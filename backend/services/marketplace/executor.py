@@ -161,6 +161,14 @@ async def execute(
         await db.commit()
         log.warning("execution failed: user=%s action=%s code=%s", user_id, action_type, e.code)
         return ExecutionResult(rec.id, "failed", action_type, target_mp, error=e.to_dict())
+    except Exception:  # noqa: BLE001 — a dispatcher bug must never become a 500
+        rec.status = "failed"
+        rec.error_code = "DISPATCH_ERROR"
+        rec.finished_at = datetime.utcnow()
+        await db.commit()
+        log.exception("execution dispatch crashed: user=%s action=%s", user_id, action_type)
+        return ExecutionResult(rec.id, "failed", action_type, target_mp,
+                               error={"code": "DISPATCH_ERROR", "detail": "internal dispatch error", "retryable": False})
 
     # 9) persist success
     rec.status = "success"

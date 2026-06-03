@@ -54,7 +54,14 @@ class WBClient:
         WB Discounts-Prices API. offer_id == nmID. Prices are integer rubles.
             POST /api/v2/upload/task  body {"data":[{"nmID":..,"price":..,"discount":..}]}
         """
-        item: dict = {"nmID": int(offer_id), "price": int(round(price))}
+        try:
+            nm_id = int(offer_id)
+        except (TypeError, ValueError):
+            raise ExecutionError(
+                ExecutionError.VALIDATION,
+                "Wildberries requires a numeric nmID as offer_id (SKU is not numeric)",
+            )
+        item: dict = {"nmID": nm_id, "price": int(round(price))}
         if discount is not None:
             item["discount"] = int(discount)
         return await self._prices.request(

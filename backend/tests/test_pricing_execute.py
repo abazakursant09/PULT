@@ -97,6 +97,24 @@ def test_set_price_reversible_and_revert():
     _run(go())
 
 
+def test_dispatcher_exception_becomes_failed_not_500():
+    # Regression (ME-6.2 visual run): a non-numeric WB SKU raised ValueError in
+    # the dispatcher, which the executor did not catch -> HTTP 500. The executor
+    # must now turn ANY dispatcher exception into a clean failed result.
+    async def go():
+        db, uid = await _setup()
+        async def boom(*, token, offer_id, price, discount=None):
+            raise ValueError("invalid literal for int() with base 10: 'VRF-001'")
+        wb_client.set_price = boom
+        res = await executor.execute(
+            db=db, user_id=uid, action_type="set_price",
+            payload={"marketplace": "wildberries", "offer_id": "VRF-001", "price": 1500},
+        )
+        assert res.status == "failed"
+        assert res.error["code"] == "DISPATCH_ERROR"
+    _run(go())
+
+
 def test_ozon_requires_client_id():
     async def go():
         db, uid = await _setup(marketplace="ozon", ozon_client_id=None)
