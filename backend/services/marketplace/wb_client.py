@@ -21,6 +21,7 @@ MARKETPLACE = "wildberries"
 class WBClient:
     def __init__(self):
         self._feedbacks = BaseMarketplaceClient(settings.wb_feedbacks_base)
+        self._prices = BaseMarketplaceClient(settings.wb_prices_base)
 
     # ── Feedbacks (ME-2) ──────────────────────────────────────────────────────
     async def list_unanswered_feedbacks(
@@ -46,15 +47,52 @@ class WBClient:
             json={"id": feedback_id, "text": text},
         )
 
-    # ── Declared for next slices (not yet implemented) ────────────────────────
-    async def set_price(self, **_):  # ME-3
-        raise ExecutionError(ExecutionError.UNKNOWN_ACTION, "wb.set_price not implemented (ME-3)")
+    # ── Prices (ME-3) ─────────────────────────────────────────────────────────
+    async def set_price(self, *, token: str, offer_id: str, price: float,
+                         discount: float | None = None) -> dict:
+        """
+        WB Discounts-Prices API. offer_id == nmID. Prices are integer rubles.
+            POST /api/v2/upload/task  body {"data":[{"nmID":..,"price":..,"discount":..}]}
+        """
+        item: dict = {"nmID": int(offer_id), "price": int(round(price))}
+        if discount is not None:
+            item["discount"] = int(discount)
+        return await self._prices.request(
+            "POST", "/api/v2/upload/task", token=token, json={"data": [item]}
+        )
 
-    async def set_bid(self, **_):    # ME-4
-        raise ExecutionError(ExecutionError.UNKNOWN_ACTION, "wb.set_bid not implemented (ME-4)")
+    # ── Advertising (ME-4) ────────────────────────────────────────────────────
+    async def set_bid(self, *, token: str, campaign_id: int, cpm: int,
+                      adv_type: int, param: int | None = None) -> dict:
+        body: dict = {"advertId": int(campaign_id), "type": int(adv_type), "cpm": int(cpm)}
+        if param is not None:
+            body["param"] = int(param)
+        return await self._advert().request("POST", "/adv/v0/cpm", token=token, json=body)
 
-    async def leave_promotion(self, **_):  # ME-5
-        raise ExecutionError(ExecutionError.UNKNOWN_ACTION, "wb.leave_promotion not implemented (ME-5)")
+    async def set_campaign_state(self, *, token: str, campaign_id: int, action: str) -> dict:
+        # action: "start" | "pause"
+        path = "/adv/v0/start" if action == "start" else "/adv/v0/pause"
+        return await self._advert().request(
+            "GET", path, token=token, params={"id": int(campaign_id)}
+        )
+
+    def _advert(self) -> "BaseMarketplaceClient":
+        # lazy: advert base only needed for ME-4
+        if not hasattr(self, "_advert_client"):
+            self._advert_client = BaseMarketplaceClient(settings.wb_advert_base)
+        return self._advert_client
+
+    # ── Content / SEO (ME-5) ──────────────────────────────────────────────────
+    async def update_card(self, *, token: str, card: dict) -> dict:
+        """WB Content API: POST /content/v2/cards/update  body [card]."""
+        return await self._content().request(
+            "POST", "/content/v2/cards/update", token=token, json=[card]
+        )
+
+    def _content(self) -> "BaseMarketplaceClient":
+        if not hasattr(self, "_content_client"):
+            self._content_client = BaseMarketplaceClient(settings.wb_content_base)
+        return self._content_client
 
 
 wb_client = WBClient()

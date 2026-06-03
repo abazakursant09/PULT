@@ -51,8 +51,11 @@ class Settings(BaseSettings):
     # only (NOT production — set CRED_ENC_KEY explicitly).
     cred_enc_key: str = ""
     wb_feedbacks_base: str = "https://feedbacks-api.wildberries.ru"
+    wb_prices_base: str = "https://discounts-prices-api.wildberries.ru"
     wb_content_base: str = "https://content-api.wildberries.ru"
+    wb_advert_base: str = "https://advert-api.wildberries.ru"
     ozon_seller_base: str = "https://api-seller.ozon.ru"
+    ozon_performance_base: str = "https://api-performance.ozon.ru"
     marketplace_http_timeout: float = 15.0
     # Master switch for the L4 automation scheduler. Off by default — L4 actions
     # only fire when this is on AND a per-user AutomationRule is enabled.

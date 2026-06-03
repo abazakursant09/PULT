@@ -85,9 +85,18 @@ async def execute(
 ) -> ExecutionResult:
     spec = action_catalog.get(action_type)  # raises UNKNOWN_ACTION
 
+    # Marketplace may be fixed by the spec, or carried in the payload for
+    # marketplace-agnostic actions (e.g. set_price works for WB and Ozon).
+    target_mp = spec.marketplace or payload.get("marketplace")
+
     # 1) resolve connection + 2) scope check
     try:
-        conn = await _resolve_connection(db, user_id, spec.marketplace, connection_id)
+        if not target_mp and not connection_id:
+            raise ExecutionError(
+                ExecutionError.VALIDATION, "marketplace required for this action"
+            )
+        conn = await _resolve_connection(db, user_id, target_mp, connection_id)
+        target_mp = conn.marketplace
         if spec.required_scope not in (conn.scopes or []):
             raise ExecutionError(
                 ExecutionError.MISSING_SCOPE, f"connection lacks scope '{spec.required_scope}'"
@@ -102,18 +111,20 @@ async def execute(
     except ExecutionError as e:
         # rejected before any side effect; persist a rejected log for audit (not for dry_run)
         if dry_run:
-            return ExecutionResult(None, "rejected", action_type, spec.marketplace, error=e.to_dict())
-        rec = _new_log(user_id, action_type, spec.marketplace, mode, payload,
+            return ExecutionResult(None, "rejected", action_type, target_mp or "unknown", error=e.to_dict())
+        rec = _new_log(user_id, action_type, target_mp, mode, payload,
                        insight_key, idempotency_key, status="rejected", error_code=e.code,
                        connection_id=connection_id)
         db.add(rec)
         await db.commit()
-        return ExecutionResult(rec.id, "rejected", action_type, spec.marketplace, error=e.to_dict())
+        return ExecutionResult(rec.id, "rejected", action_type, target_mp or "unknown", error=e.to_dict())
 
     if dry_run:
-        return ExecutionResult(None, "dry_run_ok", action_type, spec.marketplace,
+        return ExecutionResult(None, "dry_run_ok", action_type, target_mp,
                                result={"would_send": _safe_payload(payload)},
                                reversible=spec.reversible)
+
+    ctx = {"marketplace": conn.marketplace, "ozon_client_id": conn.ozon_client_id}
 
     # 5) idempotency: return prior success instead of re-calling the API
     if idempotency_key:
@@ -128,12 +139,12 @@ async def execute(
             )
         ).scalars().first()
         if prior:
-            return ExecutionResult(prior.id, "success", action_type, spec.marketplace,
+            return ExecutionResult(prior.id, "success", action_type, target_mp,
                                    api_request_id=prior.api_request_id,
                                    result=prior.result or {}, reversible=spec.reversible)
 
     # 6) write pending log BEFORE dispatch (crash visibility)
-    rec = _new_log(user_id, action_type, spec.marketplace, mode, payload,
+    rec = _new_log(user_id, action_type, target_mp, mode, payload,
                    insight_key, idempotency_key, status="pending", connection_id=conn.id)
     db.add(rec)
     await db.commit()
@@ -142,14 +153,14 @@ async def execute(
     # 7) fetch token (vault) + 8) dispatch
     try:
         token = await _resolve_token(db, conn.id, spec.required_scope)
-        result = await spec.dispatch(token, payload)
+        result = await spec.dispatch(token, payload, ctx)
     except ExecutionError as e:
         rec.status = "failed"
         rec.error_code = e.code
         rec.finished_at = datetime.utcnow()
         await db.commit()
         log.warning("execution failed: user=%s action=%s code=%s", user_id, action_type, e.code)
-        return ExecutionResult(rec.id, "failed", action_type, spec.marketplace, error=e.to_dict())
+        return ExecutionResult(rec.id, "failed", action_type, target_mp, error=e.to_dict())
 
     # 9) persist success
     rec.status = "success"
@@ -159,7 +170,7 @@ async def execute(
     await db.commit()
     log.info("execution success: user=%s action=%s mode=%s log=%s",
              user_id, action_type, mode, rec.id)
-    return ExecutionResult(rec.id, "success", action_type, spec.marketplace,
+    return ExecutionResult(rec.id, "success", action_type, target_mp,
                            api_request_id=rec.api_request_id, result=rec.result,
                            reversible=spec.reversible)
 

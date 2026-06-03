@@ -72,3 +72,13 @@ async def check(
     projected = payload.get("projected_margin")
     if min_margin is not None and projected is not None and projected < float(min_margin):
         raise ExecutionError.guard("MIN_MARGIN", f"projected margin {projected} below floor {min_margin}")
+
+    # ── Pricing ceiling ───────────────────────────────────────────────────────
+    if action_type == "set_price":
+        new_price = payload.get("price")
+        max_price = rule_guard.get("max_price")
+        if max_price is not None and new_price is not None and float(new_price) > float(max_price):
+            raise ExecutionError.guard("MAX_PRICE", f"price {new_price} exceeds ceiling {max_price}")
+        min_price = rule_guard.get("min_price")
+        if min_price is not None and new_price is not None and float(new_price) < float(min_price):
+            raise ExecutionError.guard("MIN_PRICE", f"price {new_price} below floor {min_price}")

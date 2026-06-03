@@ -15,6 +15,7 @@ from schemas.pricing import (
     PricingRuleUpsert, PricingRuleOut, PriceChangeLogOut, PriceCheckResult,
 )
 from tasks.check_pricing import compute_recommendation
+from services.marketplace import executor
 
 log    = logging.getLogger(__name__)
 router = APIRouter()
@@ -122,24 +123,42 @@ async def check_price(
         raise HTTPException(status_code=422, detail=reason)
 
     auto_applied = False
-    if rule.auto_mode and should_change:
+    if rule.auto_mode and should_change and product.sku:
         old_price = product.price or 0.0
-        await db.execute(
-            update(Product).where(Product.id == product_id).values(price=recommended)
+        # L4 — real automated push through the SAME executor. Guard enforces the
+        # rule's price floor/ceiling. No local-only imitation.
+        res = await executor.execute(
+            db=db,
+            user_id=current_user.id,
+            action_type="set_price",
+            payload={
+                "marketplace": product.marketplace,
+                "offer_id": product.sku,
+                "price": recommended,
+                "old_price": old_price,
+            },
+            mode="automated_l4",
+            insight_key="margin_crisis",
+            idempotency_key=f"price:{product_id}:{recommended}",
+            rule={"enabled": True, "guard": {
+                "min_price": rule.min_price, "max_price": rule.max_price,
+            }},
         )
-        db.add(PriceChangeLog(
-            product_id=product_id,
-            old_price=old_price,
-            new_price=recommended,
-            reason=reason,
-            source="auto",
-        ))
-        await db.commit()
-        auto_applied = True
-        log.info(
-            "price_changed: auto user=%s product=%s %.2f→%.2f reason=%s",
-            current_user.id, product_id, old_price, recommended, reason,
-        )
+        if res.ok:
+            await db.execute(
+                update(Product).where(Product.id == product_id).values(price=recommended)
+            )
+            db.add(PriceChangeLog(
+                product_id=product_id, old_price=old_price, new_price=recommended,
+                reason=reason, source="auto",
+            ))
+            await db.commit()
+            auto_applied = True
+            log.info("price_pushed: auto user=%s product=%s %.2f→%.2f log=%s",
+                     current_user.id, product_id, old_price, recommended, res.log_id)
+        else:
+            log.warning("auto price push rejected: product=%s err=%s",
+                        product_id, res.error)
 
     return PriceCheckResult(
         market_price=round(market_price, 2),
@@ -175,6 +194,35 @@ async def apply_price(
         raise HTTPException(status_code=422, detail=reason)
 
     old_price = product.price or 0.0
+
+    if not product.sku:
+        raise HTTPException(409, "У товара нет SKU/артикула — нельзя отправить цену в маркетплейс")
+
+    # L3 — push the price to the real marketplace through the single executor.
+    # The local Product.price + PriceChangeLog are updated ONLY on API success
+    # (no more local-only imitation).
+    res = await executor.execute(
+        db=db,
+        user_id=current_user.id,
+        action_type="set_price",
+        payload={
+            "marketplace": product.marketplace,
+            "offer_id": product.sku,
+            "price": recommended,
+            "old_price": old_price,
+            "step_pct": (abs(recommended - old_price) / old_price * 100.0) if old_price else None,
+        },
+        mode="manual_l3",
+        insight_key="margin_crisis",
+        idempotency_key=f"price:{product_id}:{recommended}",
+    )
+    if not res.ok:
+        raise HTTPException(
+            status_code=502,
+            detail={"message": "Цена не отправлена в маркетплейс", "error": res.error,
+                    "log_id": res.log_id},
+        )
+
     await db.execute(
         update(Product).where(Product.id == product_id).values(price=recommended)
     )
@@ -183,13 +231,13 @@ async def apply_price(
         old_price=old_price,
         new_price=recommended,
         reason=reason,
-        source="manual",
+        source="executed",          # real marketplace push, not local-only
     )
     db.add(entry)
     await db.commit()
     await db.refresh(entry)
     log.info(
-        "price_changed: manual user=%s product=%s %.2f→%.2f reason=%s",
-        current_user.id, product_id, old_price, recommended, reason,
+        "price_pushed: user=%s product=%s %.2f→%.2f log=%s",
+        current_user.id, product_id, old_price, recommended, res.log_id,
     )
     return entry
