@@ -94,6 +94,61 @@ def _revert_set_price(payload: dict, result: dict) -> tuple[str, dict]:
     }
 
 
+# ── Advertising (ME-4) ─────────────────────────────────────────────────────────
+def _validate_set_bid(payload: dict) -> None:
+    _require(payload, "campaign_id", "cpm", "adv_type")
+    try:
+        if int(payload["cpm"]) <= 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        raise ExecutionError(ExecutionError.VALIDATION, "cpm must be a positive integer")
+
+
+def _validate_set_state(payload: dict) -> None:
+    _require(payload, "campaign_id", "action")
+    if payload["action"] not in ("start", "pause"):
+        raise ExecutionError(ExecutionError.VALIDATION, "action must be 'start' or 'pause'")
+
+
+async def _dispatch_set_bid(token: str, payload: dict, ctx: dict) -> dict:
+    mp = ctx.get("marketplace")
+    if mp == "wildberries":
+        resp = await wb_client.set_bid(
+            token=token, campaign_id=int(payload["campaign_id"]),
+            cpm=int(payload["cpm"]), adv_type=int(payload["adv_type"]),
+            param=payload.get("param"),
+        )
+    elif mp == "ozon":
+        resp = await ozon_client.set_bid(token=token, **payload)  # raises (ME-4b)
+    else:
+        raise ExecutionError(ExecutionError.VALIDATION, f"ad_set_bid: unsupported marketplace {mp}")
+    return {"api_request_id": (resp or {}).get("requestId") if isinstance(resp, dict) else None,
+            "campaign_id": payload["campaign_id"], "cpm": payload["cpm"]}
+
+
+async def _dispatch_set_state(token: str, payload: dict, ctx: dict) -> dict:
+    mp = ctx.get("marketplace")
+    if mp != "wildberries":
+        raise ExecutionError(ExecutionError.VALIDATION, f"ad_set_state: unsupported marketplace {mp}")
+    resp = await wb_client.set_campaign_state(
+        token=token, campaign_id=int(payload["campaign_id"]), action=payload["action"]
+    )
+    return {"api_request_id": (resp or {}).get("requestId") if isinstance(resp, dict) else None,
+            "campaign_id": payload["campaign_id"], "state": payload["action"]}
+
+
+def _revert_set_bid(payload: dict, result: dict) -> tuple[str, dict]:
+    old = payload.get("old_cpm")
+    if old is None:
+        raise ExecutionError.guard("NOT_REVERSIBLE", "no old_cpm recorded")
+    return "ad_set_bid", {**payload, "cpm": old, "old_cpm": payload.get("cpm")}
+
+
+def _revert_set_state(payload: dict, result: dict) -> tuple[str, dict]:
+    inverse = "pause" if payload.get("action") == "start" else "start"
+    return "ad_set_state", {**payload, "action": inverse}
+
+
 # ── registry ───────────────────────────────────────────────────────────────────
 _CATALOG: dict[str, ActionSpec] = {
     "publish_review_response": ActionSpec(
@@ -113,8 +168,17 @@ _CATALOG: dict[str, ActionSpec] = {
         reversible=True,
         reverter=_revert_set_price,
     ),
-    # next slices register here: ad_set_bid/ad_pause/ad_start (ME-4),
-    # update_card (ME-5) — each with its validator, WB/Ozon dispatcher, reverter.
+    "ad_set_bid": ActionSpec(
+        action_type="ad_set_bid", marketplace=None, required_scope="advert",
+        validate=_validate_set_bid, dispatch=_dispatch_set_bid,
+        reversible=True, reverter=_revert_set_bid,
+    ),
+    "ad_set_state": ActionSpec(
+        action_type="ad_set_state", marketplace=None, required_scope="advert",
+        validate=_validate_set_state, dispatch=_dispatch_set_state,
+        reversible=True, reverter=_revert_set_state,
+    ),
+    # next slice registers here: update_card (ME-5).
 }
 
 
