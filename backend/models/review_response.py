@@ -15,6 +15,11 @@ class ReviewResponse(Base):
     rating = Column(Integer, nullable=True)
     response_text = Column(Text, nullable=True)
     status = Column(String(20), nullable=False, default="pending")
+    # ── Marketplace Execution Layer (ME-2): real publish, not local imitation ──
+    external_review_id = Column(String(120), nullable=True)   # WB/Ozon feedback id
+    marketplace = Column(String(20), nullable=True)           # wildberries | ozon
+    published_at = Column(DateTime, nullable=True)            # set only on real API success
+    execution_log_id = Column(String(36), nullable=True)      # link to ExecutionLog of the publish
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

@@ -45,6 +45,19 @@ class Settings(BaseSettings):
     yookassa_secret_key: str = ""
     yookassa_return_url: str = ""
 
+    # ── Marketplace Execution Layer (ME-1) ────────────────────────────────────
+    # Fernet key (urlsafe-base64, 32 bytes) used to encrypt marketplace API
+    # tokens at rest. If empty, a key is derived from secret_key for development
+    # only (NOT production — set CRED_ENC_KEY explicitly).
+    cred_enc_key: str = ""
+    wb_feedbacks_base: str = "https://feedbacks-api.wildberries.ru"
+    wb_content_base: str = "https://content-api.wildberries.ru"
+    ozon_seller_base: str = "https://api-seller.ozon.ru"
+    marketplace_http_timeout: float = 15.0
+    # Master switch for the L4 automation scheduler. Off by default — L4 actions
+    # only fire when this is on AND a per-user AutomationRule is enabled.
+    automation_enabled: bool = False
+
     model_config = {"env_file": ".env"}
 
 
