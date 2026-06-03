@@ -4210,3 +4210,112 @@ async def update_insight_status(
     await db.commit()
     await db.refresh(record)
     return UpdateStatusResponse(ok=True, record_id=record.id, new_status=record.status)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ME-6 — Insight Execute Layer. Turns an insight into a real marketplace action
+# through the SHARED executor. Action Engine stays a DECISION layer: it builds
+# the plan (insight_mapping) and delegates execution to Executor.execute().
+# ══════════════════════════════════════════════════════════════════════════════
+from services.marketplace import executor as _executor                 # noqa: E402
+from services.marketplace import insight_mapping as _imap              # noqa: E402
+from models.review_response import ReviewResponse as _ReviewResponse   # noqa: E402
+from models.product import Product as _Product                         # noqa: E402
+
+
+class ExecuteInsightRequest(BaseModel):
+    dry_run: bool = False
+    overrides: dict = Field(default_factory=dict)   # campaign_id / cpm / card / price ...
+
+
+class ExecuteInsightResponse(BaseModel):
+    success: bool
+    status: str                       # success | dry_run_ok | rejected | failed | needs_input | partial
+    action_type: Optional[str] = None
+    execution_id: Optional[str] = None
+    message: str = ""
+    automation_eligible: bool = False
+    needs_input: list[str] = Field(default_factory=list)
+    descriptor: dict = Field(default_factory=dict)
+    results: list[dict] = Field(default_factory=list)   # batch (rating_good)
+
+
+def _imap_negative_max() -> int:
+    from services.marketplace.guard import NEGATIVE_RATING_MAX
+    return NEGATIVE_RATING_MAX
+
+
+@router.post("/insights/{insight_key:path}/execute", response_model=ExecuteInsightResponse)
+async def execute_insight(
+    insight_key: str,
+    body: ExecuteInsightRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    uid = current_user.id
+    plan = await _imap.resolve_plan(db, uid, insight_key, body.overrides)
+
+    if not plan.ready:
+        return ExecuteInsightResponse(
+            success=False, status="needs_input", action_type=plan.action_type,
+            automation_eligible=plan.automation_eligible, needs_input=plan.needs_input,
+            descriptor=plan.descriptor,
+            message="Нужны дополнительные данные для выполнения" if plan.needs_input
+                    else "Инсайт не поддерживает выполнение",
+        )
+
+    # ── batch: rating_good publishes every prepared positive review ───────────
+    if plan.batch:
+        reviews = (
+            await db.execute(
+                select(_ReviewResponse)
+                .join(_Product, _ReviewResponse.product_id == _Product.id)
+                .where(
+                    _Product.user_id == uid,
+                    _ReviewResponse.rating > _imap_negative_max(),
+                    _ReviewResponse.external_review_id.isnot(None),
+                    _ReviewResponse.status.in_(("pending", "generated", "draft", "approved")),
+                )
+            )
+        ).scalars().all()
+        results: list[dict] = []
+        published = 0
+        for r in reviews:
+            if not (r.response_text or "").strip():
+                continue
+            res = await _executor.execute(
+                db=db, user_id=uid, action_type="publish_review_response",
+                payload={"feedback_id": r.external_review_id, "text": r.response_text,
+                         "rating": r.rating},
+                mode="manual_l3", insight_key=insight_key,
+                idempotency_key=f"review:{r.id}", dry_run=body.dry_run,
+            )
+            results.append({"review_id": r.id, "status": res.status,
+                            "execution_id": res.log_id, "error": res.error})
+            if res.ok and not body.dry_run:
+                r.status = "published"
+                r.published_at = datetime.utcnow()
+                r.execution_log_id = res.log_id
+                published += 1
+        await db.commit()
+        status = "dry_run_ok" if body.dry_run else ("success" if results else "partial")
+        return ExecuteInsightResponse(
+            success=True, status=status, action_type=plan.action_type,
+            automation_eligible=plan.automation_eligible, descriptor=plan.descriptor,
+            results=results,
+            message=f"Опубликовано: {published}" if not body.dry_run else f"Готово к публикации: {len(results)}",
+        )
+
+    # ── single action ─────────────────────────────────────────────────────────
+    res = await _executor.execute(
+        db=db, user_id=uid, action_type=plan.action_type, payload=plan.payload,
+        mode="manual_l3", insight_key=insight_key, dry_run=body.dry_run,
+    )
+    return ExecuteInsightResponse(
+        success=res.ok, status=res.status, action_type=plan.action_type,
+        execution_id=res.log_id, automation_eligible=plan.automation_eligible,
+        descriptor=plan.descriptor,
+        message={"success": "executed", "dry_run_ok": "проверка пройдена",
+                 "rejected": "отклонено guard/валидацией",
+                 "failed": "ошибка маркетплейса"}.get(res.status, res.status),
+    )
