@@ -1,0 +1,9 @@
+{
+  "compute_resilience_trajectory": {
+    "absorption_transition_note": null,
+    "resilience_trajectory": "stabilizing",
+    "resilience_trajectory_confidence": 50,
+    "resilience_trajectory_note": "Система сохраняет текущий уровень устойчивости без признаков ускоряющейся деградации.",
+    "resilience_trajectory_velocity": null
+  }
+}

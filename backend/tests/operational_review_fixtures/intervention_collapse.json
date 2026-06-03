@@ -1,0 +1,40 @@
+{
+  "review_hash": "e082abf58b7ebb3a8fb182eacc27cf0b69b6e0f93c441bd6b42c93f9701a8e49",
+  "snapshot": {
+    "findings": [
+      {
+        "descriptive_text": "drift visible",
+        "evidence": {
+          "drift_events": 3
+        },
+        "finding_code": "drift_visible",
+        "subject": "margin_crisis"
+      },
+      {
+        "descriptive_text": "instability marker observed",
+        "evidence": {},
+        "finding_code": "instability_marker",
+        "subject": "margin_crisis"
+      },
+      {
+        "descriptive_text": "intervention surface present",
+        "evidence": {
+          "accumulated_weight": 34
+        },
+        "finding_code": "intervention_surface",
+        "subject": "margin_crisis"
+      },
+      {
+        "descriptive_text": "pressure accumulation observed",
+        "evidence": {
+          "accumulated_weight": 34
+        },
+        "finding_code": "pressure_accumulation",
+        "subject": "margin_crisis"
+      }
+    ],
+    "label": "intervention_collapse",
+    "runtime_application_hash": "16610629b4b2e863b7e4c4027aeb565d310512f312ac38bc9fb01eec056fb436",
+    "runtime_event_count": 5
+  }
+}

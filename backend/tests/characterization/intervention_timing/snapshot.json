@@ -1,0 +1,14 @@
+{
+  "compute_intervention_timing": {
+    "delayed_intervention_risk": "low",
+    "delayed_risk_note": null,
+    "intervention_readiness": "ready",
+    "optimal_window_days": 14,
+    "premature_intervention_risk": "low",
+    "premature_risk_note": null,
+    "readiness_condition": null,
+    "timing_note": null,
+    "timing_state": "optimal",
+    "waiting_benefit": null
+  }
+}

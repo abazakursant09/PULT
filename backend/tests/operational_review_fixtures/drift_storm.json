@@ -1,0 +1,72 @@
+{
+  "review_hash": "cf8b679616740700c64c8aae32f35322c084f84bcb6c40608bdd0b35373a4a68",
+  "snapshot": {
+    "findings": [
+      {
+        "descriptive_text": "drift visible",
+        "evidence": {
+          "drift_events": 1
+        },
+        "finding_code": "drift_visible",
+        "subject": "high_ad_spend"
+      },
+      {
+        "descriptive_text": "drift visible",
+        "evidence": {
+          "drift_events": 3
+        },
+        "finding_code": "drift_visible",
+        "subject": "margin_crisis"
+      },
+      {
+        "descriptive_text": "drift visible",
+        "evidence": {
+          "drift_events": 1
+        },
+        "finding_code": "drift_visible",
+        "subject": "seo_opportunity"
+      },
+      {
+        "descriptive_text": "instability marker observed",
+        "evidence": {},
+        "finding_code": "instability_marker",
+        "subject": "margin_crisis"
+      },
+      {
+        "descriptive_text": "intervention surface present",
+        "evidence": {
+          "accumulated_weight": 12
+        },
+        "finding_code": "intervention_surface",
+        "subject": "margin_crisis"
+      },
+      {
+        "descriptive_text": "pressure accumulation observed",
+        "evidence": {
+          "accumulated_weight": 4
+        },
+        "finding_code": "pressure_accumulation",
+        "subject": "high_ad_spend"
+      },
+      {
+        "descriptive_text": "pressure accumulation observed",
+        "evidence": {
+          "accumulated_weight": 12
+        },
+        "finding_code": "pressure_accumulation",
+        "subject": "margin_crisis"
+      },
+      {
+        "descriptive_text": "pressure accumulation observed",
+        "evidence": {
+          "accumulated_weight": 3
+        },
+        "finding_code": "pressure_accumulation",
+        "subject": "seo_opportunity"
+      }
+    ],
+    "label": "drift_storm",
+    "runtime_application_hash": "f2e70bab4123bd85bd7d2e7f51561ba62c6935a1e1cb0de30057ead52c111247",
+    "runtime_event_count": 5
+  }
+}

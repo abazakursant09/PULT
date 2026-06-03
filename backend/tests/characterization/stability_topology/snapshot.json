@@ -1,0 +1,22 @@
+{
+  "compute_stability_topology": {
+    "compensation_behavior": "distributed",
+    "dominant_stability_layer": "execution_continuity",
+    "remaining_flexibility": "high",
+    "structural_balance": "balanced",
+    "topology_confidence": 64,
+    "topology_note": "Operational stability остаётся относительно равномерно распределённой между основными execution layers.",
+    "topology_state": "balanced_stability",
+    "weakest_stability_layer": "none"
+  },
+  "compute_stability_topology.empty": {
+    "compensation_behavior": "distributed",
+    "dominant_stability_layer": "execution_continuity",
+    "remaining_flexibility": "high",
+    "structural_balance": "balanced",
+    "topology_confidence": 64,
+    "topology_note": "Operational stability остаётся относительно равномерно распределённой между основными execution layers.",
+    "topology_state": "balanced_stability",
+    "weakest_stability_layer": "none"
+  }
+}

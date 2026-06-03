@@ -1,0 +1,103 @@
+{
+  "console": {
+    "descriptive_only": true,
+    "drift": {
+      "drift_regions": {},
+      "instability_markers": []
+    },
+    "interventions": [
+      {
+        "accumulated_weight": 14,
+        "dissipating": false,
+        "observation_only": true,
+        "region": "margin_crisis"
+      }
+    ],
+    "pressure": {
+      "accumulation_regions": {
+        "high_ad_spend": 7,
+        "low_stock": 5,
+        "margin_crisis": 14
+      },
+      "dissipation_surfaces": []
+    },
+    "replay": {
+      "event_count": 4,
+      "timeline": [
+        {
+          "entity": "margin_crisis:wildberries:A",
+          "event_type": "margin_pressure",
+          "ordinal": 0,
+          "weight": 8
+        },
+        {
+          "entity": "high_ad_spend:wildberries:A",
+          "event_type": "ad_spend_spike",
+          "ordinal": 1,
+          "weight": 7
+        },
+        {
+          "entity": "margin_crisis:wildberries:B",
+          "event_type": "margin_pressure",
+          "ordinal": 2,
+          "weight": 6
+        },
+        {
+          "entity": "low_stock:wildberries:A",
+          "event_type": "stock_drop",
+          "ordinal": 3,
+          "weight": 5
+        }
+      ],
+      "window_size": 3,
+      "windows": [
+        {
+          "end_ordinal": 2,
+          "ordinals": [
+            0,
+            1,
+            2
+          ],
+          "start_ordinal": 0
+        },
+        {
+          "end_ordinal": 3,
+          "ordinals": [
+            3
+          ],
+          "start_ordinal": 3
+        }
+      ]
+    },
+    "state": {
+      "category_weight": {
+        "high_ad_spend": 7,
+        "low_stock": 5,
+        "margin_crisis": 14
+      },
+      "entities": [
+        "high_ad_spend:wildberries:A",
+        "low_stock:wildberries:A",
+        "margin_crisis:wildberries:A",
+        "margin_crisis:wildberries:B"
+      ],
+      "event_count": 4,
+      "marketplaces": [
+        "wildberries"
+      ],
+      "type_counts": {
+        "ad_spend_spike": 1,
+        "margin_pressure": 2,
+        "stock_drop": 1
+      }
+    }
+  },
+  "name": "cascading_failure",
+  "summary": {
+    "drift_region_count": 0,
+    "intervention_surface_count": 1,
+    "pressure_region_count": 3,
+    "runtime_application_hash": "c9aac48924f7896a42284f521c590e69b5b33cb4cf1e0d451e08107b0ac9c218",
+    "runtime_event_count": 4
+  }
+}

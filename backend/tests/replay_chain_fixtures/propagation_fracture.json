@@ -1,0 +1,68 @@
+{
+  "baseline_anchor": "47beea1df0c1",
+  "cognition_hash": "88cedb5541b9acf24f5b0a3d9f20a14205a646852579cde820eda31172664f7b",
+  "cognition_topology": {
+    "categories": [
+      "high_ad_spend",
+      "margin_crisis"
+    ],
+    "marketplace_span": 3,
+    "pressure_profile": {
+      "high_ad_spend": 6,
+      "margin_crisis": 21
+    },
+    "signal_count": 4
+  },
+  "envelope_hash": "67a878ca40a506ff785b43bb55e157a9685dfde1729c701c90368938f073c8dc",
+  "event_log": [
+    {
+      "entity": "margin_crisis:wildberries:A",
+      "event_type": "margin_pressure",
+      "marketplace": "wildberries",
+      "weight": 7
+    },
+    {
+      "entity": "margin_crisis:ozon:A",
+      "event_type": "margin_pressure",
+      "marketplace": "ozon",
+      "weight": 7
+    },
+    {
+      "entity": "margin_crisis:yandex_market:A",
+      "event_type": "margin_pressure",
+      "marketplace": "yandex_market",
+      "weight": 7
+    },
+    {
+      "entity": "high_ad_spend:ozon:A",
+      "event_type": "cascade",
+      "marketplace": "ozon",
+      "weight": 6
+    }
+  ],
+  "event_log_hash": "08345e06309c8a387606f2084682345cd90e69af2b62f6f970e7282c61c91ffe",
+  "replay_chain_hash": "d96a4770af29647080b88aa7ecc12abbfac37728eea432b7b7d4af1d44db14d4",
+  "signal_set": {
+    "category_weight": {
+      "high_ad_spend": 6,
+      "margin_crisis": 21
+    },
+    "entities": [
+      "high_ad_spend:ozon:A",
+      "margin_crisis:ozon:A",
+      "margin_crisis:wildberries:A",
+      "margin_crisis:yandex_market:A"
+    ],
+    "event_count": 4,
+    "marketplaces": [
+      "ozon",
+      "wildberries",
+      "yandex_market"
+    ],
+    "type_counts": {
+      "cascade": 1,
+      "margin_pressure": 3
+    }
+  },
+  "signal_set_signature": "4197498732501f2c0b240b6e67abc3d14b7fec0900f58cdc830c5378185c09d8"
+}

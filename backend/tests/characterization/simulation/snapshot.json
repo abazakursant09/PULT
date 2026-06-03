@@ -1,0 +1,1273 @@
+{
+  "ad.history2x": [
+    {
+      "assumption": "Снижение ДРР на 15–20% за счёт отсева нецелевых ключей",
+      "causal_chain": [
+        "ДРР 25% → отсев нецелевых ключей",
+        "снижение рекламной нагрузки → стабилизация маржи",
+        "органический трафик восстанавливается через 7–14 дней"
+      ],
+      "confidence": 65,
+      "confidence_level": "medium",
+      "evidence_basis": "Текущий ДРР 25% устойчиво превышает норму на протяжении 20 дн.",
+      "expected_effect": "Вероятная стабилизация маржи за 7–14 дней",
+      "path_type": "balanced",
+      "reversible": true,
+      "risk_level": "medium",
+      "scenario_id": "<volatile>",
+      "scenario_type": "reduce_ads",
+      "source_insight": "high_ad_spend:wildberries:A",
+      "time_horizon_days": 14,
+      "tradeoff": "Краткосрочное снижение трафика (2–5 дней адаптации). WB: резкое снижение ставок может дать просадку позиций на 2–5 дней.",
+      "uncertainty_note": "Паттерн повторяется 2× — оценка подкреплена историей."
+    },
+    {
+      "assumption": "Аудит ключевых слов по ROAS — без немедленного изменения ставок",
+      "causal_chain": [
+        "анализ ROAS по ключевым словам",
+        "выявление нецелевых кластеров трафика",
+        "точечная корректировка ставок с минимальным риском"
+      ],
+      "confidence": 58,
+      "confidence_level": "medium",
+      "evidence_basis": "Рекомендуется при неясной структуре кампании (активна 20 дн.)",
+      "expected_effect": "Понимание структуры неэффективного трафика за 7 дней",
+      "path_type": "conservative",
+      "reversible": true,
+      "risk_level": "low",
+      "scenario_id": "<volatile>",
+      "scenario_type": "controlled_scale",
+      "source_insight": "high_ad_spend:wildberries:A",
+      "time_horizon_days": 7,
+      "tradeoff": "Давление на маржу продолжается во время анализа",
+      "uncertainty_note": "Паттерн повторяется 2× — оценка подкреплена историей."
+    },
+    {
+      "assumption": "Сохранение текущей рекламной нагрузки",
+      "causal_chain": [
+        "ДРР 25% сохраняется",
+        "маржинальное давление продолжается",
+        "при росте затрат без роста выручки — структурное ухудшение"
+      ],
+      "confidence": 70,
+      "confidence_level": "medium",
+      "evidence_basis": "Паттерн наблюдается 20 дн. без стабилизации",
+      "expected_effect": "Давление на маржу вероятно продолжится",
+      "path_type": "aggressive",
+      "reversible": true,
+      "risk_level": "high",
+      "scenario_id": "<volatile>",
+      "scenario_type": "maintain_current",
+      "source_insight": "high_ad_spend:wildberries:A",
+      "time_horizon_days": 14,
+      "tradeoff": "При ДРР 25% и марже 5.0% операционный буфер минимален. Риск дальнейшего сжатия маржи.",
+      "uncertainty_note": "Паттерн повторяется 2× — оценка подкреплена историей."
+    }
+  ],
+  "ad.mid_lt14": [
+    {
+      "assumption": "Снижение ДРР на 15–20% за счёт отсева нецелевых ключей",
+      "causal_chain": [
+        "ДРР 25% → отсев нецелевых ключей",
+        "снижение рекламной нагрузки → стабилизация маржи",
+        "органический трафик восстанавливается через 7–14 дней"
+      ],
+      "confidence": 55,
+      "confidence_level": "medium",
+      "evidence_basis": "Текущий ДРР 25% устойчиво превышает норму на протяжении 10 дн.",
+      "expected_effect": "Вероятная стабилизация маржи за 7–14 дней",
+      "path_type": "balanced",
+      "reversible": true,
+      "risk_level": "medium",
+      "scenario_id": "<volatile>",
+      "scenario_type": "reduce_ads",
+      "source_insight": "high_ad_spend:wildberries:A",
+      "time_horizon_days": 14,
+      "tradeoff": "Краткосрочное снижение трафика (2–5 дней адаптации). WB: резкое снижение ставок может дать просадку позиций на 2–5 дней.",
+      "uncertainty_note": "Оценка основана на ограниченной истории. Направление вероятно, но временной горизонт может сместиться."
+    },
+    {
+      "assumption": "Аудит ключевых слов по ROAS — без немедленного изменения ставок",
+      "causal_chain": [
+        "анализ ROAS по ключевым словам",
+        "выявление нецелевых кластеров трафика",
+        "точечная корректировка ставок с минимальным риском"
+      ],
+      "confidence": 48,
+      "confidence_level": "low",
+      "evidence_basis": "Рекомендуется при неясной структуре кампании (активна 10 дн.)",
+      "expected_effect": "Понимание структуры неэффективного трафика за 7 дней",
+      "path_type": "conservative",
+      "reversible": true,
+      "risk_level": "low",
+      "scenario_id": "<volatile>",
+      "scenario_type": "controlled_scale",
+      "source_insight": "high_ad_spend:wildberries:A",
+      "time_horizon_days": 7,
+      "tradeoff": "Давление на маржу продолжается во время анализа",
+      "uncertainty_note": "Оценка основана на ограниченной истории. Направление вероятно, но временной горизонт может сместиться."
+    },
+    {
+      "assumption": "Сохранение текущей рекламной нагрузки",
+      "causal_chain": [
+        "ДРР 25% сохраняется",
+        "маржинальное давление продолжается",
+        "при росте затрат без роста выручки — структурное ухудшение"
+      ],
+      "confidence": 60,
+      "confidence_level": "medium",
+      "evidence_basis": "Паттерн наблюдается 10 дн. без стабилизации",
+      "expected_effect": "Давление на маржу вероятно продолжится",
+      "path_type": "aggressive",
+      "reversible": true,
+      "risk_level": "high",
+      "scenario_id": "<volatile>",
+      "scenario_type": "maintain_current",
+      "source_insight": "high_ad_spend:wildberries:A",
+      "time_horizon_days": 14,
+      "tradeoff": "При ДРР 25% и марже 5.0% операционный буфер минимален. Риск дальнейшего сжатия маржи.",
+      "uncertainty_note": "Оценка основана на ограниченной истории. Направление вероятно, но временной горизонт может сместиться."
+    }
+  ],
+  "ad.ozon": [
+    {
+      "assumption": "Снижение ДРР на 15–20% за счёт отсева нецелевых ключей",
+      "causal_chain": [
+        "ДРР 34% → отсев нецелевых ключей",
+        "снижение рекламной нагрузки → стабилизация маржи",
+        "органический трафик восстанавливается через 7–14 дней"
+      ],
+      "confidence": 57,
+      "confidence_level": "medium",
+      "evidence_basis": "Текущий ДРР 34% устойчиво превышает норму на протяжении 20 дн.",
+      "expected_effect": "Вероятная стабилизация маржи за 7–14 дней",
+      "path_type": "balanced",
+      "reversible": true,
+      "risk_level": "medium",
+      "scenario_id": "<volatile>",
+      "scenario_type": "reduce_ads",
+      "source_insight": "high_ad_spend:ozon:A",
+      "time_horizon_days": 14,
+      "tradeoff": "Краткосрочное снижение трафика (2–5 дней адаптации). Ozon: атрибуция 48ч — эффект снижения ставок виден с задержкой.",
+      "uncertainty_note": "Исторических данных по этому товару недостаточно — сценарий опирается на рыночные закономерности."
+    },
+    {
+      "assumption": "Аудит ключевых слов по ROAS — без немедленного изменения ставок",
+      "causal_chain": [
+        "анализ ROAS по ключевым словам",
+        "выявление нецелевых кластеров трафика",
+        "точечная корректировка ставок с минимальным риском"
+      ],
+      "confidence": 50,
+      "confidence_level": "low",
+      "evidence_basis": "Рекомендуется при неясной структуре кампании (активна 20 дн.)",
+      "expected_effect": "Понимание структуры неэффективного трафика за 7 дней",
+      "path_type": "conservative",
+      "reversible": true,
+      "risk_level": "low",
+      "scenario_id": "<volatile>",
+      "scenario_type": "controlled_scale",
+      "source_insight": "high_ad_spend:ozon:A",
+      "time_horizon_days": 7,
+      "tradeoff": "Давление на маржу продолжается во время анализа",
+      "uncertainty_note": "Исторических данных по этому товару недостаточно — сценарий опирается на рыночные закономерности."
+    },
+    {
+      "assumption": "Сохранение текущей рекламной нагрузки",
+      "causal_chain": [
+        "ДРР 34% сохраняется",
+        "маржинальное давление продолжается",
+        "при росте затрат без роста выручки — структурное ухудшение"
+      ],
+      "confidence": 62,
+      "confidence_level": "medium",
+      "evidence_basis": "Паттерн наблюдается 20 дн. без стабилизации",
+      "expected_effect": "Давление на маржу вероятно продолжится",
+      "path_type": "aggressive",
+      "reversible": true,
+      "risk_level": "high",
+      "scenario_id": "<volatile>",
+      "scenario_type": "maintain_current",
+      "source_insight": "high_ad_spend:ozon:A",
+      "time_horizon_days": 14,
+      "tradeoff": "При ДРР 34% и марже 4.0% операционный буфер минимален. Риск дальнейшего сжатия маржи.",
+      "uncertainty_note": "Исторических данных по этому товару недостаточно — сценарий опирается на рыночные закономерности."
+    }
+  ],
+  "ad.wb": [
+    {
+      "assumption": "Снижение ДРР на 15–20% за счёт отсева нецелевых ключей",
+      "causal_chain": [
+        "ДРР 34% → отсев нецелевых ключей",
+        "снижение рекламной нагрузки → стабилизация маржи",
+        "органический трафик восстанавливается через 7–14 дней"
+      ],
+      "confidence": 57,
+      "confidence_level": "medium",
+      "evidence_basis": "Текущий ДРР 34% устойчиво превышает норму на протяжении 20 дн.",
+      "expected_effect": "Вероятная стабилизация маржи за 7–14 дней",
+      "path_type": "balanced",
+      "reversible": true,
+      "risk_level": "medium",
+      "scenario_id": "<volatile>",
+      "scenario_type": "reduce_ads",
+      "source_insight": "high_ad_spend:wildberries:A",
+      "time_horizon_days": 14,
+      "tradeoff": "Краткосрочное снижение трафика (2–5 дней адаптации). WB: резкое снижение ставок может дать просадку позиций на 2–5 дней.",
+      "uncertainty_note": "Исторических данных по этому товару недостаточно — сценарий опирается на рыночные закономерности."
+    },
+    {
+      "assumption": "Аудит ключевых слов по ROAS — без немедленного изменения ставок",
+      "causal_chain": [
+        "анализ ROAS по ключевым словам",
+        "выявление нецелевых кластеров трафика",
+        "точечная корректировка ставок с минимальным риском"
+      ],
+      "confidence": 50,
+      "confidence_level": "low",
+      "evidence_basis": "Рекомендуется при неясной структуре кампании (активна 20 дн.)",
+      "expected_effect": "Понимание структуры неэффективного трафика за 7 дней",
+      "path_type": "conservative",
+      "reversible": true,
+      "risk_level": "low",
+      "scenario_id": "<volatile>",
+      "scenario_type": "controlled_scale",
+      "source_insight": "high_ad_spend:wildberries:A",
+      "time_horizon_days": 7,
+      "tradeoff": "Давление на маржу продолжается во время анализа",
+      "uncertainty_note": "Исторических данных по этому товару недостаточно — сценарий опирается на рыночные закономерности."
+    },
+    {
+      "assumption": "Сохранение текущей рекламной нагрузки",
+      "causal_chain": [
+        "ДРР 34% сохраняется",
+        "маржинальное давление продолжается",
+        "при росте затрат без роста выручки — структурное ухудшение"
+      ],
+      "confidence": 62,
+      "confidence_level": "medium",
+      "evidence_basis": "Паттерн наблюдается 20 дн. без стабилизации",
+      "expected_effect": "Давление на маржу вероятно продолжится",
+      "path_type": "aggressive",
+      "reversible": true,
+      "risk_level": "high",
+      "scenario_id": "<volatile>",
+      "scenario_type": "maintain_current",
+      "source_insight": "high_ad_spend:wildberries:A",
+      "time_horizon_days": 14,
+      "tradeoff": "При ДРР 34% и марже 4.0% операционный буфер минимален. Риск дальнейшего сжатия маржи.",
+      "uncertainty_note": "Исторических данных по этому товару недостаточно — сценарий опирается на рыночные закономерности."
+    }
+  ],
+  "ad.ym": [
+    {
+      "assumption": "Снижение ДРР на 15–20% за счёт отсева нецелевых ключей",
+      "causal_chain": [
+        "ДРР 25% → отсев нецелевых ключей",
+        "снижение рекламной нагрузки → стабилизация маржи",
+        "органический трафик восстанавливается через 7–14 дней"
+      ],
+      "confidence": 57,
+      "confidence_level": "medium",
+      "evidence_basis": "Текущий ДРР 25% устойчиво превышает норму на протяжении 20 дн.",
+      "expected_effect": "Вероятная стабилизация маржи за 7–14 дней",
+      "path_type": "balanced",
+      "reversible": true,
+      "risk_level": "medium",
+      "scenario_id": "<volatile>",
+      "scenario_type": "reduce_ads",
+      "source_insight": "high_ad_spend:yandex_market:A",
+      "time_horizon_days": 14,
+      "tradeoff": "Краткосрочное снижение трафика (2–5 дней адаптации). YM: снижение ставок снижает риск нецелевых кликов конкурентов.",
+      "uncertainty_note": "Исторических данных по этому товару недостаточно — сценарий опирается на рыночные закономерности."
+    },
+    {
+      "assumption": "Аудит ключевых слов по ROAS — без немедленного изменения ставок",
+      "causal_chain": [
+        "анализ ROAS по ключевым словам",
+        "выявление нецелевых кластеров трафика",
+        "точечная корректировка ставок с минимальным риском"
+      ],
+      "confidence": 50,
+      "confidence_level": "low",
+      "evidence_basis": "Рекомендуется при неясной структуре кампании (активна 20 дн.)",
+      "expected_effect": "Понимание структуры неэффективного трафика за 7 дней",
+      "path_type": "conservative",
+      "reversible": true,
+      "risk_level": "low",
+      "scenario_id": "<volatile>",
+      "scenario_type": "controlled_scale",
+      "source_insight": "high_ad_spend:yandex_market:A",
+      "time_horizon_days": 7,
+      "tradeoff": "Давление на маржу продолжается во время анализа",
+      "uncertainty_note": "Исторических данных по этому товару недостаточно — сценарий опирается на рыночные закономерности."
+    },
+    {
+      "assumption": "Сохранение текущей рекламной нагрузки",
+      "causal_chain": [
+        "ДРР 25% сохраняется",
+        "маржинальное давление продолжается",
+        "при росте затрат без роста выручки — структурное ухудшение"
+      ],
+      "confidence": 62,
+      "confidence_level": "medium",
+      "evidence_basis": "Паттерн наблюдается 20 дн. без стабилизации",
+      "expected_effect": "Давление на маржу вероятно продолжится",
+      "path_type": "aggressive",
+      "reversible": true,
+      "risk_level": "high",
+      "scenario_id": "<volatile>",
+      "scenario_type": "maintain_current",
+      "source_insight": "high_ad_spend:yandex_market:A",
+      "time_horizon_days": 14,
+      "tradeoff": "При ДРР 25% и марже 5.0% операционный буфер минимален. Риск дальнейшего сжатия маржи.",
+      "uncertainty_note": "Исторических данных по этому товару недостаточно — сценарий опирается на рыночные закономерности."
+    }
+  ],
+  "ad.young_lt7": [
+    {
+      "assumption": "Снижение ДРР на 15–20% за счёт отсева нецелевых ключей",
+      "causal_chain": [
+        "ДРР 25% → отсев нецелевых ключей",
+        "снижение рекламной нагрузки → стабилизация маржи",
+        "органический трафик восстанавливается через 7–14 дней"
+      ],
+      "confidence": 52,
+      "confidence_level": "low",
+      "evidence_basis": "Текущий ДРР 25% устойчиво превышает норму на протяжении 5 дн.",
+      "expected_effect": "Вероятная стабилизация маржи за 7–14 дней",
+      "path_type": "balanced",
+      "reversible": true,
+      "risk_level": "medium",
+      "scenario_id": "<volatile>",
+      "scenario_type": "reduce_ads",
+      "source_insight": "high_ad_spend:wildberries:A",
+      "time_horizon_days": 14,
+      "tradeoff": "Краткосрочное снижение трафика (2–5 дней адаптации). WB: резкое снижение ставок может дать просадку позиций на 2–5 дней.",
+      "uncertainty_note": "Данных 5 дн. — оценка приблизительная. Рекомендуется перепроверить через 7 дней."
+    },
+    {
+      "assumption": "Аудит ключевых слов по ROAS — без немедленного изменения ставок",
+      "causal_chain": [
+        "анализ ROAS по ключевым словам",
+        "выявление нецелевых кластеров трафика",
+        "точечная корректировка ставок с минимальным риском"
+      ],
+      "confidence": 48,
+      "confidence_level": "low",
+      "evidence_basis": "Рекомендуется при неясной структуре кампании (активна 5 дн.)",
+      "expected_effect": "Понимание структуры неэффективного трафика за 7 дней",
+      "path_type": "conservative",
+      "reversible": true,
+      "risk_level": "low",
+      "scenario_id": "<volatile>",
+      "scenario_type": "controlled_scale",
+      "source_insight": "high_ad_spend:wildberries:A",
+      "time_horizon_days": 7,
+      "tradeoff": "Давление на маржу продолжается во время анализа",
+      "uncertainty_note": "Данных 5 дн. — оценка приблизительная. Рекомендуется перепроверить через 7 дней."
+    },
+    {
+      "assumption": "Сохранение текущей рекламной нагрузки",
+      "causal_chain": [
+        "ДРР 25% сохраняется",
+        "маржинальное давление продолжается",
+        "при росте затрат без роста выручки — структурное ухудшение"
+      ],
+      "confidence": 55,
+      "confidence_level": "medium",
+      "evidence_basis": "Паттерн наблюдается 5 дн. без стабилизации",
+      "expected_effect": "Давление на маржу вероятно продолжится",
+      "path_type": "aggressive",
+      "reversible": true,
+      "risk_level": "high",
+      "scenario_id": "<volatile>",
+      "scenario_type": "maintain_current",
+      "source_insight": "high_ad_spend:wildberries:A",
+      "time_horizon_days": 14,
+      "tradeoff": "При ДРР 25% и марже 5.0% операционный буфер минимален. Риск дальнейшего сжатия маржи.",
+      "uncertainty_note": "Данных 5 дн. — оценка приблизительная. Рекомендуется перепроверить через 7 дней."
+    }
+  ],
+  "ctx.ad_history": "\n\n🎯 Снижение ДРР ранее стабилизировало ситуацию за 7–14 дней.",
+  "ctx.ad_mp_note": "\n\n⚙️ WB: резкое снижение ставок может дать просадку позиций на 2–5 дней",
+  "ctx.empty": "",
+  "ctx.growth_history": "\n\n🎯 Исторически устойчивый рост — условия повторяются.",
+  "ctx.growth_ozon": "\n\n⏱ Данные Ozon подтверждены с учётом 48ч задержки атрибуции.",
+  "ctx.margin_history": "\n\n🎯 Структурный разбор затрат ранее помогал восстановить маржу.",
+  "ctx.seo_rebuild": "\n\n🎯 Пересборка ранее дала +6.0% CTR для этого товара.",
+  "ctx.stock_mp": "\n\n⚙️ YM: доступность > 70% критична для сохранения позиций в категории",
+  "growth.history3x": [
+    {
+      "assumption": "Масштабирование рекламного бюджета на 20–30% с мониторингом маржи",
+      "causal_chain": [
+        "рост +25% подтверждён в нескольких периодах",
+        "масштабирование рекламы → усиление тренда",
+        "мониторинг маржи и склада → устойчивый рост"
+      ],
+      "confidence": 65,
+      "confidence_level": "medium",
+      "evidence_basis": "Рост +25% подтверждён — не разовый всплеск",
+      "expected_effect": "Усиление растущего тренда (+25%) при контроле рентабельности",
+      "path_type": "balanced",
+      "reversible": true,
+      "risk_level": "low",
+      "scenario_id": "<volatile>",
+      "scenario_type": "controlled_scale",
+      "source_insight": "sales_growth:wildberries:A",
+      "time_horizon_days": 14,
+      "tradeoff": "Требует мониторинга запаса и ДРР.",
+      "uncertainty_note": "Паттерн наблюдается 3× — исторический контекст повышает достоверность оценки."
+    },
+    {
+      "assumption": "Максимальное масштабирование рекламы и ассортимента",
+      "causal_chain": [
+        "агрессивное масштабирование → рост трафика",
+        "при исчерпании запаса → прерывание роста и потеря позиций"
+      ],
+      "confidence": 58,
+      "confidence_level": "medium",
+      "evidence_basis": "Агрессивный сценарий оправдан при достаточном запасе",
+      "expected_effect": "Ускорение роста выручки при повышенных рисках",
+      "path_type": "aggressive",
+      "reversible": true,
+      "risk_level": "high",
+      "scenario_id": "<volatile>",
+      "scenario_type": "aggressive_scale",
+      "source_insight": "sales_growth:wildberries:A",
+      "time_horizon_days": 14,
+      "tradeoff": "Высокая зависимость от устойчивости тренда.",
+      "uncertainty_note": "Паттерн наблюдается 3× — исторический контекст повышает достоверность оценки."
+    },
+    {
+      "assumption": "Наблюдать за трендом ещё 7 дней без масштабирования",
+      "causal_chain": [
+        "ожидание → больше данных",
+        "если тренд устойчив — масштабирование через 7 дней с меньшим риском"
+      ],
+      "confidence": 70,
+      "confidence_level": "medium",
+      "evidence_basis": "Подходит при неопределённости в природе роста",
+      "expected_effect": "Дополнительное подтверждение тренда перед инвестициями",
+      "path_type": "conservative",
+      "reversible": true,
+      "risk_level": "low",
+      "scenario_id": "<volatile>",
+      "scenario_type": "maintain_current",
+      "source_insight": "sales_growth:wildberries:A",
+      "time_horizon_days": 7,
+      "tradeoff": "Упущенный момент роста — конкуренты могут опередить",
+      "uncertainty_note": "Паттерн наблюдается 3× — исторический контекст повышает достоверность оценки."
+    }
+  ],
+  "growth.low_stock": [
+    {
+      "assumption": "Масштабирование рекламного бюджета на 20–30% с мониторингом маржи",
+      "causal_chain": [
+        "рост +25% подтверждён в нескольких периодах",
+        "масштабирование рекламы → усиление тренда",
+        "мониторинг маржи и склада → устойчивый рост"
+      ],
+      "confidence": 57,
+      "confidence_level": "medium",
+      "evidence_basis": "Рост +25% подтверждён — не разовый всплеск",
+      "expected_effect": "Усиление растущего тренда (+25%) при контроле рентабельности",
+      "path_type": "balanced",
+      "reversible": true,
+      "risk_level": "medium",
+      "scenario_id": "<volatile>",
+      "scenario_type": "controlled_scale",
+      "source_insight": "sales_growth:wildberries:A",
+      "time_horizon_days": 14,
+      "tradeoff": "Требует мониторинга запаса и ДРР. При текущем темпе роста — риск out-of-stock.",
+      "uncertainty_note": "Исторических данных по этому товару недостаточно — сценарий опирается на рыночные закономерности."
+    },
+    {
+      "assumption": "Максимальное масштабирование рекламы и ассортимента",
+      "causal_chain": [
+        "агрессивное масштабирование → рост трафика",
+        "при исчерпании запаса → прерывание роста и потеря позиций"
+      ],
+      "confidence": 50,
+      "confidence_level": "low",
+      "evidence_basis": "Агрессивный сценарий оправдан при достаточном запасе",
+      "expected_effect": "Ускорение роста выручки при повышенных рисках",
+      "path_type": "aggressive",
+      "reversible": true,
+      "risk_level": "high",
+      "scenario_id": "<volatile>",
+      "scenario_type": "aggressive_scale",
+      "source_insight": "sales_growth:wildberries:A",
+      "time_horizon_days": 14,
+      "tradeoff": "Высокая зависимость от устойчивости тренда. При текущем темпе роста — риск out-of-stock.",
+      "uncertainty_note": "Исторических данных об агрессивном масштабировании нет — высокая неопределённость."
+    },
+    {
+      "assumption": "Наблюдать за трендом ещё 7 дней без масштабирования",
+      "causal_chain": [
+        "ожидание → больше данных",
+        "если тренд устойчив — масштабирование через 7 дней с меньшим риском"
+      ],
+      "confidence": 62,
+      "confidence_level": "medium",
+      "evidence_basis": "Подходит при неопределённости в природе роста",
+      "expected_effect": "Дополнительное подтверждение тренда перед инвестициями",
+      "path_type": "conservative",
+      "reversible": true,
+      "risk_level": "low",
+      "scenario_id": "<volatile>",
+      "scenario_type": "maintain_current",
+      "source_insight": "sales_growth:wildberries:A",
+      "time_horizon_days": 7,
+      "tradeoff": "Упущенный момент роста — конкуренты могут опередить",
+      "uncertainty_note": "Исторических данных по этому товару недостаточно — сценарий опирается на рыночные закономерности."
+    }
+  ],
+  "growth.ozon": [
+    {
+      "assumption": "Масштабирование рекламного бюджета на 20–30% с мониторингом маржи",
+      "causal_chain": [
+        "рост +25% подтверждён в нескольких периодах",
+        "масштабирование рекламы → усиление тренда",
+        "мониторинг маржи и склада → устойчивый рост"
+      ],
+      "confidence": 57,
+      "confidence_level": "medium",
+      "evidence_basis": "Рост +25% подтверждён — не разовый всплеск",
+      "expected_effect": "Усиление растущего тренда (+25%) при контроле рентабельности",
+      "path_type": "balanced",
+      "reversible": true,
+      "risk_level": "low",
+      "scenario_id": "<volatile>",
+      "scenario_type": "controlled_scale",
+      "source_insight": "sales_growth:ozon:A",
+      "time_horizon_days": 14,
+      "tradeoff": "Требует мониторинга запаса и ДРР.",
+      "uncertainty_note": "Исторических данных по этому товару недостаточно — сценарий опирается на рыночные закономерности."
+    },
+    {
+      "assumption": "Максимальное масштабирование рекламы и ассортимента",
+      "causal_chain": [
+        "агрессивное масштабирование → рост трафика",
+        "при исчерпании запаса → прерывание роста и потеря позиций"
+      ],
+      "confidence": 50,
+      "confidence_level": "low",
+      "evidence_basis": "Агрессивный сценарий оправдан при достаточном запасе",
+      "expected_effect": "Ускорение роста выручки при повышенных рисках",
+      "path_type": "aggressive",
+      "reversible": true,
+      "risk_level": "high",
+      "scenario_id": "<volatile>",
+      "scenario_type": "aggressive_scale",
+      "source_insight": "sales_growth:ozon:A",
+      "time_horizon_days": 14,
+      "tradeoff": "Высокая зависимость от устойчивости тренда. Ozon: данные с лагом 48ч — масштабирование на непроверенных данных рискованно.",
+      "uncertainty_note": "Исторических данных об агрессивном масштабировании нет — высокая неопределённость."
+    },
+    {
+      "assumption": "Наблюдать за трендом ещё 7 дней без масштабирования",
+      "causal_chain": [
+        "ожидание → больше данных",
+        "если тренд устойчив — масштабирование через 7 дней с меньшим риском"
+      ],
+      "confidence": 62,
+      "confidence_level": "medium",
+      "evidence_basis": "Подходит при неопределённости в природе роста",
+      "expected_effect": "Дополнительное подтверждение тренда перед инвестициями",
+      "path_type": "conservative",
+      "reversible": true,
+      "risk_level": "low",
+      "scenario_id": "<volatile>",
+      "scenario_type": "maintain_current",
+      "source_insight": "sales_growth:ozon:A",
+      "time_horizon_days": 7,
+      "tradeoff": "Упущенный момент роста — конкуренты могут опередить",
+      "uncertainty_note": "Исторических данных по этому товару недостаточно — сценарий опирается на рыночные закономерности."
+    }
+  ],
+  "growth.plain": [
+    {
+      "assumption": "Масштабирование рекламного бюджета на 20–30% с мониторингом маржи",
+      "causal_chain": [
+        "рост +25% подтверждён в нескольких периодах",
+        "масштабирование рекламы → усиление тренда",
+        "мониторинг маржи и склада → устойчивый рост"
+      ],
+      "confidence": 57,
+      "confidence_level": "medium",
+      "evidence_basis": "Рост +25% подтверждён — не разовый всплеск",
+      "expected_effect": "Усиление растущего тренда (+25%) при контроле рентабельности",
+      "path_type": "balanced",
+      "reversible": true,
+      "risk_level": "low",
+      "scenario_id": "<volatile>",
+      "scenario_type": "controlled_scale",
+      "source_insight": "sales_growth:wildberries:A",
+      "time_horizon_days": 14,
+      "tradeoff": "Требует мониторинга запаса и ДРР.",
+      "uncertainty_note": "Исторических данных по этому товару недостаточно — сценарий опирается на рыночные закономерности."
+    },
+    {
+      "assumption": "Максимальное масштабирование рекламы и ассортимента",
+      "causal_chain": [
+        "агрессивное масштабирование → рост трафика",
+        "при исчерпании запаса → прерывание роста и потеря позиций"
+      ],
+      "confidence": 50,
+      "confidence_level": "low",
+      "evidence_basis": "Агрессивный сценарий оправдан при достаточном запасе",
+      "expected_effect": "Ускорение роста выручки при повышенных рисках",
+      "path_type": "aggressive",
+      "reversible": true,
+      "risk_level": "high",
+      "scenario_id": "<volatile>",
+      "scenario_type": "aggressive_scale",
+      "source_insight": "sales_growth:wildberries:A",
+      "time_horizon_days": 14,
+      "tradeoff": "Высокая зависимость от устойчивости тренда.",
+      "uncertainty_note": "Исторических данных об агрессивном масштабировании нет — высокая неопределённость."
+    },
+    {
+      "assumption": "Наблюдать за трендом ещё 7 дней без масштабирования",
+      "causal_chain": [
+        "ожидание → больше данных",
+        "если тренд устойчив — масштабирование через 7 дней с меньшим риском"
+      ],
+      "confidence": 62,
+      "confidence_level": "medium",
+      "evidence_basis": "Подходит при неопределённости в природе роста",
+      "expected_effect": "Дополнительное подтверждение тренда перед инвестициями",
+      "path_type": "conservative",
+      "reversible": true,
+      "risk_level": "low",
+      "scenario_id": "<volatile>",
+      "scenario_type": "maintain_current",
+      "source_insight": "sales_growth:wildberries:A",
+      "time_horizon_days": 7,
+      "tradeoff": "Упущенный момент роста — конкуренты могут опередить",
+      "uncertainty_note": "Исторических данных по этому товару недостаточно — сценарий опирается на рыночные закономерности."
+    }
+  ],
+  "growth.ym_aggr": [
+    {
+      "assumption": "Масштабирование рекламного бюджета на 20–30% с мониторингом маржи",
+      "causal_chain": [
+        "рост +25% подтверждён в нескольких периодах",
+        "масштабирование рекламы → усиление тренда",
+        "мониторинг маржи и склада → устойчивый рост"
+      ],
+      "confidence": 57,
+      "confidence_level": "medium",
+      "evidence_basis": "Рост +25% подтверждён — не разовый всплеск",
+      "expected_effect": "Усиление растущего тренда (+25%) при контроле рентабельности",
+      "path_type": "balanced",
+      "reversible": true,
+      "risk_level": "low",
+      "scenario_id": "<volatile>",
+      "scenario_type": "controlled_scale",
+      "source_insight": "sales_growth:yandex_market:A",
+      "time_horizon_days": 14,
+      "tradeoff": "Требует мониторинга запаса и ДРР.",
+      "uncertainty_note": "Исторических данных по этому товару недостаточно — сценарий опирается на рыночные закономерности."
+    },
+    {
+      "assumption": "Максимальное масштабирование рекламы и ассортимента",
+      "causal_chain": [
+        "агрессивное масштабирование → рост трафика",
+        "при исчерпании запаса → прерывание роста и потеря позиций"
+      ],
+      "confidence": 50,
+      "confidence_level": "low",
+      "evidence_basis": "Агрессивный сценарий оправдан при достаточном запасе",
+      "expected_effect": "Ускорение роста выручки при повышенных рисках",
+      "path_type": "aggressive",
+      "reversible": true,
+      "risk_level": "high",
+      "scenario_id": "<volatile>",
+      "scenario_type": "aggressive_scale",
+      "source_insight": "sales_growth:yandex_market:A",
+      "time_horizon_days": 14,
+      "tradeoff": "Высокая зависимость от устойчивости тренда. YM: при stock < 70% доступности карточка выпадает из TopK на 2 недели.",
+      "uncertainty_note": "Исторических данных об агрессивном масштабировании нет — высокая неопределённость."
+    },
+    {
+      "assumption": "Наблюдать за трендом ещё 7 дней без масштабирования",
+      "causal_chain": [
+        "ожидание → больше данных",
+        "если тренд устойчив — масштабирование через 7 дней с меньшим риском"
+      ],
+      "confidence": 62,
+      "confidence_level": "medium",
+      "evidence_basis": "Подходит при неопределённости в природе роста",
+      "expected_effect": "Дополнительное подтверждение тренда перед инвестициями",
+      "path_type": "conservative",
+      "reversible": true,
+      "risk_level": "low",
+      "scenario_id": "<volatile>",
+      "scenario_type": "maintain_current",
+      "source_insight": "sales_growth:yandex_market:A",
+      "time_horizon_days": 7,
+      "tradeoff": "Упущенный момент роста — конкуренты могут опередить",
+      "uncertainty_note": "Исторических данных по этому товару недостаточно — сценарий опирается на рыночные закономерности."
+    }
+  ],
+  "margin.ad_driven": [
+    {
+      "assumption": "Снижение рекламной нагрузки — первопричины маржинального давления",
+      "causal_chain": [
+        "снижение ДРР → уменьшение рекламной нагрузки",
+        "рекламные расходы — первопричина давления на маржу",
+        "стабилизация маржи следует за стабилизацией ДРР"
+      ],
+      "confidence": 54,
+      "confidence_level": "low",
+      "evidence_basis": "Маржинальное давление имеет рекламную природу",
+      "expected_effect": "Стабилизация маржи следует за стабилизацией ДРР за 7–14 дней",
+      "path_type": "balanced",
+      "reversible": true,
+      "risk_level": "medium",
+      "scenario_id": "<volatile>",
+      "scenario_type": "reduce_ads",
+      "source_insight": "margin_crisis:wildberries:A",
+      "time_horizon_days": 14,
+      "tradeoff": "Возможное краткосрочное снижение трафика. WB: резкое снижение ставок может дать просадку позиций на 2–5 дней.",
+      "uncertainty_note": "Исторических данных по этому товару недостаточно — сценарий опирается на рыночные закономерности."
+    },
+    {
+      "assumption": "Сохранение текущей структуры затрат",
+      "causal_chain": [
+        "затраты сохраняются → маржа остаётся под давлением",
+        "при дальнейшем снижении маржи — операционная устойчивость снижается"
+      ],
+      "confidence": 62,
+      "confidence_level": "medium",
+      "evidence_basis": "Маржа 3.0% ниже безопасного порога 20 дн.",
+      "expected_effect": "Давление на маржу вероятно продолжится",
+      "path_type": "aggressive",
+      "reversible": true,
+      "risk_level": "high",
+      "scenario_id": "<volatile>",
+      "scenario_type": "maintain_current",
+      "source_insight": "margin_crisis:wildberries:A",
+      "time_horizon_days": 14,
+      "tradeoff": "При марже 3.0% операционный буфер минимален. Риск дальнейшего ухудшения при нестабильной выручке.",
+      "uncertainty_note": "Исторических данных по этому товару недостаточно — сценарий опирается на рыночные закономерности."
+    }
+  ],
+  "margin.commission": [
+    {
+      "assumption": "Проверка тарифного плана и перекатегоризация товара",
+      "causal_chain": [
+        "аудит категории и тарифа → выявление оптимального плана",
+        "снижение комиссии → стабилизация маржи"
+      ],
+      "confidence": 52,
+      "confidence_level": "low",
+      "evidence_basis": "Комиссия площадки — основной источник давления",
+      "expected_effect": "Возможное снижение комиссии при переходе на другой тариф",
+      "path_type": "balanced",
+      "reversible": true,
+      "risk_level": "low",
+      "scenario_id": "<volatile>",
+      "scenario_type": "controlled_scale",
+      "source_insight": "margin_crisis:wildberries:A",
+      "time_horizon_days": 14,
+      "tradeoff": "Эффект зависит от доступных тарифных опций площадки. WB: частая смена цены влияет на ранжирование — делать постепенно.",
+      "uncertainty_note": "Исторических данных по этому товару недостаточно — сценарий опирается на рыночные закономерности."
+    },
+    {
+      "assumption": "Сохранение текущей структуры затрат",
+      "causal_chain": [
+        "затраты сохраняются → маржа остаётся под давлением",
+        "при дальнейшем снижении маржи — операционная устойчивость снижается"
+      ],
+      "confidence": 62,
+      "confidence_level": "medium",
+      "evidence_basis": "Маржа 3.0% ниже безопасного порога 20 дн.",
+      "expected_effect": "Давление на маржу вероятно продолжится",
+      "path_type": "aggressive",
+      "reversible": true,
+      "risk_level": "high",
+      "scenario_id": "<volatile>",
+      "scenario_type": "maintain_current",
+      "source_insight": "margin_crisis:wildberries:A",
+      "time_horizon_days": 14,
+      "tradeoff": "При марже 3.0% операционный буфер минимален. Риск дальнейшего ухудшения при нестабильной выручке.",
+      "uncertainty_note": "Исторических данных по этому товару недостаточно — сценарий опирается на рыночные закономерности."
+    }
+  ],
+  "margin.logistics": [
+    {
+      "assumption": "Оптимизация упаковки и схемы отгрузки",
+      "causal_chain": [
+        "оптимизация упаковки → снижение стоимости доставки",
+        "снижение логистической нагрузки → восстановление маржи"
+      ],
+      "confidence": 54,
+      "confidence_level": "low",
+      "evidence_basis": "Логистика — основной драйвер давления на маржу",
+      "expected_effect": "Снижение логистической нагрузки на 10–25% при правильном подборе",
+      "path_type": "balanced",
+      "reversible": true,
+      "risk_level": "low",
+      "scenario_id": "<volatile>",
+      "scenario_type": "controlled_scale",
+      "source_insight": "margin_crisis:wildberries:A",
+      "time_horizon_days": 21,
+      "tradeoff": "Требует 1–3 нед. на согласование с логистом",
+      "uncertainty_note": "Исторических данных по этому товару недостаточно — сценарий опирается на рыночные закономерности."
+    },
+    {
+      "assumption": "Сохранение текущей структуры затрат",
+      "causal_chain": [
+        "затраты сохраняются → маржа остаётся под давлением",
+        "при дальнейшем снижении маржи — операционная устойчивость снижается"
+      ],
+      "confidence": 62,
+      "confidence_level": "medium",
+      "evidence_basis": "Маржа 3.0% ниже безопасного порога 20 дн.",
+      "expected_effect": "Давление на маржу вероятно продолжится",
+      "path_type": "aggressive",
+      "reversible": true,
+      "risk_level": "high",
+      "scenario_id": "<volatile>",
+      "scenario_type": "maintain_current",
+      "source_insight": "margin_crisis:wildberries:A",
+      "time_horizon_days": 14,
+      "tradeoff": "При марже 3.0% операционный буфер минимален. Риск дальнейшего ухудшения при нестабильной выручке.",
+      "uncertainty_note": "Исторических данных по этому товару недостаточно — сценарий опирается на рыночные закономерности."
+    }
+  ],
+  "margin.structural": [
+    {
+      "assumption": "Постепенное повышение цены на 5–10% с мониторингом конверсии",
+      "causal_chain": [
+        "повышение цены → улучшение маржи",
+        "мониторинг конверсии → корректировка при необходимости",
+        "при сохранении объёма — структурное улучшение"
+      ],
+      "confidence": 50,
+      "confidence_level": "low",
+      "evidence_basis": "Структурное давление без явного доминирующего источника",
+      "expected_effect": "Улучшение маржинальности при сохранении объёма продаж",
+      "path_type": "balanced",
+      "reversible": true,
+      "risk_level": "medium",
+      "scenario_id": "<volatile>",
+      "scenario_type": "decrease_discount",
+      "source_insight": "margin_crisis:wildberries:A",
+      "time_horizon_days": 21,
+      "tradeoff": "Возможное снижение конверсии на 10–20% — необходим A/B мониторинг",
+      "uncertainty_note": "Исторических данных по этому товару недостаточно — сценарий опирается на рыночные закономерности."
+    },
+    {
+      "assumption": "Сохранение текущей структуры затрат",
+      "causal_chain": [
+        "затраты сохраняются → маржа остаётся под давлением",
+        "при дальнейшем снижении маржи — операционная устойчивость снижается"
+      ],
+      "confidence": 62,
+      "confidence_level": "medium",
+      "evidence_basis": "Маржа 3.0% ниже безопасного порога 20 дн.",
+      "expected_effect": "Давление на маржу вероятно продолжится",
+      "path_type": "aggressive",
+      "reversible": true,
+      "risk_level": "high",
+      "scenario_id": "<volatile>",
+      "scenario_type": "maintain_current",
+      "source_insight": "margin_crisis:wildberries:A",
+      "time_horizon_days": 14,
+      "tradeoff": "При марже 3.0% операционный буфер минимален. Риск дальнейшего ухудшения при нестабильной выручке.",
+      "uncertainty_note": "Исторических данных по этому товару недостаточно — сценарий опирается на рыночные закономерности."
+    }
+  ],
+  "margin.structural_ozon": [
+    {
+      "assumption": "Постепенное повышение цены на 5–10% с мониторингом конверсии",
+      "causal_chain": [
+        "повышение цены → улучшение маржи",
+        "мониторинг конверсии → корректировка при необходимости",
+        "при сохранении объёма — структурное улучшение"
+      ],
+      "confidence": 50,
+      "confidence_level": "low",
+      "evidence_basis": "Структурное давление без явного доминирующего источника",
+      "expected_effect": "Улучшение маржинальности при сохранении объёма продаж",
+      "path_type": "balanced",
+      "reversible": true,
+      "risk_level": "medium",
+      "scenario_id": "<volatile>",
+      "scenario_type": "decrease_discount",
+      "source_insight": "margin_crisis:ozon:A",
+      "time_horizon_days": 21,
+      "tradeoff": "Возможное снижение конверсии на 10–20% — необходим A/B мониторинг",
+      "uncertainty_note": "Исторических данных по этому товару недостаточно — сценарий опирается на рыночные закономерности."
+    },
+    {
+      "assumption": "Сохранение текущей структуры затрат",
+      "causal_chain": [
+        "затраты сохраняются → маржа остаётся под давлением",
+        "при дальнейшем снижении маржи — операционная устойчивость снижается"
+      ],
+      "confidence": 62,
+      "confidence_level": "medium",
+      "evidence_basis": "Маржа 3.0% ниже безопасного порога 20 дн.",
+      "expected_effect": "Давление на маржу вероятно продолжится",
+      "path_type": "aggressive",
+      "reversible": true,
+      "risk_level": "high",
+      "scenario_id": "<volatile>",
+      "scenario_type": "maintain_current",
+      "source_insight": "margin_crisis:ozon:A",
+      "time_horizon_days": 14,
+      "tradeoff": "При марже 3.0% операционный буфер минимален. Риск дальнейшего ухудшения при нестабильной выручке.",
+      "uncertainty_note": "Исторических данных по этому товару недостаточно — сценарий опирается на рыночные закономерности."
+    }
+  ],
+  "seo.no_memory": [
+    {
+      "assumption": "Авто-пересборка карточки с лучшим стилем категории",
+      "causal_chain": [
+        "пересборка карточки → улучшение визуального CTR",
+        "рост органического трафика → снижение зависимости от рекламы",
+        "нормализация CPC → снижение рекламной нагрузки"
+      ],
+      "confidence": 62,
+      "confidence_level": "medium",
+      "evidence_basis": "Рейтинг товара хороший — проблема на уровне карточки, не продукта",
+      "expected_effect": "Вероятное улучшение CTR и снижение стоимости рекламного клика",
+      "path_type": "balanced",
+      "reversible": true,
+      "risk_level": "low",
+      "scenario_id": "<volatile>",
+      "scenario_type": "controlled_scale",
+      "source_insight": "seo_opportunity:wildberries:A",
+      "time_horizon_days": 10,
+      "tradeoff": "WB: cooldown 72ч между пересборками карточки. Эффект виден через 5–10 дней после индексации",
+      "uncertainty_note": "Исторических данных по этому товару недостаточно — сценарий опирается на рыночные закономерности."
+    },
+    {
+      "assumption": "Пересборка карточки + одновременное масштабирование рекламы",
+      "causal_chain": [
+        "новая карточка → потенциально высокий CTR",
+        "увеличение бюджета → рост трафика",
+        "если CTR не улучшится — бюджет потрачен неэффективно"
+      ],
+      "confidence": 54,
+      "confidence_level": "low",
+      "evidence_basis": "Агрессивный путь оправдан только при высокой уверенности в визуальном улучшении",
+      "expected_effect": "Ускоренный рост трафика при улучшенном CTR",
+      "path_type": "aggressive",
+      "reversible": true,
+      "risk_level": "high",
+      "scenario_id": "<volatile>",
+      "scenario_type": "aggressive_scale",
+      "source_insight": "seo_opportunity:wildberries:A",
+      "time_horizon_days": 10,
+      "tradeoff": "Повышенные рекламные расходы при неподтверждённом CTR новой карточки.",
+      "uncertainty_note": "Рекомендуется сначала пересборка, затем масштабирование после подтверждения CTR."
+    },
+    {
+      "assumption": "Сохранение текущей карточки без изменений",
+      "causal_chain": [
+        "карточка не меняется → CTR остаётся ниже нормы",
+        "конкуренты с лучшим визуалом продолжают опережать"
+      ],
+      "confidence": 57,
+      "confidence_level": "medium",
+      "evidence_basis": "Бездействие — тоже выбор; PULT показывает его операционное следствие",
+      "expected_effect": "CTR остаётся ниже потенциала — рекламная нагрузка не снижается",
+      "path_type": "conservative",
+      "reversible": true,
+      "risk_level": "medium",
+      "scenario_id": "<volatile>",
+      "scenario_type": "maintain_current",
+      "source_insight": "seo_opportunity:wildberries:A",
+      "time_horizon_days": 14,
+      "tradeoff": "Упущенный органический трафик при хорошем рейтинге товара",
+      "uncertainty_note": "Исторических данных по этому товару недостаточно — сценарий опирается на рыночные закономерности."
+    }
+  ],
+  "seo.ozon": [
+    {
+      "assumption": "Авто-пересборка карточки с лучшим стилем категории",
+      "causal_chain": [
+        "пересборка карточки → улучшение визуального CTR",
+        "рост органического трафика → снижение зависимости от рекламы",
+        "нормализация CPC → снижение рекламной нагрузки"
+      ],
+      "confidence": 62,
+      "confidence_level": "medium",
+      "evidence_basis": "Рейтинг товара хороший — проблема на уровне карточки, не продукта",
+      "expected_effect": "Вероятное улучшение CTR и снижение стоимости рекламного клика",
+      "path_type": "balanced",
+      "reversible": true,
+      "risk_level": "low",
+      "scenario_id": "<volatile>",
+      "scenario_type": "controlled_scale",
+      "source_insight": "seo_opportunity:ozon:A",
+      "time_horizon_days": 10,
+      "tradeoff": "Эффект виден через 5–10 дней после индексации",
+      "uncertainty_note": "Исторических данных по этому товару недостаточно — сценарий опирается на рыночные закономерности."
+    },
+    {
+      "assumption": "Пересборка карточки + одновременное масштабирование рекламы",
+      "causal_chain": [
+        "новая карточка → потенциально высокий CTR",
+        "увеличение бюджета → рост трафика",
+        "если CTR не улучшится — бюджет потрачен неэффективно"
+      ],
+      "confidence": 54,
+      "confidence_level": "low",
+      "evidence_basis": "Агрессивный путь оправдан только при высокой уверенности в визуальном улучшении",
+      "expected_effect": "Ускоренный рост трафика при улучшенном CTR",
+      "path_type": "aggressive",
+      "reversible": true,
+      "risk_level": "high",
+      "scenario_id": "<volatile>",
+      "scenario_type": "aggressive_scale",
+      "source_insight": "seo_opportunity:ozon:A",
+      "time_horizon_days": 10,
+      "tradeoff": "Повышенные рекламные расходы при неподтверждённом CTR новой карточки. Ozon: данные с лагом 48ч — масштабирование на непроверенных данных рискованно.",
+      "uncertainty_note": "Рекомендуется сначала пересборка, затем масштабирование после подтверждения CTR."
+    },
+    {
+      "assumption": "Сохранение текущей карточки без изменений",
+      "causal_chain": [
+        "карточка не меняется → CTR остаётся ниже нормы",
+        "конкуренты с лучшим визуалом продолжают опережать"
+      ],
+      "confidence": 57,
+      "confidence_level": "medium",
+      "evidence_basis": "Бездействие — тоже выбор; PULT показывает его операционное следствие",
+      "expected_effect": "CTR остаётся ниже потенциала — рекламная нагрузка не снижается",
+      "path_type": "conservative",
+      "reversible": true,
+      "risk_level": "medium",
+      "scenario_id": "<volatile>",
+      "scenario_type": "maintain_current",
+      "source_insight": "seo_opportunity:ozon:A",
+      "time_horizon_days": 14,
+      "tradeoff": "Упущенный органический трафик при хорошем рейтинге товара",
+      "uncertainty_note": "Исторических данных по этому товару недостаточно — сценарий опирается на рыночные закономерности."
+    }
+  ],
+  "seo.rebuild_fail": [
+    {
+      "assumption": "Авто-пересборка карточки с лучшим стилем категории",
+      "causal_chain": [
+        "пересборка карточки → улучшение визуального CTR",
+        "рост органического трафика → снижение зависимости от рекламы",
+        "нормализация CPC → снижение рекламной нагрузки"
+      ],
+      "confidence": 58,
+      "confidence_level": "medium",
+      "evidence_basis": "Рейтинг товара хороший — проблема на уровне карточки, не продукта",
+      "expected_effect": "Вероятное улучшение CTR и снижение стоимости рекламного клика",
+      "path_type": "balanced",
+      "reversible": true,
+      "risk_level": "low",
+      "scenario_id": "<volatile>",
+      "scenario_type": "controlled_scale",
+      "source_insight": "seo_opportunity:wildberries:A",
+      "time_horizon_days": 10,
+      "tradeoff": "WB: cooldown 72ч между пересборками карточки. Эффект виден через 5–10 дней после индексации",
+      "uncertainty_note": "Оценка основана на операционной логике и рыночных закономерностях."
+    },
+    {
+      "assumption": "Пересборка карточки + одновременное масштабирование рекламы",
+      "causal_chain": [
+        "новая карточка → потенциально высокий CTR",
+        "увеличение бюджета → рост трафика",
+        "если CTR не улучшится — бюджет потрачен неэффективно"
+      ],
+      "confidence": 50,
+      "confidence_level": "low",
+      "evidence_basis": "Агрессивный путь оправдан только при высокой уверенности в визуальном улучшении",
+      "expected_effect": "Ускоренный рост трафика при улучшенном CTR",
+      "path_type": "aggressive",
+      "reversible": true,
+      "risk_level": "high",
+      "scenario_id": "<volatile>",
+      "scenario_type": "aggressive_scale",
+      "source_insight": "seo_opportunity:wildberries:A",
+      "time_horizon_days": 10,
+      "tradeoff": "Повышенные рекламные расходы при неподтверждённом CTR новой карточки.",
+      "uncertainty_note": "Рекомендуется сначала пересборка, затем масштабирование после подтверждения CTR."
+    },
+    {
+      "assumption": "Сохранение текущей карточки без изменений",
+      "causal_chain": [
+        "карточка не меняется → CTR остаётся ниже нормы",
+        "конкуренты с лучшим визуалом продолжают опережать"
+      ],
+      "confidence": 65,
+      "confidence_level": "medium",
+      "evidence_basis": "Бездействие — тоже выбор; PULT показывает его операционное следствие",
+      "expected_effect": "CTR остаётся ниже потенциала — рекламная нагрузка не снижается",
+      "path_type": "conservative",
+      "reversible": true,
+      "risk_level": "medium",
+      "scenario_id": "<volatile>",
+      "scenario_type": "maintain_current",
+      "source_insight": "seo_opportunity:wildberries:A",
+      "time_horizon_days": 14,
+      "tradeoff": "Упущенный органический трафик при хорошем рейтинге товара",
+      "uncertainty_note": "Оценка основана на операционной логике и рыночных закономерностях."
+    }
+  ],
+  "seo.rebuild_win": [
+    {
+      "assumption": "Авто-пересборка карточки с лучшим стилем категории (SEO-пересборка ранее дала +8.0% CTR для этого товара)",
+      "causal_chain": [
+        "пересборка карточки → улучшение визуального CTR",
+        "рост органического трафика → снижение зависимости от рекламы",
+        "нормализация CPC → снижение рекламной нагрузки"
+      ],
+      "confidence": 80,
+      "confidence_level": "high",
+      "evidence_basis": "SEO-пересборка ранее дала +8.0% CTR для этого товара",
+      "expected_effect": "Вероятное улучшение CTR и снижение стоимости рекламного клика",
+      "path_type": "balanced",
+      "reversible": true,
+      "risk_level": "low",
+      "scenario_id": "<volatile>",
+      "scenario_type": "controlled_scale",
+      "source_insight": "seo_opportunity:wildberries:A",
+      "time_horizon_days": 10,
+      "tradeoff": "WB: cooldown 72ч между пересборками карточки. Эффект виден через 5–10 дней после индексации",
+      "uncertainty_note": "Оценка основана на операционной логике и рыночных закономерностях."
+    },
+    {
+      "assumption": "Пересборка карточки + одновременное масштабирование рекламы",
+      "causal_chain": [
+        "новая карточка → потенциально высокий CTR",
+        "увеличение бюджета → рост трафика",
+        "если CTR не улучшится — бюджет потрачен неэффективно"
+      ],
+      "confidence": 72,
+      "confidence_level": "medium",
+      "evidence_basis": "Агрессивный путь оправдан только при высокой уверенности в визуальном улучшении",
+      "expected_effect": "Ускоренный рост трафика при улучшенном CTR",
+      "path_type": "aggressive",
+      "reversible": true,
+      "risk_level": "high",
+      "scenario_id": "<volatile>",
+      "scenario_type": "aggressive_scale",
+      "source_insight": "seo_opportunity:wildberries:A",
+      "time_horizon_days": 10,
+      "tradeoff": "Повышенные рекламные расходы при неподтверждённом CTR новой карточки.",
+      "uncertainty_note": "Оценка основана на операционной логике и рыночных закономерностях."
+    },
+    {
+      "assumption": "Сохранение текущей карточки без изменений",
+      "causal_chain": [
+        "карточка не меняется → CTR остаётся ниже нормы",
+        "конкуренты с лучшим визуалом продолжают опережать"
+      ],
+      "confidence": 65,
+      "confidence_level": "medium",
+      "evidence_basis": "Бездействие — тоже выбор; PULT показывает его операционное следствие",
+      "expected_effect": "CTR остаётся ниже потенциала — рекламная нагрузка не снижается",
+      "path_type": "conservative",
+      "reversible": true,
+      "risk_level": "medium",
+      "scenario_id": "<volatile>",
+      "scenario_type": "maintain_current",
+      "source_insight": "seo_opportunity:wildberries:A",
+      "time_horizon_days": 14,
+      "tradeoff": "Упущенный органический трафик при хорошем рейтинге товара",
+      "uncertainty_note": "Оценка основана на операционной логике и рыночных закономерностях."
+    }
+  ],
+  "stock.wb": [
+    {
+      "assumption": "Экстренное пополнение до уровня ≥ 30 дней продаж",
+      "causal_chain": [
+        "остаток 5 шт. → риск out-of-stock через 3 дн.",
+        "пополнение → сохранение позиций в поиске",
+        "предотвращение дорогостоящего восстановления органики"
+      ],
+      "confidence": 66,
+      "confidence_level": "medium",
+      "evidence_basis": "Запас 5 шт. ≈ 3 дн. продаж.",
+      "expected_effect": "Сохранение позиций в поиске, предотвращение штрафа за out-of-stock",
+      "path_type": "balanced",
+      "reversible": false,
+      "risk_level": "low",
+      "scenario_id": "<volatile>",
+      "scenario_type": "increase_stock",
+      "source_insight": "low_stock:wildberries:A",
+      "time_horizon_days": 3,
+      "tradeoff": "Заморозка оборотных средств в запасе.",
+      "uncertainty_note": "Точный срок пополнения зависит от поставщика и логистики."
+    },
+    {
+      "assumption": "Не пополнять — продать оставшийся запас",
+      "causal_chain": [
+        "остаток 5 шт. → out-of-stock через 3 дн.",
+        "выпадение из поиска → потеря органического трафика",
+        "дорогостоящее восстановление рекламой после возврата"
+      ],
+      "confidence": 70,
+      "confidence_level": "high",
+      "evidence_basis": "Текущая скорость продаж исчерпает запас через 3 дн.",
+      "expected_effect": "Out-of-stock вероятен через 3 дн.",
+      "path_type": "aggressive",
+      "reversible": false,
+      "risk_level": "high",
+      "scenario_id": "<volatile>",
+      "scenario_type": "maintain_current",
+      "source_insight": "low_stock:wildberries:A",
+      "time_horizon_days": 3,
+      "tradeoff": "При нулевом остатке позиции в поиске теряются мгновенно. Восстановление — от 3 до 10 дней.",
+      "uncertainty_note": "PULT не рекомендует этот сценарий. Показан как ориентир риска."
+    }
+  ],
+  "stock.ym": [
+    {
+      "assumption": "Экстренное пополнение до уровня ≥ 30 дней продаж",
+      "causal_chain": [
+        "остаток 5 шт. → риск out-of-stock через 3 дн.",
+        "пополнение → сохранение позиций в поиске",
+        "предотвращение дорогостоящего восстановления органики"
+      ],
+      "confidence": 66,
+      "confidence_level": "medium",
+      "evidence_basis": "Запас 5 шт. ≈ 3 дн. продаж.",
+      "expected_effect": "Сохранение позиций в поиске, предотвращение штрафа за out-of-stock",
+      "path_type": "balanced",
+      "reversible": false,
+      "risk_level": "low",
+      "scenario_id": "<volatile>",
+      "scenario_type": "increase_stock",
+      "source_insight": "low_stock:yandex_market:A",
+      "time_horizon_days": 3,
+      "tradeoff": "YM: доступность > 70% критична для сохранения позиций в категории. Заморозка оборотных средств в запасе.",
+      "uncertainty_note": "Точный срок пополнения зависит от поставщика и логистики."
+    },
+    {
+      "assumption": "Не пополнять — продать оставшийся запас",
+      "causal_chain": [
+        "остаток 5 шт. → out-of-stock через 3 дн.",
+        "выпадение из поиска → потеря органического трафика",
+        "дорогостоящее восстановление рекламой после возврата"
+      ],
+      "confidence": 70,
+      "confidence_level": "high",
+      "evidence_basis": "Текущая скорость продаж исчерпает запас через 3 дн.",
+      "expected_effect": "Out-of-stock вероятен через 3 дн.",
+      "path_type": "aggressive",
+      "reversible": false,
+      "risk_level": "high",
+      "scenario_id": "<volatile>",
+      "scenario_type": "maintain_current",
+      "source_insight": "low_stock:yandex_market:A",
+      "time_horizon_days": 3,
+      "tradeoff": "При нулевом остатке позиции в поиске теряются мгновенно. Восстановление — от 3 до 10 дней.",
+      "uncertainty_note": "PULT не рекомендует этот сценарий. Показан как ориентир риска."
+    }
+  ],
+  "unknown_category": []
+}

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 40">
+  <defs>
+    <linearGradient id="ozg" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#005BFF"/>
+      <stop offset="100%" stop-color="#006CFF"/>
+    </linearGradient>
+  </defs>
+  <!-- Ellipse accent -->
+  <ellipse cx="40" cy="32" rx="32" ry="5" fill="#005BFF" opacity="0.12"/>
+  <!-- OZON text -->
+  <text x="40" y="26" text-anchor="middle" font-family="Arial,sans-serif" font-weight="900" font-size="24" fill="url(#ozg)" letter-spacing="1">ozon</text>
+</svg>

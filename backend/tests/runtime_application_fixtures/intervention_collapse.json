@@ -1,0 +1,107 @@
+{
+  "console": {
+    "descriptive_only": true,
+    "drift": {
+      "drift_regions": {
+        "margin_crisis": 3
+      },
+      "instability_markers": [
+        "margin_crisis"
+      ]
+    },
+    "interventions": [
+      {
+        "accumulated_weight": 34,
+        "dissipating": false,
+        "observation_only": true,
+        "region": "margin_crisis"
+      }
+    ],
+    "pressure": {
+      "accumulation_regions": {
+        "margin_crisis": 34
+      },
+      "dissipation_surfaces": []
+    },
+    "replay": {
+      "event_count": 5,
+      "timeline": [
+        {
+          "entity": "margin_crisis:wildberries:A",
+          "event_type": "intervention_started",
+          "ordinal": 0,
+          "weight": 5
+        },
+        {
+          "entity": "margin_crisis:wildberries:A",
+          "event_type": "intervention_failed",
+          "ordinal": 1,
+          "weight": 9
+        },
+        {
+          "entity": "margin_crisis:wildberries:A",
+          "event_type": "intervention_started",
+          "ordinal": 2,
+          "weight": 5
+        },
+        {
+          "entity": "margin_crisis:wildberries:A",
+          "event_type": "intervention_failed",
+          "ordinal": 3,
+          "weight": 9
+        },
+        {
+          "entity": "margin_crisis:wildberries:A",
+          "event_type": "reversal",
+          "ordinal": 4,
+          "weight": 6
+        }
+      ],
+      "window_size": 3,
+      "windows": [
+        {
+          "end_ordinal": 2,
+          "ordinals": [
+            0,
+            1,
+            2
+          ],
+          "start_ordinal": 0
+        },
+        {
+          "end_ordinal": 4,
+          "ordinals": [
+            3,
+            4
+          ],
+          "start_ordinal": 3
+        }
+      ]
+    },
+    "state": {
+      "category_weight": {
+        "margin_crisis": 34
+      },
+      "entities": [
+        "margin_crisis:wildberries:A"
+      ],
+      "event_count": 5,
+      "marketplaces": [
+        "wildberries"
+      ],
+      "type_counts": {
+        "intervention_failed": 2,
+        "intervention_started": 2,
+        "reversal": 1
+      }
+    }
+  },
+  "name": "intervention_collapse",
+  "summary": {
+    "drift_region_count": 1,
+    "intervention_surface_count": 1,
+    "pressure_region_count": 1,
+    "runtime_application_hash": "16610629b4b2e863b7e4c4027aeb565d310512f312ac38bc9fb01eec056fb436",
+    "runtime_event_count": 5
+  }
+}

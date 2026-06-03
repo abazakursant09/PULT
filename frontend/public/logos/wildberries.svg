@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 40">
+  <defs>
+    <linearGradient id="wbg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#CB11AB"/>
+      <stop offset="100%" stop-color="#7B3FF2"/>
+    </linearGradient>
+  </defs>
+  <!-- Berry dots -->
+  <circle cx="10" cy="20" r="7" fill="url(#wbg)" opacity="0.9"/>
+  <circle cx="24" cy="14" r="5.5" fill="url(#wbg)" opacity="0.75"/>
+  <circle cx="24" cy="26" r="5.5" fill="url(#wbg)" opacity="0.75"/>
+  <!-- WB text -->
+  <text x="36" y="26" font-family="Arial,sans-serif" font-weight="800" font-size="18" fill="#7B3FF2" letter-spacing="-0.5">Wildberries</text>
+</svg>

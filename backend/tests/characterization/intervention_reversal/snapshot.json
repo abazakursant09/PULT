@@ -1,0 +1,12 @@
+{
+  "compute_intervention_reversal": {
+    "reversal_note": null,
+    "reversal_probability": 15,
+    "reversal_state": "stable_intervention",
+    "reversal_trigger": null,
+    "reversal_window_days": null,
+    "rollback_effect_expectation": null,
+    "rollback_safety": "conditional",
+    "stabilization_dependency": null
+  }
+}

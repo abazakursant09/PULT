@@ -1,0 +1,42 @@
+{
+  "review_hash": "67aa7c1ba28f4b0c49600869d2266c5be36f7d14582f84fbb6f0b2e5ef67f269",
+  "snapshot": {
+    "findings": [
+      {
+        "descriptive_text": "intervention surface present",
+        "evidence": {
+          "accumulated_weight": 14
+        },
+        "finding_code": "intervention_surface",
+        "subject": "margin_crisis"
+      },
+      {
+        "descriptive_text": "pressure accumulation observed",
+        "evidence": {
+          "accumulated_weight": 7
+        },
+        "finding_code": "pressure_accumulation",
+        "subject": "high_ad_spend"
+      },
+      {
+        "descriptive_text": "pressure accumulation observed",
+        "evidence": {
+          "accumulated_weight": 5
+        },
+        "finding_code": "pressure_accumulation",
+        "subject": "low_stock"
+      },
+      {
+        "descriptive_text": "pressure accumulation observed",
+        "evidence": {
+          "accumulated_weight": 14
+        },
+        "finding_code": "pressure_accumulation",
+        "subject": "margin_crisis"
+      }
+    ],
+    "label": "cascading_failure",
+    "runtime_application_hash": "c9aac48924f7896a42284f521c590e69b5b33cb4cf1e0d451e08107b0ac9c218",
+    "runtime_event_count": 4
+  }
+}

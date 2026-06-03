@@ -1,0 +1,67 @@
+{
+  "baseline_anchor": "47beea1df0c1",
+  "cognition_hash": "f4f9c83f27f58489cfa211d2b7b46857d0376d0715e33ee208c7d875a17e1a3b",
+  "cognition_topology": {
+    "categories": [
+      "margin_crisis"
+    ],
+    "marketplace_span": 1,
+    "pressure_profile": {
+      "margin_crisis": 34
+    },
+    "signal_count": 5
+  },
+  "envelope_hash": "b32e3dbfcbc80f4a868bb31ef99c456667f01e34aa16c32b81f3b6dbf50f0a08",
+  "event_log": [
+    {
+      "entity": "margin_crisis:wildberries:A",
+      "event_type": "intervention_started",
+      "marketplace": "wildberries",
+      "weight": 5
+    },
+    {
+      "entity": "margin_crisis:wildberries:A",
+      "event_type": "intervention_failed",
+      "marketplace": "wildberries",
+      "weight": 9
+    },
+    {
+      "entity": "margin_crisis:wildberries:A",
+      "event_type": "intervention_started",
+      "marketplace": "wildberries",
+      "weight": 5
+    },
+    {
+      "entity": "margin_crisis:wildberries:A",
+      "event_type": "intervention_failed",
+      "marketplace": "wildberries",
+      "weight": 9
+    },
+    {
+      "entity": "margin_crisis:wildberries:A",
+      "event_type": "reversal",
+      "marketplace": "wildberries",
+      "weight": 6
+    }
+  ],
+  "event_log_hash": "b348650632c1b27478fe0b5141e3660c3fe80a8c933e07cc74a1e1d834c62f16",
+  "replay_chain_hash": "79ebeb43921309bee695a1a03ec5417a6c2f158e8c30b692dd2e3da316e06442",
+  "signal_set": {
+    "category_weight": {
+      "margin_crisis": 34
+    },
+    "entities": [
+      "margin_crisis:wildberries:A"
+    ],
+    "event_count": 5,
+    "marketplaces": [
+      "wildberries"
+    ],
+    "type_counts": {
+      "intervention_failed": 2,
+      "intervention_started": 2,
+      "reversal": 1
+    }
+  },
+  "signal_set_signature": "5612e21ed1536c2e8426cfadecacd8909204886251745ff0d138352ad18157f8"
+}

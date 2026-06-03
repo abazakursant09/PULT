@@ -1,0 +1,26 @@
+{
+  "compute_recovery_path_topology": {
+    "adaptive_recovery_path_count": 2,
+    "blocked_edges_count": 1,
+    "bottleneck_state": "constrained_recovery",
+    "direct_recovery_path_count": 2,
+    "dominant_path_type": "direct_recovery_path",
+    "irreversible_edges_count": 0,
+    "min_accessibility_state": "constrained_recovery",
+    "path_topology_confidence": 64,
+    "path_topology_note": "Топология перехода сохраняет открытость структурного recovery-пространства (density: 0.65). Bottleneck в constrained recovery находится в пределах операционной компенсации. Прямые восстановительные маршруты доступны без системного давления.",
+    "recovery_path_density": 0.65
+  },
+  "compute_recovery_path_topology.empty": {
+    "adaptive_recovery_path_count": 2,
+    "blocked_edges_count": 1,
+    "bottleneck_state": "constrained_recovery",
+    "direct_recovery_path_count": 2,
+    "dominant_path_type": "direct_recovery_path",
+    "irreversible_edges_count": 0,
+    "min_accessibility_state": "constrained_recovery",
+    "path_topology_confidence": 58,
+    "path_topology_note": "Топология перехода сохраняет открытость структурного recovery-пространства (density: 0.65). Bottleneck в constrained recovery находится в пределах операционной компенсации. Прямые восстановительные маршруты доступны без системного давления.",
+    "recovery_path_density": 0.65
+  }
+}

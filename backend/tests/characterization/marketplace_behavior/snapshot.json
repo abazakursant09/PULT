@@ -1,0 +1,28 @@
+{
+  "behavior_note_for_insight": [
+    [
+      "margin_pressure_ads"
+    ],
+    "WB в конкурентных категориях быстро поднимает ДРР без пропорционального роста выручки. Структурное давление на маржу часто сопровождается высокой долей нецелевого трафика по широким ключам.",
+    14
+  ],
+  "match_marketplace_patterns": [
+    {
+      "category": "margin_crisis",
+      "confidence": 78,
+      "description": "WB в конкурентных категориях быстро поднимает ДРР без пропорционального роста выручки. Структурное давление на маржу часто сопровождается высокой долей нецелевого трафика по широким ключам.",
+      "expected_behavior": "Давление стабилизируется после оптимизации ставок по ключам с низкой конверсией.",
+      "marketplace": "wildberries",
+      "operational_risk": "Широкие ключи на WB снижают ROAS быстрее, чем на других площадках.",
+      "pattern_type": "margin_pressure_ads",
+      "recommendation_bias": null,
+      "stabilization_window_days": 14,
+      "trigger_conditions": {
+        "categories": [
+          "margin_crisis"
+        ],
+        "marketplace": "wildberries"
+      }
+    }
+  ]
+}

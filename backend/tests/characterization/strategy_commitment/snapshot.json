@@ -1,0 +1,22 @@
+{
+  "compute_strategy_commitment": {
+    "commitment_note": "Текущий stabilization cycle ориентирован на структурное восстановление unit-экономики.",
+    "commitment_score": 70,
+    "commitment_state": "emerging",
+    "estimated_observation_window_days": null,
+    "interruption_risk": "moderate",
+    "observability_quality": "sufficient",
+    "strategy_shift": null,
+    "strategy_type": "structural_margin_recovery"
+  },
+  "compute_strategy_commitment.empty": {
+    "commitment_note": "Частая смена stabilization path может временно снижать прозрачность recovery cycle.",
+    "commitment_score": 35,
+    "commitment_state": "fragmented",
+    "estimated_observation_window_days": null,
+    "interruption_risk": "high",
+    "observability_quality": "degraded",
+    "strategy_shift": null,
+    "strategy_type": "mixed_fragmented_strategy"
+  }
+}

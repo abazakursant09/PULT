@@ -1,0 +1,81 @@
+{
+  "console": {
+    "descriptive_only": true,
+    "drift": {
+      "drift_regions": {},
+      "instability_markers": []
+    },
+    "interventions": [],
+    "pressure": {
+      "accumulation_regions": {
+        "margin_crisis": 5,
+        "user": 1
+      },
+      "dissipation_surfaces": [
+        "margin_crisis"
+      ]
+    },
+    "replay": {
+      "event_count": 3,
+      "timeline": [
+        {
+          "entity": "user:1",
+          "event_type": "dashboard_opened",
+          "ordinal": 0,
+          "weight": 1
+        },
+        {
+          "entity": "margin_crisis:wildberries:A",
+          "event_type": "insight_opened",
+          "ordinal": 1,
+          "weight": 2
+        },
+        {
+          "entity": "margin_crisis:wildberries:A",
+          "event_type": "insight_resolved",
+          "ordinal": 2,
+          "weight": 3
+        }
+      ],
+      "window_size": 3,
+      "windows": [
+        {
+          "end_ordinal": 2,
+          "ordinals": [
+            0,
+            1,
+            2
+          ],
+          "start_ordinal": 0
+        }
+      ]
+    },
+    "state": {
+      "category_weight": {
+        "margin_crisis": 5,
+        "user": 1
+      },
+      "entities": [
+        "margin_crisis:wildberries:A",
+        "user:1"
+      ],
+      "event_count": 3,
+      "marketplaces": [
+        "wildberries"
+      ],
+      "type_counts": {
+        "dashboard_opened": 1,
+        "insight_opened": 1,
+        "insight_resolved": 1
+      }
+    }
+  },
+  "name": "steady_state",
+  "summary": {
+    "drift_region_count": 0,
+    "intervention_surface_count": 0,
+    "pressure_region_count": 2,
+    "runtime_application_hash": "935f1024fd573b725f76881132a7d817addec82f86b5f87ab87caa7ad3ce73a8",
+    "runtime_event_count": 3
+  }
+}

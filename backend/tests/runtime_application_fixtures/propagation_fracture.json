@@ -1,0 +1,104 @@
+{
+  "console": {
+    "descriptive_only": true,
+    "drift": {
+      "drift_regions": {
+        "high_ad_spend": 1
+      },
+      "instability_markers": []
+    },
+    "interventions": [
+      {
+        "accumulated_weight": 21,
+        "dissipating": false,
+        "observation_only": true,
+        "region": "margin_crisis"
+      }
+    ],
+    "pressure": {
+      "accumulation_regions": {
+        "high_ad_spend": 6,
+        "margin_crisis": 21
+      },
+      "dissipation_surfaces": []
+    },
+    "replay": {
+      "event_count": 4,
+      "timeline": [
+        {
+          "entity": "margin_crisis:wildberries:A",
+          "event_type": "margin_pressure",
+          "ordinal": 0,
+          "weight": 7
+        },
+        {
+          "entity": "margin_crisis:ozon:A",
+          "event_type": "margin_pressure",
+          "ordinal": 1,
+          "weight": 7
+        },
+        {
+          "entity": "margin_crisis:yandex_market:A",
+          "event_type": "margin_pressure",
+          "ordinal": 2,
+          "weight": 7
+        },
+        {
+          "entity": "high_ad_spend:ozon:A",
+          "event_type": "cascade",
+          "ordinal": 3,
+          "weight": 6
+        }
+      ],
+      "window_size": 3,
+      "windows": [
+        {
+          "end_ordinal": 2,
+          "ordinals": [
+            0,
+            1,
+            2
+          ],
+          "start_ordinal": 0
+        },
+        {
+          "end_ordinal": 3,
+          "ordinals": [
+            3
+          ],
+          "start_ordinal": 3
+        }
+      ]
+    },
+    "state": {
+      "category_weight": {
+        "high_ad_spend": 6,
+        "margin_crisis": 21
+      },
+      "entities": [
+        "high_ad_spend:ozon:A",
+        "margin_crisis:ozon:A",
+        "margin_crisis:wildberries:A",
+        "margin_crisis:yandex_market:A"
+      ],
+      "event_count": 4,
+      "marketplaces": [
+        "ozon",
+        "wildberries",
+        "yandex_market"
+      ],
+      "type_counts": {
+        "cascade": 1,
+        "margin_pressure": 3
+      }
+    }
+  },
+  "name": "propagation_fracture",
+  "summary": {
+    "drift_region_count": 1,
+    "intervention_surface_count": 1,
+    "pressure_region_count": 2,
+    "runtime_application_hash": "df9629f8b80ff6bc6443d7ffc77a957dbd52ddc5cb6aa7679edb7ece81c647d1",
+    "runtime_event_count": 4
+  }
+}

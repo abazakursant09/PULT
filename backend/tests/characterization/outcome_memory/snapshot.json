@@ -1,0 +1,29 @@
+{
+  "apply_outcome_to_recommendations": [
+    {
+      "__duck__": {
+        "category": "margin_crisis",
+        "confidence": 70,
+        "impact_score": 50,
+        "key": "margin_crisis:wildberries:SKU1",
+        "marketplace": "wildberries",
+        "signal_lifecycle_stage": "recurring",
+        "status": "active"
+      }
+    },
+    {
+      "__duck__": {
+        "category": "seo_opportunity",
+        "confidence": 70,
+        "impact_score": 50,
+        "key": "seo_opportunity:ozon:S2",
+        "marketplace": "wildberries",
+        "status": "active"
+      }
+    }
+  ],
+  "apply_outcome_to_recommendations.empty": [],
+  "build_outcome_note": "",
+  "detect_recurrence": false,
+  "evaluate_resolution_outcome": null
+}

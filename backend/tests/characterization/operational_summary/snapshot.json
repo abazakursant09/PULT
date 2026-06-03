@@ -1,0 +1,36 @@
+{
+  "build_operational_summary": {
+    "destabilizing_systems": [
+      "маржинального давления"
+    ],
+    "dominant_pressure": "маржинального давления",
+    "improving_systems": [],
+    "narrative_lines": [
+      "Операционное давление сместилось из SEO в рекламную экономику."
+    ],
+    "operational_shift": "Операционное давление сместилось из SEO в рекламную экономику.",
+    "operator_load": "low",
+    "portfolio_direction": "unstable",
+    "recurring_patterns": [
+      "margin_crisis"
+    ],
+    "stabilized_patterns": [],
+    "summary_note": "Один повторяющийся паттерн сохраняет операционное давление.",
+    "summary_type": "operational"
+  },
+  "build_operational_summary.empty": {
+    "destabilizing_systems": [],
+    "dominant_pressure": null,
+    "improving_systems": [],
+    "narrative_lines": [
+      "Операционное состояние портфеля остаётся под мониторингом."
+    ],
+    "operational_shift": "Операционное состояние портфеля остаётся под мониторингом.",
+    "operator_load": "low",
+    "portfolio_direction": "stabilizing",
+    "recurring_patterns": [],
+    "stabilized_patterns": [],
+    "summary_note": "ПУЛЬТ продолжает мониторинг операционного состояния.",
+    "summary_type": "operational"
+  }
+}

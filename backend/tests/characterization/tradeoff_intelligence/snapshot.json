@@ -1,0 +1,20 @@
+{
+  "build_tradeoff_note": null,
+  "get_tradeoff": {
+    "acceptable_when": [
+      "маржа ниже порога безубыточности",
+      "без активных рекламных кампаний на этот SKU"
+    ],
+    "avoid_when": [
+      "период активных продаж",
+      "продукт на стадии рейтингового роста"
+    ],
+    "confidence_band": "moderate",
+    "expected_duration_days": 14,
+    "reversibility": "reversible",
+    "severity": "moderate",
+    "side_effect_type": "ctr_instability",
+    "stabilization_benefit": "Unit-экономика выходит в устойчивую зону. Структурный дрейф останавливается.",
+    "tradeoff_note": "Корректировка цены временно нарушает CTR-сигнал до переиндексации карточки площадкой."
+  }
+}

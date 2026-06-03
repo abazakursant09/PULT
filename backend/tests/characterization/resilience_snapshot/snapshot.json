@@ -1,0 +1,106 @@
+{
+  "adaptive": {
+    "absorption_capacity": "high",
+    "resilience_note": "Система демонстрирует высокую способность к компенсации давления.",
+    "resilience_score": 100,
+    "resilience_state": "adaptive",
+    "resilience_window": null,
+    "weakest_operational_layer": "маржинальная устойчивость"
+  },
+  "brittle": {
+    "absorption_capacity": "narrowing",
+    "resilience_note": "Система находится в зоне повышенной операционной хрупкости.",
+    "resilience_score": 22,
+    "resilience_state": "brittle",
+    "resilience_window": 7,
+    "weakest_operational_layer": "маржинальная устойчивость"
+  },
+  "category_low_stock": {
+    "absorption_capacity": "moderate",
+    "resilience_note": "Уровень устойчивости позволяет компенсировать умеренное давление без дестабилизации.",
+    "resilience_score": 55,
+    "resilience_state": "moderate",
+    "resilience_window": 14,
+    "weakest_operational_layer": "складской резерв"
+  },
+  "category_unknown": {
+    "absorption_capacity": "moderate",
+    "resilience_note": "Уровень устойчивости позволяет компенсировать умеренное давление без дестабилизации.",
+    "resilience_score": 55,
+    "resilience_state": "moderate",
+    "resilience_window": 14,
+    "weakest_operational_layer": null
+  },
+  "collapsing": {
+    "absorption_capacity": "exhausted",
+    "resilience_note": "Несколько операционных слоёв одновременно теряют устойчивость.",
+    "resilience_score": 6,
+    "resilience_state": "collapsing",
+    "resilience_window": 4,
+    "weakest_operational_layer": "маржинальная устойчивость"
+  },
+  "exhausted": {
+    "absorption_capacity": "exhausted",
+    "resilience_note": "Абсорбционный ресурс системы близок к операционному пределу.",
+    "resilience_score": 0,
+    "resilience_state": "exhausted",
+    "resilience_window": null,
+    "weakest_operational_layer": "маржинальная устойчивость"
+  },
+  "moderate_neutral": {
+    "absorption_capacity": "moderate",
+    "resilience_note": "Уровень устойчивости позволяет компенсировать умеренное давление без дестабилизации.",
+    "resilience_score": 55,
+    "resilience_state": "moderate",
+    "resilience_window": 14,
+    "weakest_operational_layer": "маржинальная устойчивость"
+  },
+  "mods_negative": {
+    "absorption_capacity": "exhausted",
+    "resilience_note": "Абсорбционный ресурс системы близок к операционному пределу.",
+    "resilience_score": 1,
+    "resilience_state": "exhausted",
+    "resilience_window": null,
+    "weakest_operational_layer": "маржинальная устойчивость"
+  },
+  "mods_positive": {
+    "absorption_capacity": "moderate",
+    "resilience_note": "Операционная устойчивость сохраняется на достаточном уровне для стабилизации.",
+    "resilience_score": 64,
+    "resilience_state": "resilient",
+    "resilience_window": 21,
+    "weakest_operational_layer": "маржинальная устойчивость"
+  },
+  "mods_struct_accum": {
+    "absorption_capacity": "moderate",
+    "resilience_note": "Уровень устойчивости позволяет компенсировать умеренное давление без дестабилизации.",
+    "resilience_score": 43,
+    "resilience_state": "moderate",
+    "resilience_window": 14,
+    "weakest_operational_layer": "маржинальная устойчивость"
+  },
+  "narrowing": {
+    "absorption_capacity": "narrowing",
+    "resilience_note": "Способность системы поглощать давление постепенно снижается.",
+    "resilience_score": 37,
+    "resilience_state": "narrowing",
+    "resilience_window": 10,
+    "weakest_operational_layer": "маржинальная устойчивость"
+  },
+  "recurrence_penalties": {
+    "absorption_capacity": "exhausted",
+    "resilience_note": "Абсорбционный ресурс системы близок к операционному пределу.",
+    "resilience_score": 0,
+    "resilience_state": "exhausted",
+    "resilience_window": null,
+    "weakest_operational_layer": "маржинальная устойчивость"
+  },
+  "resilient": {
+    "absorption_capacity": "moderate",
+    "resilience_note": "Операционная устойчивость сохраняется на достаточном уровне для стабилизации.",
+    "resilience_score": 67,
+    "resilience_state": "resilient",
+    "resilience_window": 21,
+    "weakest_operational_layer": "маржинальная устойчивость"
+  }
+}

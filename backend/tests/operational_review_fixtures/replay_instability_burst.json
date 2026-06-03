@@ -1,0 +1,80 @@
+{
+  "review_hash": "3ff59fbf22559fcbbb63a94e37375b1338342eae6e92af32bddc49db775a8454",
+  "snapshot": {
+    "findings": [
+      {
+        "descriptive_text": "drift visible",
+        "evidence": {
+          "drift_events": 1
+        },
+        "finding_code": "drift_visible",
+        "subject": "high_ad_spend"
+      },
+      {
+        "descriptive_text": "drift visible",
+        "evidence": {
+          "drift_events": 2
+        },
+        "finding_code": "drift_visible",
+        "subject": "margin_crisis"
+      },
+      {
+        "descriptive_text": "instability marker observed",
+        "evidence": {},
+        "finding_code": "instability_marker",
+        "subject": "margin_crisis"
+      },
+      {
+        "descriptive_text": "intervention surface present",
+        "evidence": {
+          "accumulated_weight": 18
+        },
+        "finding_code": "intervention_surface",
+        "subject": "high_ad_spend"
+      },
+      {
+        "descriptive_text": "intervention surface present",
+        "evidence": {
+          "accumulated_weight": 10
+        },
+        "finding_code": "intervention_surface",
+        "subject": "low_stock"
+      },
+      {
+        "descriptive_text": "intervention surface present",
+        "evidence": {
+          "accumulated_weight": 28
+        },
+        "finding_code": "intervention_surface",
+        "subject": "margin_crisis"
+      },
+      {
+        "descriptive_text": "pressure accumulation observed",
+        "evidence": {
+          "accumulated_weight": 18
+        },
+        "finding_code": "pressure_accumulation",
+        "subject": "high_ad_spend"
+      },
+      {
+        "descriptive_text": "pressure accumulation observed",
+        "evidence": {
+          "accumulated_weight": 10
+        },
+        "finding_code": "pressure_accumulation",
+        "subject": "low_stock"
+      },
+      {
+        "descriptive_text": "pressure accumulation observed",
+        "evidence": {
+          "accumulated_weight": 28
+        },
+        "finding_code": "pressure_accumulation",
+        "subject": "margin_crisis"
+      }
+    ],
+    "label": "replay_instability_burst",
+    "runtime_application_hash": "dc0a0e69f899dfde35bb1d37b37fb9f611994a3549650c011649cfb8f74960f5",
+    "runtime_event_count": 6
+  }
+}

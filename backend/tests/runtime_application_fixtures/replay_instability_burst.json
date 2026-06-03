@@ -1,0 +1,137 @@
+{
+  "console": {
+    "descriptive_only": true,
+    "drift": {
+      "drift_regions": {
+        "high_ad_spend": 1,
+        "margin_crisis": 2
+      },
+      "instability_markers": [
+        "margin_crisis"
+      ]
+    },
+    "interventions": [
+      {
+        "accumulated_weight": 28,
+        "dissipating": false,
+        "observation_only": true,
+        "region": "margin_crisis"
+      },
+      {
+        "accumulated_weight": 18,
+        "dissipating": false,
+        "observation_only": true,
+        "region": "high_ad_spend"
+      },
+      {
+        "accumulated_weight": 10,
+        "dissipating": false,
+        "observation_only": true,
+        "region": "low_stock"
+      }
+    ],
+    "pressure": {
+      "accumulation_regions": {
+        "high_ad_spend": 18,
+        "low_stock": 10,
+        "margin_crisis": 28
+      },
+      "dissipation_surfaces": []
+    },
+    "replay": {
+      "event_count": 6,
+      "timeline": [
+        {
+          "entity": "margin_crisis:wildberries:A",
+          "event_type": "margin_pressure",
+          "ordinal": 0,
+          "weight": 10
+        },
+        {
+          "entity": "high_ad_spend:wildberries:A",
+          "event_type": "ad_spend_spike",
+          "ordinal": 1,
+          "weight": 10
+        },
+        {
+          "entity": "low_stock:wildberries:A",
+          "event_type": "stock_drop",
+          "ordinal": 2,
+          "weight": 10
+        },
+        {
+          "entity": "margin_crisis:wildberries:A",
+          "event_type": "recurrence",
+          "ordinal": 3,
+          "weight": 9
+        },
+        {
+          "entity": "margin_crisis:wildberries:A",
+          "event_type": "intervention_failed",
+          "ordinal": 4,
+          "weight": 9
+        },
+        {
+          "entity": "high_ad_spend:wildberries:B",
+          "event_type": "cascade",
+          "ordinal": 5,
+          "weight": 8
+        }
+      ],
+      "window_size": 3,
+      "windows": [
+        {
+          "end_ordinal": 2,
+          "ordinals": [
+            0,
+            1,
+            2
+          ],
+          "start_ordinal": 0
+        },
+        {
+          "end_ordinal": 5,
+          "ordinals": [
+            3,
+            4,
+            5
+          ],
+          "start_ordinal": 3
+        }
+      ]
+    },
+    "state": {
+      "category_weight": {
+        "high_ad_spend": 18,
+        "low_stock": 10,
+        "margin_crisis": 28
+      },
+      "entities": [
+        "high_ad_spend:wildberries:A",
+        "high_ad_spend:wildberries:B",
+        "low_stock:wildberries:A",
+        "margin_crisis:wildberries:A"
+      ],
+      "event_count": 6,
+      "marketplaces": [
+        "wildberries"
+      ],
+      "type_counts": {
+        "ad_spend_spike": 1,
+        "cascade": 1,
+        "intervention_failed": 1,
+        "margin_pressure": 1,
+        "recurrence": 1,
+        "stock_drop": 1
+      }
+    }
+  },
+  "name": "replay_instability_burst",
+  "summary": {
+    "drift_region_count": 2,
+    "intervention_surface_count": 3,
+    "pressure_region_count": 3,
+    "runtime_application_hash": "dc0a0e69f899dfde35bb1d37b37fb9f611994a3549650c011649cfb8f74960f5",
+    "runtime_event_count": 6
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "build_cross_mp_memory.no_history": null,
+  "build_cross_mp_memory.recurrence": {
+    "marketplaces": [],
+    "pattern_type": "multi_margin_pressure",
+    "recurrence": true,
+    "resolved_at": "datetime.datetime(2026, 2, 15, 0, 0)",
+    "resolved_by": "корректировки закупочной цены",
+    "stability_duration_days": 45
+  },
+  "build_cross_mp_memory.unknown_pattern": null,
+  "build_memory_narrative.none": null,
+  "build_memory_narrative.recurrence": "Похожий паттерн ранее уже возвращался после временной стабилизации."
+}

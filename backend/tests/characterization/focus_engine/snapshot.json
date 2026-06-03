@@ -1,0 +1,24 @@
+{
+  "compress_scenarios.empty": [],
+  "compute_operational_focus.empty": null,
+  "compute_operational_focus.populated": {
+    "confidence": 70,
+    "effective_weight": 70,
+    "expected_impact": "дальнейшее сжатие экономики товара при отсутствии коррекции",
+    "focus_id": "<volatile>",
+    "focus_momentum": "active",
+    "is_stable": false,
+    "linked_chains": [],
+    "linked_scenarios": [],
+    "linked_signals": [
+      "margin_crisis:wildberries:A"
+    ],
+    "primary_action": "Провести структурный разбор затрат и рекламных ключей",
+    "reason": "маржа ниже устойчивого порога без признаков стабилизации",
+    "root_cause": "margin_crisis",
+    "secondary_action": null,
+    "time_sensitivity": "this_week",
+    "title": "Маржинальное давление достигло операционно значимого уровня."
+  },
+  "focus_briefing_for_telegram.real": "\n\n📍 <b>Операционный фокус:</b>\n<i>Маржинальное давление достигло операционно значимого уровня.</i>\n↳ маржа ниже устойчивого порога без признаков стабилизации\n↳ Вероятное следствие: дальнейшее сжатие экономики товара при отсутствии коррекции\n↳ Провести структурный разбор затрат и рекламных ключей"
+}

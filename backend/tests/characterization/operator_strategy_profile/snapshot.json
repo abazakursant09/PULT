@@ -1,0 +1,24 @@
+{
+  "compute_operator_strategy_profile": {
+    "coaching_note": null,
+    "intervention_style": "reactive",
+    "operational_volatility_source": "mixed",
+    "pacing_discipline": "moderate",
+    "profile_confidence": "low",
+    "recovery_patience": "patient",
+    "stability_band": "disciplined",
+    "strategic_stability_score": 75,
+    "structural_decision_tendency": "balanced"
+  },
+  "compute_operator_strategy_profile.empty": {
+    "coaching_note": null,
+    "intervention_style": "stable",
+    "operational_volatility_source": "mixed",
+    "pacing_discipline": "moderate",
+    "profile_confidence": "low",
+    "recovery_patience": "patient",
+    "stability_band": "disciplined",
+    "strategic_stability_score": 90,
+    "structural_decision_tendency": "balanced"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "compute_decision_energy": {
+    "coordination_load": "moderate",
+    "energy_confidence": 54,
+    "energy_note": "Стабилизация остаётся управляемой в рамках текущего operational regime.",
+    "energy_state": "manageable",
+    "execution_complexity": "multi-step",
+    "observability_load": "localized",
+    "stabilization_burden": "sustained"
+  },
+  "compute_decision_energy.empty": {
+    "coordination_load": "minimal",
+    "energy_confidence": 54,
+    "energy_note": "Текущее вмешательство требует ограниченной операционной координации и не создаёт выраженного дополнительного давления на систему.",
+    "energy_state": "lightweight",
+    "execution_complexity": "contained",
+    "observability_load": "isolated",
+    "stabilization_burden": "absorbable"
+  }
+}

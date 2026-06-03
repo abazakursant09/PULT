@@ -1,0 +1,145 @@
+{
+  "cat_not_in_config": [],
+  "empty": [],
+  "mixed": [
+    {
+      "dependency_reduction": [
+        "давление на маржу",
+        "зависимость от рекламы",
+        "операционный ДРР"
+      ],
+      "expected_stabilization_window_days": 14,
+      "insight_key": "high_ad_spend:wildberries:A",
+      "insight_product": "P",
+      "insight_title": "t",
+      "sequence_priority": 1,
+      "sequence_stage": 1,
+      "sequencing_confidence": "stable",
+      "sequencing_note": "Стабилизация здесь может снизить давление на следующем этапе.",
+      "stabilization_role": "fast_stabilization",
+      "unlocks_next_stage": true
+    },
+    {
+      "dependency_reduction": [
+        "давление на видимость",
+        "волатильность позиций"
+      ],
+      "expected_stabilization_window_days": 7,
+      "insight_key": "low_stock:wildberries:D",
+      "insight_product": "P",
+      "insight_title": "t",
+      "sequence_priority": 2,
+      "sequence_stage": 1,
+      "sequencing_confidence": "stable",
+      "sequencing_note": "Стабилизация здесь может снизить давление на следующем этапе.",
+      "stabilization_role": "fast_stabilization",
+      "unlocks_next_stage": true
+    },
+    {
+      "dependency_reduction": [
+        "операционный дрейф",
+        "системное давление портфеля"
+      ],
+      "expected_stabilization_window_days": 21,
+      "insight_key": "margin_crisis:wildberries:B",
+      "insight_product": "P",
+      "insight_title": "t",
+      "sequence_priority": 3,
+      "sequence_stage": 2,
+      "sequencing_confidence": "moderate",
+      "sequencing_note": "Имеет смысл после стабилизации рекламной нагрузки.",
+      "stabilization_role": "structural_fix",
+      "unlocks_next_stage": false
+    },
+    {
+      "dependency_reduction": [],
+      "expected_stabilization_window_days": 21,
+      "insight_key": "seo_opportunity:wildberries:C",
+      "insight_product": "P",
+      "insight_title": "t",
+      "sequence_priority": 4,
+      "sequence_stage": 2,
+      "sequencing_confidence": "moderate",
+      "sequencing_note": "Может быть реализовано параллельно с основной стабилизацией.",
+      "stabilization_role": "parallel_track",
+      "unlocks_next_stage": false
+    },
+    {
+      "dependency_reduction": [],
+      "expected_stabilization_window_days": 21,
+      "insight_key": "high_rating:wildberries:E",
+      "insight_product": "P",
+      "insight_title": "t",
+      "sequence_priority": 5,
+      "sequence_stage": 2,
+      "sequencing_confidence": "low",
+      "sequencing_note": "Может быть реализовано параллельно с основной стабилизацией.",
+      "stabilization_role": "parallel_track",
+      "unlocks_next_stage": false
+    }
+  ],
+  "no_warnings": [],
+  "paralysis": [
+    {
+      "dependency_reduction": [
+        "операционный дрейф",
+        "системное давление портфеля"
+      ],
+      "expected_stabilization_window_days": 21,
+      "insight_key": "margin_crisis:wildberries:A",
+      "insight_product": "P",
+      "insight_title": "t",
+      "sequence_priority": 1,
+      "sequence_stage": 1,
+      "sequencing_confidence": "moderate",
+      "sequencing_note": "Обычно выполняется на раннем этапе стабилизации.",
+      "stabilization_role": "structural_fix",
+      "unlocks_next_stage": false
+    }
+  ],
+  "recurring": [
+    {
+      "dependency_reduction": [
+        "давление на маржу",
+        "зависимость от рекламы",
+        "операционный ДРР"
+      ],
+      "expected_stabilization_window_days": 14,
+      "insight_key": "high_ad_spend:wildberries:A",
+      "insight_product": "P",
+      "insight_title": "t",
+      "sequence_priority": 1,
+      "sequence_stage": 1,
+      "sequencing_confidence": "stable",
+      "sequencing_note": "Стабилизация здесь может снизить давление на следующем этапе.",
+      "stabilization_role": "fast_stabilization",
+      "unlocks_next_stage": true
+    },
+    {
+      "dependency_reduction": [
+        "операционный дрейф",
+        "системное давление портфеля"
+      ],
+      "expected_stabilization_window_days": 21,
+      "insight_key": "margin_crisis:wildberries:B",
+      "insight_product": "P",
+      "insight_title": "t",
+      "sequence_priority": 2,
+      "sequence_stage": 2,
+      "sequencing_confidence": "stable",
+      "sequencing_note": "Имеет смысл после стабилизации рекламной нагрузки.",
+      "stabilization_role": "structural_fix",
+      "unlocks_next_stage": false
+    }
+  ],
+  "role_label": [
+    "быстрый эффект стабилизации",
+    "структурное изменение",
+    "параллельный трек",
+    "изолированный сигнал",
+    "???"
+  ],
+  "summary_line.no_chain": null,
+  "summary_line.present": "Часть отклонений связана между собой — локальная стабилизация может снизить downstream pressure.",
+  "summary_line.too_short": null
+}

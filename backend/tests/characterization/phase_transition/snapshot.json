@@ -1,0 +1,20 @@
+{
+  "compute_phase_transition": {
+    "phase": "stabilization_cycle",
+    "phase_confidence": 62,
+    "phase_note": "Система постепенно входит в цикл последовательной стабилизации с сохранением operational flexibility.",
+    "transition_direction": "stabilizing",
+    "transition_driver": "recovering operational resilience",
+    "transition_stability": "moderate",
+    "transition_velocity": "gradual"
+  },
+  "compute_phase_transition.empty": {
+    "phase": "adaptive_equilibrium",
+    "phase_confidence": 56,
+    "phase_note": "Система сохраняет устойчивую способность адаптироваться без выраженного накопления structural pressure.",
+    "transition_direction": "stabilizing",
+    "transition_driver": "stable adaptive capacity",
+    "transition_stability": "stable",
+    "transition_velocity": "stable"
+  }
+}

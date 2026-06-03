@@ -1,0 +1,8 @@
+{
+  "compute_stabilization_lock": {
+    "estimated_recovery_window_days": null,
+    "next_safe_action": null,
+    "recovery_signal_state": "ready",
+    "reentry_condition": null
+  }
+}

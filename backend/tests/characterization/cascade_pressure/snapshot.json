@@ -1,0 +1,11 @@
+{
+  "compute_cascade_pressure": {
+    "cascade_direction": "localized",
+    "cascade_note": null,
+    "cascade_offset_note": null,
+    "cascade_probability": 15,
+    "cascade_state": "isolated",
+    "cascade_window_days": null,
+    "secondary_pressure_target": "ценовое позиционирование"
+  }
+}

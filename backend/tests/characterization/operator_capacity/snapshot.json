@@ -1,0 +1,65 @@
+{
+  "defer_nondeferrable": {
+    "capacity_note": "Система рекомендует сократить количество параллельных вмешательств до стабилизации ключевых зон.",
+    "capacity_state": "overloaded",
+    "defer_categories": [
+      "high_ad_spend"
+    ],
+    "operational_bandwidth_score": 25,
+    "overload_risk": "critical"
+  },
+  "empty": {
+    "capacity_note": "Операционная нагрузка остаётся в управляемом диапазоне.",
+    "capacity_state": "stable",
+    "defer_categories": [],
+    "operational_bandwidth_score": 100,
+    "overload_risk": "low"
+  },
+  "loaded": {
+    "capacity_note": "Несколько параллельных стабилизаций постепенно увеличивают фрагментацию внимания.",
+    "capacity_state": "loaded",
+    "defer_categories": [],
+    "operational_bandwidth_score": 64,
+    "overload_risk": "moderate"
+  },
+  "overloaded": {
+    "capacity_note": "Система рекомендует сократить количество параллельных вмешательств до стабилизации ключевых зон.",
+    "capacity_state": "overloaded",
+    "defer_categories": [
+      "seo_opportunity"
+    ],
+    "operational_bandwidth_score": 0,
+    "overload_risk": "critical"
+  },
+  "recovery_bonus": {
+    "capacity_note": "Операционная нагрузка остаётся в управляемом диапазоне.",
+    "capacity_state": "stable",
+    "defer_categories": [],
+    "operational_bandwidth_score": 100,
+    "overload_risk": "low"
+  },
+  "saturated": {
+    "capacity_note": "Текущее количество одновременных изменений может снижать качество операционных решений.",
+    "capacity_state": "saturated",
+    "defer_categories": [
+      "seo_opportunity",
+      "sales_growth"
+    ],
+    "operational_bandwidth_score": 49,
+    "overload_risk": "high"
+  },
+  "stable": {
+    "capacity_note": "Операционная нагрузка остаётся в управляемом диапазоне.",
+    "capacity_state": "stable",
+    "defer_categories": [],
+    "operational_bandwidth_score": 100,
+    "overload_risk": "low"
+  },
+  "tradeoff_cluster": {
+    "capacity_note": "Несколько параллельных стабилизаций постепенно увеличивают фрагментацию внимания.",
+    "capacity_state": "loaded",
+    "defer_categories": [],
+    "operational_bandwidth_score": 68,
+    "overload_risk": "moderate"
+  }
+}

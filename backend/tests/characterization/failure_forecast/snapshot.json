@@ -1,0 +1,20 @@
+{
+  "compute_failure_forecast": {
+    "escalation_probability": 35,
+    "first_failure_mode": null,
+    "forecast_confidence_band": "moderate",
+    "forecast_note": "Давление пока остаётся обратимым, но окно стабилизации постепенно сужается.",
+    "fragility_state": "sensitive",
+    "instability_window_days": 14,
+    "predicted_next_stage": null
+  },
+  "compute_failure_forecast.empty": {
+    "escalation_probability": 35,
+    "first_failure_mode": null,
+    "forecast_confidence_band": "moderate",
+    "forecast_note": "Давление пока остаётся обратимым, но окно стабилизации постепенно сужается.",
+    "fragility_state": "sensitive",
+    "instability_window_days": 14,
+    "predicted_next_stage": null
+  }
+}

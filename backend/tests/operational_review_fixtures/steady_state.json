@@ -1,0 +1,32 @@
+{
+  "review_hash": "431c7954b22cf6af405dec9347a5558429b0a63d612e06b7f48412a5077d03b7",
+  "snapshot": {
+    "findings": [
+      {
+        "descriptive_text": "dissipation surface observed",
+        "evidence": {},
+        "finding_code": "dissipation_surface",
+        "subject": "margin_crisis"
+      },
+      {
+        "descriptive_text": "pressure accumulation observed",
+        "evidence": {
+          "accumulated_weight": 5
+        },
+        "finding_code": "pressure_accumulation",
+        "subject": "margin_crisis"
+      },
+      {
+        "descriptive_text": "pressure accumulation observed",
+        "evidence": {
+          "accumulated_weight": 1
+        },
+        "finding_code": "pressure_accumulation",
+        "subject": "user"
+      }
+    ],
+    "label": "steady_state",
+    "runtime_application_hash": "935f1024fd573b725f76881132a7d817addec82f86b5f87ab87caa7ad3ce73a8",
+    "runtime_event_count": 3
+  }
+}

@@ -1,0 +1,364 @@
+{
+  "ae._ad_degradation.sustained": [
+    true,
+    "Паттерн наблюдается 12 дн. — не разовый выброс кампании",
+    3
+  ],
+  "ae._ad_degradation.young": [
+    false,
+    "Кампания активна 5 дн. — слишком мало данных для вывода",
+    0
+  ],
+  "ae._clevel": [
+    "low",
+    "medium",
+    "medium",
+    "high",
+    "high"
+  ],
+  "ae._extract_category": [
+    "margin_crisis",
+    "seo_opportunity"
+  ],
+  "ae._fmt_k": [
+    "≈ 0 ₽/мес",
+    "≈ 500 ₽/мес",
+    "≈ 62k ₽/мес",
+    "≈ 1500k ₽/мес"
+  ],
+  "ae._fmt_rub": [
+    "0",
+    "999",
+    "1 500",
+    "1 234 567"
+  ],
+  "ae._growth_maturity.mature": [
+    true,
+    3,
+    120,
+    0.0
+  ],
+  "ae._growth_maturity.too_short": [
+    false,
+    0,
+    0,
+    1.0
+  ],
+  "ae._impact_score": [
+    49,
+    99,
+    100,
+    60
+  ],
+  "ae._mp_label": [
+    "Wildberries",
+    "Ozon",
+    "Яндекс Маркет",
+    "Unknown Mp"
+  ],
+  "ae._normalize_cat": [
+    "margin_crisis",
+    "margin_crisis",
+    "high_ad_spend"
+  ],
+  "decay.aging": {
+    "age_days": 14,
+    "confidence_penalty": -4,
+    "decay_factor": 0.85,
+    "decay_state": "aging",
+    "operational_note": "Сигнал сохраняется без усиления давления."
+  },
+  "decay.fading": {
+    "age_days": 30,
+    "confidence_penalty": -10,
+    "decay_factor": 0.65,
+    "decay_state": "fading",
+    "operational_note": "Операционное давление постепенно теряет подтверждение."
+  },
+  "decay.fresh": {
+    "age_days": 2,
+    "confidence_penalty": 0,
+    "decay_factor": 1.0,
+    "decay_state": "fresh",
+    "operational_note": "Сигнал подтверждён недавней операционной динамикой."
+  },
+  "decay.persistent_recurring": {
+    "age_days": 60,
+    "confidence_penalty": -2,
+    "decay_factor": 1.0,
+    "decay_state": "persistent",
+    "operational_note": "Давление сохраняет устойчивый операционный паттерн."
+  },
+  "decay.persistent_structural": {
+    "age_days": 60,
+    "confidence_penalty": 0,
+    "decay_factor": 1.0,
+    "decay_state": "persistent",
+    "operational_note": "Давление сохраняет устойчивый операционный паттерн."
+  },
+  "decay.stale": {
+    "age_days": 60,
+    "confidence_penalty": -18,
+    "decay_factor": 0.35,
+    "decay_state": "stale",
+    "operational_note": "Сигнал больше не подтверждается активной динамикой."
+  },
+  "doctrine.empty": {
+    "adaptation_mode": "adaptive",
+    "doctrine_confidence": 72,
+    "doctrine_flexibility": "high",
+    "doctrine_note": "Operational behavior сохраняет достаточную гибкость и не демонстрирует признаков rigid execution repetition.",
+    "doctrine_pattern": "diversified execution",
+    "doctrine_state": "adaptive_execution",
+    "institutionalization_level": "none"
+  },
+  "doctrine.recurring_bias": {
+    "adaptation_mode": "biased",
+    "doctrine_confidence": 74,
+    "doctrine_flexibility": "moderate",
+    "doctrine_note": "Некоторые stabilization approaches начинают постепенно повторяться как preferred operational response.",
+    "doctrine_pattern": "preferred response repetition",
+    "doctrine_state": "recurring_operational_bias",
+    "institutionalization_level": "emerging"
+  },
+  "doctrine.stabilization_dependency": {
+    "adaptation_mode": "dependency_driven",
+    "doctrine_confidence": 74,
+    "doctrine_flexibility": "limited",
+    "doctrine_note": "Operational system increasingly зависит от повторяющихся stabilization cycles для поддержания continuity.",
+    "doctrine_pattern": "stabilization cycle dependency",
+    "doctrine_state": "stabilization_dependency",
+    "institutionalization_level": "established"
+  },
+  "il._behavior_line": [
+    "",
+    "\n\n↳ <i>Механика площадки: Ozon: Ozon лагает 48ч</i>"
+  ],
+  "il._certainty_line": [
+    "\n\n↳ <i>Сигнал подтверждается устойчивой операционной историей.</i>",
+    "\n\n↳ <i>Сигнал требует дополнительного подтверждения.</i>",
+    ""
+  ],
+  "il._decay_note": [
+    "\n\n↳ <i>Сигнал сохраняется в памяти, но активная динамика не подтверждена.</i>",
+    ""
+  ],
+  "il._feedback_line": [
+    "\n\n↳ <i>Аналогичное действие ранее приводило к устойчивой стабилизации.</i>",
+    "\n\n↳ <i>Предыдущие аналогичные действия не дали устойчивого эффекта.</i>",
+    ""
+  ],
+  "il._fmt_critical_alert": [
+    "🚨 <b>Критический алерт — Бизнес-Пульт</b>\n\n🔴 Карточка снижает CTR\n📦 <b>Кружка</b> · Wildberries\n\n• Низкий CTR\n• Слабые ключи\n\n💸 +30k ₽/мес\n\n💡 Снизить рекламу",
+    [
+      [
+        {
+          "text": "⚡ Решить сейчас",
+          "url": "http://localhost:3000/dashboard/finance"
+        },
+        {
+          "text": "🏠 Дашборд",
+          "url": "http://localhost:3000/dashboard"
+        }
+      ]
+    ]
+  ],
+  "il._fmt_digest": [
+    "⚡ <b>Несколько инсайтов — Кружка</b> · Wildberries\n\n🔴 Давление на маржу: <i>-10k</i>\n🔍 SEO-возможность\n\n👉 Откройте Разведку для деталей и решений.",
+    [
+      [
+        {
+          "text": "🚀 Разведка",
+          "url": "http://localhost:3000/dashboard/action-engine"
+        },
+        {
+          "text": "🏠 Дашборд",
+          "url": "http://localhost:3000/dashboard"
+        }
+      ]
+    ]
+  ],
+  "il._fmt_high_rating": [
+    "⭐ <b>Отличный рейтинг — Бизнес-Пульт</b>\n\n<b>Карточка снижает CTR</b>\n📦 Кружка · Wildberries\n\n💡 +30k ₽/мес\n\nИспользуйте момент — масштабируйте рекламу!",
+    [
+      [
+        {
+          "text": "✨ Пересобрать карточку",
+          "url": "http://localhost:3000/dashboard/seo-cards?product=Кружка&auto=1"
+        },
+        {
+          "text": "🏠 Дашборд",
+          "url": "http://localhost:3000/dashboard"
+        }
+      ]
+    ]
+  ],
+  "il._fmt_retention": [
+    "👋 <b>Бизнес-Пульт ждёт вас</b>\n\nПривет, <b>Иван</b>!\n\nПока вас не было, мы обнаружили 3 новых инсайтов по вашим товарам. Загляните — возможно, есть возможности для роста или требуют внимания проблемы.\n\n⚡ <i>Пульт работает непрерывно, даже когда вы отдыхаете.</i>",
+    [
+      [
+        {
+          "text": "🚀 Открыть Пульт",
+          "url": "http://localhost:3000/dashboard"
+        },
+        {
+          "text": "🔍 Action Engine",
+          "url": "http://localhost:3000/dashboard/action-engine"
+        }
+      ]
+    ]
+  ],
+  "il._fmt_sales_growth": [
+    "📈 <b>Устойчивый рост — Бизнес-Пульт</b>\n\n<b>Карточка снижает CTR</b>\n📦 Кружка · Wildberries\n\n• Низкий CTR\n• Слабые ключи\n\n💰 +30k ₽/мес\nУверенность: 82%",
+    [
+      [
+        {
+          "text": "📊 Открыть финансы",
+          "url": "http://localhost:3000/dashboard/finance"
+        },
+        {
+          "text": "🏠 Дашборд",
+          "url": "http://localhost:3000/dashboard"
+        }
+      ]
+    ]
+  ],
+  "il._fmt_seo_opportunity": [
+    "🔍 <b>SEO-возможность — Бизнес-Пульт</b>\n\n📦 <b>Кружка</b> · Wildberries\n\n⚠️ <b>Карточка снижает CTR</b>\n• Низкий CTR\n• Слабые ключи\n\n📊 Потенциал: <i>+30k ₽/мес</i>\nУверенность: 82%",
+    [
+      [
+        {
+          "text": "✨ Авто-пересборка",
+          "url": "http://localhost:3000/dashboard/seo-cards?product=Кружка&auto=1"
+        },
+        {
+          "text": "📋 SEO-карточки",
+          "url": "http://localhost:3000/dashboard/seo-cards"
+        }
+      ]
+    ]
+  ],
+  "il._lifecycle_line": [
+    "\n\n↳ Паттерн повторяется после предыдущей стабилизации.",
+    "\n\n↳ Сигнал в ранней фазе и требует подтверждения.",
+    ""
+  ],
+  "il._memory_line": [
+    "",
+    "\n\n🧠 <i>ранее было</i>"
+  ],
+  "il._outcome_line": [
+    "\n\n↳ <i>Паттерн ранее возвращался после временной стабилизации.</i>",
+    "\n\n↳ <i>История: n</i>"
+  ],
+  "lifecycle.confirmed_by_age": {
+    "days_in_state": 10,
+    "lifecycle_note": "Паттерн наблюдается 10 дн. и подтверждён повторными наблюдениями. Операционное воздействие устойчиво.",
+    "lifecycle_weight": 55,
+    "operational_meaning": "Паттерн подтверждён — операционное воздействие устойчиво",
+    "recurrence_count": 0,
+    "stabilization_age": null,
+    "stage": "confirmed"
+  },
+  "lifecycle.confirmed_by_notif": {
+    "days_in_state": 10,
+    "lifecycle_note": "Паттерн наблюдается 10 дн. и подтверждён повторными наблюдениями. Операционное воздействие устойчиво.",
+    "lifecycle_weight": 55,
+    "operational_meaning": "Паттерн подтверждён — операционное воздействие устойчиво",
+    "recurrence_count": 2,
+    "stabilization_age": null,
+    "stage": "confirmed"
+  },
+  "lifecycle.emerging": {
+    "days_in_state": 0,
+    "lifecycle_note": "Сигнал наблюдается менее суток — данных ещё недостаточно для полного подтверждения. ПУЛЬТ продолжит мониторинг.",
+    "lifecycle_weight": 20,
+    "operational_meaning": "Сигнал в начальной фазе — требует подтверждения",
+    "recurrence_count": 0,
+    "stabilization_age": null,
+    "stage": "emerging"
+  },
+  "lifecycle.recurring": {
+    "days_in_state": 40,
+    "lifecycle_note": "Паттерн повторяется после предыдущей стабилизации. Единичные меры не устраняют первопричину — требуется системное решение.",
+    "lifecycle_weight": 85,
+    "operational_meaning": "Паттерн возвращается после стабилизации — системная проблема",
+    "recurrence_count": 3,
+    "stabilization_age": 10,
+    "stage": "recurring"
+  },
+  "lifecycle.resolved": {
+    "days_in_state": 20,
+    "lifecycle_note": "Сигнал был закрыт. ПУЛЬТ проверяет устойчивость результата.",
+    "lifecycle_weight": 5,
+    "operational_meaning": "Сигнал недавно закрыт — ПУЛЬТ проверяет устойчивость",
+    "recurrence_count": 1,
+    "stabilization_age": 3,
+    "stage": "resolved"
+  },
+  "lifecycle.stabilized": {
+    "days_in_state": 30,
+    "lifecycle_note": "Ранее стабилизировалось 10 дн. назад. Мониторинг возврата активен в течение операционного окна.",
+    "lifecycle_weight": 15,
+    "operational_meaning": "Ранее стабилизировалось — мониторинг возврата активен",
+    "recurrence_count": 1,
+    "stabilization_age": 10,
+    "stage": "stabilized"
+  },
+  "obs.clear_none": {
+    "obs_blocking_factor": null,
+    "obs_recovery_condition": null,
+    "obs_recovery_note": null,
+    "obs_recovery_state": "clear",
+    "obs_recovery_window_days": null
+  },
+  "obs.clear_ready": {
+    "obs_blocking_factor": null,
+    "obs_recovery_condition": null,
+    "obs_recovery_note": null,
+    "obs_recovery_state": "clear",
+    "obs_recovery_window_days": null
+  },
+  "obs.distorted": {
+    "obs_blocking_factor": "незавершённое стабилизационное окно наблюдения",
+    "obs_recovery_condition": "после стабилизации CTR и органической видимости",
+    "obs_recovery_note": "Текущие изменения ещё не полностью отражены в сигнале. Выводы на этом этапе могут быть неточными.",
+    "obs_recovery_state": "distorted",
+    "obs_recovery_window_days": 5
+  },
+  "obs.distorted_escalating": {
+    "obs_blocking_factor": "накапливающееся давление затрудняет чистую атрибуцию",
+    "obs_recovery_condition": "после стабилизации CTR и органической видимости",
+    "obs_recovery_note": "Текущие изменения ещё не полностью отражены в сигнале. Выводы на этом этапе могут быть неточными.",
+    "obs_recovery_state": "distorted",
+    "obs_recovery_window_days": 20
+  },
+  "obs.fragmented": {
+    "obs_blocking_factor": "параллельные вмешательства, снижающие точность атрибуции",
+    "obs_recovery_condition": "после завершения параллельных стабилизационных окон",
+    "obs_recovery_note": "Параллельные вмешательства временно снижают точность атрибуции.",
+    "obs_recovery_state": "fragmented",
+    "obs_recovery_window_days": 5
+  },
+  "obs.recovering_reopening": {
+    "obs_blocking_factor": null,
+    "obs_recovery_condition": "после стабилизации CTR и органической видимости",
+    "obs_recovery_note": "Сигнал постепенно возвращается к интерпретируемому состоянию.",
+    "obs_recovery_state": "recovering",
+    "obs_recovery_window_days": null
+  },
+  "obs.recovering_stabilizing": {
+    "obs_blocking_factor": "незавершённое стабилизационное окно наблюдения",
+    "obs_recovery_condition": "после стабилизации CTR и органической видимости",
+    "obs_recovery_note": "Сигнал постепенно возвращается к интерпретируемому состоянию.",
+    "obs_recovery_state": "recovering",
+    "obs_recovery_window_days": 5
+  },
+  "obs.reset_structural": {
+    "obs_blocking_factor": "структурное давление, маскирующее операционный сигнал",
+    "obs_recovery_condition": "после завершения текущего стабилизационного окна",
+    "obs_recovery_note": "Для получения чистого сигнала требуется завершение текущего стабилизационного окна.",
+    "obs_recovery_state": "reset_required",
+    "obs_recovery_window_days": 10
+  }
+}

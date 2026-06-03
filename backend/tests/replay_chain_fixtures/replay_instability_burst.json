@@ -1,0 +1,85 @@
+{
+  "baseline_anchor": "47beea1df0c1",
+  "cognition_hash": "b0995d14a56fbea81e75c95770942bb7597745560bc042db715948f682227fba",
+  "cognition_topology": {
+    "categories": [
+      "high_ad_spend",
+      "low_stock",
+      "margin_crisis"
+    ],
+    "marketplace_span": 1,
+    "pressure_profile": {
+      "high_ad_spend": 18,
+      "low_stock": 10,
+      "margin_crisis": 28
+    },
+    "signal_count": 6
+  },
+  "envelope_hash": "1f34864723ca8b1dedf93950dbfb57b7f993651f5e49579a364c0866acc1cd04",
+  "event_log": [
+    {
+      "entity": "margin_crisis:wildberries:A",
+      "event_type": "margin_pressure",
+      "marketplace": "wildberries",
+      "weight": 10
+    },
+    {
+      "entity": "high_ad_spend:wildberries:A",
+      "event_type": "ad_spend_spike",
+      "marketplace": "wildberries",
+      "weight": 10
+    },
+    {
+      "entity": "low_stock:wildberries:A",
+      "event_type": "stock_drop",
+      "marketplace": "wildberries",
+      "weight": 10
+    },
+    {
+      "entity": "margin_crisis:wildberries:A",
+      "event_type": "recurrence",
+      "marketplace": "wildberries",
+      "weight": 9
+    },
+    {
+      "entity": "margin_crisis:wildberries:A",
+      "event_type": "intervention_failed",
+      "marketplace": "wildberries",
+      "weight": 9
+    },
+    {
+      "entity": "high_ad_spend:wildberries:B",
+      "event_type": "cascade",
+      "marketplace": "wildberries",
+      "weight": 8
+    }
+  ],
+  "event_log_hash": "4b1e7b43d44e41ac27868dca107b517efc7830022d02b473c950314f19ca7ecf",
+  "replay_chain_hash": "089b5bb3df47de4c0a37122285b04a1bc5c435b55b26afed1357d70fda35e283",
+  "signal_set": {
+    "category_weight": {
+      "high_ad_spend": 18,
+      "low_stock": 10,
+      "margin_crisis": 28
+    },
+    "entities": [
+      "high_ad_spend:wildberries:A",
+      "high_ad_spend:wildberries:B",
+      "low_stock:wildberries:A",
+      "margin_crisis:wildberries:A"
+    ],
+    "event_count": 6,
+    "marketplaces": [
+      "wildberries"
+    ],
+    "type_counts": {
+      "ad_spend_spike": 1,
+      "cascade": 1,
+      "intervention_failed": 1,
+      "margin_pressure": 1,
+      "recurrence": 1,
+      "stock_drop": 1
+    }
+  },
+  "signal_set_signature": "6a37f8b4fefb3fc108b5631174b76c638e1fa60374b3e162d7f2a523dbdb7678"
+}

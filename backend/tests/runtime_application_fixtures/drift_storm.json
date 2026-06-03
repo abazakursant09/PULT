@@ -1,0 +1,115 @@
+{
+  "console": {
+    "descriptive_only": true,
+    "drift": {
+      "drift_regions": {
+        "high_ad_spend": 1,
+        "margin_crisis": 3,
+        "seo_opportunity": 1
+      },
+      "instability_markers": [
+        "margin_crisis"
+      ]
+    },
+    "interventions": [
+      {
+        "accumulated_weight": 12,
+        "dissipating": false,
+        "observation_only": true,
+        "region": "margin_crisis"
+      }
+    ],
+    "pressure": {
+      "accumulation_regions": {
+        "high_ad_spend": 4,
+        "margin_crisis": 12,
+        "seo_opportunity": 3
+      },
+      "dissipation_surfaces": []
+    },
+    "replay": {
+      "event_count": 5,
+      "timeline": [
+        {
+          "entity": "margin_crisis:ozon:A",
+          "event_type": "recurrence",
+          "ordinal": 0,
+          "weight": 4
+        },
+        {
+          "entity": "margin_crisis:ozon:B",
+          "event_type": "recurrence",
+          "ordinal": 1,
+          "weight": 4
+        },
+        {
+          "entity": "high_ad_spend:ozon:C",
+          "event_type": "recurrence",
+          "ordinal": 2,
+          "weight": 4
+        },
+        {
+          "entity": "seo_opportunity:ozon:D",
+          "event_type": "recurrence",
+          "ordinal": 3,
+          "weight": 3
+        },
+        {
+          "entity": "margin_crisis:ozon:E",
+          "event_type": "recurrence",
+          "ordinal": 4,
+          "weight": 4
+        }
+      ],
+      "window_size": 3,
+      "windows": [
+        {
+          "end_ordinal": 2,
+          "ordinals": [
+            0,
+            1,
+            2
+          ],
+          "start_ordinal": 0
+        },
+        {
+          "end_ordinal": 4,
+          "ordinals": [
+            3,
+            4
+          ],
+          "start_ordinal": 3
+        }
+      ]
+    },
+    "state": {
+      "category_weight": {
+        "high_ad_spend": 4,
+        "margin_crisis": 12,
+        "seo_opportunity": 3
+      },
+      "entities": [
+        "high_ad_spend:ozon:C",
+        "margin_crisis:ozon:A",
+        "margin_crisis:ozon:B",
+        "margin_crisis:ozon:E",
+        "seo_opportunity:ozon:D"
+      ],
+      "event_count": 5,
+      "marketplaces": [
+        "wildberries"
+      ],
+      "type_counts": {
+        "recurrence": 5
+      }
+    }
+  },
+  "name": "drift_storm",
+  "summary": {
+    "drift_region_count": 3,
+    "intervention_surface_count": 1,
+    "pressure_region_count": 3,
+    "runtime_application_hash": "f2e70bab4123bd85bd7d2e7f51561ba62c6935a1e1cb0de30057ead52c111247",
+    "runtime_event_count": 5
+  }
+}

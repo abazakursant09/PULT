@@ -1,0 +1,26 @@
+{
+  "compute_structural_recovery_capacity": {
+    "continuity_dependence": "low",
+    "recovery_capacity_confidence": 88,
+    "recovery_capacity_note": "Система сохраняет полную структурную восстановимость без необходимости в каких-либо вмешательствах.",
+    "recovery_elasticity": "high",
+    "recovery_state": "structurally_recoverable",
+    "recovery_window_days": 7,
+    "restructuring_requirement": "minimal",
+    "structural_recoverability": "high",
+    "structural_recovery_horizon": "near_term",
+    "structural_reversibility_index": 0.95
+  },
+  "compute_structural_recovery_capacity.empty": {
+    "continuity_dependence": "low",
+    "recovery_capacity_confidence": 88,
+    "recovery_capacity_note": "Система сохраняет полную структурную восстановимость без необходимости в каких-либо вмешательствах.",
+    "recovery_elasticity": "high",
+    "recovery_state": "structurally_recoverable",
+    "recovery_window_days": 7,
+    "restructuring_requirement": "minimal",
+    "structural_recoverability": "high",
+    "structural_recovery_horizon": "near_term",
+    "structural_reversibility_index": 0.95
+  }
+}

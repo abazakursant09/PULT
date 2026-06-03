@@ -1,0 +1,65 @@
+{
+  "aligned_not_recurring": {
+    "doctrine_alignment_note": "Текущий подход к стабилизации соотносится с ранее эффективными сценариями восстановления.",
+    "drift_confidence": 50,
+    "drift_note": "Стабилизационная траектория сохраняет преемственность с ранее устойчивыми сценариями восстановления.",
+    "drift_state": "aligned",
+    "historical_cycles": 1,
+    "memory_continuity": "connected",
+    "repetition_pattern_note": null
+  },
+  "aligned_recurring_no_flags": {
+    "doctrine_alignment_note": "Текущий подход к стабилизации соотносится с ранее эффективными сценариями восстановления.",
+    "drift_confidence": 55,
+    "drift_note": "Стабилизационная траектория сохраняет преемственность с ранее устойчивыми сценариями восстановления.",
+    "drift_state": "aligned",
+    "historical_cycles": 3,
+    "memory_continuity": "connected",
+    "repetition_pattern_note": null
+  },
+  "compounding_repetition": {
+    "doctrine_alignment_note": "Повторяющиеся циклы воспроизводят ранее неустойчивые сценарии без признаков адаптации.",
+    "drift_confidence": 85,
+    "drift_note": "Система воспроизводит ранее неустойчивые сценарии восстановления без признаков адаптации.",
+    "drift_state": "compounding_repetition",
+    "historical_cycles": 4,
+    "memory_continuity": "disconnected",
+    "repetition_pattern_note": "Цикл маржинального давления повторяется без улучшения структурной устойчивости."
+  },
+  "drifting": {
+    "doctrine_alignment_note": "Стабилизационная траектория начинает расходиться с ранее успешными операционными сценариями.",
+    "drift_confidence": 60,
+    "drift_note": "Текущая стабилизация постепенно расходится с ранее устойчивыми сценариями восстановления.",
+    "drift_state": "drifting",
+    "historical_cycles": 3,
+    "memory_continuity": "partially_connected",
+    "repetition_pattern_note": null
+  },
+  "fragmented": {
+    "doctrine_alignment_note": "Исторически устойчивые сценарии стабилизации утрачивают преемственность.",
+    "drift_confidence": 72,
+    "drift_note": "Повторяющиеся циклы стабилизации начинают использовать несовместимые операционные сценарии.",
+    "drift_state": "fragmented",
+    "historical_cycles": 3,
+    "memory_continuity": "fragmented",
+    "repetition_pattern_note": "Цикл маржинального давления повторяется без улучшения структурной устойчивости."
+  },
+  "fragmented_low_stock": {
+    "doctrine_alignment_note": "Исторически устойчивые сценарии стабилизации утрачивают преемственность.",
+    "drift_confidence": 72,
+    "drift_note": "Повторяющиеся циклы стабилизации начинают использовать несовместимые операционные сценарии.",
+    "drift_state": "fragmented",
+    "historical_cycles": 3,
+    "memory_continuity": "fragmented",
+    "repetition_pattern_note": "Складской дефицит повторяется без признаков изменения операционной модели."
+  },
+  "historically_disconnected": {
+    "doctrine_alignment_note": "Текущая стратегия слабо соотносится с исторически эффективными сценариями восстановления.",
+    "drift_confidence": 78,
+    "drift_note": "Текущая стратегия стабилизации слабо соотносится с исторически эффективными сценариями восстановления.",
+    "drift_state": "historically_disconnected",
+    "historical_cycles": 3,
+    "memory_continuity": "disconnected",
+    "repetition_pattern_note": null
+  }
+}

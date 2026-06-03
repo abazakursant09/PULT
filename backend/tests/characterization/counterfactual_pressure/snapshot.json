@@ -1,0 +1,20 @@
+{
+  "compute_counterfactual_pressure": {
+    "counterfactual_note": "Окно стабилизации постепенно сужается по мере накопления давления.",
+    "estimated_transition_window_days": 21,
+    "inaction_cost_note": "Каждый цикл без изменений постепенно уменьшает доступное операционное окно.",
+    "likely_next_phase": "Структурное сжатие unit-экономики",
+    "operational_time_pressure": "moderate",
+    "pressure_state": "narrowing",
+    "reversibility_remaining_pct": 90
+  },
+  "compute_counterfactual_pressure.empty": {
+    "counterfactual_note": "Окно стабилизации постепенно сужается по мере накопления давления.",
+    "estimated_transition_window_days": 21,
+    "inaction_cost_note": "Каждый цикл без изменений постепенно уменьшает доступное операционное окно.",
+    "likely_next_phase": "Структурное сжатие unit-экономики",
+    "operational_time_pressure": "moderate",
+    "pressure_state": "narrowing",
+    "reversibility_remaining_pct": 90
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "compute_operational_trajectory": {
+    "pressure_accumulation": "accumulating",
+    "reversibility_state": "easily_reversible",
+    "stabilization_window_days": 30,
+    "structural_risk": "moderate",
+    "trajectory_confidence_band": "moderate",
+    "trajectory_direction": "stable",
+    "trajectory_note": "Давление устойчиво, но пока не нарастает.",
+    "trajectory_state": "persistent"
+  },
+  "compute_operational_trajectory.empty": {
+    "pressure_accumulation": "accumulating",
+    "reversibility_state": "easily_reversible",
+    "stabilization_window_days": 30,
+    "structural_risk": "moderate",
+    "trajectory_confidence_band": "moderate",
+    "trajectory_direction": "stable",
+    "trajectory_note": "Давление устойчиво, но пока не нарастает.",
+    "trajectory_state": "persistent"
+  },
+  "trajectory_weight_delta": 0.0
+}

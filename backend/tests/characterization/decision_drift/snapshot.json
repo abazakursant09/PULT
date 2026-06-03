@@ -1,0 +1,16 @@
+{
+  "compute_decision_drift": {
+    "drift_note": "Последовательность изменений остаётся наблюдаемой.",
+    "drift_state": "stable_execution",
+    "intervention_overlap": "none",
+    "observation_reset_count": 0,
+    "sequencing_continuity": "stable"
+  },
+  "compute_decision_drift.empty": {
+    "drift_note": "Последовательность изменений остаётся наблюдаемой.",
+    "drift_state": "stable_execution",
+    "intervention_overlap": "none",
+    "observation_reset_count": 0,
+    "sequencing_continuity": "stable"
+  }
+}

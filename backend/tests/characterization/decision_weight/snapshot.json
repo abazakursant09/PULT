@@ -1,0 +1,40 @@
+{
+  "apply_decision_weights.effect": [
+    {
+      "intervention_tier": "immediate",
+      "key": "margin_crisis:wildberries:A",
+      "resolution_difficulty": "moderate",
+      "signal_state": "temporary",
+      "weight": 78.0
+    },
+    {
+      "intervention_tier": "immediate",
+      "key": "low_stock:ozon:B",
+      "resolution_difficulty": "moderate",
+      "signal_state": "temporary",
+      "weight": 90.0
+    }
+  ],
+  "compute_fatigue_score.high": 1.0,
+  "compute_fatigue_score.none": 0.0,
+  "compute_stability_credit.new_operator": 0.0,
+  "compute_stability_credit.stable_operator": 1.0,
+  "compute_weight.low_stock": {
+    "intervention_tier": "immediate",
+    "resolution_difficulty": "moderate",
+    "signal_state": "persistent",
+    "weight": 100.0
+  },
+  "compute_weight.margin_structural": {
+    "intervention_tier": "immediate",
+    "resolution_difficulty": "hard",
+    "signal_state": "structural",
+    "weight": 100.0
+  },
+  "compute_weight.seo_low_conf": {
+    "intervention_tier": "monitor",
+    "resolution_difficulty": "easy",
+    "signal_state": "temporary",
+    "weight": 28.0
+  }
+}

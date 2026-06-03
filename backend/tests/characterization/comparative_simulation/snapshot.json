@@ -1,0 +1,27 @@
+{
+  "compute_path_comparison": {
+    "comparison_dimension": "reversibility",
+    "contextual_note": "Корректировка цены обычно stabilizes маржу быстрее, но может временно снизить конверсию. Repricing закупок stabilizes медленнее, но формирует более устойчивую margin structure.",
+    "insight_key": "margin_crisis:wildberries:SKU1",
+    "path_a": {
+      "action_type": "increase_price",
+      "observability_impact": "reduced",
+      "operator_load": "moderate",
+      "path_note": "Корректировка цены обычно stabilizes маржу быстрее, но может временно снизить конверсию.",
+      "reversibility_profile": "neutral",
+      "stabilization_speed": "moderate",
+      "structural_depth": "tactical",
+      "volatility_impact": "higher"
+    },
+    "path_b": {
+      "action_type": "procurement_repricing",
+      "observability_impact": "preserved",
+      "operator_load": "higher",
+      "path_note": "Repricing закупок stabilizes медленнее, но формирует более устойчивую margin structure.",
+      "reversibility_profile": "stronger",
+      "stabilization_speed": "slower",
+      "structural_depth": "structural",
+      "volatility_impact": "lower"
+    }
+  }
+}

@@ -1,0 +1,75 @@
+{
+  "baseline_anchor": "47beea1df0c1",
+  "cognition_hash": "93a43597a2b517e6cf016ceb367a23e40549f3b538fa8fa09c357ea0ea3d1987",
+  "cognition_topology": {
+    "categories": [
+      "high_ad_spend",
+      "margin_crisis",
+      "seo_opportunity"
+    ],
+    "marketplace_span": 1,
+    "pressure_profile": {
+      "high_ad_spend": 4,
+      "margin_crisis": 12,
+      "seo_opportunity": 3
+    },
+    "signal_count": 5
+  },
+  "envelope_hash": "70bdeda3be6bbbe1204e4028e63f35628a39c336890f5d06bd5fe813221f7b70",
+  "event_log": [
+    {
+      "entity": "margin_crisis:ozon:A",
+      "event_type": "recurrence",
+      "marketplace": "wildberries",
+      "weight": 4
+    },
+    {
+      "entity": "margin_crisis:ozon:B",
+      "event_type": "recurrence",
+      "marketplace": "wildberries",
+      "weight": 4
+    },
+    {
+      "entity": "high_ad_spend:ozon:C",
+      "event_type": "recurrence",
+      "marketplace": "wildberries",
+      "weight": 4
+    },
+    {
+      "entity": "seo_opportunity:ozon:D",
+      "event_type": "recurrence",
+      "marketplace": "wildberries",
+      "weight": 3
+    },
+    {
+      "entity": "margin_crisis:ozon:E",
+      "event_type": "recurrence",
+      "marketplace": "wildberries",
+      "weight": 4
+    }
+  ],
+  "event_log_hash": "b1feebb0e736cdd7239b0064c2843131213aea61198d862e569ddddfef22dfb2",
+  "replay_chain_hash": "7eadb4f4b6292cada392f717704bbafb43f6d147a8f6d29404228d54b7955953",
+  "signal_set": {
+    "category_weight": {
+      "high_ad_spend": 4,
+      "margin_crisis": 12,
+      "seo_opportunity": 3
+    },
+    "entities": [
+      "high_ad_spend:ozon:C",
+      "margin_crisis:ozon:A",
+      "margin_crisis:ozon:B",
+      "margin_crisis:ozon:E",
+      "seo_opportunity:ozon:D"
+    ],
+    "event_count": 5,
+    "marketplaces": [
+      "wildberries"
+    ],
+    "type_counts": {
+      "recurrence": 5
+    }
+  },
+  "signal_set_signature": "242053cb080eef8d7530d99c5e07ec34995bb14703e8b3a1aba770f13aef22db"
+}

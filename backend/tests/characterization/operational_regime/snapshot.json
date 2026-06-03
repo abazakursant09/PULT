@@ -1,0 +1,22 @@
+{
+  "compute_operational_regime": {
+    "intervention_tolerance": "moderate",
+    "observability_quality": "strong",
+    "operational_posture": "equilibrium_focused",
+    "regime": "stabilization",
+    "regime_confidence": 48,
+    "regime_direction": "stabilizing",
+    "regime_note": "Текущий operational regime ориентирован на локальную стабилизацию отдельных зон давления.",
+    "resilience_context": "Локальная нестабильность управляема в рамках текущего операционного ресурса."
+  },
+  "compute_operational_regime.empty": {
+    "intervention_tolerance": "moderate",
+    "observability_quality": "strong",
+    "operational_posture": "equilibrium_focused",
+    "regime": "stabilization",
+    "regime_confidence": 48,
+    "regime_direction": "stabilizing",
+    "regime_note": "Текущий operational regime ориентирован на локальную стабилизацию отдельных зон давления.",
+    "resilience_context": "Локальная нестабильность управляема в рамках текущего операционного ресурса."
+  }
+}

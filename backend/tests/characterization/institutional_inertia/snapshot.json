@@ -1,0 +1,24 @@
+{
+  "compute_institutional_inertia": {
+    "adaptation_resistance": "low",
+    "behavioral_repeatability": "low",
+    "inertia_confidence": 68,
+    "inertia_driver": "none",
+    "inertia_note": "Operational system сохраняет достаточную structural elasticity и способность к adaptive behavioral change.",
+    "inertia_state": "flexible_structure",
+    "inertia_window_days": null,
+    "recovery_mobility": "high",
+    "structural_elasticity": "high"
+  },
+  "compute_institutional_inertia.empty": {
+    "adaptation_resistance": "low",
+    "behavioral_repeatability": "low",
+    "inertia_confidence": 68,
+    "inertia_driver": "none",
+    "inertia_note": "Operational system сохраняет достаточную structural elasticity и способность к adaptive behavioral change.",
+    "inertia_state": "flexible_structure",
+    "inertia_window_days": null,
+    "recovery_mobility": "high",
+    "structural_elasticity": "high"
+  }
+}

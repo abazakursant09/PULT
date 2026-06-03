@@ -1,0 +1,42 @@
+{
+  "review_hash": "2c50d5187357e7f73a1e993d72586a9aa7e692e0d4962fc359901eef82debfb0",
+  "snapshot": {
+    "findings": [
+      {
+        "descriptive_text": "drift visible",
+        "evidence": {
+          "drift_events": 1
+        },
+        "finding_code": "drift_visible",
+        "subject": "high_ad_spend"
+      },
+      {
+        "descriptive_text": "intervention surface present",
+        "evidence": {
+          "accumulated_weight": 21
+        },
+        "finding_code": "intervention_surface",
+        "subject": "margin_crisis"
+      },
+      {
+        "descriptive_text": "pressure accumulation observed",
+        "evidence": {
+          "accumulated_weight": 6
+        },
+        "finding_code": "pressure_accumulation",
+        "subject": "high_ad_spend"
+      },
+      {
+        "descriptive_text": "pressure accumulation observed",
+        "evidence": {
+          "accumulated_weight": 21
+        },
+        "finding_code": "pressure_accumulation",
+        "subject": "margin_crisis"
+      }
+    ],
+    "label": "propagation_fracture",
+    "runtime_application_hash": "df9629f8b80ff6bc6443d7ffc77a957dbd52ddc5cb6aa7679edb7ece81c647d1",
+    "runtime_event_count": 4
+  }
+}

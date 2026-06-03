@@ -1,0 +1,236 @@
+{
+  "checks": {
+    "routers_registered": {
+      "status": "PASS",
+      "total_router_files": 33,
+      "not_included_in_main": [],
+      "imports_unmatched": [
+        "events\nfrom routers"
+      ]
+    },
+    "model_exports": {
+      "status": "WARN",
+      "total_model_files": 34,
+      "not_exported": [
+        "idea",
+        "import_record",
+        "imported_product",
+        "insight",
+        "legal_case",
+        "mfa_secret",
+        "monitor_event",
+        "notification",
+        "oauth_account",
+        "product",
+        "referral_record",
+        "review_response",
+        "seo_rebuild",
+        "supplier_review",
+        "telegram_settings",
+        "transport_company",
+        "user_event"
+      ]
+    },
+    "frontend_pages": {
+      "status": "PASS",
+      "total_route_dirs": 49,
+      "missing_page_tsx": []
+    },
+    "orphan_models": {
+      "status": "WARN",
+      "orphans": [
+        "creative_variant"
+      ],
+      "ref_counts": {
+        "chat_message": 1,
+        "competitor_analysis": 4,
+        "creative_variant": 0,
+        "deal": 1,
+        "financial_snapshot": 2,
+        "idea": 1,
+        "imported_finance": 3,
+        "imported_product": 3,
+        "import_record": 1,
+        "insight": 3,
+        "legal_case": 3,
+        "login_attempt": 1,
+        "mfa_secret": 2,
+        "monitor_event": 2,
+        "notification": 2,
+        "oauth_account": 1,
+        "operator_decision": 1,
+        "payment": 1,
+        "pricing_rule": 2,
+        "product": 9,
+        "promo_code": 2,
+        "referral_record": 3,
+        "review_response": 2,
+        "seo_project": 1,
+        "seo_rebuild": 4,
+        "success_story": 1,
+        "supplier": 3,
+        "supplier_review": 1,
+        "supplier_verification": 1,
+        "telegram_notification_log": 3,
+        "telegram_settings": 3,
+        "transport_company": 3,
+        "user": 30,
+        "user_event": 2
+      }
+    },
+    "todo_markers": {
+      "status": "WARN",
+      "total": 1,
+      "by_kind": {
+        "XXX": 1
+      },
+      "sample": [
+        {
+          "file": "frontend/app/dashboard/suppliers/verify/page.tsx",
+          "line": 379,
+          "kind": "XXX",
+          "msg": "XXXX XXXX\""
+        }
+      ]
+    },
+    "oversized_files": {
+      "status": "WARN",
+      "threshold_loc": 500,
+      "count": 18,
+      "top": [
+        {
+          "file": "backend/routers/action_engine.py",
+          "loc": 4191
+        },
+        {
+          "file": "frontend/app/dashboard/action-engine/page.tsx",
+          "loc": 3019
+        },
+        {
+          "file": "frontend/lib/api.ts",
+          "loc": 1746
+        },
+        {
+          "file": "frontend/app/dashboard/page.tsx",
+          "loc": 1623
+        },
+        {
+          "file": "frontend/app/dashboard/products/[id]/page.tsx",
+          "loc": 1520
+        },
+        {
+          "file": "backend/tasks/intelligence_loop.py",
+          "loc": 1485
+        },
+        {
+          "file": "frontend/app/dashboard/seo-cards/page.tsx",
+          "loc": 1250
+        },
+        {
+          "file": "frontend/app/seo-cards/page.tsx",
+          "loc": 913
+        },
+        {
+          "file": "frontend/app/dashboard/account/page.tsx",
+          "loc": 780
+        },
+        {
+          "file": "backend/logic/simulation.py",
+          "loc": 774
+        },
+        {
+          "file": "frontend/app/startup/[step]/page.tsx",
+          "loc": 742
+        },
+        {
+          "file": "frontend/app/dashboard/seo-lab/page.tsx",
+          "loc": 674
+        },
+        {
+          "file": "frontend/app/market-overview/page.tsx",
+          "loc": 639
+        },
+        {
+          "file": "frontend/app/dashboard/seo-cards/cards.tsx",
+          "loc": 611
+        },
+        {
+          "file": "frontend/app/page.tsx",
+          "loc": 591
+        },
+        {
+          "file": "backend/routers/csv_import.py",
+          "loc": 583
+        },
+        {
+          "file": "frontend/app/dashboard/finance/page.tsx",
+          "loc": 579
+        },
+        {
+          "file": "frontend/app/dashboard/import/page.tsx",
+          "loc": 527
+        }
+      ]
+    },
+    "migrations": {
+      "status": "PASS",
+      "files": 0,
+      "heads": [],
+      "multi_head": false
+    },
+    "env_keys": {
+      "status": "WARN",
+      "missing_in_dotenv": [
+        "ACCESS_TOKEN_EXPIRE_MINUTES",
+        "ALGORITHM",
+        "API_URL",
+        "APP_ENV",
+        "DATABASE_URL",
+        "FRONTEND_URL",
+        "NANO_BANANA_API_KEY",
+        "REDIS_URL",
+        "SECRET_KEY",
+        "TELEGRAM_ADMIN_CHAT_ID",
+        "VK_API_TOKEN",
+        "YOOKASSA_RETURN_URL",
+        "YOOKASSA_SECRET_KEY",
+        "YOOKASSA_SHOP_ID"
+      ],
+      "example_total": 17,
+      "actual_total": 4
+    },
+    "unlinked_routes": {
+      "status": "WARN",
+      "total_routes": 50,
+      "unlinked": [
+        "/.",
+        "/academy/*",
+        "/ad-strategy",
+        "/admin/promocodes",
+        "/agreement",
+        "/ai-agents",
+        "/community",
+        "/dashboard/admin/downtime",
+        "/dashboard/chat",
+        "/dashboard/deals",
+        "/dashboard/marking",
+        "/dashboard/referrals",
+        "/dashboard/security",
+        "/dashboard/seo-intelligence",
+        "/dashboard/seo-lab",
+        "/dashboard/settings",
+        "/dashboard/suppliers/verify",
+        "/ideas",
+        "/logistics",
+        "/market-overview",
+        "/payment/result",
+        "/reset-password",
+        "/rules",
+        "/seo-cards",
+        "/startup/calculator",
+        "/verify-email"
+      ]
+    }
+  },
+  "stats": {}
+}

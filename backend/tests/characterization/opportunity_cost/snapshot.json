@@ -1,0 +1,8 @@
+{
+  "compute_opportunity_cost": {
+    "dependency_note": null,
+    "future_intervention_cost": "minimal",
+    "opportunity_cost_note": null,
+    "reversibility_shift_note": "Сценарий остаётся в основном обратимым"
+  }
+}

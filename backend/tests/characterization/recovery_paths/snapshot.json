@@ -1,0 +1,22 @@
+{
+  "compute_recovery_path": {
+    "expected_recovery_window_days": null,
+    "first_recovered_metric": "вклад в маржу",
+    "lagging_metric": "стабильность повторных покупок",
+    "recovery_dependency": "пересмотр ценовой модели",
+    "recovery_note": "Текущее давление редко стабилизируется без пересмотра закупочной или ценовой модели.",
+    "recovery_probability": 38,
+    "recovery_state": "structural",
+    "stabilization_pattern": "pricing_model_revision"
+  },
+  "compute_recovery_path.empty": {
+    "expected_recovery_window_days": null,
+    "first_recovered_metric": "вклад в маржу",
+    "lagging_metric": "стабильность повторных покупок",
+    "recovery_dependency": "пересмотр ценовой модели",
+    "recovery_note": "Текущее давление редко стабилизируется без пересмотра закупочной или ценовой модели.",
+    "recovery_probability": 38,
+    "recovery_state": "structural",
+    "stabilization_pattern": "pricing_model_revision"
+  }
+}

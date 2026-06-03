@@ -1,0 +1,12 @@
+{
+  "evaluate_operator_action": {
+    "action_type": "margin_crisis",
+    "alt_recommendation": null,
+    "confidence_delta": 0,
+    "effect_duration_days": null,
+    "narrative": "Исторических данных недостаточно для оценки эффекта.",
+    "outcome": "unknown",
+    "recommendation_bias": "neutral",
+    "recurrence_after_days": null
+  }
+}

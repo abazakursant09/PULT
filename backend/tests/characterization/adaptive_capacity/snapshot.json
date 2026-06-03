@@ -1,0 +1,12 @@
+{
+  "compute_adaptive_capacity": {
+    "adaptation_confidence": 40,
+    "adaptation_cycles": 1,
+    "adaptation_direction": "stable",
+    "adaptation_note": "Система сохраняет стабильную способность к операционной адаптации.",
+    "observability_trend": null,
+    "recurrence_trend": null,
+    "stabilization_trend": null,
+    "state": "adaptive"
+  }
+}

@@ -1,0 +1,44 @@
+name: Constitutional Verification
+
+# Any failure in any step fails the pipeline. No exceptions.
+on:
+  push:
+  pull_request:
+
+jobs:
+  constitution:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install ruff pytest pytest-cov coverage
+
+      - name: Ruff (constitutional packages)
+        run: |
+          ruff check \
+            root_constitution \
+            runtime_envelope \
+            replay_chain \
+            runtime_application \
+            operational_review \
+            constitutional_enforcement \
+            tests/root_constitution \
+            tests/constitutional_enforcement
+
+      - name: Pytest (full suite)
+        run: pytest -p no:cacheprovider -q
+
+      - name: Constitutional gate (verify_full_constitution)
+        run: python -m constitutional_enforcement.constitution_gate

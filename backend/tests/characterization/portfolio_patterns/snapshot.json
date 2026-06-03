@@ -1,0 +1,120 @@
+{
+  "detect_advertising_dependency": null,
+  "detect_advertising_dependency.empty": null,
+  "detect_multi_margin_pressure": {
+    "affected_products": [
+      "AlphaMug",
+      "BetaCup"
+    ],
+    "category": null,
+    "confidence": 82,
+    "cross_mp_memory_note": null,
+    "cross_mp_stability_days": null,
+    "id": "<id>",
+    "insight_types": [
+      "margin_crisis"
+    ],
+    "marketplace": "wildberries",
+    "operational_summary": "Несколько товаров одновременно вышли за устойчивый диапазон маржи. Давление распределено по 2 SKU.",
+    "pattern_type": "multi_margin_pressure",
+    "recommendation_bias": "audit_category_economics",
+    "root_cause_band": null,
+    "root_cause_confidence": null,
+    "root_cause_hypothesis": null,
+    "root_cause_note": null,
+    "stabilization_complexity": "systemic",
+    "systemic_risk": "Структурное давление на маржу не локализовано — возможна категорийная динамика."
+  },
+  "detect_multi_margin_pressure.empty": null,
+  "detect_ozon_attribution_noise": null,
+  "detect_ozon_attribution_noise.empty": null,
+  "detect_portfolio_patterns": [
+    {
+      "affected_products": [
+        "AlphaMug",
+        "BetaCup"
+      ],
+      "category": null,
+      "confidence": 82,
+      "cross_mp_memory_note": null,
+      "cross_mp_stability_days": null,
+      "id": "<id>",
+      "insight_types": [
+        "margin_crisis"
+      ],
+      "marketplace": "wildberries",
+      "operational_summary": "Несколько товаров одновременно вышли за устойчивый диапазон маржи. Давление распределено по 2 SKU.",
+      "pattern_type": "multi_margin_pressure",
+      "recommendation_bias": "audit_category_economics",
+      "root_cause_band": "moderate",
+      "root_cause_confidence": 55,
+      "root_cause_hypothesis": "Закупочная цена",
+      "root_cause_note": "Кросс-площадочное давление чаще связано со структурой затрат или закупочной ценой, чем с механикой отдельной площадки.",
+      "stabilization_complexity": "systemic",
+      "systemic_risk": "Структурное давление на маржу не локализовано — возможна категорийная динамика."
+    },
+    {
+      "affected_products": [
+        "AlphaMug",
+        "BetaCup"
+      ],
+      "category": null,
+      "confidence": 76,
+      "cross_mp_memory_note": null,
+      "cross_mp_stability_days": null,
+      "id": "<id>",
+      "insight_types": [
+        "margin_crisis"
+      ],
+      "marketplace": "wildberries",
+      "operational_summary": "Снижение маржи одновременно фиксируется у нескольких товаров категории. Возможно категорийное ценовое давление.",
+      "pattern_type": "price_pressure_cluster",
+      "recommendation_bias": "stabilize_price_first",
+      "root_cause_band": "moderate",
+      "root_cause_confidence": 50,
+      "root_cause_hypothesis": "Ценовая война в категории",
+      "root_cause_note": "Параллельное давление на маржу в категории чаще связано с ценовой динамикой рынка, чем с внутренними операционными решениями.",
+      "stabilization_complexity": "systemic",
+      "systemic_risk": "Изменения цены могут усилить давление, если категория в фазе ценовой войны."
+    }
+  ],
+  "detect_portfolio_patterns.empty": [],
+  "detect_price_pressure_cluster": {
+    "affected_products": [
+      "AlphaMug",
+      "BetaCup"
+    ],
+    "category": null,
+    "confidence": 76,
+    "cross_mp_memory_note": null,
+    "cross_mp_stability_days": null,
+    "id": "<id>",
+    "insight_types": [
+      "margin_crisis"
+    ],
+    "marketplace": "wildberries",
+    "operational_summary": "Снижение маржи одновременно фиксируется у нескольких товаров категории. Возможно категорийное ценовое давление.",
+    "pattern_type": "price_pressure_cluster",
+    "recommendation_bias": "stabilize_price_first",
+    "root_cause_band": null,
+    "root_cause_confidence": null,
+    "root_cause_hypothesis": null,
+    "root_cause_note": null,
+    "stabilization_complexity": "systemic",
+    "systemic_risk": "Изменения цены могут усилить давление, если категория в фазе ценовой войны."
+  },
+  "detect_price_pressure_cluster.empty": null,
+  "detect_seo_decay_cluster": null,
+  "detect_seo_decay_cluster.empty": null,
+  "detect_stock_instability": null,
+  "detect_stock_instability.empty": null,
+  "insight_to_summary": {
+    "automation_level": null,
+    "confidence": 70,
+    "key": "margin_crisis:wildberries:SKU1",
+    "marketplace": "wildberries",
+    "product_name": "AlphaMug",
+    "product_sku": "a",
+    "status": "active"
+  }
+}
