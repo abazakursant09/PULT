@@ -397,16 +397,30 @@ async def _send_weekly_reports() -> None:
 
 
 async def run_scheduler() -> None:
-    """Main scheduler loop — checks every minute."""
-    logger.info("Telegram scheduler started")
+    """Main scheduler loop — checks every minute. Also drives the L4 automation
+    tick (Marketplace Execution Layer), gated by settings.automation_enabled."""
+    logger.info("Scheduler started (reports + L4 automation tick)")
     while True:
         try:
             await _send_daily_reports()
             await _send_weekly_reports()
+            await _automation_tick()
         except Exception:
             logger.exception("Scheduler iteration error")
         now = datetime.now()
         await asyncio.sleep(60 - now.second)
+
+
+async def _automation_tick() -> None:
+    """L4 automation. Uses the SAME executor path as manual L3. No-op unless
+    AUTOMATION_ENABLED and a user has an enabled AutomationRule."""
+    if not settings.automation_enabled:
+        return
+    from tasks.auto_publish_reviews import run_auto_publish_reviews
+    try:
+        await run_auto_publish_reviews()
+    except Exception:
+        logger.exception("auto_publish_reviews tick error")
 
 
 async def send_critical_alert_to_user(user_id: str, message: str) -> bool:

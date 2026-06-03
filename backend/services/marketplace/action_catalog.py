@@ -149,6 +149,36 @@ def _revert_set_state(payload: dict, result: dict) -> tuple[str, dict]:
     return "ad_set_state", {**payload, "action": inverse}
 
 
+# ── SEO / Content (ME-5) ───────────────────────────────────────────────────────
+def _validate_update_card(payload: dict) -> None:
+    _require(payload, "offer_id", "card")
+    if not isinstance(payload["card"], dict) or not payload["card"]:
+        raise ExecutionError(ExecutionError.VALIDATION, "card must be a non-empty object")
+
+
+async def _dispatch_update_card(token: str, payload: dict, ctx: dict) -> dict:
+    mp = ctx.get("marketplace")
+    card = dict(payload["card"])
+    if mp == "wildberries":
+        card.setdefault("nmID", int(payload["offer_id"]))
+        resp = await wb_client.update_card(token=token, card=card)
+    elif mp == "ozon":
+        resp = await ozon_client.update_card(token=token, **payload)  # raises (later slice)
+    else:
+        raise ExecutionError(ExecutionError.VALIDATION, f"update_card: unsupported marketplace {mp}")
+    return {"api_request_id": (resp or {}).get("requestId") if isinstance(resp, dict) else None,
+            "offer_id": payload["offer_id"], "updated": True}
+
+
+def _revert_update_card(payload: dict, result: dict) -> tuple[str, dict]:
+    old = payload.get("old_card")
+    if not old:
+        raise ExecutionError.guard("NOT_REVERSIBLE", "no old_card snapshot recorded")
+    return "update_card", {"marketplace": payload.get("marketplace"),
+                           "offer_id": payload["offer_id"], "card": old,
+                           "old_card": payload.get("card")}
+
+
 # ── registry ───────────────────────────────────────────────────────────────────
 _CATALOG: dict[str, ActionSpec] = {
     "publish_review_response": ActionSpec(
@@ -178,7 +208,11 @@ _CATALOG: dict[str, ActionSpec] = {
         validate=_validate_set_state, dispatch=_dispatch_set_state,
         reversible=True, reverter=_revert_set_state,
     ),
-    # next slice registers here: update_card (ME-5).
+    "update_card": ActionSpec(
+        action_type="update_card", marketplace=None, required_scope="content",
+        validate=_validate_update_card, dispatch=_dispatch_update_card,
+        reversible=True, reverter=_revert_update_card,
+    ),
 }
 
 
