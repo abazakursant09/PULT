@@ -1053,6 +1053,46 @@ export interface TrackRebuildPayload {
   impact_score?:     number | null
 }
 
+// ── Marketplace Execution Layer (ME-6 / ME-6.1) ──────────────────────────────
+export interface InsightExecuteResult {
+  success:              boolean
+  status:               'success' | 'dry_run_ok' | 'rejected' | 'failed' | 'needs_input' | 'partial'
+  action_type:          string | null
+  execution_id:         string | null
+  message:              string
+  automation_eligible:  boolean
+  needs_input:          string[]
+  descriptor:           {
+    reason?:            string
+    action?:            string
+    what_will_happen?:  string
+    expected_effect?:   string
+  }
+  results:              Array<{ review_id: string; status: string; execution_id: string | null; error: unknown }>
+}
+
+export interface ExecutionLogItem {
+  id:          string
+  action_type: string
+  marketplace: string | null
+  mode:        string
+  status:      'pending' | 'success' | 'failed' | 'rejected' | 'reverted'
+  insight_key: string | null
+  error_code:  string | null
+  created_at:  string
+  finished_at: string | null
+}
+
+export interface ExecutionLogDetail extends ExecutionLogItem {
+  user_id:         string
+  connection_id:   string | null
+  payload:         Record<string, unknown>
+  api_request_id:  string | null
+  result:          Record<string, unknown> | null
+  reverted_from:   string | null
+  idempotency_key: string | null
+}
+
 export const api = {
   auth: {
     login: (email: string, password: string) =>
@@ -1392,6 +1432,21 @@ export const api = {
         `/api/insights/${encodeURIComponent(insightKey)}/status`,
         { method: 'POST', body: JSON.stringify({ status }) },
       ),
+    // ME-6: execute an insight (dry_run=true for "Проверить", false for "Выполнить")
+    executeInsight: (
+      insightKey: string,
+      opts: { dry_run: boolean; overrides?: Record<string, unknown> } = { dry_run: false },
+    ) =>
+      req<InsightExecuteResult>(
+        `/api/insights/${encodeURIComponent(insightKey)}/execute`,
+        { method: 'POST', body: JSON.stringify({ dry_run: opts.dry_run, overrides: opts.overrides ?? {} }) },
+      ),
+  },
+
+  // ME-6.1: execution history — "what PULT did for me"
+  executions: {
+    list: () => req<ExecutionLogItem[]>('/api/executions'),
+    detail: (id: string) => req<ExecutionLogDetail>(`/api/executions/${encodeURIComponent(id)}`),
   },
 
   rebuildTracker: {

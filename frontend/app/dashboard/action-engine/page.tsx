@@ -25,6 +25,8 @@ import { T } from '@/lib/tokens'
 import { ErrorState } from '@/components/system/ErrorState'
 import { EmptyState } from '@/components/system/EmptyState'
 import { SkeletonList } from '@/components/system/SkeletonList'
+import InsightActionBlock from '@/components/InsightActionBlock'
+import ExecutionHistory from '@/components/ExecutionHistory'
 
 // ── Local aliases keep diffs minimal ─────────────────────────────────────────
 const R = {
@@ -1480,6 +1482,9 @@ function InsightCard({
               ))}
             </ul>
           </div>
+
+          {/* ME-6.1 — Insight Action Block: Проверить / Выполнить in place */}
+          {!isResolved && <InsightActionBlock insightKey={insight.key} />}
 
           {/* Outcome feedback note — Sprint 26 */}
           {insight.outcome_feedback_note && insight.recommendation_confidence_delta !== 0 && (() => {
@@ -3009,6 +3014,11 @@ export default function ActionEnginePage() {
           ))}
         </div>
       )}
+
+      {/* ME-6.1 — Execution history: "what PULT did for me" */}
+      <div style={{ marginTop: 20 }}>
+        <ExecutionHistory />
+      </div>
 
       <style>{`
         @keyframes spin  { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }

@@ -10,7 +10,10 @@ from database import get_db
 from dependencies import get_current_user
 from models.user import User
 from models.execution_log import ExecutionLog
-from schemas.marketplace import ExecuteRequest, ExecuteResponse, ExecutionLogOut
+from fastapi import HTTPException
+from schemas.marketplace import (
+    ExecuteRequest, ExecuteResponse, ExecutionLogOut, ExecutionLogDetailOut,
+)
 from services.marketplace import executor
 
 log = logging.getLogger(__name__)
@@ -41,12 +44,14 @@ async def execute_action(
     )
 
 
+@router.get("/executions", response_model=List[ExecutionLogOut])
 @router.get("/execution-log", response_model=List[ExecutionLogOut])
 async def execution_log(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     limit: int = 50,
 ):
+    """Execution history — 'what PULT did for me', newest first."""
     rows = (
         await db.execute(
             select(ExecutionLog)
@@ -56,6 +61,26 @@ async def execution_log(
         )
     ).scalars().all()
     return rows
+
+
+@router.get("/executions/{execution_id}", response_model=ExecutionLogDetailOut)
+async def execution_detail(
+    execution_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Full record for the details drawer (payload, result, guard outcome)."""
+    rec = (
+        await db.execute(
+            select(ExecutionLog).where(
+                ExecutionLog.id == execution_id,
+                ExecutionLog.user_id == current_user.id,
+            )
+        )
+    ).scalars().first()
+    if rec is None:
+        raise HTTPException(404, "execution not found")
+    return rec
 
 
 @router.post("/execute/{log_id}/revert", response_model=ExecuteResponse)

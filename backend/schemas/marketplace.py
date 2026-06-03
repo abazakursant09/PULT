@@ -58,6 +58,28 @@ class ExecutionLogOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ExecutionLogDetailOut(BaseModel):
+    """Full record for the execution-details drawer (ME-6.1)."""
+    id: str
+    user_id: str
+    connection_id: Optional[str]
+    insight_key: Optional[str]
+    action_type: str
+    marketplace: Optional[str]
+    mode: str
+    status: str
+    payload: dict = {}
+    api_request_id: Optional[str]
+    result: Optional[dict] = None
+    error_code: Optional[str]
+    reverted_from: Optional[str]
+    idempotency_key: Optional[str]
+    created_at: datetime
+    finished_at: Optional[datetime]
+
+    model_config = {"from_attributes": True}
+
+
 # ── Automation rules (L4) ────────────────────────────────────────────────────
 class AutomationRuleCreate(BaseModel):
     contour: str
