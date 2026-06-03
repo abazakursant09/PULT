@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     # ── Database ─────────────────────────────────────────────────────────────
     database_url: str = "sqlite+aiosqlite:///./business_pult.db"
     redis_url: str = "redis://localhost:6379"
+    # Apply `alembic upgrade head` on startup. Default on (dev + single-process
+    # prod). Set AUTO_MIGRATE=0 for multi-worker prod that migrates at deploy.
+    auto_migrate: bool = True
 
     # ── URLs ─────────────────────────────────────────────────────────────────
     frontend_url: str = "http://localhost:3000"
