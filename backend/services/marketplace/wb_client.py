@@ -101,5 +101,22 @@ class WBClient:
             self._content_client = BaseMarketplaceClient(settings.wb_content_base)
         return self._content_client
 
+    # ── Statistics (read side, Metric Catalog) ────────────────────────────────
+    async def get_sales(self, *, token: str, date_from: str, flag: int = 0) -> list[dict]:
+        """
+        WB Statistics API: GET /api/v1/supplier/sales?dateFrom=&flag=
+        Returns a JSON array of sale rows (each row carries nmId + forPay).
+        """
+        data = await self._statistics().request(
+            "GET", "/api/v1/supplier/sales", token=token,
+            params={"dateFrom": date_from, "flag": flag},
+        )
+        return data if isinstance(data, list) else []
+
+    def _statistics(self) -> "BaseMarketplaceClient":
+        if not hasattr(self, "_statistics_client"):
+            self._statistics_client = BaseMarketplaceClient(settings.wb_statistics_base)
+        return self._statistics_client
+
 
 wb_client = WBClient()

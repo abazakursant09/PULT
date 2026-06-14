@@ -31,3 +31,5 @@ from .seo_rebuild import SeoRebuild
 from .creative_variant import CreativeVariant
 from .user_event import UserEvent
 from .operator_decision import OperatorDecision
+# Metric Catalog foundation — canonical normalized facts (read side)
+from .observation import Observation
