@@ -18,6 +18,7 @@ class ExecutionLog(Base):
     user_id        = Column(String(36), nullable=False)
     connection_id  = Column(String(36), nullable=True)
     insight_key    = Column(String(200), nullable=True)       # provenance: triggering insight
+    decision_id    = Column(String(36), nullable=True)        # provenance: applied decision (soft ref, no hard FK — mirrors insight_key)
     action_type    = Column(String(60), nullable=False)
     marketplace    = Column(String(20), nullable=True)
     mode           = Column(String(20), nullable=False)        # manual_l3 | automated_l4
@@ -35,4 +36,5 @@ class ExecutionLog(Base):
         Index("ix_execlog_user", "user_id"),
         Index("ix_execlog_user_action", "user_id", "action_type"),
         Index("ix_execlog_idem", "user_id", "action_type", "idempotency_key"),
+        Index("ix_execlog_decision", "decision_id"),
     )

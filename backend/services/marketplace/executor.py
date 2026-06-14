@@ -79,6 +79,7 @@ async def execute(
     mode: str = "manual_l3",
     connection_id: str | None = None,
     insight_key: str | None = None,
+    decision_id: str | None = None,
     idempotency_key: str | None = None,
     rule: dict | None = None,
     dry_run: bool = False,
@@ -114,7 +115,7 @@ async def execute(
             return ExecutionResult(None, "rejected", action_type, target_mp or "unknown", error=e.to_dict())
         rec = _new_log(user_id, action_type, target_mp, mode, payload,
                        insight_key, idempotency_key, status="rejected", error_code=e.code,
-                       connection_id=connection_id)
+                       connection_id=connection_id, decision_id=decision_id)
         db.add(rec)
         await db.commit()
         return ExecutionResult(rec.id, "rejected", action_type, target_mp or "unknown", error=e.to_dict())
@@ -145,7 +146,8 @@ async def execute(
 
     # 6) write pending log BEFORE dispatch (crash visibility)
     rec = _new_log(user_id, action_type, target_mp, mode, payload,
-                   insight_key, idempotency_key, status="pending", connection_id=conn.id)
+                   insight_key, idempotency_key, status="pending", connection_id=conn.id,
+                   decision_id=decision_id)
     db.add(rec)
     await db.commit()
     await db.refresh(rec)
@@ -217,9 +219,11 @@ def _safe_result(result: dict) -> dict:
 
 
 def _new_log(user_id, action_type, marketplace, mode, payload, insight_key,
-             idempotency_key, *, status, error_code=None, connection_id=None) -> ExecutionLog:
+             idempotency_key, *, status, error_code=None, connection_id=None,
+             decision_id=None) -> ExecutionLog:
     return ExecutionLog(
         user_id=user_id, connection_id=connection_id, insight_key=insight_key,
+        decision_id=decision_id,
         action_type=action_type, marketplace=marketplace, mode=mode,
         payload=_safe_payload(payload), status=status, error_code=error_code,
         idempotency_key=idempotency_key,
