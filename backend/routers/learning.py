@@ -18,6 +18,7 @@ from dependencies import get_current_user
 from models.user import User
 from services.ranked_alternatives import get_ranked_alternatives_for_insight
 from services.decision_memory import resolve_context_group_for_insight
+from services.decision_evidence import get_decision_evidence
 
 router = APIRouter()
 
@@ -64,4 +65,42 @@ async def ranked_alternatives_endpoint(
         alternatives=alternatives,
         source=_SOURCE,
         degraded="unknown" in context_group,
+    )
+
+
+class Evidence(BaseModel):
+    action_key: str
+    reason: str
+    context_group: str
+    confirmed: int
+    refuted: int
+    sample: int
+    confirmed_rate: float | None = None
+    weighted_rate: float | None = None
+    fallback: bool
+    source: str
+
+
+class EvidenceResponse(BaseModel):
+    insight_key: str
+    evidence: Evidence | None
+
+
+@router.get("/learning/evidence", response_model=EvidenceResponse)
+async def decision_evidence_endpoint(
+    insight_key: str,
+    action_key: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> EvidenceResponse:
+    """
+    Evidence for one (insight_key, action_key) decision — its reason and the
+    outcome-memory stats in the resolved business context. Read-only. `evidence`
+    is null when the action isn't among the insight's alternatives.
+    """
+    ev = await get_decision_evidence(
+        db, user_id=current_user.id, insight_key=insight_key, action_key=action_key)
+    return EvidenceResponse(
+        insight_key=insight_key,
+        evidence=Evidence(**ev.to_dict()) if ev is not None else None,
     )
