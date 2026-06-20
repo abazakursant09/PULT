@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.decision import Decision
 from models.product_listing import ProductListing
+from services.marketplace import action_metric_binding
 from services.product_resolver import normalize_marketplace, normalize_sku
 
 # Deterministic insight-type → executor action_key. Explicit by design: only the
@@ -40,6 +41,38 @@ _ACTION_KEY: dict[str, Optional[str]] = {
     "low_stock":       None,
     "high_rating":     None,
 }
+
+
+@dataclass
+class DecisionCandidate:
+    """One emitted alternative for an insight: its action and parsed context."""
+    insight_key: str
+    itype: str
+    action_key: str
+    marketplace: Optional[str]
+    sku: Optional[str]
+
+
+def emit_candidates(insight_key: str) -> list["DecisionCandidate"]:
+    """
+    Declarative alternatives emission (A2.5). For a problem with a declared
+    action space (margin_crisis → set_price + reduce_discount) emit one candidate
+    per action; otherwise fall back to the single legacy action_key. Pure and
+    deterministic — NO ranking, NO scores, NO learning, NO DB writes, no Decision
+    creation. Persisting multiple candidates as separate measurable Decisions is
+    a later slice (needs a (user_id, insight_key, action_key) uniqueness change).
+    """
+    parts = (insight_key or "").split(":")
+    itype = parts[0] if parts and parts[0] else ""
+    marketplace = parts[1] if len(parts) > 1 else None
+    sku = parts[2] if len(parts) > 2 else None
+
+    space = list(action_metric_binding.problem_action_space(itype))
+    if not space:
+        single = action_key_for(itype)
+        space = [single] if single else []
+
+    return [DecisionCandidate(insight_key, itype, a, marketplace, sku) for a in space if a]
 
 
 @dataclass
@@ -105,23 +138,33 @@ async def _resolve_listing(
     return listing.physical_product_id, listing.id
 
 
-async def _get_existing(db: AsyncSession, user_id: str, insight_key: str) -> Optional[Decision]:
+_UNSET = object()  # "action_key not supplied" → use the legacy itype mapping
+
+
+async def _get_existing(
+    db: AsyncSession, user_id: str, insight_key: str, action_key: Optional[str]
+) -> Optional[Decision]:
+    # SQLAlchemy renders `== None` as `IS NULL`, so null action_key dedups too.
     return (
         await db.execute(
             select(Decision).where(
                 Decision.user_id == user_id,
                 Decision.insight_key == insight_key,
+                Decision.action_key == action_key,
             )
         )
     ).scalars().first()
 
 
 async def promote_insight_to_decision(
-    db: AsyncSession, *, user_id: str, insight: InsightPromotionDTO
+    db: AsyncSession, *, user_id: str, insight: InsightPromotionDTO, action_key=_UNSET
 ) -> PromoteResult:
     """
-    Create or get the Decision for a promotable Insight. Promotion only — no
-    apply, no measurement, no execution. See module docstring.
+    Create or get the Decision for a promotable Insight + action. Idempotent per
+    (user_id, insight_key, action_key) — a single insight can hold multiple
+    alternative-action Decisions (A2.6). `action_key` defaults to the legacy
+    itype mapping (single-action behavior); pass an explicit action_key to
+    promote a specific alternative. Promotion only — no apply/measurement.
     """
     # ── hard blocks (no DB write) ────────────────────────────────────────────
     if insight.is_demo:
@@ -131,8 +174,10 @@ async def promote_insight_to_decision(
     if not _is_promotable(insight):
         return PromoteResult(None, created=False, promotable=False, reason="non_promotable_sku")
 
-    # ── idempotency: one Decision per (user_id, insight_key) ──────────────────
-    existing = await _get_existing(db, user_id, insight.insight_key)
+    ak = action_key_for(insight.itype) if action_key is _UNSET else action_key
+
+    # ── idempotency: one Decision per (user_id, insight_key, action_key) ──────
+    existing = await _get_existing(db, user_id, insight.insight_key, ak)
     if existing is not None:
         return PromoteResult(existing.id, created=False, promotable=True, reason=None)
 
@@ -149,7 +194,7 @@ async def promote_insight_to_decision(
         cause=insight.cause,
         effect=insight.effect,
         action=insight.action,
-        action_key=action_key_for(insight.itype),
+        action_key=ak,
         pnl_impact=insight.pnl_impact,
         severity=(insight.severity or "warn"),
         source="insight",
@@ -165,9 +210,29 @@ async def promote_insight_to_decision(
     except IntegrityError:
         # Race: another promotion won the unique index. Return the winner.
         await db.rollback()
-        winner = await _get_existing(db, user_id, insight.insight_key)
+        winner = await _get_existing(db, user_id, insight.insight_key, ak)
         if winner is not None:
             return PromoteResult(winner.id, created=False, promotable=True, reason=None)
         raise
 
     return PromoteResult(decision.id, created=True, promotable=True, reason=None)
+
+
+async def promote_insight_alternatives(
+    db: AsyncSession, *, user_id: str, insight: InsightPromotionDTO
+) -> list[PromoteResult]:
+    """
+    Promote every declared alternative action for the insight (A2.6). For
+    margin_crisis this persists Decision(set_price) AND Decision(reduce_discount),
+    each idempotent per (user_id, insight_key, action_key). Single-action insights
+    yield one result (unchanged behavior). Promotion only — no apply/measurement.
+    """
+    candidates = emit_candidates(insight.insight_key)
+    if not candidates:
+        # No declared action space → fall back to the single legacy promotion.
+        return [await promote_insight_to_decision(db, user_id=user_id, insight=insight)]
+    results: list[PromoteResult] = []
+    for c in candidates:
+        results.append(await promote_insight_to_decision(
+            db, user_id=user_id, insight=insight, action_key=c.action_key))
+    return results

@@ -38,6 +38,18 @@ _PROBLEM_BINDING: dict[str, str] = {
     "margin_crisis": "net_profit",
 }
 
+# Declarative action space a problem may propose (emission is a later slice).
+# A2 adds reduce_discount alongside set_price for margin_crisis; both measure on
+# net_profit via _PROBLEM_BINDING.
+_PROBLEM_ACTIONS: dict[str, tuple[str, ...]] = {
+    "margin_crisis": ("set_price", "reduce_discount", "stop_auto_promotion"),
+}
+
+
+def problem_action_space(problem_type: Optional[str]) -> tuple[str, ...]:
+    """Action_types PULT may propose for a problem (declarative, no emission)."""
+    return _PROBLEM_ACTIONS.get(problem_type or "", ())
+
 
 def target_metric(action_key: Optional[str], problem_type: Optional[str] = None) -> Optional[str]:
     """

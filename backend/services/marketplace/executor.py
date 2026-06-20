@@ -30,6 +30,8 @@ _ACTION_CAPABILITY = {
     "ad_set_bid":              "campaign_control",
     "ad_set_state":            "campaign_control",
     "publish_review_response": "review_reply",
+    "reduce_discount":         "discounts.write",     # A2: WB/Ozon api, Yandex impossible
+    "stop_auto_promotion":     "promotions.write",    # A3: WB/Ozon api, Yandex impossible
 }
 
 # Connection marketplace label → registry marketplace code.

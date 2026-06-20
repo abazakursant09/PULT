@@ -46,7 +46,9 @@ class Decision(Base):
         Index("ix_decision_user_status", "user_id", "status"),
         Index("ix_decision_phys", "physical_product_id"),
         Index("ix_decision_listing", "listing_id"),
-        # One Decision per (seller, insight). NULLs distinct → seed/legacy rows ok.
-        Index("uq_decision_user_insight", "user_id", "insight_key", unique=True),
+        # One Decision per (seller, insight, action) — lets a single insight
+        # promote multiple alternative actions (A2.6). NULLs distinct → seed/
+        # legacy/manual (action_key NULL) rows ok.
+        Index("uq_decision_user_insight_action", "user_id", "insight_key", "action_key", unique=True),
         Index("ix_decision_chain", "decision_chain_id", "step_in_chain"),
     )

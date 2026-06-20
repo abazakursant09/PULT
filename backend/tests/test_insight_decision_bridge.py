@@ -179,29 +179,36 @@ def test_no_apply_or_measurement_side_effects():
 # ── DB-level uniqueness ──────────────────────────────────────────────────────
 
 def test_unique_index_enforced_at_db():
+    # A2.6: uniqueness is now (user_id, insight_key, action_key). Same triple
+    # collides; differing action_key does not.
     async def go():
         db = await _engine(); uid = str(uuid.uuid4())
-        db.add(Decision(user_id=uid, insight_key="k:wb:A", problem="p", status="open"))
+        db.add(Decision(user_id=uid, insight_key="k:wb:A", action_key="set_price",
+                        problem="p", status="open"))
         await db.flush()
-        db.add(Decision(user_id=uid, insight_key="k:wb:A", problem="p2", status="open"))
+        db.add(Decision(user_id=uid, insight_key="k:wb:A", action_key="set_price",
+                        problem="p2", status="open"))
         raised = False
         try:
             await db.flush()
         except IntegrityError:
             raised = True
-        assert raised, "unique (user_id, insight_key) not enforced"
+        assert raised, "unique (user_id, insight_key, action_key) not enforced"
     _run(go())
 
 
 def test_insight_key_column_exists():
     assert "insight_key" in Decision.__table__.columns
     idx = {i.name for i in Decision.__table__.indexes}
-    assert "uq_decision_user_insight" in idx
+    assert "uq_decision_user_insight_action" in idx
 
 
 # ── architecture import guards ───────────────────────────────────────────────
 
-_FORBIDDEN = ("executor", "wb_client", "ozon_client", "marketplace",
+# Forbid execution/marketplace CLIENTS and side-effect modules. (action_metric_binding
+# lives under services/marketplace/ but is pure binding metadata, not a client —
+# the bridge may import it for the declarative action space.)
+_FORBIDDEN = ("executor", "wb_client", "ozon_client",
               "decision_validation", "attribution", "learning",
               "counterfactual", "action_engine")
 

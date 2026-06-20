@@ -1,196 +1,543 @@
 {
-  "_meta": {
-    "doc": "PULT capability registry — что доступно по каждому пункту доктрины на WB/Ozon/Яндекс Маркете. Источник истины для §6.1 (источниковость) и §19 (честность возможностей). Драйвит feature-флаги UI и corridor-телеметрию.",
-    "verdicts": {
-      "api": "прямой endpoint маркетплейса",
-      "compute": "вычисляем из нескольких API-полей (нужна формула)",
-      "impossible": "нет в API — ручной ввод / внешний реестр / внешний сервис"
-    },
-    "generated": "2026-06-06 from WB/Ozon/YM API audit",
-    "version": 1
+ "_meta": {
+  "doc": "PULT capability registry — что доступно по каждому пункту доктрины на WB/Ozon/Яндекс Маркете. Источник истины для §6.1 (источниковость) и §19 (честность возможностей). Драйвит feature-флаги UI и corridor-телеметрию.",
+  "verdicts": {
+   "api": "прямой endpoint маркетплейса",
+   "compute": "вычисляем из нескольких API-полей (нужна формула)",
+   "impossible": "нет в API — ручной ввод / внешний реестр / внешний сервис"
   },
-  "capabilities": [
-    {
-      "key": "product_list", "block": "Товары", "label": "Список товаров",
-      "wb": {"verdict": "api", "endpoint": "content/v2/get/cards/list"},
-      "ozon": {"verdict": "api", "endpoint": "/v3/product/list"},
-      "yandex": {"verdict": "api", "endpoint": "getOfferMappings"},
-      "pult_verdict": "api"
-    },
-    {
-      "key": "product_rating", "block": "Товары", "label": "Рейтинг товара",
-      "wb": {"verdict": "compute", "endpoint": "feedbacks", "note": "усреднить productValuation"},
-      "ozon": {"verdict": "api", "endpoint": "/v1/product/rating-by-sku", "note": "контент-рейтинг + звёзды из отзывов"},
-      "yandex": {"verdict": "api", "endpoint": "getGoodsFeedbacks.statistics.rating"},
-      "pult_verdict": "compute"
-    },
-    {
-      "key": "reviews", "block": "Товары", "label": "Отзывы (текст/оценка/дата)",
-      "wb": {"verdict": "api", "endpoint": "/api/v1/feedbacks"},
-      "ozon": {"verdict": "api", "endpoint": "/v1/review/list", "tariff": "premium_plus"},
-      "yandex": {"verdict": "api", "endpoint": "getGoodsFeedbacks"},
-      "pult_verdict": "api"
-    },
-    {
-      "key": "stocks", "block": "Товары", "label": "Остатки FBO/FBS/rFBS",
-      "wb": {"verdict": "api", "endpoint": "supplier/stocks + marketplace stocks"},
-      "ozon": {"verdict": "api", "endpoint": "/v4/product/info/stocks"},
-      "yandex": {"verdict": "api", "endpoint": "getStocks", "note": "per-campaign = модель размещения"},
-      "pult_verdict": "api", "scope": "listing"
-    },
-    {
-      "key": "cogs", "block": "Товары", "label": "Себестоимость (COGS)",
-      "wb": {"verdict": "impossible", "note": "поля нет в API"},
-      "ozon": {"verdict": "impossible", "endpoint": "/v1/product/import/prices", "access": "write", "note": "пишется в аналитику Ozon, чистого read-back нет"},
-      "yandex": {"verdict": "api", "endpoint": "updateOfferMappings.purchasePrice", "access": "read_write"},
-      "pult_verdict": "compute", "scope": "product",
-      "note": "PULT хранит COGS у себя (§14). Без него — экономика Level 1."
-    },
-    {
-      "key": "certificates", "block": "Документы", "label": "Сертификаты (загрузка+статус)",
-      "wb": {"verdict": "impossible", "note": "нет загрузки документов"},
-      "ozon": {"verdict": "api", "endpoint": "/v1/product/certificate/create|bind|info"},
-      "yandex": {"verdict": "compute", "endpoint": "updateOfferMappings.CERTIFICATES", "note": "привязка по номеру; файл-upload не подтверждён"},
-      "pult_verdict": "compute", "scope": "product"
-    },
-    {
-      "key": "chestny_znak", "block": "Документы", "label": "Честный знак",
-      "wb": {"verdict": "api", "note": "КИЗ на уровне заказа, не статус карточки"},
-      "ozon": {"verdict": "api", "endpoint": "/v6/fbs/posting/product/exemplar/set", "note": "маркировка заказа"},
-      "yandex": {"verdict": "api", "note": "КИЗ при отгрузке"},
-      "pult_verdict": "api", "scope": "order",
-      "note": "Управление регистрацией ЧЗ — impossible (внешний ГИС МТ)."
-    },
-    {
-      "key": "trademark", "block": "Документы", "label": "Товарный знак (юр. статус)",
-      "wb": {"verdict": "impossible"}, "ozon": {"verdict": "impossible"}, "yandex": {"verdict": "impossible"},
-      "pult_verdict": "impossible", "scope": "product",
-      "source": "external_registry", "note": "Роспатент API / ручной ввод. UI: статус=неизвестно, источник=не подключён."
-    },
-    {
-      "key": "card_history", "block": "Товары", "label": "История изменений карточки",
-      "wb": {"verdict": "impossible"}, "ozon": {"verdict": "impossible"}, "yandex": {"verdict": "impossible"},
-      "pult_verdict": "impossible",
-      "note": "Audit-log нет нигде. PULT ведёт свою историю снапшотами ingest."
-    },
-    {
-      "key": "search_position", "block": "Реклама", "label": "Позиция в поиске по ключу",
-      "wb": {"verdict": "api", "endpoint": "/api/v2/search-report/report", "tariff": "jam", "note": "только запросы своих товаров"},
-      "ozon": {"verdict": "api", "endpoint": "/v1/analytics/product-queries", "tariff": "premium", "note": "только запросы своих товаров"},
-      "yandex": {"verdict": "impossible", "note": "только позиция в категории vs конкуренты"},
-      "pult_verdict": "compute", "scope": "listing"
-    },
-    {
-      "key": "sales", "block": "Финансы", "label": "Продажи (шт+выручка)",
-      "wb": {"verdict": "api", "endpoint": "supplier/sales + reportDetailByPeriod"},
-      "ozon": {"verdict": "api", "endpoint": "/v1/analytics/data"},
-      "yandex": {"verdict": "api", "endpoint": "getOrdersStats"},
-      "pult_verdict": "api", "scope": "listing"
-    },
-    {
-      "key": "net_profit", "block": "Финансы", "label": "Чистая прибыль",
-      "wb": {"verdict": "compute"}, "ozon": {"verdict": "compute"}, "yandex": {"verdict": "compute"},
-      "pult_verdict": "compute",
-      "note": "выручка − комиссия − логистика − возвраты − COGS. Поля прибыли нет нигде. Требует COGS (Level 2)."
-    },
-    {
-      "key": "commission", "block": "Финансы", "label": "Комиссия МП",
-      "wb": {"verdict": "api", "endpoint": "reportDetailByPeriod.ppvz_sales_commission + tariffs/commission"},
-      "ozon": {"verdict": "api", "endpoint": "/v5/product/info/prices + transactions"},
-      "yandex": {"verdict": "api", "endpoint": "getOrdersStats.commissions[]"},
-      "pult_verdict": "api"
-    },
-    {
-      "key": "logistics_cost", "block": "Финансы", "label": "Логистика (доставка+хранение)",
-      "wb": {"verdict": "api", "endpoint": "realization: delivery_rub, storage_fee"},
-      "ozon": {"verdict": "api", "endpoint": "/v3/finance/transaction/list"},
-      "yandex": {"verdict": "api", "endpoint": "generateUnitedNettingReport"},
-      "pult_verdict": "api"
-    },
-    {
-      "key": "returns", "block": "Финансы", "label": "Возвраты (кол-во/сумма/причина)",
-      "wb": {"verdict": "api", "endpoint": "sales + /api/v1/claims", "note": "причины в claims"},
-      "ozon": {"verdict": "api", "endpoint": "/v1/returns/list"},
-      "yandex": {"verdict": "api", "endpoint": "getReturns"},
-      "pult_verdict": "api"
-    },
-    {
-      "key": "promotions", "block": "Финансы", "label": "Акции/скидки (участие+условия)",
-      "wb": {"verdict": "api", "endpoint": "/api/v1/calendar/promotions", "note": "только обычные акции"},
-      "ozon": {"verdict": "api", "endpoint": "/v1/actions"},
-      "yandex": {"verdict": "api", "endpoint": "getPromos"},
-      "pult_verdict": "api"
-    },
-    {
-      "key": "auto_promotions", "block": "Финансы", "label": "Автоакции (участие)",
-      "wb": {"verdict": "impossible", "note": "автоакций в API нет — слепая зона, только ЛК"},
-      "ozon": {"verdict": "api", "endpoint": "/v1/actions/candidates"},
-      "yandex": {"verdict": "api", "endpoint": "promo-offers"},
-      "pult_verdict": "compute",
-      "note": "Участие где есть API; прогноз прибыли после скидки = compute (цена_акции − комиссия − логистика − COGS)."
-    },
-    {
-      "key": "ad_spend", "block": "Реклама", "label": "Расход на рекламу",
-      "wb": {"verdict": "api", "endpoint": "/adv/v2/fullstats"},
-      "ozon": {"verdict": "api", "endpoint": "Performance /api/client/statistics", "note": "отдельный OAuth, async, 100k/день"},
-      "yandex": {"verdict": "api", "endpoint": "generateBoostConsolidatedReport"},
-      "pult_verdict": "api"
-    },
-    {
-      "key": "ad_metrics", "block": "Реклама", "label": "Клики/показы/CTR",
-      "wb": {"verdict": "api", "endpoint": "/adv/v2/fullstats"},
-      "ozon": {"verdict": "api", "endpoint": "Performance statistics"},
-      "yandex": {"verdict": "compute", "note": "дискретные клики/показы не подтверждены"},
-      "pult_verdict": "compute"
-    },
-    {
-      "key": "drr_profit_impact", "block": "Реклама", "label": "ДРР + влияние на прибыль",
-      "wb": {"verdict": "compute"}, "ozon": {"verdict": "compute"}, "yandex": {"verdict": "compute"},
-      "pult_verdict": "compute",
-      "note": "ДРР=расход/выручка (Level 1). Влияние на ПРИБЫЛЬ требует COGS (Level 2)."
-    },
-    {
-      "key": "campaign_control", "block": "Реклама", "label": "Управление кампаниями вкл/выкл",
-      "wb": {"verdict": "api", "endpoint": "/adv/v0/start|pause|stop"},
-      "ozon": {"verdict": "api", "endpoint": "/api/client/campaign/{id}/activate|deactivate"},
-      "yandex": {"verdict": "api", "endpoint": "putBidsForCampaign"},
-      "pult_verdict": "api", "note": "Уже реализовано в executor (ME-4)."
-    },
-    {
-      "key": "review_reply", "block": "Отзывы", "label": "Публикация ответа",
-      "wb": {"verdict": "api", "endpoint": "/api/v1/feedbacks/answer"},
-      "ozon": {"verdict": "api", "endpoint": "/v1/review/comment/create", "tariff": "premium_plus"},
-      "yandex": {"verdict": "api", "endpoint": "updateGoodsFeedbackComment"},
-      "pult_verdict": "api",
-      "note": "Автоответ = свой планировщик. §9.1: 5★ авто, 4★ suggest, 1-3★ manual. Ответ на безтекстовую оценку — проверить выполнимость endpoint."
-    },
-    {
-      "key": "sentiment", "block": "Отзывы", "label": "Анализ тональности",
-      "wb": {"verdict": "impossible"}, "ozon": {"verdict": "impossible"}, "yandex": {"verdict": "impossible"},
-      "pult_verdict": "compute", "source": "derived", "note": "своя NLP по тексту+оценке"
-    },
-    {
-      "key": "card_blocks", "block": "Риски", "label": "Блокировки/предупреждения карточки",
-      "wb": {"verdict": "compute", "endpoint": "content/v2/cards/error/list"},
-      "ozon": {"verdict": "compute", "endpoint": "import/info + /v1/rating/summary"},
-      "yandex": {"verdict": "compute", "note": "статус-флаги оффера"},
-      "pult_verdict": "compute", "note": "Полного warning-feed нет; частично из error/moderation."
-    },
-    {
-      "key": "legal_violations", "block": "Риски", "label": "Юр. риски/нарушения (превентивно)",
-      "wb": {"verdict": "impossible"}, "ozon": {"verdict": "impossible"}, "yandex": {"verdict": "impossible"},
-      "pult_verdict": "impossible",
-      "note": "Штрафы видны только постфактум в финотчёте. Превентивных сигналов нет."
-    }
-  ],
-  "freshness": {
-    "wb": {"ads": "~3 мин", "finance": "недельный расчёт", "analytics": "не realtime", "webhooks": false},
-    "ozon": {"analytics": "минус ~3 последних дня", "performance": "async", "finance": "цикл расчёта", "webhooks": "push: заказы/чат; каталог/финансы — polling"},
-    "yandex": {"reports": "async generate→poll", "webhooks": "push: заказы/возвраты; отзывы/финансы — polling"}
+  "generated": "2026-06-06 from WB/Ozon/YM API audit",
+  "version": 1
+ },
+ "capabilities": [
+  {
+   "key": "product_list",
+   "block": "Товары",
+   "label": "Список товаров",
+   "wb": {
+    "verdict": "api",
+    "endpoint": "content/v2/get/cards/list"
+   },
+   "ozon": {
+    "verdict": "api",
+    "endpoint": "/v3/product/list"
+   },
+   "yandex": {
+    "verdict": "api",
+    "endpoint": "getOfferMappings"
+   },
+   "pult_verdict": "api"
   },
-  "rate_limits": {
-    "wb": "Content 100/мин (create/edit 10/мин), Marketplace 300/мин, Feedbacks 1/сек, Documents 1/10сек, Analytics ~1/мин",
-    "ozon": "per-method 429; Performance 100k/день, отчёты async без параллели",
-    "yandex": "4-уровневые, заголовки X-RateLimit-*, тело ≤512KB, превышение HTTP 420"
+  {
+   "key": "product_rating",
+   "block": "Товары",
+   "label": "Рейтинг товара",
+   "wb": {
+    "verdict": "compute",
+    "endpoint": "feedbacks",
+    "note": "усреднить productValuation"
+   },
+   "ozon": {
+    "verdict": "api",
+    "endpoint": "/v1/product/rating-by-sku",
+    "note": "контент-рейтинг + звёзды из отзывов"
+   },
+   "yandex": {
+    "verdict": "api",
+    "endpoint": "getGoodsFeedbacks.statistics.rating"
+   },
+   "pult_verdict": "compute"
+  },
+  {
+   "key": "reviews",
+   "block": "Товары",
+   "label": "Отзывы (текст/оценка/дата)",
+   "wb": {
+    "verdict": "api",
+    "endpoint": "/api/v1/feedbacks"
+   },
+   "ozon": {
+    "verdict": "api",
+    "endpoint": "/v1/review/list",
+    "tariff": "premium_plus"
+   },
+   "yandex": {
+    "verdict": "api",
+    "endpoint": "getGoodsFeedbacks"
+   },
+   "pult_verdict": "api"
+  },
+  {
+   "key": "stocks",
+   "block": "Товары",
+   "label": "Остатки FBO/FBS/rFBS",
+   "wb": {
+    "verdict": "api",
+    "endpoint": "supplier/stocks + marketplace stocks"
+   },
+   "ozon": {
+    "verdict": "api",
+    "endpoint": "/v4/product/info/stocks"
+   },
+   "yandex": {
+    "verdict": "api",
+    "endpoint": "getStocks",
+    "note": "per-campaign = модель размещения"
+   },
+   "pult_verdict": "api",
+   "scope": "listing"
+  },
+  {
+   "key": "cogs",
+   "block": "Товары",
+   "label": "Себестоимость (COGS)",
+   "wb": {
+    "verdict": "impossible",
+    "note": "поля нет в API"
+   },
+   "ozon": {
+    "verdict": "impossible",
+    "endpoint": "/v1/product/import/prices",
+    "access": "write",
+    "note": "пишется в аналитику Ozon, чистого read-back нет"
+   },
+   "yandex": {
+    "verdict": "api",
+    "endpoint": "updateOfferMappings.purchasePrice",
+    "access": "read_write"
+   },
+   "pult_verdict": "compute",
+   "scope": "product",
+   "note": "PULT хранит COGS у себя (§14). Без него — экономика Level 1."
+  },
+  {
+   "key": "certificates",
+   "block": "Документы",
+   "label": "Сертификаты (загрузка+статус)",
+   "wb": {
+    "verdict": "impossible",
+    "note": "нет загрузки документов"
+   },
+   "ozon": {
+    "verdict": "api",
+    "endpoint": "/v1/product/certificate/create|bind|info"
+   },
+   "yandex": {
+    "verdict": "compute",
+    "endpoint": "updateOfferMappings.CERTIFICATES",
+    "note": "привязка по номеру; файл-upload не подтверждён"
+   },
+   "pult_verdict": "compute",
+   "scope": "product"
+  },
+  {
+   "key": "chestny_znak",
+   "block": "Документы",
+   "label": "Честный знак",
+   "wb": {
+    "verdict": "api",
+    "note": "КИЗ на уровне заказа, не статус карточки"
+   },
+   "ozon": {
+    "verdict": "api",
+    "endpoint": "/v6/fbs/posting/product/exemplar/set",
+    "note": "маркировка заказа"
+   },
+   "yandex": {
+    "verdict": "api",
+    "note": "КИЗ при отгрузке"
+   },
+   "pult_verdict": "api",
+   "scope": "order",
+   "note": "Управление регистрацией ЧЗ — impossible (внешний ГИС МТ)."
+  },
+  {
+   "key": "trademark",
+   "block": "Документы",
+   "label": "Товарный знак (юр. статус)",
+   "wb": {
+    "verdict": "impossible"
+   },
+   "ozon": {
+    "verdict": "impossible"
+   },
+   "yandex": {
+    "verdict": "impossible"
+   },
+   "pult_verdict": "impossible",
+   "scope": "product",
+   "source": "external_registry",
+   "note": "Роспатент API / ручной ввод. UI: статус=неизвестно, источник=не подключён."
+  },
+  {
+   "key": "card_history",
+   "block": "Товары",
+   "label": "История изменений карточки",
+   "wb": {
+    "verdict": "impossible"
+   },
+   "ozon": {
+    "verdict": "impossible"
+   },
+   "yandex": {
+    "verdict": "impossible"
+   },
+   "pult_verdict": "impossible",
+   "note": "Audit-log нет нигде. PULT ведёт свою историю снапшотами ingest."
+  },
+  {
+   "key": "search_position",
+   "block": "Реклама",
+   "label": "Позиция в поиске по ключу",
+   "wb": {
+    "verdict": "api",
+    "endpoint": "/api/v2/search-report/report",
+    "tariff": "jam",
+    "note": "только запросы своих товаров"
+   },
+   "ozon": {
+    "verdict": "api",
+    "endpoint": "/v1/analytics/product-queries",
+    "tariff": "premium",
+    "note": "только запросы своих товаров"
+   },
+   "yandex": {
+    "verdict": "impossible",
+    "note": "только позиция в категории vs конкуренты"
+   },
+   "pult_verdict": "compute",
+   "scope": "listing"
+  },
+  {
+   "key": "sales",
+   "block": "Финансы",
+   "label": "Продажи (шт+выручка)",
+   "wb": {
+    "verdict": "api",
+    "endpoint": "supplier/sales + reportDetailByPeriod"
+   },
+   "ozon": {
+    "verdict": "api",
+    "endpoint": "/v1/analytics/data"
+   },
+   "yandex": {
+    "verdict": "api",
+    "endpoint": "getOrdersStats"
+   },
+   "pult_verdict": "api",
+   "scope": "listing"
+  },
+  {
+   "key": "net_profit",
+   "block": "Финансы",
+   "label": "Чистая прибыль",
+   "wb": {
+    "verdict": "compute"
+   },
+   "ozon": {
+    "verdict": "compute"
+   },
+   "yandex": {
+    "verdict": "compute"
+   },
+   "pult_verdict": "compute",
+   "note": "выручка − комиссия − логистика − возвраты − COGS. Поля прибыли нет нигде. Требует COGS (Level 2)."
+  },
+  {
+   "key": "commission",
+   "block": "Финансы",
+   "label": "Комиссия МП",
+   "wb": {
+    "verdict": "api",
+    "endpoint": "reportDetailByPeriod.ppvz_sales_commission + tariffs/commission"
+   },
+   "ozon": {
+    "verdict": "api",
+    "endpoint": "/v5/product/info/prices + transactions"
+   },
+   "yandex": {
+    "verdict": "api",
+    "endpoint": "getOrdersStats.commissions[]"
+   },
+   "pult_verdict": "api"
+  },
+  {
+   "key": "logistics_cost",
+   "block": "Финансы",
+   "label": "Логистика (доставка+хранение)",
+   "wb": {
+    "verdict": "api",
+    "endpoint": "realization: delivery_rub, storage_fee"
+   },
+   "ozon": {
+    "verdict": "api",
+    "endpoint": "/v3/finance/transaction/list"
+   },
+   "yandex": {
+    "verdict": "api",
+    "endpoint": "generateUnitedNettingReport"
+   },
+   "pult_verdict": "api"
+  },
+  {
+   "key": "returns",
+   "block": "Финансы",
+   "label": "Возвраты (кол-во/сумма/причина)",
+   "wb": {
+    "verdict": "api",
+    "endpoint": "sales + /api/v1/claims",
+    "note": "причины в claims"
+   },
+   "ozon": {
+    "verdict": "api",
+    "endpoint": "/v1/returns/list"
+   },
+   "yandex": {
+    "verdict": "api",
+    "endpoint": "getReturns"
+   },
+   "pult_verdict": "api"
+  },
+  {
+   "key": "promotions",
+   "block": "Финансы",
+   "label": "Акции/скидки (участие+условия)",
+   "wb": {
+    "verdict": "api",
+    "endpoint": "/api/v1/calendar/promotions",
+    "note": "только обычные акции"
+   },
+   "ozon": {
+    "verdict": "api",
+    "endpoint": "/v1/actions"
+   },
+   "yandex": {
+    "verdict": "api",
+    "endpoint": "getPromos"
+   },
+   "pult_verdict": "api"
+  },
+  {
+   "key": "auto_promotions",
+   "block": "Финансы",
+   "label": "Автоакции (участие)",
+   "wb": {
+    "verdict": "impossible",
+    "note": "автоакций в API нет — слепая зона, только ЛК"
+   },
+   "ozon": {
+    "verdict": "api",
+    "endpoint": "/v1/actions/candidates"
+   },
+   "yandex": {
+    "verdict": "api",
+    "endpoint": "promo-offers"
+   },
+   "pult_verdict": "compute",
+   "note": "Участие где есть API; прогноз прибыли после скидки = compute (цена_акции − комиссия − логистика − COGS)."
+  },
+  {
+   "key": "ad_spend",
+   "block": "Реклама",
+   "label": "Расход на рекламу",
+   "wb": {
+    "verdict": "api",
+    "endpoint": "/adv/v2/fullstats"
+   },
+   "ozon": {
+    "verdict": "api",
+    "endpoint": "Performance /api/client/statistics",
+    "note": "отдельный OAuth, async, 100k/день"
+   },
+   "yandex": {
+    "verdict": "api",
+    "endpoint": "generateBoostConsolidatedReport"
+   },
+   "pult_verdict": "api"
+  },
+  {
+   "key": "ad_metrics",
+   "block": "Реклама",
+   "label": "Клики/показы/CTR",
+   "wb": {
+    "verdict": "api",
+    "endpoint": "/adv/v2/fullstats"
+   },
+   "ozon": {
+    "verdict": "api",
+    "endpoint": "Performance statistics"
+   },
+   "yandex": {
+    "verdict": "compute",
+    "note": "дискретные клики/показы не подтверждены"
+   },
+   "pult_verdict": "compute"
+  },
+  {
+   "key": "drr_profit_impact",
+   "block": "Реклама",
+   "label": "ДРР + влияние на прибыль",
+   "wb": {
+    "verdict": "compute"
+   },
+   "ozon": {
+    "verdict": "compute"
+   },
+   "yandex": {
+    "verdict": "compute"
+   },
+   "pult_verdict": "compute",
+   "note": "ДРР=расход/выручка (Level 1). Влияние на ПРИБЫЛЬ требует COGS (Level 2)."
+  },
+  {
+   "key": "campaign_control",
+   "block": "Реклама",
+   "label": "Управление кампаниями вкл/выкл",
+   "wb": {
+    "verdict": "api",
+    "endpoint": "/adv/v0/start|pause|stop"
+   },
+   "ozon": {
+    "verdict": "api",
+    "endpoint": "/api/client/campaign/{id}/activate|deactivate"
+   },
+   "yandex": {
+    "verdict": "api",
+    "endpoint": "putBidsForCampaign"
+   },
+   "pult_verdict": "api",
+   "note": "Уже реализовано в executor (ME-4)."
+  },
+  {
+   "key": "review_reply",
+   "block": "Отзывы",
+   "label": "Публикация ответа",
+   "wb": {
+    "verdict": "api",
+    "endpoint": "/api/v1/feedbacks/answer"
+   },
+   "ozon": {
+    "verdict": "api",
+    "endpoint": "/v1/review/comment/create",
+    "tariff": "premium_plus"
+   },
+   "yandex": {
+    "verdict": "api",
+    "endpoint": "updateGoodsFeedbackComment"
+   },
+   "pult_verdict": "api",
+   "note": "Автоответ = свой планировщик. §9.1: 5★ авто, 4★ suggest, 1-3★ manual. Ответ на безтекстовую оценку — проверить выполнимость endpoint."
+  },
+  {
+   "key": "sentiment",
+   "block": "Отзывы",
+   "label": "Анализ тональности",
+   "wb": {
+    "verdict": "impossible"
+   },
+   "ozon": {
+    "verdict": "impossible"
+   },
+   "yandex": {
+    "verdict": "impossible"
+   },
+   "pult_verdict": "compute",
+   "source": "derived",
+   "note": "своя NLP по тексту+оценке"
+  },
+  {
+   "key": "card_blocks",
+   "block": "Риски",
+   "label": "Блокировки/предупреждения карточки",
+   "wb": {
+    "verdict": "compute",
+    "endpoint": "content/v2/cards/error/list"
+   },
+   "ozon": {
+    "verdict": "compute",
+    "endpoint": "import/info + /v1/rating/summary"
+   },
+   "yandex": {
+    "verdict": "compute",
+    "note": "статус-флаги оффера"
+   },
+   "pult_verdict": "compute",
+   "note": "Полного warning-feed нет; частично из error/moderation."
+  },
+  {
+   "key": "legal_violations",
+   "block": "Риски",
+   "label": "Юр. риски/нарушения (превентивно)",
+   "wb": {
+    "verdict": "impossible"
+   },
+   "ozon": {
+    "verdict": "impossible"
+   },
+   "yandex": {
+    "verdict": "impossible"
+   },
+   "pult_verdict": "impossible",
+   "note": "Штрафы видны только постфактум в финотчёте. Превентивных сигналов нет."
+  },
+  {
+   "key": "discounts.write",
+   "block": "Цены",
+   "label": "Управление скидкой товара (write)",
+   "wb": {
+    "verdict": "api",
+    "endpoint": "/api/v2/upload/task (discount)"
+   },
+   "ozon": {
+    "verdict": "api",
+    "endpoint": "/v1/product/import/prices (price)"
+   },
+   "yandex": {
+    "verdict": "impossible"
+   },
+   "pult_verdict": "api",
+   "note": "A2 reduce_discount. Yandex: нет write-API скидок (honest stub)."
+  },
+  {
+   "key": "promotions.write",
+   "block": "Цены",
+   "label": "Управление участием в акциях (write)",
+   "wb": {
+    "verdict": "api",
+    "endpoint": "/api/v1/promotions/participation"
+   },
+   "ozon": {
+    "verdict": "api",
+    "endpoint": "/v1/actions/products/(de)activate"
+   },
+   "yandex": {
+    "verdict": "impossible"
+   },
+   "pult_verdict": "api",
+   "note": "A3 stop_auto_promotion. Yandex: нет write-API участия в акциях (honest stub)."
   }
+ ],
+ "freshness": {
+  "wb": {
+   "ads": "~3 мин",
+   "finance": "недельный расчёт",
+   "analytics": "не realtime",
+   "webhooks": false
+  },
+  "ozon": {
+   "analytics": "минус ~3 последних дня",
+   "performance": "async",
+   "finance": "цикл расчёта",
+   "webhooks": "push: заказы/чат; каталог/финансы — polling"
+  },
+  "yandex": {
+   "reports": "async generate→poll",
+   "webhooks": "push: заказы/возвраты; отзывы/финансы — polling"
+  }
+ },
+ "rate_limits": {
+  "wb": "Content 100/мин (create/edit 10/мин), Marketplace 300/мин, Feedbacks 1/сек, Documents 1/10сек, Analytics ~1/мин",
+  "ozon": "per-method 429; Performance 100k/день, отчёты async без параллели",
+  "yandex": "4-уровневые, заголовки X-RateLimit-*, тело ≤512KB, превышение HTTP 420"
+ }
 }

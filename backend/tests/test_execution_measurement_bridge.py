@@ -273,6 +273,7 @@ def test_execute_opens_measurement_single_site_no_close():
 
 
 def test_bridge_blocks_non_listing_actions():
+    # ad_* (campaign-grain) stay excluded; listing-grain margin/content actions allowed.
     assert "ad_set_bid" not in bridge._MEASURABLE_ACTIONS
     assert "ad_set_state" not in bridge._MEASURABLE_ACTIONS
-    assert bridge._MEASURABLE_ACTIONS == frozenset({"set_price", "update_card"})
+    assert bridge._MEASURABLE_ACTIONS == frozenset({"set_price", "update_card", "reduce_discount", "stop_auto_promotion"})

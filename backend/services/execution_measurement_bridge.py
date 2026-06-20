@@ -37,12 +37,13 @@ log = logging.getLogger(__name__)
 # Honest listing-grain actions only. ad_set_bid / ad_set_state excluded:
 # campaign_id is not a listing entity → no honest entity_id. The metric a
 # Decision is measured on comes from its action_key (action_metric_binding).
-_MEASURABLE_ACTIONS = frozenset({"set_price", "update_card"})
+_MEASURABLE_ACTIONS = frozenset({"set_price", "update_card", "reduce_discount", "stop_auto_promotion"})
 
 # Required API scope per measurable action (mirrors
 # services/marketplace/action_catalog.py ActionSpec.required_scope). Kept local
 # to avoid importing the marketplace client modules into this service.
-_ACTION_SCOPE = {"set_price": "prices", "update_card": "content"}
+_ACTION_SCOPE = {"set_price": "prices", "update_card": "content", "reduce_discount": "prices",
+                 "stop_auto_promotion": "promotions"}
 
 DEFAULT_WINDOW_DAYS = 7
 

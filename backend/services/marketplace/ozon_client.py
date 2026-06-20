@@ -35,6 +35,20 @@ class OzonClient:
             json={"prices": [{"offer_id": str(offer_id), "price": str(int(round(price)))}]},
         )
 
+    async def set_auto_promotion(self, *, token: str, client_id: str | None,
+                                 offer_id: str, enabled: bool) -> dict:
+        """
+        Ozon promotions participation (A3 stop_auto_promotion). enabled=False
+        deactivates the product in actions.
+            POST /v1/actions/products/{activate|deactivate}
+        """
+        path = "/v1/actions/products/activate" if enabled else "/v1/actions/products/deactivate"
+        return await self._seller.request(
+            "POST", path, token=token, auth_header="Api-Key",
+            extra_headers=self._headers(client_id),
+            json={"product_ids": [str(offer_id)]},
+        )
+
     # ── deferred ──────────────────────────────────────────────────────────────
     async def publish_feedback_answer(self, **_):  # premium Reviews API
         raise ExecutionError(
