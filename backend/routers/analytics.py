@@ -14,6 +14,7 @@ from database import get_db
 from dependencies import get_current_user
 from models.user import User
 from services import decision_effect_aggregator as agg
+from services import decision_recommendation_engine as rec
 
 router = APIRouter()
 
@@ -29,3 +30,12 @@ async def decision_effects(
         "action_performance": await agg.get_action_performance(db, uid),
         "insight_effectiveness": await agg.get_insight_effectiveness(db, uid),
     }
+
+
+@router.get("/analytics/recommendations")
+async def recommendations(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    uid = current_user.id
+    return {"recommendations": await rec.generate_recommendations(db, uid)}
