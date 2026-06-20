@@ -31,8 +31,22 @@ _BINDING: dict[str, str] = {
 }
 
 
-def target_metric(action_key: Optional[str]) -> Optional[str]:
-    """Canonical metric_name an action targets, or None if unbound."""
+# problem_type → canonical metric (overrides the action binding). A margin
+# problem must be measured on profit, not revenue: a price/discount fix can raise
+# margin while revenue falls, which the revenue binding would mis-mark as refuted.
+_PROBLEM_BINDING: dict[str, str] = {
+    "margin_crisis": "net_profit",
+}
+
+
+def target_metric(action_key: Optional[str], problem_type: Optional[str] = None) -> Optional[str]:
+    """
+    Canonical metric_name an action targets, or None if unbound. Problem-aware:
+    when problem_type has a binding (e.g. margin_crisis → net_profit) it wins;
+    otherwise falls back to the action binding (set_price → revenue).
+    """
+    if problem_type and problem_type in _PROBLEM_BINDING:
+        return _PROBLEM_BINDING[problem_type]
     if not action_key:
         return None
     return _BINDING.get(action_key)

@@ -81,6 +81,7 @@ async def close_measurement(
     sample = await metric_reader.read_metric(
         token=token, marketplace=baseline.marketplace, metric_name=outcome.metric_name,
         entity_id=baseline.entity_id, window_days=outcome.expected_window_days, now=now,
+        db=db, user_id=baseline.user_id,  # compute metrics (net_profit) need them; ignored by API metrics
     )
     if not isinstance(sample, MetricSample):
         # MetricUnavailable → honest insufficient_data, never a fabricated value

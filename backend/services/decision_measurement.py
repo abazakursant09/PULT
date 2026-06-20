@@ -49,7 +49,14 @@ async def open_measurement(
     """
     now = now or datetime.utcnow()
 
-    metric = action_metric_binding.target_metric(getattr(decision, "action_key", None))
+    # Problem-aware binding: derive problem_type from the insight_key prefix so
+    # margin_crisis measures net_profit while other problems keep their action
+    # binding (pricing set_price → revenue). Malformed/no key → no override.
+    ikey = getattr(decision, "insight_key", None)
+    problem_type = ikey.split(":", 1)[0] if ikey and ":" in ikey else None
+    metric = action_metric_binding.target_metric(
+        getattr(decision, "action_key", None), problem_type=problem_type
+    )
     if metric is None:
         return None  # nothing measurable to open
 
@@ -61,6 +68,7 @@ async def open_measurement(
     sample = await metric_reader.read_metric(
         token=token, marketplace=marketplace, metric_name=metric,
         entity_id=entity_id, window_days=window_days, tariffs=tariffs, now=now,
+        db=db, user_id=getattr(decision, "user_id", None),  # compute metrics (net_profit) need them
     )
 
     baseline_id = None
