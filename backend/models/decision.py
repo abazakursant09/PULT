@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, Float, Text, ForeignKey, Index
+from sqlalchemy import Column, String, DateTime, Float, Integer, Text, ForeignKey, Index
 from database import Base
 
 
@@ -26,6 +26,10 @@ class Decision(Base):
     action_key = Column(String(64), nullable=True) # ключ для executor (one-click §11), null если ручное
     insight_key = Column(String(64), nullable=True) # анкор Insight → Decision (bridge); null для seed/legacy
 
+    # Memory OS Phase 1 — chain tracking (additive; Slice 1 schema only, no logic).
+    decision_chain_id = Column(String(36), nullable=True)   # цепочка попыток над одной проблемой; null = legacy/нет цепочки
+    step_in_chain     = Column(Integer, nullable=False, default=0, server_default="0")  # номер попытки в цепочке (0..)
+
     # Экономика решения
     pnl_impact = Column(Float, nullable=True)       # ожидаемый эффект, ₽
     pnl_level  = Column(String(10), nullable=True)  # level1 (без COGS) | level2 (с COGS) §14.1
@@ -44,4 +48,5 @@ class Decision(Base):
         Index("ix_decision_listing", "listing_id"),
         # One Decision per (seller, insight). NULLs distinct → seed/legacy rows ok.
         Index("uq_decision_user_insight", "user_id", "insight_key", unique=True),
+        Index("ix_decision_chain", "decision_chain_id", "step_in_chain"),
     )
