@@ -33,6 +33,10 @@ from models.telegram_notification_log import TelegramNotificationLog
 from models.seo_rebuild import SeoRebuild
 from data.marketplace_mechanics import get_mechanic, AutomationLevel
 from services.insight_keys import build_insight_key
+from services.insight_decision_bridge import (
+    promote_insight_to_decision as _promote_decision,
+    InsightPromotionDTO as _PromotionDTO,
+)
 from logic.simulation import generate_scenarios_for_insight as _gen_scenarios
 from logic.focus_engine import compute_operational_focus, compress_scenarios as _compress_scenarios
 from logic.focus_engine import OperationalFocus as _OperationalFocusDC
@@ -4262,6 +4266,25 @@ async def execute_insight(
             message="Нужны дополнительные данные для выполнения" if plan.needs_input
                     else "Инсайт не поддерживает выполнение",
         )
+
+    # ── Insight → Decision promotion (bridge Slice 1: intent fixation only) ───
+    # Best-effort, non-blocking: fixates the Decision; never applies/executes,
+    # never opens measurement, never alters the execute response. Only on this
+    # explicit operator path — NOT in _compute_insights / dashboard / Telegram.
+    try:
+        _ptype, _pmp, _psku = _imap.parse_key(insight_key)
+        _desc = plan.descriptor or {}
+        _sev = {"sales_growth": "gain", "high_rating": "gain"}.get(_ptype, "warn")
+        await _promote_decision(db, user_id=uid, insight=_PromotionDTO(
+            insight_key=insight_key, itype=_ptype, marketplace=_pmp, sku=_psku,
+            problem=_desc.get("reason") or _ptype,
+            cause=_desc.get("reason"),
+            effect=_desc.get("expected_effect"),
+            action=_desc.get("action"),
+            pnl_impact=None, severity=_sev, is_demo=False,
+        ))
+    except Exception:
+        logger.exception("insight promotion failed for %s", insight_key)
 
     # ── batch: rating_good publishes every prepared positive review ───────────
     if plan.batch:

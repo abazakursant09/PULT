@@ -24,6 +24,7 @@ class Decision(Base):
     effect  = Column(Text, nullable=True)          # последствие
     action  = Column(String(500), nullable=True)   # рекомендованное действие (человекочитаемо)
     action_key = Column(String(64), nullable=True) # ключ для executor (one-click §11), null если ручное
+    insight_key = Column(String(64), nullable=True) # анкор Insight → Decision (bridge); null для seed/legacy
 
     # Экономика решения
     pnl_impact = Column(Float, nullable=True)       # ожидаемый эффект, ₽
@@ -41,4 +42,6 @@ class Decision(Base):
         Index("ix_decision_user_status", "user_id", "status"),
         Index("ix_decision_phys", "physical_product_id"),
         Index("ix_decision_listing", "listing_id"),
+        # One Decision per (seller, insight). NULLs distinct → seed/legacy rows ok.
+        Index("uq_decision_user_insight", "user_id", "insight_key", unique=True),
     )
