@@ -16,6 +16,7 @@ from models.user import User
 from services import decision_effect_aggregator as agg
 from services import decision_recommendation_engine as rec
 from services import decision_candidate_engine as cand
+from services import decision_policy_engine as policy
 
 router = APIRouter()
 
@@ -49,3 +50,13 @@ async def decision_candidates(
 ) -> dict:
     uid = current_user.id
     return {"decision_candidates": await cand.generate_decision_candidates(db, uid)}
+
+
+@router.get("/analytics/decision-policy")
+async def decision_policy(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    uid = current_user.id
+    candidates = await cand.generate_decision_candidates(db, uid)
+    return await policy.apply_decision_policy(db, uid, candidates)
