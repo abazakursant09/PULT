@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     wb_prices_base: str = "https://discounts-prices-api.wildberries.ru"
     wb_content_base: str = "https://content-api.wildberries.ru"
     wb_advert_base: str = "https://advert-api.wildberries.ru"
+    wb_statistics_base: str = "https://statistics-api.wildberries.ru"
     ozon_seller_base: str = "https://api-seller.ozon.ru"
     ozon_performance_base: str = "https://api-performance.ozon.ru"
     marketplace_http_timeout: float = 15.0

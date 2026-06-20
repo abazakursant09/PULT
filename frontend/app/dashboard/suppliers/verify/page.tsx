@@ -20,7 +20,7 @@ const ABR = 'rgba(26,115,232,0.18)'
 
 const STATUS_CONFIG = {
   verified: { label: 'Верифицирован', icon: <ShieldCheck size={15} />, variant: 'outline' as const, color: '#1A73E8', borderColor: 'rgba(26,115,232,0.22)', bg: 'rgba(26,115,232,0.08)' },
-  pending:  { label: 'На проверке',  icon: <Clock size={15} />,       variant: 'warning' as const,  color: '#D97706', borderColor: 'rgba(245,158,11,0.2)',  bg: 'rgba(245,158,11,0.08)' },
+  pending:  { label: 'На проверке',  icon: <Clock size={15} />,       variant: 'warning' as const,  color: 'var(--warning)', borderColor: 'rgba(245,158,11,0.2)',  bg: 'rgba(245,158,11,0.08)' },
   rejected: { label: 'Отклонена',    icon: <ShieldX size={15} />,     variant: 'destructive' as const, color: '#DC2626', borderColor: 'rgba(220,38,38,0.2)', bg: 'rgba(220,38,38,0.08)' },
 } as const
 

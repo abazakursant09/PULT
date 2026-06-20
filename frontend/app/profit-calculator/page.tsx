@@ -36,7 +36,7 @@ function Field({ label, value, onChange, suffix = '', placeholder = '0' }: {
 }) {
   return (
     <div>
-      <label className="label mb-2">{label}{suffix && <span style={{ color: '#909096', marginLeft: 6, textTransform: 'none', letterSpacing: 0 }}>{suffix}</span>}</label>
+      <label className="label mb-2">{label}{suffix && <span style={{ color: 'var(--text-2)', marginLeft: 6, textTransform: 'none', letterSpacing: 0 }}>{suffix}</span>}</label>
       <Input
         type="number"
         placeholder={placeholder}
@@ -48,12 +48,12 @@ function Field({ label, value, onChange, suffix = '', placeholder = '0' }: {
   )
 }
 
-function Bar({ label, value, total, color = '#7C3AED' }: { label: string; value: number; total: number; color?: string }) {
+function Bar({ label, value, total, color = 'var(--violet)' }: { label: string; value: number; total: number; color?: string }) {
   const pct = total > 0 ? Math.min((Math.abs(value) / total) * 100, 100) : 0
   return (
     <div>
       <div className="flex justify-between mb-1.5">
-        <span className="text-[12px]" style={{ color: '#71717A' }}>{label}</span>
+        <span className="text-[12px]" style={{ color: 'var(--text-3)' }}>{label}</span>
         <span className="text-[12px] mono" style={{ color: '#FFFFFF' }}>{value.toLocaleString('ru-RU')} ₽</span>
       </div>
       <div style={{ height: 4, background: 'rgba(255,255,255,0.06)', borderRadius: 0 }}>
@@ -110,23 +110,23 @@ export default function ProfitCalculatorPage() {
         <button
           onClick={() => router.back()}
           className="flex items-center gap-1.5 text-[13px] mb-6"
-          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#71717A', padding: 0 }}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: 0 }}
           onMouseEnter={e => { e.currentTarget.style.color = '#FFFFFF' }}
-          onMouseLeave={e => { e.currentTarget.style.color = '#71717A' }}
+          onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-3)' }}
         >
           <ArrowLeft size={14} /> Назад
         </button>
         <div className="mb-8">
           <p className="label mb-2">ИНСТРУМЕНТЫ</p>
           <h1 className="text-[22px] font-bold" style={{ color: '#FFFFFF' }}>Калькулятор чистой прибыли</h1>
-          <p className="text-[13px] mt-1" style={{ color: '#71717A' }}>Рассчитайте реальную прибыль с учётом всех расходов маркетплейса</p>
+          <p className="text-[13px] mt-1" style={{ color: 'var(--text-3)' }}>Рассчитайте реальную прибыль с учётом всех расходов маркетплейса</p>
         </div>
 
         <div className="grid grid-cols-5 gap-6 items-start">
 
           {/* LEFT: Form — 3 cols */}
           <div className="col-span-3 space-y-4">
-            <div className="p-6 rounded-[8px]" style={{ background: '#111113', border: '1px solid rgba(255,255,255,0.08)' }}>
+            <div className="p-6 rounded-[8px]" style={{ background: 'var(--surface)', border: '1px solid rgba(255,255,255,0.08)' }}>
               <p className="text-[13px] font-semibold mb-5" style={{ color: '#FFFFFF' }}>Данные товара</p>
               <div className="grid grid-cols-2 gap-4">
                 <Field label="ЦЕНА ПРОДАЖИ" suffix="₽" value={form.price} onChange={set('price')} placeholder="1990" />
@@ -150,37 +150,37 @@ export default function ProfitCalculatorPage() {
 
           {/* RIGHT: Result — 2 cols */}
           <div className="col-span-2 sticky top-20">
-            <div className="p-6 rounded-[8px]" style={{ background: '#111113', border: '1px solid rgba(255,255,255,0.08)' }}>
+            <div className="p-6 rounded-[8px]" style={{ background: 'var(--surface)', border: '1px solid rgba(255,255,255,0.08)' }}>
               <p className="label mb-4">РЕЗУЛЬТАТ</p>
 
               <div className="mb-6">
-                <p className="text-[11px] mb-1" style={{ color: '#909096' }}>ЧИСТАЯ ПРИБЫЛЬ</p>
+                <p className="text-[11px] mb-1" style={{ color: 'var(--text-2)' }}>ЧИСТАЯ ПРИБЫЛЬ</p>
                 <p
                   className="font-bold mono leading-none"
                   style={{ fontSize: 36, color: r.profit >= 0 ? '#FFFFFF' : '#F87171' }}
                 >
                   {r.profit >= 0 ? '+' : ''}{Math.round(r.profit).toLocaleString('ru-RU')}
-                  <span style={{ fontSize: 18, color: '#A78BFA', marginLeft: 6 }}>₽</span>
+                  <span style={{ fontSize: 18, color: 'var(--violet-text)', marginLeft: 6 }}>₽</span>
                 </p>
               </div>
 
-              <div className="mb-6 p-4 rounded-[8px]" style={{ background: '#09090B', border: '1px solid rgba(255,255,255,0.08)' }}>
+              <div className="mb-6 p-4 rounded-[8px]" style={{ background: 'var(--bg)', border: '1px solid rgba(255,255,255,0.08)' }}>
                 <div className="flex justify-between mb-1">
-                  <span className="text-[12px]" style={{ color: '#71717A' }}>МАРЖА</span>
-                  <span className="text-[14px] font-bold mono" style={{ color: r.margin >= 15 ? '#22C55E' : '#F87171' }}>
+                  <span className="text-[12px]" style={{ color: 'var(--text-3)' }}>МАРЖА</span>
+                  <span className="text-[14px] font-bold mono" style={{ color: r.margin >= 15 ? 'var(--success)' : '#F87171' }}>
                     {r.margin.toFixed(1)}%
                   </span>
                 </div>
                 <div style={{ height: 4, background: 'rgba(255,255,255,0.06)' }}>
-                  <div style={{ height: '100%', width: `${Math.max(0, Math.min(r.margin * 5, 100))}%`, background: r.margin >= 15 ? '#22C55E' : '#F87171', transition: 'width 0.3s' }} />
+                  <div style={{ height: '100%', width: `${Math.max(0, Math.min(r.margin * 5, 100))}%`, background: r.margin >= 15 ? 'var(--success)' : '#F87171', transition: 'width 0.3s' }} />
                 </div>
               </div>
 
               <div className="space-y-3">
                 {r.price > 0 && (
                   <>
-                    <Bar label="Себестоимость" value={r.costPrice}   total={r.price} color="#909096" />
-                    <Bar label="Комиссия МП"   value={r.commission}  total={r.price} color="#7C3AED" />
+                    <Bar label="Себестоимость" value={r.costPrice}   total={r.price} color="var(--text-2)" />
+                    <Bar label="Комиссия МП"   value={r.commission}  total={r.price} color="var(--violet)" />
                     <Bar label="Логистика"     value={r.logistics}   total={r.price} color="#5A56D0" />
                     <Bar label="Хранение"      value={r.storage}     total={r.price} color="#4A47B0" />
                     <Bar label="Реклама"       value={r.advertising} total={r.price} color="#3C3A90" />
@@ -189,14 +189,14 @@ export default function ProfitCalculatorPage() {
                   </>
                 )}
                 {r.price === 0 && (
-                  <p className="text-center py-4 text-[13px]" style={{ color: '#909096' }}>Введите цену продажи</p>
+                  <p className="text-center py-4 text-[13px]" style={{ color: 'var(--text-2)' }}>Введите цену продажи</p>
                 )}
               </div>
 
               {r.price > 0 && (
                 <div className="mt-5 pt-4" style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}>
                   <div className="flex justify-between text-[12px]">
-                    <span style={{ color: '#71717A' }}>Итого расходов</span>
+                    <span style={{ color: 'var(--text-3)' }}>Итого расходов</span>
                     <span className="mono" style={{ color: '#FFFFFF' }}>{Math.round(r.totalExp + r.tax).toLocaleString('ru-RU')} ₽</span>
                   </div>
                 </div>
@@ -214,27 +214,27 @@ export default function ProfitCalculatorPage() {
                 <div
                   key={s.id}
                   className="flex items-center justify-between p-4 rounded-[8px] transition-colors duration-200"
-                  style={{ background: '#111113', border: '1px solid rgba(255,255,255,0.08)' }}
-                  onMouseEnter={e => { e.currentTarget.style.background = '#18181B' }}
-                  onMouseLeave={e => { e.currentTarget.style.background = '#111113' }}
+                  style={{ background: 'var(--surface)', border: '1px solid rgba(255,255,255,0.08)' }}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface-h)' }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'var(--surface)' }}
                 >
                   <div className="flex items-center gap-4">
-                    <Calculator size={14} style={{ color: '#909096' }} />
+                    <Calculator size={14} style={{ color: 'var(--text-2)' }} />
                     <div>
                       <p className="text-[13px] font-medium" style={{ color: '#FFFFFF' }}>{s.name}</p>
-                      <p className="text-[11px]" style={{ color: '#909096' }}>{s.date}</p>
+                      <p className="text-[11px]" style={{ color: 'var(--text-2)' }}>{s.date}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-6">
                     <div className="text-right">
                       <p className="text-[11px] label mb-0.5">ПРИБЫЛЬ</p>
-                      <p className="text-[14px] font-bold mono" style={{ color: s.profit >= 0 ? '#A78BFA' : '#F87171' }}>
+                      <p className="text-[14px] font-bold mono" style={{ color: s.profit >= 0 ? 'var(--violet-text)' : '#F87171' }}>
                         {s.profit >= 0 ? '+' : ''}{s.profit.toLocaleString('ru-RU')} ₽
                       </p>
                     </div>
                     <div className="text-right">
                       <p className="text-[11px] label mb-0.5">МАРЖА</p>
-                      <p className="text-[14px] font-bold mono" style={{ color: s.margin >= 15 ? '#22C55E' : '#F87171' }}>
+                      <p className="text-[14px] font-bold mono" style={{ color: s.margin >= 15 ? 'var(--success)' : '#F87171' }}>
                         {s.margin}%
                       </p>
                     </div>

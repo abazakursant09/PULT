@@ -1514,6 +1514,22 @@ export const api = {
     financeSummary: () => req<ImportFinanceSummary>('/api/import/finance/summary'),
     stats: () => req<ImportStatsResponse>('/api/import/stats'),
   },
+
+  // ── Learning Surface (F1) — read-only ranked alternatives + decision evidence.
+  // Contract rule: pass the SAME listing_id to both calls so the recommendation
+  // and its evidence share one resolved context (see E4 consistency fix).
+  learning: {
+    getLearningAlternatives: (params: { insight_key: string; listing_id?: string }) => {
+      const q = new URLSearchParams({ insight_key: params.insight_key })
+      if (params.listing_id) q.set('listing_id', params.listing_id)
+      return req<LearningAlternativesResponse>(`/api/learning/alternatives?${q}`)
+    },
+    getDecisionEvidence: (params: { insight_key: string; action_key: string; listing_id?: string }) => {
+      const q = new URLSearchParams({ insight_key: params.insight_key, action_key: params.action_key })
+      if (params.listing_id) q.set('listing_id', params.listing_id)
+      return req<DecisionEvidenceResponse>(`/api/learning/evidence?${q}`)
+    },
+  },
 }
 
 // ── Catalog types ──────────────────────────────────────────────────────────────
@@ -1797,4 +1813,45 @@ export interface SeoProjectItem {
   template_set:      string | null
   image_urls:        string[]
   created_at:        string
+}
+
+// ── Learning Surface types (F1) ──────────────────────────────────────────────
+// Mirror the backend read-only contracts: GET /api/learning/alternatives (L6)
+// and GET /api/learning/evidence (E2/E4). Counts are aggregate; no internal ids.
+
+export interface LearningAlternative {
+  action_key:     string
+  rank:           number
+  reason:         string
+  fallback:       boolean
+  confirmed:      number
+  refuted:        number
+  sample:         number
+  confirmed_rate: number | null
+  weighted_rate:  number | null
+}
+
+export interface LearningAlternativesResponse {
+  insight_key:  string
+  alternatives: LearningAlternative[]
+  source:       string   // "decision_memory"
+  degraded:     boolean  // true when the resolved context has an "unknown" segment
+}
+
+export interface DecisionEvidence {
+  action_key:     string
+  reason:         string
+  context_group:  string
+  confirmed:      number
+  refuted:        number
+  sample:         number
+  confirmed_rate: number | null
+  weighted_rate:  number | null
+  fallback:       boolean
+  source:         string   // "decision_memory"
+}
+
+export interface DecisionEvidenceResponse {
+  insight_key: string
+  evidence:    DecisionEvidence | null
 }

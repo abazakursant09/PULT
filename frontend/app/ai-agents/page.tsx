@@ -101,14 +101,14 @@ export default function AIAgentsPage() {
       <div className="flex h-[calc(100vh-56px)]">
 
         {/* Agent list */}
-        <div className="shrink-0 flex flex-col" style={{ width: 240, background: '#09090B', borderRight: '1px solid rgba(255,255,255,0.08)' }}>
+        <div className="shrink-0 flex flex-col" style={{ width: 240, background: 'var(--bg)', borderRight: '1px solid rgba(255,255,255,0.08)' }}>
           <div className="p-5 pb-4" style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
             <button
               onClick={() => router.back()}
               className="flex items-center gap-1 text-[12px] mb-3"
-              style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#71717A', padding: 0 }}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: 0 }}
               onMouseEnter={e => { e.currentTarget.style.color = '#FFFFFF' }}
-              onMouseLeave={e => { e.currentTarget.style.color = '#71717A' }}
+              onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-3)' }}
             >
               <ArrowLeft size={12} /> Назад
             </button>
@@ -126,18 +126,18 @@ export default function AIAgentsPage() {
                   className="w-full text-left p-4 rounded-[8px] transition-all duration-200"
                   style={{
                     background: isActive ? 'rgba(110,106,252,0.10)' : 'transparent',
-                    border: `1px solid ${isActive ? '#A78BFA' : 'transparent'}`,
+                    border: `1px solid ${isActive ? 'var(--violet-text)' : 'transparent'}`,
                     cursor: 'pointer',
                   }}
                 >
                   <div className="flex items-center gap-2.5 mb-1.5">
-                    <Icon size={13} style={{ color: isActive ? '#A78BFA' : '#909096', flexShrink: 0 }} />
-                    <span className="text-[13px] font-medium" style={{ color: isActive ? '#FFFFFF' : '#71717A' }}>{a.name}</span>
+                    <Icon size={13} style={{ color: isActive ? 'var(--violet-text)' : 'var(--text-2)', flexShrink: 0 }} />
+                    <span className="text-[13px] font-medium" style={{ color: isActive ? '#FFFFFF' : 'var(--text-3)' }}>{a.name}</span>
                     {msgCount > 0 && (
-                      <span className="ml-auto text-[10px]" style={{ color: '#909096' }}>{msgCount}</span>
+                      <span className="ml-auto text-[10px]" style={{ color: 'var(--text-2)' }}>{msgCount}</span>
                     )}
                   </div>
-                  <p className="text-[11px] line-clamp-2" style={{ color: '#909096' }}>{a.desc}</p>
+                  <p className="text-[11px] line-clamp-2" style={{ color: 'var(--text-2)' }}>{a.desc}</p>
                 </button>
               )
             })}
@@ -148,12 +148,12 @@ export default function AIAgentsPage() {
         <div className="flex-1 flex flex-col min-w-0">
           {/* Chat header */}
           <div className="flex items-center gap-3 px-6 py-4" style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-            <div className="w-8 h-8 rounded-[8px] flex items-center justify-center" style={{ background: '#111113', border: '1px solid rgba(255,255,255,0.08)' }}>
-              <agent.icon size={14} style={{ color: '#A78BFA' }} />
+            <div className="w-8 h-8 rounded-[8px] flex items-center justify-center" style={{ background: 'var(--surface)', border: '1px solid rgba(255,255,255,0.08)' }}>
+              <agent.icon size={14} style={{ color: 'var(--violet-text)' }} />
             </div>
             <div>
               <p className="text-[14px] font-semibold" style={{ color: '#FFFFFF' }}>{agent.name}</p>
-              <p className="text-[12px]" style={{ color: '#909096' }}>{agent.desc}</p>
+              <p className="text-[12px]" style={{ color: 'var(--text-2)' }}>{agent.desc}</p>
             </div>
           </div>
 
@@ -162,15 +162,15 @@ export default function AIAgentsPage() {
             {msgs.map((m, i) => (
               <div key={i} className={`flex gap-3 ${m.role === 'user' ? 'flex-row-reverse' : ''}`}>
                 {m.role === 'agent' && (
-                  <div className="w-7 h-7 rounded-[8px] flex items-center justify-center shrink-0 mt-0.5" style={{ background: '#111113', border: '1px solid rgba(255,255,255,0.08)' }}>
-                    <Bot size={12} style={{ color: '#A78BFA' }} />
+                  <div className="w-7 h-7 rounded-[8px] flex items-center justify-center shrink-0 mt-0.5" style={{ background: 'var(--surface)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                    <Bot size={12} style={{ color: 'var(--violet-text)' }} />
                   </div>
                 )}
                 <div style={{ maxWidth: '70%' }}>
                   <div
                     className="px-4 py-3 rounded-[8px] text-[13px] whitespace-pre-line"
                     style={{
-                      background: m.role === 'user' ? 'rgba(110,106,252,0.10)' : '#111113',
+                      background: m.role === 'user' ? 'rgba(110,106,252,0.10)' : 'var(--surface)',
                       border: `1px solid ${m.role === 'user' ? 'rgba(110,106,252,0.22)' : 'rgba(255,255,255,0.08)'}`,
                       color: '#FFFFFF',
                       lineHeight: 1.6,
@@ -178,20 +178,20 @@ export default function AIAgentsPage() {
                   >
                     {m.text}
                   </div>
-                  <p className="text-[10px] mt-1 px-1" style={{ color: '#909096', textAlign: m.role === 'user' ? 'right' : 'left' }}>{m.ts}</p>
+                  <p className="text-[10px] mt-1 px-1" style={{ color: 'var(--text-2)', textAlign: m.role === 'user' ? 'right' : 'left' }}>{m.ts}</p>
                 </div>
               </div>
             ))}
 
             {typing && (
               <div className="flex gap-3">
-                <div className="w-7 h-7 rounded-[8px] flex items-center justify-center shrink-0" style={{ background: '#111113', border: '1px solid rgba(255,255,255,0.08)' }}>
-                  <Bot size={12} style={{ color: '#A78BFA' }} />
+                <div className="w-7 h-7 rounded-[8px] flex items-center justify-center shrink-0" style={{ background: 'var(--surface)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                  <Bot size={12} style={{ color: 'var(--violet-text)' }} />
                 </div>
-                <div className="px-4 py-3 rounded-[8px]" style={{ background: '#111113', border: '1px solid rgba(255,255,255,0.08)' }}>
+                <div className="px-4 py-3 rounded-[8px]" style={{ background: 'var(--surface)', border: '1px solid rgba(255,255,255,0.08)' }}>
                   <div className="flex gap-1.5">
                     {[0,1,2].map(i => (
-                      <span key={i} className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: '#909096', animationDelay: `${i*200}ms` }} />
+                      <span key={i} className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: 'var(--text-2)', animationDelay: `${i*200}ms` }} />
                     ))}
                   </div>
                 </div>

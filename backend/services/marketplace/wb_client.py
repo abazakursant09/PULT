@@ -68,6 +68,41 @@ class WBClient:
             "POST", "/api/v2/upload/task", token=token, json={"data": [item]}
         )
 
+    async def set_discount(self, *, token: str, offer_id: str, discount: float) -> dict:
+        """
+        WB Discounts-Prices API — update the discount only (A2 reduce_discount).
+            POST /api/v2/upload/task  body {"data":[{"nmID":..,"discount":..}]}
+        """
+        try:
+            nm_id = int(offer_id)
+        except (TypeError, ValueError):
+            raise ExecutionError(
+                ExecutionError.VALIDATION,
+                "Wildberries requires a numeric nmID as offer_id (SKU is not numeric)",
+            )
+        return await self._prices.request(
+            "POST", "/api/v2/upload/task", token=token,
+            json={"data": [{"nmID": nm_id, "discount": int(discount)}]},
+        )
+
+    async def set_auto_promotion(self, *, token: str, offer_id: str, enabled: bool) -> dict:
+        """
+        WB promotions participation (A3 stop_auto_promotion). enabled=False
+        declines automatic promotion participation for the listing.
+            POST /api/v1/promotions/participation  {"nmID":.., "participate": bool}
+        """
+        try:
+            nm_id = int(offer_id)
+        except (TypeError, ValueError):
+            raise ExecutionError(
+                ExecutionError.VALIDATION,
+                "Wildberries requires a numeric nmID as offer_id (SKU is not numeric)",
+            )
+        return await self._prices.request(
+            "POST", "/api/v1/promotions/participation", token=token,
+            json={"nmID": nm_id, "participate": bool(enabled)},
+        )
+
     # ── Advertising (ME-4) ────────────────────────────────────────────────────
     async def set_bid(self, *, token: str, campaign_id: int, cpm: int,
                       adv_type: int, param: int | None = None) -> dict:
@@ -100,6 +135,23 @@ class WBClient:
         if not hasattr(self, "_content_client"):
             self._content_client = BaseMarketplaceClient(settings.wb_content_base)
         return self._content_client
+
+    # ── Statistics (read side, Metric Catalog) ────────────────────────────────
+    async def get_sales(self, *, token: str, date_from: str, flag: int = 0) -> list[dict]:
+        """
+        WB Statistics API: GET /api/v1/supplier/sales?dateFrom=&flag=
+        Returns a JSON array of sale rows (each row carries nmId + forPay).
+        """
+        data = await self._statistics().request(
+            "GET", "/api/v1/supplier/sales", token=token,
+            params={"dateFrom": date_from, "flag": flag},
+        )
+        return data if isinstance(data, list) else []
+
+    def _statistics(self) -> "BaseMarketplaceClient":
+        if not hasattr(self, "_statistics_client"):
+            self._statistics_client = BaseMarketplaceClient(settings.wb_statistics_base)
+        return self._statistics_client
 
 
 wb_client = WBClient()

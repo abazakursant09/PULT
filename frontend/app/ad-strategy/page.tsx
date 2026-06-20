@@ -9,19 +9,19 @@ const STRATEGIES = [
     title: 'Поисковая реклама',
     desc: 'Продвижение в поиске маркетплейса по ключевым запросам. Подходит для сезонных товаров и новинок.',
     icon: Target,
-    color: '#7C3AED',
+    color: 'var(--violet)',
   },
   {
     title: 'Баннерная реклама',
     desc: 'Размещение баннеров на главной странице и в категориях. Максимальный охват аудитории.',
     icon: Megaphone,
-    color: '#22C55E',
+    color: 'var(--success)',
   },
   {
     title: 'Акции и скидки',
     desc: 'Участие в акциях маркетплейса: распродажи, купоны, программы лояльности.',
     icon: TrendingUp,
-    color: '#F59E0B',
+    color: 'var(--warning)',
   },
   {
     title: 'Аналитика рекламы',
@@ -41,9 +41,9 @@ export default function AdStrategyPage() {
         <button
           onClick={() => router.back()}
           className="flex items-center gap-1.5 text-[13px] mb-6"
-          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#71717A', padding: 0 }}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: 0 }}
           onMouseEnter={e => { e.currentTarget.style.color = '#FFFFFF' }}
-          onMouseLeave={e => { e.currentTarget.style.color = '#71717A' }}
+          onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-3)' }}
         >
           <ArrowLeft size={14} /> Назад
         </button>
@@ -52,7 +52,7 @@ export default function AdStrategyPage() {
         <div className="mb-8">
           <p className="label mb-2">ИНСТРУМЕНТЫ</p>
           <h1 className="text-[22px] font-bold mb-1" style={{ color: '#FFFFFF' }}>Реклама</h1>
-          <p className="text-[13px]" style={{ color: '#71717A' }}>
+          <p className="text-[13px]" style={{ color: 'var(--text-3)' }}>
             Стратегии продвижения на маркетплейсах — Wildberries, Ozon, Яндекс Маркет
           </p>
         </div>
@@ -63,7 +63,7 @@ export default function AdStrategyPage() {
             <div
               key={title}
               className="p-6 rounded-[8px]"
-              style={{ background: '#111113', border: '1px solid rgba(255,255,255,0.08)' }}
+              style={{ background: 'var(--surface)', border: '1px solid rgba(255,255,255,0.08)' }}
             >
               <div
                 className="w-10 h-10 rounded-[8px] flex items-center justify-center mb-4"
@@ -72,7 +72,7 @@ export default function AdStrategyPage() {
                 <Icon size={20} style={{ color }} />
               </div>
               <p className="text-[15px] font-semibold mb-2" style={{ color: '#FFFFFF' }}>{title}</p>
-              <p className="text-[13px] leading-relaxed" style={{ color: '#71717A' }}>{desc}</p>
+              <p className="text-[13px] leading-relaxed" style={{ color: 'var(--text-3)' }}>{desc}</p>
             </div>
           ))}
         </div>
@@ -82,7 +82,7 @@ export default function AdStrategyPage() {
           className="mt-8 p-4 rounded-[8px] text-center"
           style={{ background: 'rgba(110,106,252,0.08)', border: '1px solid rgba(110,106,252,0.20)' }}
         >
-          <p className="text-[13px]" style={{ color: '#71717A' }}>
+          <p className="text-[13px]" style={{ color: 'var(--text-3)' }}>
             Полная интеграция с рекламными кабинетами маркетплейсов — скоро
           </p>
         </div>

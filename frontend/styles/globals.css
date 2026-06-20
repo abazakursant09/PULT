@@ -31,20 +31,48 @@
   --radius:                 0.5rem;
 
   /* ── Raw design tokens ─────────────────────────────────── */
-  --bg:          #09090B;
-  --surface:     #111113;
-  --surface-h:   #18181B;
-  --line:        #232329;
-  --text:        #FFFFFF;
-  --text-2:      #A1A1AA;
-  --text-3:      #71717A;
+  /* ── КОМФОРТ-ПАЛИТРА (default = тёмная-комфорт) ──────────────────────────────
+     Глаза не устают за 6-8ч: НЕ чистый чёрный (#15171C), НЕ чистый белый текст
+     (#E3E5EA), приглушённые сигналы. Акцент --violet канон, только на действиях.
+     Светлая тема — ниже в [data-theme="light"]. */
+  --bg:          #15171C;
+  --surface:     #1C1F26;
+  --surface-h:   #232730;
+  --line:        #2C313B;
+  --text:        #E3E5EA;
+  --text-2:      #9AA1AD;
+  --text-3:      #6C7480;
   --violet:      #7C3AED;
   --violet-h:    #8B5CF6;
-  --violet-text: #A78BFA;
-  --violet-dim:  rgba(124,58,237,0.12);
-  --danger:      #EF4444;
-  --success:     #22C55E;
-  --warning:     #F59E0B;
+  --violet-text: #B6A4FA;
+  --violet-dim:  rgba(124,58,237,0.16);
+  --danger:      #E5614E;
+  --success:     #46B07D;
+  --warning:     #E0A33A;
+  --danger-dim:  rgba(229,97,78,0.14);
+  --success-dim: rgba(70,176,125,0.14);
+  --warning-dim: rgba(224,163,58,0.14);
+}
+
+/* ── СВЕТЛАЯ-КОМФОРТ (по кнопке) — мягкий серый фон, не чисто-белый ──────────── */
+[data-theme="light"]{
+  --bg:          #F5F6F8;
+  --surface:     #FFFFFF;
+  --surface-h:   #EFF1F4;
+  --line:        #E3E6EB;
+  --text:        #222732;
+  --text-2:      #586071;
+  --text-3:      #8A92A0;
+  --violet:      #6D45D9;   /* глубже для контраста на белом (AA) */
+  --violet-h:    #7C3AED;
+  --violet-text: #5B34C7;
+  --violet-dim:  #EDE7FB;
+  --danger:      #CC5440;
+  --success:     #2E9B68;
+  --warning:     #B07A16;
+  --danger-dim:  #FAEAE6;
+  --success-dim: #E4F3EB;
+  --warning-dim: #F9F1DC;
 }
 
 /* ── BASE ──────────────────────────────────────────────────── */

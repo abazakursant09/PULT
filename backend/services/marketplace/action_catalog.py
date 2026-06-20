@@ -95,6 +95,90 @@ def _revert_set_price(payload: dict, result: dict) -> tuple[str, dict]:
 
 
 # ── Advertising (ME-4) ─────────────────────────────────────────────────────────
+def _validate_reduce_discount(payload: dict) -> None:
+    # offer_id required; the marketplace-specific magnitude (discount for WB,
+    # price for Ozon) is validated at dispatch where the marketplace is known.
+    _require(payload, "offer_id")
+
+
+async def _dispatch_reduce_discount(token: str, payload: dict, ctx: dict) -> dict:
+    mp = ctx.get("marketplace")
+    if mp == "wildberries":
+        if payload.get("discount") is None:
+            raise ExecutionError(ExecutionError.VALIDATION,
+                                 "reduce_discount: Wildberries requires 'discount'")
+        resp = await wb_client.set_discount(
+            token=token, offer_id=str(payload["offer_id"]),
+            discount=float(payload["discount"]),
+        )
+    elif mp == "ozon":
+        # Ozon has no discount-% field; a reduced discount = a higher price.
+        if payload.get("price") is None:
+            raise ExecutionError(ExecutionError.VALIDATION,
+                                 "reduce_discount: Ozon requires 'price' (reduced-discount price)")
+        resp = await ozon_client.set_price(
+            token=token, client_id=ctx.get("ozon_client_id"),
+            offer_id=str(payload["offer_id"]), price=float(payload["price"]),
+        )
+    else:
+        raise ExecutionError(ExecutionError.VALIDATION,
+                             f"reduce_discount: unsupported marketplace {mp}")
+    return {
+        "api_request_id": (resp or {}).get("requestId") if isinstance(resp, dict) else None,
+        "offer_id": payload["offer_id"],
+    }
+
+
+def _revert_reduce_discount(payload: dict, result: dict) -> tuple[str, dict]:
+    """Inverse = restore the recorded prior discount (WB) / prior price (Ozon)."""
+    mp = payload.get("marketplace")
+    if mp == "wildberries":
+        old = payload.get("old_discount")
+        if old is None:
+            raise ExecutionError.guard("NOT_REVERSIBLE", "no old_discount recorded")
+        return "reduce_discount", {"marketplace": mp, "offer_id": payload["offer_id"],
+                                   "discount": old, "old_discount": payload.get("discount")}
+    old = payload.get("old_price")
+    if old is None:
+        raise ExecutionError.guard("NOT_REVERSIBLE", "no old_price recorded")
+    return "reduce_discount", {"marketplace": mp, "offer_id": payload["offer_id"],
+                               "price": old, "old_price": payload.get("price")}
+
+
+def _validate_stop_auto_promotion(payload: dict) -> None:
+    _require(payload, "offer_id")
+
+
+async def _dispatch_stop_auto_promotion(token: str, payload: dict, ctx: dict) -> dict:
+    mp = ctx.get("marketplace")
+    enabled = bool(payload.get("enabled", False))   # stop → disable participation
+    if mp == "wildberries":
+        resp = await wb_client.set_auto_promotion(
+            token=token, offer_id=str(payload["offer_id"]), enabled=enabled)
+    elif mp == "ozon":
+        resp = await ozon_client.set_auto_promotion(
+            token=token, client_id=ctx.get("ozon_client_id"),
+            offer_id=str(payload["offer_id"]), enabled=enabled)
+    else:
+        raise ExecutionError(ExecutionError.VALIDATION,
+                             f"stop_auto_promotion: unsupported marketplace {mp}")
+    return {
+        "api_request_id": (resp or {}).get("requestId") if isinstance(resp, dict) else None,
+        "offer_id": payload["offer_id"], "enabled": enabled,
+    }
+
+
+def _revert_stop_auto_promotion(payload: dict, result: dict) -> tuple[str, dict]:
+    """Inverse = restore the recorded prior participation state (re-enable)."""
+    old = payload.get("old_enabled")
+    if old is None:
+        raise ExecutionError.guard("NOT_REVERSIBLE", "no old_enabled recorded")
+    return "stop_auto_promotion", {
+        "marketplace": payload.get("marketplace"), "offer_id": payload["offer_id"],
+        "enabled": bool(old), "old_enabled": payload.get("enabled"),
+    }
+
+
 def _validate_set_bid(payload: dict) -> None:
     _require(payload, "campaign_id", "cpm", "adv_type")
     try:
@@ -197,6 +281,24 @@ _CATALOG: dict[str, ActionSpec] = {
         dispatch=_dispatch_set_price,
         reversible=True,
         reverter=_revert_set_price,
+    ),
+    "reduce_discount": ActionSpec(        # A2 — margin alternative; measured on net_profit
+        action_type="reduce_discount",
+        marketplace=None,                 # WB (discount) / Ozon (price); Yandex gated impossible
+        required_scope="prices",
+        validate=_validate_reduce_discount,
+        dispatch=_dispatch_reduce_discount,
+        reversible=True,
+        reverter=_revert_reduce_discount,
+    ),
+    "stop_auto_promotion": ActionSpec(    # A3 — margin alternative; measured on net_profit
+        action_type="stop_auto_promotion",
+        marketplace=None,                 # WB / Ozon; Yandex gated impossible
+        required_scope="promotions",
+        validate=_validate_stop_auto_promotion,
+        dispatch=_dispatch_stop_auto_promotion,
+        reversible=True,
+        reverter=_revert_stop_auto_promotion,
     ),
     "ad_set_bid": ActionSpec(
         action_type="ad_set_bid", marketplace=None, required_scope="advert",

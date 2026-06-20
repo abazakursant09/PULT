@@ -19,11 +19,11 @@ export const T = {
   text2: '#8E8E93',   // secondary
   text3: '#6B6B72',   // tertiary / metadata
 
-  // ── Accent — violet ──────────────────────────────────────────────────────────
-  v:     '#6E6AFC',
+  // ── Accent — violet (canon: совпадает с globals.css --violet) ─────────────────
+  v:     '#7C3AED',
   vMid:  '#A78BFA',                    // lighter violet for text on dark
-  vDim:  'rgba(110,106,252,0.12)',     // tinted bg (active state, hover)
-  vHint: 'rgba(110,106,252,0.07)',     // very subtle hint
+  vDim:  'rgba(124,58,237,0.12)',      // tinted bg (active state, hover)
+  vHint: 'rgba(124,58,237,0.07)',      // very subtle hint
 
   // ── Status ───────────────────────────────────────────────────────────────────
   ok:    '#22C55E',

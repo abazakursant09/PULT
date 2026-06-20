@@ -50,3 +50,9 @@ Thumbs.db
 # ── Logs ─────────────────────────────────────────────────────────────────────
 *.log
 logs/
+
+# ── Generated analysis / cache / backup artifacts ─────────────────────────────
+graphify-out/
+*.zip
+project_backup_*/
+frontend/tsconfig.tsbuildinfo

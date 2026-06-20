@@ -6,10 +6,10 @@ import { Bell, Check, CheckCheck } from 'lucide-react'
 import { api, type NotificationItem } from '@/lib/api'
 
 const DOT_COLOR: Record<string, string> = {
-  new_review:    '#7C3AED',
-  offer_change:  '#D97706',
-  trial_end:     '#EF4444',
-  limit_reached: '#7C3AED',
+  new_review:    'var(--violet)',
+  offer_change:  'var(--warning)',
+  trial_end:     'var(--danger)',
+  limit_reached: 'var(--violet)',
 }
 
 function fmt(iso: string) {
@@ -97,7 +97,7 @@ export function NotificationBell({ dropdownSide = 'down' }: Props) {
           borderRadius: 9,
           border: `1px solid ${open ? 'rgba(110,106,252,0.3)' : 'rgba(110,106,252,0.12)'}`,
           background: open ? 'rgba(110,106,252,0.08)' : 'transparent',
-          color: open ? '#7C3AED' : '#909096',
+          color: open ? 'var(--violet)' : 'var(--text-2)',
           cursor: 'pointer',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           flexShrink: 0,
@@ -108,10 +108,10 @@ export function NotificationBell({ dropdownSide = 'down' }: Props) {
           <span style={{
             position: 'absolute', top: -5, right: -5,
             minWidth: 16, height: 16, borderRadius: 8, padding: '0 4px',
-            background: '#EF4444', color: '#fff',
+            background: 'var(--danger)', color: '#fff',
             fontSize: 9, fontWeight: 700,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            lineHeight: 1, border: '1.5px solid #111113',
+            lineHeight: 1, border: '1.5px solid var(--surface)',
           }}>
             {count > 9 ? '9+' : count}
           </span>
@@ -122,7 +122,7 @@ export function NotificationBell({ dropdownSide = 'down' }: Props) {
       {open && (
         <div style={{
           ...dropdownStyle,
-          background: '#111113',
+          background: 'var(--surface)',
           border: '1px solid rgba(255,255,255,0.08)',
           borderRadius: 14,
           boxShadow: '0 8px 32px rgba(0,0,0,0.13)',
@@ -134,13 +134,13 @@ export function NotificationBell({ dropdownSide = 'down' }: Props) {
             borderBottom: '1px solid rgba(255,255,255,0.06)',
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           }}>
-            <span style={{ fontWeight: 600, fontSize: '0.875rem', color: '#FFFFFF' }}>
-              Уведомления {count > 0 && <span style={{ color: '#EF4444' }}>({count})</span>}
+            <span style={{ fontWeight: 600, fontSize: '0.875rem', color: 'var(--text)' }}>
+              Уведомления {count > 0 && <span style={{ color: 'var(--danger)' }}>({count})</span>}
             </span>
             {count > 0 && (
               <button
                 onClick={markAllRead}
-                style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#A78BFA', fontSize: '0.75rem', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'var(--violet-text)', fontSize: '0.75rem', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
               >
                 <CheckCheck size={12} /> Прочитать все
               </button>
@@ -150,12 +150,12 @@ export function NotificationBell({ dropdownSide = 'down' }: Props) {
           {/* List */}
           <div style={{ maxHeight: 320, overflowY: 'auto' }}>
             {loading && (
-              <div style={{ padding: '18px', textAlign: 'center', color: '#909096', fontSize: '0.8125rem' }}>
+              <div style={{ padding: '18px', textAlign: 'center', color: 'var(--text-2)', fontSize: '0.8125rem' }}>
                 Загрузка...
               </div>
             )}
             {!loading && notifications.length === 0 && (
-              <div style={{ padding: '24px 14px', textAlign: 'center', color: '#909096', fontSize: '0.8125rem' }}>
+              <div style={{ padding: '24px 14px', textAlign: 'center', color: 'var(--text-2)', fontSize: '0.8125rem' }}>
                 Нет уведомлений
               </div>
             )}
@@ -171,16 +171,16 @@ export function NotificationBell({ dropdownSide = 'down' }: Props) {
               >
                 <div style={{
                   width: 7, height: 7, borderRadius: '50%', marginTop: 5, flexShrink: 0,
-                  background: n.is_read ? 'rgba(110,106,252,0.15)' : (DOT_COLOR[n.type] ?? '#7C3AED'),
+                  background: n.is_read ? 'rgba(110,106,252,0.15)' : (DOT_COLOR[n.type] ?? 'var(--violet)'),
                 }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 600, fontSize: '0.75rem', color: '#FFFFFF', marginBottom: 2 }}>
+                  <div style={{ fontWeight: 600, fontSize: '0.75rem', color: 'var(--text)', marginBottom: 2 }}>
                     {n.title}
                   </div>
-                  <div style={{ fontSize: '0.6875rem', color: '#71717A', lineHeight: 1.5 }}>
+                  <div style={{ fontSize: '0.6875rem', color: 'var(--text-3)', lineHeight: 1.5 }}>
                     {n.message}
                   </div>
-                  <div style={{ fontSize: '0.625rem', color: '#909096', marginTop: 3 }}>
+                  <div style={{ fontSize: '0.625rem', color: 'var(--text-2)', marginTop: 3 }}>
                     {fmt(n.created_at)}
                   </div>
                 </div>
@@ -188,7 +188,7 @@ export function NotificationBell({ dropdownSide = 'down' }: Props) {
                   <button
                     onClick={() => markRead(n.id)}
                     title="Отметить прочитанным"
-                    style={{ color: '#909096', background: 'none', border: 'none', cursor: 'pointer', padding: 2, flexShrink: 0 }}
+                    style={{ color: 'var(--text-2)', background: 'none', border: 'none', cursor: 'pointer', padding: 2, flexShrink: 0 }}
                   >
                     <Check size={11} />
                   </button>
@@ -202,7 +202,7 @@ export function NotificationBell({ dropdownSide = 'down' }: Props) {
             <Link
               href="/dashboard/notifications"
               onClick={() => setOpen(false)}
-              style={{ display: 'block', textAlign: 'center', color: '#A78BFA', fontSize: '0.8125rem', textDecoration: 'none' }}
+              style={{ display: 'block', textAlign: 'center', color: 'var(--violet-text)', fontSize: '0.8125rem', textDecoration: 'none' }}
             >
               Все уведомления →
             </Link>

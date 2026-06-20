@@ -1,256 +1,96 @@
 'use client'
-
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { AlertTriangle, TrendingUp, TrendingDown, ArrowRight, FlaskConical, ChevronDown, Upload } from 'lucide-react'
-import { api, type InsightItem, type FinanceSummaryItem } from '@/lib/api'
-import { useData } from '@/hooks/useData'
-import { trackEvent, stampFunnel, elapsedSince, firstTimeOnly, FUNNEL_TS } from '@/lib/events'
-import { selectL1, splitL1, type L1ProductLine } from '@/lib/pultDecision'
+import { SellerBar } from '@/components/seller/Shell'
+import { getProducts, marketplaceSummary, daysLeft, mono, rub, MP_NAME, lensDetail, type SellerProduct } from '@/lib/pultSeller'
 
-// ── L1 ПУЛЬТ — V5 decision-first OS ──────────────────────────────────────────
-// "1 screen = 1 decision". DEFAULT shows only: money strip + ONE problem + ONE
-// CTA. All trust depth (why / mechanism / confidence / evidence / competing /
-// leaks / gains) lives behind an EXPAND toggle. Decision faster than reading.
+const ACT: Record<string, string> = { 'Реклама': 'Снизить ставку', 'Документы': 'Загрузить', 'Отзывы': 'Ответить', 'Возвраты': 'Разобрать', 'SEO': 'Обновить SEO', 'Цена': 'Поднять цену' }
+const sevRank = { loss: 0, warn: 1, gain: 2 } as const
 
-// Tokens — single source of truth: styles/globals.css :root (no raw hex)
-const BG = 'var(--bg)'
-const CARD = 'var(--surface)'
-const BORDER = 'var(--line)'
-const RED = 'var(--danger)'
-const GREEN = 'var(--success)'
-const AMBER = 'var(--warning)'
-const MUTED = 'var(--text-3)'
-const ACCENT_BG = 'var(--violet)'
-
-const CONF_COLOR: Record<'high' | 'medium' | 'low', string> = { high: GREEN, medium: AMBER, low: MUTED }
-const CONF_LABEL: Record<'high' | 'medium' | 'low', string> = { high: 'высокое', medium: 'среднее', low: 'низкое' }
-
-function rub(n: number): string { return `${Math.round(n).toLocaleString('ru-RU')} ₽` }
-
-function ProductRow({ p, color }: { p: L1ProductLine; color: string }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
-                  background: CARD, border: `1px solid ${BORDER}`, borderRadius: 10, padding: '11px 14px' }}>
-      <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.product}</div>
-        <div style={{ fontSize: 11.5, color: MUTED }}>маржа <span style={{ color }}>{p.margin.toFixed(1)}%</span></div>
-      </div>
-      <div style={{ fontSize: 14, fontWeight: 800, color, whiteSpace: 'nowrap' }}>
-        {p.effect_rub >= 0 ? '+' : '−'}{rub(Math.abs(p.effect_rub))}
-      </div>
-    </div>
-  )
-}
-
-export default function DashboardPage() {
+export default function Home() {
   const router = useRouter()
-  const [expanded, setExpanded] = useState(false)   // progressive disclosure
-  useEffect(() => {
-    if (!localStorage.getItem('token')) { router.push('/login'); return }
-    trackEvent('dashboard_opened', 'dashboard')
-  }, [router])
+  useEffect(() => { if (!localStorage.getItem('token')) router.push('/login') }, [router])
 
-  const { data: insightsData } = useData('/api/insights', () => api.actionEngine.getInsights(), 30_000)
-  const { data: finance }      = useData('/api/finance/summary', () => api.finance.summary(), 60_000)
+  const products = getProducts()
+  const mps = marketplaceSummary()
+  const totalLoss = products.filter(p => p.pr < 0).reduce((a, p) => a + p.pr, 0)
 
-  const insights: InsightItem[] = insightsData?.insights ?? []
-  const fin: FinanceSummaryItem[] = finance ?? []
-  // has_data unknown while loading → treat as data present (no onboarding flicker)
-  const hasData = insightsData?.has_data ?? true
-
-  const decision = selectL1(insights, fin, hasData)
-  const { default: d, expanded: ex } = splitL1(decision)
-  const demo = d.state.mode === 'demo'
-  const noData = d.state.mode === 'no_data'
-
-  // first_insight_shown — fired once ever, classified by insight_type, with activation timing
-  useEffect(() => {
-    if (noData || !decision.problem) return
-    if (!firstTimeOnly('bp_evt_first_insight')) return
-    stampFunnel(FUNNEL_TS.firstInsight)
-    trackEvent('first_insight_shown', 'dashboard', undefined, {
-      insight_type: decision.problem.insight_type,
-      time_to_first_insight_ms: elapsedSince(FUNNEL_TS.signup),
-    })
-  }, [noData, decision.problem?.insight_type])
-
-  function toggleExpand() {
-    setExpanded(v => { if (!v) trackEvent('l1_expand', 'dashboard'); return !v })
+  // пожары: проблемные линзы + критичные остатки, отранжированы
+  type Fire = { p: SellerProduct; ico: 'loss' | 'warn'; ms: string; amt: string; amtCls: string; act: string; rank: number }
+  const fires: Fire[] = []
+  for (const p of products) {
+    for (const l of p.L) {
+      if (l.sev === 'gain') continue
+      const d = lensDetail(l.label)
+      fires.push({ p, ico: l.sev, ms: d ? d.p : l.label, amt: l.label === 'Реклама' ? rub(p.pr) : l.sev === 'loss' ? 'риск' : '−топ', amtCls: l.sev === 'loss' ? 'neg' : 'amb', act: ACT[l.label] ?? 'Открыть', rank: sevRank[l.sev] })
+    }
+    const dl = daysLeft(p)
+    if (dl <= 4) fires.push({ p, ico: 'warn', ms: `Заканчивается остаток — ${dl} дня до нуля`, amt: `${dl} дня`, amtCls: 'amb', act: 'Заказать', rank: 0.5 })
   }
+  fires.sort((a, b) => a.rank - b.rank)
+  const topFires = fires.slice(0, 5)
+
+  const lowStock = products.slice().sort((a, b) => daysLeft(a) - daysLeft(b)).slice(0, 4)
+  const opps = products.flatMap(p => p.L.filter(l => l.sev === 'gain').map(l => ({ p, l }))).slice(0, 3)
+  const risks = products.flatMap(p => p.L.filter(l => l.label === 'Документы' || l.sev === 'loss').map(l => ({ p, l }))).filter(x => x.l.label === 'Документы').slice(0, 2)
 
   return (
-    <div style={{ background: BG, minHeight: '100vh', padding: '28px 24px', maxWidth: 1020, margin: '0 auto' }}>
-      {/* DEMO SAFETY — never present demo as the seller's real money */}
-      {demo && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(251,191,36,0.12)', border: '1px solid rgba(251,191,36,0.35)', borderRadius: 10, padding: '10px 14px', marginBottom: 18 }}>
-          <FlaskConical size={15} color={AMBER} />
-          <span style={{ fontSize: 12.5, color: AMBER, fontWeight: 600 }}>Демо-режим — пример, не ваши данные.</span>
+    <>
+      <SellerBar title="Главная" sub="Среда, 4 июня · доброе утро" />
+      <div className="s-canvas">
+        <div className="s-grid s-g4">
+          <Link className="s-card s-clk" href="/dashboard/zakazy"><div className="s-k">Прибыль сегодня</div><div className="s-kpi pos num">+9 840 ₽<small className="s-muted">из 148 заказов</small></div></Link>
+          <Link className="s-card s-clk" href="/dashboard/finance"><div className="s-k">Прибыль · 30 дней</div><div className="s-kpi num">248 600 ₽<small className="pos">▲ 6,2%</small></div></Link>
+          <Link className="s-card s-clk" href="/dashboard/finance"><div className="s-k">Сейчас теряете</div><div className="s-kpi neg num">{rub(totalLoss)}<small className="s-muted">/мес</small></div></Link>
+          <Link className="s-card s-clk" href="/dashboard/opportunities"><div className="s-k">Можно заработать</div><div className="s-kpi pos num">+58 700 ₽<small className="s-muted">/мес</small></div></Link>
         </div>
-      )}
 
-      {/* NO DATA — onboarding, not fake numbers (Step 3) */}
-      {noData && (
-        <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: 14, padding: 28, textAlign: 'center' }}>
-          <Upload size={26} color={MUTED} style={{ marginBottom: 12 }} />
-          <div style={{ fontSize: 19, fontWeight: 800, color: 'var(--text)', marginBottom: 6 }}>Данных пока нет</div>
-          <div style={{ fontSize: 13, color: MUTED, marginBottom: 18, maxWidth: 420, marginLeft: 'auto', marginRight: 'auto' }}>
-            Загрузите выгрузку с маркетплейса (финансы и товары) — Пульт покажет вашу прибыль, потери и что делать.
+        <div className="s-sec"><h2>По маркетплейсам</h2><Link className="" href="/dashboard/products" style={{ fontSize: 12.5, color: 'var(--ac-2)' }}>Все товары →</Link></div>
+        <div className="s-mprow">
+          {mps.map(s => (
+            <Link className="s-mpc s-clk" href={`/dashboard/products?mp=${s.m}`} key={s.m}><span className={`bd ${s.m}`} /><div><div className="nm">{MP_NAME[s.m]}</div><div className="ms">{s.count} товаров · {s.orders} заказов</div></div><span className={`v num ${s.profit >= 0 ? 'pos' : 'neg'}`}>{rub(s.profit)}</span></Link>
+          ))}
+        </div>
+
+        <div className="s-sec"><h2>Что горит сейчас <span className="badge">{topFires.length}</span></h2><Link href="/dashboard/products" style={{ fontSize: 12.5, color: 'var(--ac-2)' }}>Все задачи →</Link></div>
+        <div className="s-grid s-gfire">
+          <div className="s-card">
+            {topFires.map((f, i) => (
+              <div className="s-fire" key={i}>
+                <span className={`ico ${f.ico}`}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2 2 7l10 5 10-5z" /><path d="M2 7v10l10 5 10-5V7" /></svg></span>
+                <div className="ti"><div className="nm">{f.p.n} · {MP_NAME[f.p.m]}</div><div className="ms">{f.ms}</div></div>
+                <div className={`amt num ${f.amtCls}`}>{f.amt}</div>
+                <Link href={`/dashboard/products/${f.p.id}`} className="s-firebtn pri">{f.act}</Link>
+              </div>
+            ))}
           </div>
-          <Link href="/dashboard/import"
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13.5, fontWeight: 700,
-                     padding: '11px 20px', borderRadius: 9, textDecoration: 'none', background: ACCENT_BG,
-                     border: '1px solid rgba(124,58,237,0.5)', color: 'var(--text)' }}>
-            Загрузить данные<ArrowRight size={15} />
-          </Link>
+          <div className="s-card">
+            <div className="s-ch" style={{ color: 'var(--warn)' }}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 8 12 3 3 8l9 5z" /><path d="M3 8v8l9 5 9-5V8" /></svg>Надо заказать <Link href="/dashboard/sklad">Склад →</Link></div>
+            {lowStock.map(p => {
+              const d = daysLeft(p); const w = Math.min(60, d * 4); const c = d <= 4 ? 'var(--loss)' : d <= 8 ? 'var(--warn)' : 'var(--gain)'
+              return (
+                <Link className="s-stk s-clk" href="/dashboard/sklad" key={p.id}><span className="s-mono">{mono(p.n)}</span><div style={{ flex: 1 }}><div className="nm">{p.n}</div><div className="bar2"><i style={{ width: `${w}%`, background: c }} /></div></div><div className="days" style={{ color: c }}>{d} дн</div></Link>
+              )
+            })}
+          </div>
         </div>
-      )}
 
-      {!noData && (<>
-      {/* 1 — MONEY STRIP (net primary, no overload) */}
-      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 28, alignItems: 'stretch' }}>
-        <div style={{ flex: 2, minWidth: 220, background: CARD, border: `1px solid ${BORDER}`, borderRadius: 14, padding: 20 }}>
-          <div style={{ fontSize: 12, color: MUTED, marginBottom: 6 }}>Чистая прибыль</div>
-          <div style={{ fontSize: 34, fontWeight: 800, color: d.money_strip.net_profit >= 0 ? GREEN : RED }}>{rub(d.money_strip.net_profit)}</div>
-        </div>
-        <div style={{ flex: 1, minWidth: 140, background: CARD, border: `1px solid ${BORDER}`, borderRadius: 14, padding: 20 }}>
-          <div style={{ fontSize: 12, color: MUTED, marginBottom: 6 }}>Выручка</div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--text)' }}>{rub(d.money_strip.revenue)}</div>
-        </div>
-        <div style={{ flex: 1, minWidth: 120, background: CARD, border: `1px solid ${BORDER}`, borderRadius: 14, padding: 20 }}>
-          <div style={{ fontSize: 12, color: MUTED, marginBottom: 6 }}>Маржа</div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: d.money_strip.margin >= 0 ? GREEN : RED }}>{d.money_strip.margin.toFixed(1)}%</div>
+        <div className="s-grid s-g2e" style={{ marginTop: 16 }}>
+          <div className="s-card">
+            <div className="s-ch g"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 18 10 11l4 4 6-7" /><path d="M15 6h5v5" /></svg>Возможности · +58 700 ₽ <Link href="/dashboard/opportunities">Все →</Link></div>
+            {opps.map(({ p, l }, i) => (
+              <Link className="s-mini s-clk" href={`/dashboard/products/${p.id}`} key={i}><span className="s-mono">{mono(p.n)}</span><div><div className="nm">{p.n} · {MP_NAME[p.m]}</div><div className="ms">{lensDetail(l.label)?.s ?? l.label}</div></div><span className="amt pos num">{rub(Math.max(p.pr, 12800))}</span></Link>
+            ))}
+          </div>
+          <div className="s-card">
+            <div className="s-ch r"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 3 4 6v6c0 5 3.5 7.5 8 9 4.5-1.5 8-4 8-9V6z" /></svg>Риски · {risks.length} активных <Link href="/dashboard/risks">Все →</Link></div>
+            {risks.map(({ p }, i) => (
+              <Link className="s-mini s-clk" href={`/dashboard/products/${p.id}`} key={i}><span className="s-mono">{mono(p.n)}</span><div><div className="nm">{p.n} · {MP_NAME[p.m]}</div><div className="ms">нет сертификата ЕАС</div></div><span className="amt neg">блокировка</span></Link>
+            ))}
+          </div>
         </div>
       </div>
-
-      {/* 2 — ONE DOMINANT PROBLEM + ONE PRIMARY ACTION (decision in <5s) */}
-      {d.problem ? (
-        <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderLeft: `4px solid ${RED}`, borderRadius: 14, padding: 22, marginBottom: 20 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-            <AlertTriangle size={18} color={RED} />
-            <span style={{ fontSize: 12, color: MUTED, textTransform: 'uppercase', letterSpacing: 0.5 }}>Главное сейчас</span>
-          </div>
-          <div style={{ fontSize: 19, fontWeight: 800, color: 'var(--text)', marginBottom: 6 }}>{d.problem.title}</div>
-          {d.problem.impact_rub > 0 && <div style={{ fontSize: 16, fontWeight: 700, color: AMBER, marginBottom: 16 }}>−{rub(d.problem.impact_rub)} в месяц</div>}
-
-          {/* ONE primary CTA only */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
-            {d.problem.primary_action && (
-              <Link href={d.problem.primary_action.url}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13.5, fontWeight: 700,
-                         padding: '11px 20px', borderRadius: 9, textDecoration: 'none', background: ACCENT_BG,
-                         border: '1px solid rgba(124,58,237,0.5)', color: 'var(--text)' }}>
-                {d.problem.primary_action.label}<ArrowRight size={15} />
-              </Link>
-            )}
-            {/* EXPAND trigger — depth on demand, not on screen */}
-            {ex && (
-              <button onClick={toggleExpand}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'none', border: 'none',
-                         color: MUTED, fontSize: 12.5, cursor: 'pointer', padding: '6px 2px' }}>
-                {expanded ? 'Скрыть' : 'Почему это и как'}
-                <ChevronDown size={14} style={{ transform: expanded ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }} />
-              </button>
-            )}
-          </div>
-
-          {/* ── L1 EXPAND — trust depth (hidden by default) ── */}
-          {expanded && ex && (
-            <div style={{ marginTop: 18, paddingTop: 18, borderTop: `1px solid ${BORDER}`, display: 'grid', gap: 14 }}>
-              {/* confidence */}
-              <div>
-                <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.4, padding: '3px 8px', borderRadius: 6,
-                               color: CONF_COLOR[ex.confidence.level], background: `${CONF_COLOR[ex.confidence.level]}22`, border: `1px solid ${CONF_COLOR[ex.confidence.level]}55` }}>
-                  Доверие: {CONF_LABEL[ex.confidence.level]}
-                </span>
-                <span style={{ fontSize: 11.5, color: MUTED, marginLeft: 8 }}>{ex.confidence.reason}</span>
-              </div>
-              {/* causal mechanism */}
-              {ex.reason && <div style={{ fontSize: 13, color: 'var(--text-2)' }}>{ex.reason}</div>}
-              <div>
-                <div style={{ fontSize: 12.5, color: 'var(--text-2)', marginBottom: 6 }}>{ex.causal_mechanism.description}</div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                  {ex.causal_mechanism.chain.map((step, i) => (
-                    <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, color: MUTED }}>
-                      <span style={{ padding: '2px 7px', borderRadius: 5, background: 'rgba(255,255,255,0.05)', border: `1px solid ${BORDER}` }}>{step}</span>
-                      {i < ex.causal_mechanism.chain.length - 1 && <span style={{ color: 'var(--text-3)' }}>→</span>}
-                    </span>
-                  ))}
-                </div>
-              </div>
-              {/* selection + evidence */}
-              <div style={{ fontSize: 11.5, color: MUTED }}>Почему это: {ex.selection_reason}</div>
-              {ex.competing.length > 0 && (
-                <div style={{ fontSize: 11.5, color: MUTED }}>Отложено: {ex.competing.map(c => `${c.title} (−${rub(c.impact_rub)})`).join(' · ')}</div>
-              )}
-              <div style={{ fontSize: 11.5, color: MUTED }}>Откуда: {ex.evidence.source} · {ex.evidence.volume} · {ex.evidence.period}</div>
-              {/* secondary actions with full detail */}
-              {ex.secondary_actions.length > 0 && (
-                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                  {ex.secondary_actions.map((a, i) => (
-                    <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 4, maxWidth: 260 }}>
-                      <Link href={a.url} style={{ display: 'inline-flex', alignSelf: 'flex-start', fontSize: 12.5, fontWeight: 700,
-                               padding: '8px 14px', borderRadius: 8, textDecoration: 'none', background: 'transparent', border: `1px solid ${BORDER}`, color: 'var(--text-2)' }}>
-                        {a.label}
-                      </Link>
-                      {a.mechanism && <span style={{ fontSize: 10.5, color: 'var(--text-3)', lineHeight: 1.4 }}>{a.mechanism}</span>}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      ) : (
-        <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderLeft: `4px solid ${GREEN}`, borderRadius: 14, padding: 22, marginBottom: 20 }}>
-          <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--text)' }}>Срочных проблем нет</div>
-          <div style={{ fontSize: 13, color: MUTED, marginTop: 4 }}>Деньги под контролем.</div>
-        </div>
-      )}
-
-      {/* 3 — LEAKS / GAINS — hidden behind a single disclosure (no competition with the decision) */}
-      {ex && (ex.leaks.length > 0 || ex.gains.length > 0) && <ProductBreakdown leaks={ex.leaks} gains={ex.gains} />}
-      </>)}
-    </div>
-  )
-}
-
-function ProductBreakdown({ leaks, gains }: { leaks: L1ProductLine[]; gains: L1ProductLine[] }) {
-  const [open, setOpen] = useState(false)
-  return (
-    <div>
-      <button onClick={() => { if (!open) trackEvent('l1_breakdown', 'dashboard'); setOpen(v => !v) }}
-        style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: MUTED, fontSize: 12.5, cursor: 'pointer', padding: '4px 2px' }}>
-        {open ? 'Скрыть разбор по товарам' : 'Разбор по товарам'}
-        <ChevronDown size={14} style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }} />
-      </button>
-      {open && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 20, marginTop: 14 }}>
-          <section id="risks">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-              <TrendingDown size={16} color={RED} />
-              <h2 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>Под риском</h2>
-            </div>
-            <div style={{ fontSize: 11, color: MUTED, marginBottom: 12 }}>убыток или маржа ниже 10%</div>
-            <div style={{ display: 'grid', gap: 8 }}>
-              {leaks.length > 0 ? leaks.map(p => <ProductRow key={p.product} p={p} color={p.effect_rub < 0 ? RED : AMBER} />)
-                : <div style={{ fontSize: 13, color: MUTED, padding: 12, background: CARD, border: `1px solid ${BORDER}`, borderRadius: 10 }}>Товаров под риском нет.</div>}
-            </div>
-          </section>
-          <section id="growth">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-              <TrendingUp size={16} color={GREEN} />
-              <h2 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>Приносит прибыль</h2>
-            </div>
-            <div style={{ fontSize: 11, color: MUTED, marginBottom: 12 }}>прибыль и здоровая маржа</div>
-            <div style={{ display: 'grid', gap: 8 }}>
-              {gains.length > 0 ? gains.map(p => <ProductRow key={p.product} p={p} color={GREEN} />)
-                : <div style={{ fontSize: 13, color: MUTED, padding: 12, background: CARD, border: `1px solid ${BORDER}`, borderRadius: 10 }}>Пока нет прибыльных товаров.</div>}
-            </div>
-          </section>
-        </div>
-      )}
-    </div>
+    </>
   )
 }

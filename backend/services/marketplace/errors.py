@@ -12,6 +12,7 @@ class ExecutionError(Exception):
     AUTH = "AUTH"
     MARKETPLACE_4XX = "MARKETPLACE_4XX"
     UNKNOWN_ACTION = "UNKNOWN_ACTION"
+    CAPABILITY_NOT_SUPPORTED = "CAPABILITY_NOT_SUPPORTED"  # marketplace can't do this action
     # guard rejections carry a GUARD_<reason> code, built at raise site
     # retryable
     RATE_LIMIT = "RATE_LIMIT"

@@ -32,6 +32,14 @@ from models.imported_product import ImportedProductRow
 from models.telegram_notification_log import TelegramNotificationLog
 from models.seo_rebuild import SeoRebuild
 from data.marketplace_mechanics import get_mechanic, AutomationLevel
+from services.insight_keys import build_insight_key
+from services.insight_decision_bridge import (
+    promote_insight_to_decision as _promote_decision,
+    InsightPromotionDTO as _PromotionDTO,
+)
+from services.execution_measurement_bridge import (
+    open_measurement_for_execution as _open_measurement,
+)
 from logic.simulation import generate_scenarios_for_insight as _gen_scenarios
 from logic.focus_engine import compute_operational_focus, compress_scenarios as _compress_scenarios
 from logic.focus_engine import OperationalFocus as _OperationalFocusDC
@@ -3265,7 +3273,7 @@ async def _compute_insights(
         idx = 0
         for row in p_rows:
             if row.stock is not None and 0 <= row.stock <= 5:
-                key = f"low_stock:{row.marketplace}:{row.sku}"
+                key = build_insight_key("low_stock", row.marketplace, row.sku).key
                 st = statuses.get(key, ("active", None))
                 insights.append(InsightItem(
                     id=f"ins-{idx}", key=key,
@@ -3313,8 +3321,6 @@ async def _compute_insights(
         ad_ratio   = ads / rev   if rev > 0 else None
         rev_per_ad = rev / ads   if ads > 0 else None
 
-        kp = f"{mp}:{sku}"
-
         # ── Rule 1: SEO CTR Opportunity ────────────────────────────────────────
         if (
             rating is not None and rating >= 4.2
@@ -3323,7 +3329,7 @@ async def _compute_insights(
             and rev_per_ad is not None
             and rev_per_ad < bm["revenue_per_ad"] * 0.72
         ):
-            key = f"seo_opportunity:{kp}"
+            key = build_insight_key("seo_opportunity", mp, sku).key
             st  = statuses.get(key, ("active", None))
             gap_pct  = round((bm["revenue_per_ad"] - rev_per_ad) / bm["revenue_per_ad"] * 100)
             conf     = min(88, 60 + gap_pct // 2)
@@ -3393,7 +3399,7 @@ async def _compute_insights(
             alert_ok, ctx_note, conf_penalty = _ad_degradation_context(fin["daily"], days_active)
 
             if alert_ok:
-                key          = f"high_ad_spend:{kp}"
+                key          = build_insight_key("high_ad_spend", mp, sku).key
                 st           = statuses.get(key, ("active", None))
                 excess_ratio = ad_ratio - bm["ad_spend_ratio_median"]
                 dev_pct      = round(excess_ratio / bm["ad_spend_ratio_median"] * 100)
@@ -3469,7 +3475,7 @@ async def _compute_insights(
             )
 
             if alert_ok:
-                key         = f"margin_crisis:{kp}"
+                key         = build_insight_key("margin_crisis", mp, sku).key
                 st          = statuses.get(key, ("active", None))
                 gap_pp      = round((bm["margin_median"] - margin_pct) * 100)
                 monthly_rev = rev / days_active * 30
@@ -3524,7 +3530,7 @@ async def _compute_insights(
         daily = fin["daily"]
         is_mature, periods, growth_pct, cv = _growth_maturity(daily)
         if is_mature:
-            key    = f"sales_growth:{kp}"
+            key    = build_insight_key("sales_growth", mp, sku).key
             st     = statuses.get(key, ("active", None))
             # Use most recent 3 days sum for uplift estimate
             dates_s  = sorted(daily.keys())
@@ -3578,7 +3584,7 @@ async def _compute_insights(
 
         # ── Rule 5: Low Stock ──────────────────────────────────────────────────
         if stock is not None and 0 <= stock <= 5:
-            key = f"low_stock:{kp}"
+            key = build_insight_key("low_stock", mp, sku).key
             st  = statuses.get(key, ("active", None))
             daily_avg = qty / max(len(daily), 1) if qty > 0 else 1
             days_left = round(stock / daily_avg) if daily_avg > 0 and daily_avg < stock else stock
@@ -3623,7 +3629,7 @@ async def _compute_insights(
 
         # ── Rule 6: High Rating (positive) ────────────────────────────────────
         if rating is not None and rating >= 4.8 and rev >= 3000:
-            key = f"high_rating:{kp}"
+            key = build_insight_key("high_rating", mp, sku).key
             st  = statuses.get(key, ("active", None))
 
             insights.append(InsightItem(
@@ -4264,6 +4270,30 @@ async def execute_insight(
                     else "Инсайт не поддерживает выполнение",
         )
 
+    # ── Insight → Decision promotion (bridge Slice 1: intent fixation only) ───
+    # Best-effort, non-blocking: fixates the Decision; never applies/executes,
+    # never opens measurement, never alters the execute response. Only on this
+    # explicit operator path — NOT in _compute_insights / dashboard / Telegram.
+    # Slice 2: capture the promoted decision_id for ExecutionLog provenance only.
+    # Blocked promotion (or any failure) leaves decision_id None — execution
+    # proceeds unchanged.
+    decision_id = None
+    try:
+        _ptype, _pmp, _psku = _imap.parse_key(insight_key)
+        _desc = plan.descriptor or {}
+        _sev = {"sales_growth": "gain", "high_rating": "gain"}.get(_ptype, "warn")
+        pres = await _promote_decision(db, user_id=uid, insight=_PromotionDTO(
+            insight_key=insight_key, itype=_ptype, marketplace=_pmp, sku=_psku,
+            problem=_desc.get("reason") or _ptype,
+            cause=_desc.get("reason"),
+            effect=_desc.get("expected_effect"),
+            action=_desc.get("action"),
+            pnl_impact=None, severity=_sev, is_demo=False,
+        ))
+        decision_id = pres.decision_id if pres else None
+    except Exception:
+        logger.exception("insight promotion failed for %s", insight_key)
+
     # ── batch: rating_good publishes every prepared positive review ───────────
     if plan.batch:
         reviews = (
@@ -4287,7 +4317,7 @@ async def execute_insight(
                 db=db, user_id=uid, action_type="publish_review_response",
                 payload={"feedback_id": r.external_review_id, "text": r.response_text,
                          "rating": r.rating},
-                mode="manual_l3", insight_key=insight_key,
+                mode="manual_l3", insight_key=insight_key, decision_id=decision_id,
                 idempotency_key=f"review:{r.id}", dry_run=body.dry_run,
             )
             results.append({"review_id": r.id, "status": res.status,
@@ -4309,8 +4339,27 @@ async def execute_insight(
     # ── single action ─────────────────────────────────────────────────────────
     res = await _executor.execute(
         db=db, user_id=uid, action_type=plan.action_type, payload=plan.payload,
-        mode="manual_l3", insight_key=insight_key, dry_run=body.dry_run,
+        mode="manual_l3", insight_key=insight_key, decision_id=decision_id,
+        dry_run=body.dry_run,
     )
+
+    # ── Insight → Decision → ExecutionLog → Measurement OPEN (bridge Slice 3) ──
+    # Best-effort, non-blocking, open-only. Real success + listing-grain action
+    # (set_price/update_card) only; token resolved server-side; baseline honesty
+    # owned downstream (null baseline when the metric is unreadable, never faked).
+    # Never closes, never attributes, never alters the execute response.
+    if res.status == "success" and not body.dry_run and decision_id:
+        try:
+            opened = await _open_measurement(
+                db, user_id=uid, decision_id=decision_id, action_key=plan.action_type,
+                marketplace=res.marketplace, entity_id=plan.payload.get("offer_id"),
+            )
+            if opened is not None:
+                await db.commit()
+        except Exception:
+            await db.rollback()
+            logger.exception("measurement open failed for decision %s", decision_id)
+
     return ExecuteInsightResponse(
         success=res.ok, status=res.status, action_type=plan.action_type,
         execution_id=res.log_id, automation_eligible=plan.automation_eligible,

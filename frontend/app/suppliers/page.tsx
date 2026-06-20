@@ -106,7 +106,7 @@ function Stars({ rating }: { rating: number }) {
   return (
     <span className="flex items-center gap-0.5">
       {[1,2,3,4,5].map(n => (
-        <Star key={n} size={13} style={{ color: n <= Math.round(rating) ? '#7C3AED' : 'hsl(var(--border))', fill: n <= Math.round(rating) ? '#7C3AED' : 'none' }} />
+        <Star key={n} size={13} style={{ color: n <= Math.round(rating) ? 'var(--violet)' : 'hsl(var(--border))', fill: n <= Math.round(rating) ? 'var(--violet)' : 'none' }} />
       ))}
       <span className="ml-1 text-xs text-muted-foreground">{rating.toFixed(1)}</span>
     </span>
@@ -135,7 +135,7 @@ function ReviewForm({ supplierId, onDone }: { supplierId: string; onDone: () => 
       <div className="flex gap-1">
         {[1,2,3,4,5].map(n => (
           <button key={n} onClick={() => setRating(n)}>
-            <Star size={20} style={{ color: n <= rating ? '#7C3AED' : 'hsl(var(--border))', fill: n <= rating ? '#7C3AED' : 'none' }} />
+            <Star size={20} style={{ color: n <= rating ? 'var(--violet)' : 'hsl(var(--border))', fill: n <= rating ? 'var(--violet)' : 'none' }} />
           </button>
         ))}
       </div>
@@ -186,7 +186,7 @@ function DealForm({ supplierId, onClose }: { supplierId: string; onClose: () => 
         <Card className="shadow-stripe-lg max-w-sm w-full text-center">
           <CardContent className="p-8">
             <div className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4" style={{ background: 'rgba(110,106,252,0.1)', border: '1px solid rgba(110,106,252,0.25)' }}>
-              <ShieldCheck size={28} style={{ color: '#7C3AED' }} />
+              <ShieldCheck size={28} style={{ color: 'var(--violet)' }} />
             </div>
             <h2 className="text-xl font-bold mb-2" style={{ color: '#FFFFFF' }}>Сделка создана!</h2>
             <p className="text-sm mb-6 text-muted-foreground">Договор сформирован. Перейдите в раздел «Сделки» для подписания.</p>
@@ -277,7 +277,7 @@ function SupplierCard({ s }: { s: SupplierEntry }) {
             <div className="flex items-center gap-2 flex-wrap">
               <h3 className="font-semibold truncate" style={{ color: '#FFFFFF' }}>{s.company_name}</h3>
               {s.is_verified && (
-                <Badge variant="outline" className="text-xs px-2 h-5 gap-1" style={{ color: '#7C3AED', borderColor: 'rgba(110,106,252,0.3)', background: 'rgba(110,106,252,0.06)' }}>
+                <Badge variant="outline" className="text-xs px-2 h-5 gap-1" style={{ color: 'var(--violet)', borderColor: 'rgba(110,106,252,0.3)', background: 'rgba(110,106,252,0.06)' }}>
                   <ShieldCheck size={10} /> Верифицирован
                 </Badge>
               )}
@@ -287,7 +287,7 @@ function SupplierCard({ s }: { s: SupplierEntry }) {
               <Stars rating={s.rating} />
               <span className="text-xs text-muted-foreground">{s.total_reviews} отзывов · {s.total_deals} сделок</span>
               {s.industry && (
-                <Badge variant="outline" className="text-xs px-2 h-5" style={{ color: '#7C3AED', borderColor: 'rgba(110,106,252,0.2)', background: 'rgba(110,106,252,0.05)' }}>{s.industry}</Badge>
+                <Badge variant="outline" className="text-xs px-2 h-5" style={{ color: 'var(--violet)', borderColor: 'rgba(110,106,252,0.2)', background: 'rgba(110,106,252,0.05)' }}>{s.industry}</Badge>
               )}
               {s.region && <span className="text-xs text-muted-foreground">{s.region}</span>}
             </div>
@@ -312,7 +312,7 @@ function SupplierCard({ s }: { s: SupplierEntry }) {
           <div className="mt-4 pt-4 border-t border-border space-y-4">
             <div className="flex flex-wrap gap-4 text-sm">
               {s.website && (
-                <a href={`https://${s.website}`} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 hover:opacity-80 transition-opacity" style={{ color: '#7C3AED' }}>
+                <a href={`https://${s.website}`} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 hover:opacity-80 transition-opacity" style={{ color: 'var(--violet)' }}>
                   <Globe size={14} /> {s.website}
                 </a>
               )}
@@ -334,7 +334,7 @@ function SupplierCard({ s }: { s: SupplierEntry }) {
                       </div>
                       <div className="min-w-0 flex-1">
                         <p className="text-xs font-medium truncate" style={{ color: '#FFFFFF' }}>{p.name}</p>
-                        <p className="text-xs font-bold" style={{ color: '#7C3AED' }}>{p.price.toLocaleString('ru-RU')} ₽</p>
+                        <p className="text-xs font-bold" style={{ color: 'var(--violet)' }}>{p.price.toLocaleString('ru-RU')} ₽</p>
                         <p className="text-[11px] text-muted-foreground">мин. партия: {p.minQty.toLocaleString('ru-RU')} шт.</p>
                       </div>
                     </div>
@@ -347,7 +347,7 @@ function SupplierCard({ s }: { s: SupplierEntry }) {
               <div className="flex items-center justify-between mb-2">
                 <p className="text-sm font-medium" style={{ color: '#FFFFFF' }}>Отзывы</p>
                 {!showReviewForm && (
-                  <button onClick={() => setShowReviewForm(true)} className="text-xs transition-opacity hover:opacity-70" style={{ color: '#7C3AED' }}>
+                  <button onClick={() => setShowReviewForm(true)} className="text-xs transition-opacity hover:opacity-70" style={{ color: 'var(--violet)' }}>
                     + Написать отзыв
                   </button>
                 )}
@@ -402,11 +402,11 @@ export default function SuppliersPage() {
 
   return (
     <AppShell>
-      <div className="flex-1 p-4 md:p-6" style={{ background: '#09090B' }}>
+      <div className="flex-1 p-4 md:p-6" style={{ background: 'var(--bg)' }}>
       <div className="max-w-5xl mx-auto">
         <BlurFade inView className="mb-6">
           <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-2xl flex items-center justify-center shadow-stripe" style={{ background: '#7C3AED' }}>
+            <div className="w-11 h-11 rounded-2xl flex items-center justify-center shadow-stripe" style={{ background: 'var(--violet)' }}>
               <Package size={20} style={{ color: 'white' }} />
             </div>
             <div>

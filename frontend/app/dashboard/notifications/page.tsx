@@ -13,8 +13,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 
 const DOT_COLOR: Record<string, string> = {
   new_review:    '#1A73E8',
-  offer_change:  '#D97706',
-  trial_end:     '#EF4444',
+  offer_change:  'var(--warning)',
+  trial_end:     'var(--danger)',
   limit_reached: '#1A73E8',
   referral_paid: '#22c55e',
 }

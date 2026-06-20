@@ -31,3 +31,11 @@ from .seo_rebuild import SeoRebuild
 from .creative_variant import CreativeVariant
 from .user_event import UserEvent
 from .operator_decision import OperatorDecision
+# Product Graph (Doctrine §3/§7 core model) — Товар / Листинг / Решение
+from .physical_product import PhysicalProduct
+from .product_listing import ProductListing
+from .decision import Decision
+# Metric Catalog foundation — canonical normalized facts (read side)
+from .observation import Observation
+# Decision Outcome foundation — observed outcome state (NOT attribution)
+from .decision_outcome import DecisionOutcome
