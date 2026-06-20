@@ -17,6 +17,7 @@ from services import decision_effect_aggregator as agg
 from services import decision_recommendation_engine as rec
 from services import decision_candidate_engine as cand
 from services import decision_policy_engine as policy
+from services import execution_orchestrator as orch
 
 router = APIRouter()
 
@@ -60,3 +61,11 @@ async def decision_policy(
     uid = current_user.id
     candidates = await cand.generate_decision_candidates(db, uid)
     return await policy.apply_decision_policy(db, uid, candidates)
+
+
+@router.get("/analytics/execution-plan")
+async def execution_plan(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    return await orch.build_execution_plan(db, current_user.id)
