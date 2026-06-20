@@ -77,7 +77,7 @@ def test_confirmed_rate_ordering():
         ranked = await rank_actions(db, user_id=uid, problem_type="margin_crisis",
                                     context_group=CG, available_actions=ACTIONS)
         assert _order(ranked) == ["stop_auto_promotion", "reduce_discount", "set_price"]
-        assert ranked[0]["reason"] == "4/4 confirmed in this context"
+        assert ranked[0]["reason"] == "4/4 confirmed in this context (recent outcomes weighted)"
         assert ranked[2]["confirmed_rate"] == 0.25
     _run(go())
 

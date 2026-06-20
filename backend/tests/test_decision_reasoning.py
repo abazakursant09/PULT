@@ -56,8 +56,9 @@ def test_explain_with_history():
                  "refuted": 1, "sample": 5, "confirmed_rate": 0.8, "eligible": True})
     assert r == {
         "action_key": "reduce_discount", "rank": 1, "confirmed": 4, "refuted": 1,
-        "sample": 5, "confirmed_rate": 0.8,
-        "reason": "4 of 5 similar cases confirmed profit improvement", "fallback": False}
+        "sample": 5, "confirmed_rate": 0.8, "weighted_rate": None,
+        "reason": "4 of 5 similar cases confirmed profit improvement (recent outcomes weighted)",
+        "fallback": False}
 
 
 def test_explain_no_history_fallback():
@@ -96,7 +97,7 @@ def test_explain_ranking_over_real_stats():
         assert len(reasons) == 3
         by = {r["action_key"]: r for r in reasons}
         assert by["reduce_discount"]["fallback"] is False
-        assert by["reduce_discount"]["reason"] == "4 of 5 similar cases confirmed profit improvement"
+        assert by["reduce_discount"]["reason"] == "4 of 5 similar cases confirmed profit improvement (recent outcomes weighted)"
         assert by["stop_auto_promotion"]["fallback"] is True  # no history
         # order preserved from ranking
         assert [r["action_key"] for r in reasons] == [r["action_key"] for r in ranked]

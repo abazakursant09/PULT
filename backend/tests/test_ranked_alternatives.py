@@ -66,7 +66,8 @@ def test_margin_no_history_static_with_fallback_reasons():
         assert all(a["reason"] == "Not enough history. Using default action order." for a in alts)
         # full contract keys present
         assert set(alts[0].keys()) == {"action_key", "rank", "reason", "fallback",
-                                       "confirmed", "refuted", "sample", "confirmed_rate"}
+                                       "confirmed", "refuted", "sample", "confirmed_rate",
+                                       "weighted_rate"}
     _run(go())
 
 
@@ -84,7 +85,7 @@ def test_margin_with_history_ranked_with_reasons():
         assert [a["action_key"] for a in alts] == ["reduce_discount", "set_price", "stop_auto_promotion"]
         top = alts[0]
         assert top["fallback"] is False
-        assert top["reason"] == "4 of 5 similar cases confirmed profit improvement"
+        assert top["reason"] == "4 of 5 similar cases confirmed profit improvement (recent outcomes weighted)"
         assert top["confirmed"] == 4 and top["refuted"] == 1 and top["sample"] == 5
         assert top["confirmed_rate"] == 0.8
         assert alts[2]["fallback"] is True  # stop_auto_promotion no history

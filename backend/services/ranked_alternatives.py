@@ -52,6 +52,7 @@ async def get_ranked_alternatives(
                 "refuted": int(r.get("refuted", 0) or 0),
                 "sample": int(r.get("sample", 0) or 0),
                 "confirmed_rate": r.get("confirmed_rate"),
+                "weighted_rate": r.get("weighted_rate"),
             })
         return out
 
@@ -65,4 +66,5 @@ async def get_ranked_alternatives(
         "refuted": 0,
         "sample": 0,
         "confirmed_rate": None,
+        "weighted_rate": None,
     } for i, c in enumerate(candidates, 1)]

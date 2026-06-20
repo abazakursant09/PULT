@@ -26,7 +26,8 @@ def explain(stat: dict) -> dict:
     sample = int(stat.get("sample", 0) or 0)
 
     if eligible:
-        reason = f"{confirmed} of {sample} similar cases confirmed profit improvement"
+        reason = (f"{confirmed} of {sample} similar cases confirmed profit improvement "
+                  f"(recent outcomes weighted)")
         fallback = False
     elif sample > 0:
         reason = f"Not enough history ({sample} cases). Using default action order."
@@ -42,6 +43,7 @@ def explain(stat: dict) -> dict:
         "refuted": refuted,
         "sample": sample,
         "confirmed_rate": stat.get("confirmed_rate"),
+        "weighted_rate": stat.get("weighted_rate"),
         "reason": reason,
         "fallback": fallback,
     }
