@@ -23,7 +23,9 @@ from routers import learning
 from routers.learning import decision_evidence_endpoint, EvidenceResponse, Evidence
 
 IKEY = "margin_crisis:wb:SKU1"
-CG = "wb|unknown|unknown|unknown"
+# E4: evidence context now mirrors /alternatives (listing_id only). No listing →
+# fully-unknown context, which is what the seeded memory uses.
+CG = "unknown|unknown|unknown|unknown"
 
 
 def _run(c):

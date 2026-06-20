@@ -90,16 +90,19 @@ class EvidenceResponse(BaseModel):
 async def decision_evidence_endpoint(
     insight_key: str,
     action_key: str,
+    listing_id: str | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> EvidenceResponse:
     """
     Evidence for one (insight_key, action_key) decision — its reason and the
     outcome-memory stats in the resolved business context. Read-only. `evidence`
-    is null when the action isn't among the insight's alternatives.
+    is null when the action isn't among the insight's alternatives. Pass the same
+    listing_id as GET /alternatives to get a context consistent with the ranking.
     """
     ev = await get_decision_evidence(
-        db, user_id=current_user.id, insight_key=insight_key, action_key=action_key)
+        db, user_id=current_user.id, insight_key=insight_key, action_key=action_key,
+        listing_id=listing_id)
     return EvidenceResponse(
         insight_key=insight_key,
         evidence=Evidence(**ev.to_dict()) if ev is not None else None,

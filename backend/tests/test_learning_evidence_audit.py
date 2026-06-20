@@ -23,7 +23,9 @@ from routers.learning import (
 )
 
 IKEY = "margin_crisis:wb:SKU1"
-CG = "wb|unknown|unknown|unknown"
+# E4: evidence context mirrors /alternatives (listing_id only) → fully unknown
+# without a listing, matching the seeded memory context.
+CG = "unknown|unknown|unknown|unknown"
 
 
 def _run(c):

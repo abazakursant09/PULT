@@ -183,48 +183,32 @@ be degraded.
 | `confidence_source = "decision_memory"` | ✅ | both endpoints emit `source` |
 | degraded | ✅ | `AlternativesResponse.degraded` |
 | empty / fallback distinction | ✅ | `[]` vs `alternatives[0].fallback` |
-| **Evidence ↔ recommendation context consistency** | ⚠️ **only when degraded** | see blocker below |
+| **Evidence ↔ recommendation context consistency** | ✅ (E4) | when the same `listing_id` is passed to both |
 
-The contract is **populatable**, but with one consistency caveat.
+The contract is **populatable and consistent**.
 
-### BLOCKER-1 — `/alternatives` and `/evidence` resolve context independently
+### BLOCKER-1 — RESOLVED in E4
 
-The two endpoints compute `context_group` from **different inputs**:
+Previously `/alternatives` and `/evidence` resolved `context_group` from
+different inputs (listing vs insight_key parsing), so the evidence block could
+reflect a more-degraded context than the recommendation.
 
-- `GET /alternatives` resolves from **`listing_id`** (and ignores the marketplace
-  segment inside `insight_key`). With a listing it yields the enriched
-  `marketplace|category|price_band|margin_band`.
-- `GET /evidence` has **no `listing_id` parameter**; it resolves from the
-  **`insight_key`** marketplace/sku only. Category and price come from a listing,
-  which it cannot reach → those segments are always `unknown`.
+**Fix (E4, `fix(learning): keep evidence consistent with ranked alternatives`):**
+`get_decision_evidence` now resolves context the **same way** `/alternatives`
+does — `resolve_context_group_for_insight(insight_key, listing_id)` then
+`get_ranked_alternatives` — and `GET /evidence` gained an optional `listing_id`
+query param (response shape unchanged). The evidence row is literally the ranked
+alternative row, so for the same `(insight_key, action_key, listing_id)` the
+`reason / confirmed / refuted / sample / confirmed_rate / weighted_rate /
+fallback / context_group` all match the alternatives surface by construction.
 
-Consequence: for the **same insight**, the evidence block can reflect a
-**more-degraded** context than the recommendation/alternatives block. They
-coincide **only in the fully-degraded (no-listing) case**, where both resolve
-`unknown|unknown|unknown|unknown`.
+Pinned by `test_listing_backed_context_consistent_across_endpoints`,
+`test_surface_enriched_consistent`, and
+`test_evidence_matches_top_alternative`.
 
-Observed (test `test_blocker_alternatives_and_evidence_context_diverge`): an
-insight with a seeded listing →
-`/alternatives` `degraded=false` (`wildberries|electronics|mid|high_margin`)
-while `/evidence` returns `context_group = "wildberries|unknown|unknown|high_margin"`
-(`degraded`). The two blocks disagree on context.
+### Frontend guidance
 
-**Severity:** latent today (most contexts are degraded to `unknown` anyway, where
-the two agree), but a real hazard once listings/finance enrich contexts.
-
-**Recommended fix (later sprint, backend — NOT in E3):** the evidence block for
-the *recommended* action is already a strict subset of `alternatives[0]`
-(`confirmed/refuted/sample/confirmed_rate/weighted_rate/fallback/reason`); only
-`context_group` is missing from the alternatives payload. Either
-(a) expose `context_group` on `AlternativesResponse` and build the surface's
-evidence from `alternatives[0]` (zero extra call, always consistent), or
-(b) add `listing_id` to `GET /evidence` so it can resolve the same enriched
-context. Option (a) is preferred — it also removes the redundant second call.
-
-### Frontend guidance until the fix
-
-For a single-insight surface, **derive the recommendation's evidence from
-`alternatives[0]`** rather than calling `/evidence`. Reserve `/evidence` for
-ad-hoc "explain a non-top action" lookups, and read its `context_group` as
-"evidence context" (which may be more degraded than the ranking context). The
-`source` and all count/rate fields remain authoritative.
+**Pass the same `listing_id` to `/alternatives` and `/evidence`.** Then the
+recommendation and its evidence share one context. (The evidence block remains a
+strict subset of `alternatives[0]` plus `context_group`; a single-call surface
+endpoint that folds both is still a possible future optimization, not required.)

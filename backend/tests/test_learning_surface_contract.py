@@ -91,7 +91,7 @@ async def _build_surface(db, uid, insight_key, listing_id=None):
         }
         ev_resp = await decision_evidence_endpoint(
             insight_key=insight_key, action_key=top.action_key,
-            current_user=_User(uid), db=db)
+            listing_id=listing_id, current_user=_User(uid), db=db)
         evidence = ev_resp.evidence.model_dump() if ev_resp.evidence else None
         ui = "fallback" if top.fallback else "ranked"
 
@@ -200,9 +200,9 @@ def test_surface_top_level_shape():
     _run(go())
 
 
-# ── BLOCKER: the two endpoints resolve different context for an enriched insight
-#    /alternatives uses listing_id (enriched, not degraded); /evidence uses the
-#    insight_key only (no listing → category/price unknown → degraded). ────────
+# ── E4 fix: with the SAME listing_id, /alternatives and /evidence agree ──────
+#    (BLOCKER-1 resolved — evidence now resolves context the same way as
+#    alternatives, so an enriched insight stays enriched on both sides.)
 
 async def _seed_domain(db, uid):
     prod = Product(id=str(uuid.uuid4()), user_id=uid, name="P", marketplace="wildberries",
@@ -218,7 +218,7 @@ async def _seed_domain(db, uid):
     return listing.id
 
 
-def test_blocker_alternatives_and_evidence_context_diverge():
+def test_listing_backed_context_consistent_across_endpoints():
     async def go():
         db = await _engine(); uid = str(uuid.uuid4())
         listing_id = await _seed_domain(db, uid)
@@ -227,12 +227,28 @@ def test_blocker_alternatives_and_evidence_context_diverge():
         alts = await ranked_alternatives_endpoint(
             insight_key=IKEY_ENR, listing_id=listing_id, current_user=_User(uid), db=db)
         assert alts.degraded is False
-        # /evidence has no listing_id param → category/price unknown → degraded context
+        # /evidence WITH the same listing_id → same enriched context, also not degraded
         ev = await decision_evidence_endpoint(
-            insight_key=IKEY_ENR, action_key="set_price", current_user=_User(uid), db=db)
+            insight_key=IKEY_ENR, action_key="set_price", listing_id=listing_id,
+            current_user=_User(uid), db=db)
         assert ev.evidence is not None
-        assert "unknown" in ev.evidence.context_group         # evidence is degraded
-        # divergence: the alternatives block is enriched while the evidence block is not
-        assert ev.evidence.context_group == "wildberries|unknown|unknown|high_margin"
-        assert alts.degraded != ("unknown" in ev.evidence.context_group)
+        assert ev.evidence.context_group == "wildberries|electronics|mid|high_margin"
+        assert "unknown" not in ev.evidence.context_group     # enriched, NOT degraded
+    _run(go())
+
+
+def test_surface_enriched_consistent():
+    async def go():
+        db = await _engine(); uid = str(uuid.uuid4())
+        listing_id = await _seed_domain(db, uid)
+        await db.commit()
+        s = await _build_surface(db, uid, IKEY_ENR, listing_id=listing_id)
+        assert s["degraded"] is False                # alternatives enriched
+        assert s["evidence"]["context_group"] == "wildberries|electronics|mid|high_margin"
+        # evidence stats agree with alternatives[0] for the same listing context
+        a0 = s["alternatives"][0]; ev = s["evidence"]
+        assert ev["action_key"] == a0["action_key"]
+        for k in ("reason", "confirmed", "refuted", "sample",
+                  "confirmed_rate", "weighted_rate", "fallback"):
+            assert ev[k] == a0[k]
     _run(go())

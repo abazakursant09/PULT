@@ -22,11 +22,13 @@ from models.decision_memory import DecisionMemory
 
 from services import decision_evidence
 from services.decision_evidence import get_decision_evidence, DecisionEvidence
+from services.ranked_alternatives import get_ranked_alternatives_for_insight
 
-# insight_key 'type:marketplace:sku' → marketplace hint "wb", no listing/finance
-# → resolved context_group "wb|unknown|unknown|unknown" (matches seeded memory).
+# E4: evidence resolves context the same way /alternatives does (listing_id only,
+# NOT the insight_key marketplace). With no listing_id the context is fully
+# unknown — matching the seeded memory context below.
 IKEY = "margin_crisis:wb:SKU1"
-CG = "wb|unknown|unknown|unknown"
+CG = "unknown|unknown|unknown|unknown"
 
 
 def _run(c):
@@ -138,6 +140,28 @@ def test_context_isolation():
         await db.commit()
         ev = await _ev(db, uid, "reduce_discount")
         assert ev.fallback is True and ev.sample == 0
+    _run(go())
+
+
+# ── E4 consistency: evidence == top ranked alternative ───────────────────────
+
+def test_evidence_matches_top_alternative():
+    async def go():
+        db = await _engine(); uid = str(uuid.uuid4())
+        await _mem(db, uid, "reduce_discount", "confirmed", 4)
+        await _mem(db, uid, "reduce_discount", "refuted", 1)
+        await db.commit()
+        alts = await get_ranked_alternatives_for_insight(db, user_id=uid, insight_key=IKEY)
+        top = alts[0]
+        ev = await get_decision_evidence(db, user_id=uid, insight_key=IKEY,
+                                         action_key=top["action_key"])
+        # same context resolution + same ranking → every shared field matches
+        assert ev.reason == top["reason"]
+        assert ev.confirmed == top["confirmed"] and ev.refuted == top["refuted"]
+        assert ev.sample == top["sample"]
+        assert ev.confirmed_rate == top["confirmed_rate"]
+        assert ev.weighted_rate == top["weighted_rate"]
+        assert ev.fallback == top["fallback"]
     _run(go())
 
 

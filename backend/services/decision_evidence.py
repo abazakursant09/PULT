@@ -43,28 +43,22 @@ class DecisionEvidence:
         return asdict(self)
 
 
-def _mp_sku_from_key(insight_key: Optional[str]) -> tuple[Optional[str], Optional[str]]:
-    """Parse marketplace|sku hints from an insight_key 'type:marketplace:sku'."""
-    parts = (insight_key or "").split(":")
-    if len(parts) > 2:
-        return (parts[1] or None), (parts[2] or None)
-    return None, None
-
-
 async def get_decision_evidence(
-    db: AsyncSession, *, user_id: str, insight_key: str, action_key: str
+    db: AsyncSession, *, user_id: str, insight_key: str, action_key: str,
+    listing_id: Optional[str] = None,
 ) -> Optional[DecisionEvidence]:
     """
-    Evidence for one (insight_key, action_key) decision. Resolves the same
-    context_group the ranking uses (marketplace/sku taken from the insight_key),
-    then returns the ranked alternative's reason + stats for action_key. Returns
-    None when the action isn't part of the insight's alternatives (malformed or
-    unknown insight/action). Read-only.
+    Evidence for one (insight_key, action_key) decision. Resolves the context the
+    SAME way GET /alternatives does — resolve_context_group_for_insight with the
+    same listing_id — then returns the ranked alternative row for action_key.
+    Because it uses the identical context resolution and the identical ranking,
+    the returned reason/counts/rates/fallback and context_group are guaranteed to
+    match the alternatives surface for the same (insight_key, action_key,
+    listing_id). Returns None when the action isn't part of the insight's
+    alternatives (malformed or unknown insight/action). Read-only.
     """
-    marketplace, sku = _mp_sku_from_key(insight_key)
     context_group = await resolve_context_group_for_insight(
-        db, user_id=user_id, insight_key=insight_key,
-        marketplace=marketplace, sku=sku)
+        db, user_id=user_id, insight_key=insight_key, listing_id=listing_id)
     alternatives = await get_ranked_alternatives(
         db, user_id=user_id, insight_key=insight_key, context_group=context_group)
     match = next((a for a in alternatives if a["action_key"] == action_key), None)
