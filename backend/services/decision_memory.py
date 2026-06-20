@@ -16,7 +16,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.decision_memory import DecisionMemory
@@ -95,3 +95,60 @@ async def record_decision_memory(
     db.add(row)
     await db.flush()
     return row
+
+
+# ── read-only chain helpers (Slice 5) ────────────────────────────────────────
+# Pure reads over decision_memory. NO write, NO refuted-loop, NO candidate
+# creation, NO similarity/learning. Just answer questions about a chain.
+
+async def get_used_actions(db: AsyncSession, decision_chain_id: str) -> set[str]:
+    """action_type values already tried in the chain (any outcome). Null/empty ignored."""
+    if not decision_chain_id:
+        return set()
+    rows = (
+        await db.execute(
+            select(DecisionMemory.action_type).where(
+                DecisionMemory.decision_chain_id == decision_chain_id
+            )
+        )
+    ).scalars().all()
+    return {a for a in rows if a}
+
+
+async def get_current_step(db: AsyncSession, decision_chain_id: str) -> int:
+    """max(step_in_chain) for the chain; 0 when no rows. Null step → 0."""
+    if not decision_chain_id:
+        return 0
+    m = (
+        await db.execute(
+            select(func.max(DecisionMemory.step_in_chain)).where(
+                DecisionMemory.decision_chain_id == decision_chain_id
+            )
+        )
+    ).scalar()
+    return int(m or 0)
+
+
+async def get_chain_status(db: AsyncSession, decision_chain_id: str) -> str:
+    """
+    'confirmed' if any row confirmed; else 'stopped' if max step >= 3 AND that
+    max step has a refuted row; else 'open'. Insufficient never stops/advances.
+    """
+    if not decision_chain_id:
+        return "open"
+    rows = (
+        await db.execute(
+            select(DecisionMemory.step_in_chain, DecisionMemory.outcome).where(
+                DecisionMemory.decision_chain_id == decision_chain_id
+            )
+        )
+    ).all()
+    if not rows:
+        return "open"
+    if any(outcome == "confirmed" for _step, outcome in rows):
+        return "confirmed"
+    max_step = max((step or 0) for step, _outcome in rows)
+    if max_step >= 3 and any((step or 0) == max_step and outcome == "refuted"
+                             for step, outcome in rows):
+        return "stopped"
+    return "open"
