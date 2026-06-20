@@ -248,15 +248,23 @@ async def promote_insight_to_decision(
 
 
 async def promote_insight_alternatives(
-    db: AsyncSession, *, user_id: str, insight: InsightPromotionDTO
+    db: AsyncSession, *, user_id: str, insight: InsightPromotionDTO,
+    context_group: Optional[str] = None,
 ) -> list[PromoteResult]:
     """
     Promote every declared alternative action for the insight (A2.6). For
-    margin_crisis this persists Decision(set_price) AND Decision(reduce_discount),
-    each idempotent per (user_id, insight_key, action_key). Single-action insights
-    yield one result (unchanged behavior). Promotion only — no apply/measurement.
+    margin_crisis this persists Decision(set_price), Decision(reduce_discount),
+    Decision(stop_auto_promotion), each idempotent per (user_id, insight_key,
+    action_key). When `context_group` is given, margin candidates are promoted in
+    outcome-memory-ranked ORDER (L2.2) — sort-only, never filters; without it (or
+    with no eligible history) the deterministic action-space order is used.
+    Single-action insights yield one result. Promotion only — no apply/measurement.
     """
-    candidates = emit_candidates(insight.insight_key)
+    if context_group:
+        candidates = await emit_ranked_candidates(
+            db, user_id=user_id, insight_key=insight.insight_key, context_group=context_group)
+    else:
+        candidates = emit_candidates(insight.insight_key)
     if not candidates:
         # No declared action space → fall back to the single legacy promotion.
         return [await promote_insight_to_decision(db, user_id=user_id, insight=insight)]
