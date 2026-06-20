@@ -256,14 +256,18 @@ def test_execute_promotes_exactly_once(monkeypatch):
         return plan
 
     class _Res:
-        ok = True; status = "success"; log_id = "l1"; error = None
+        ok = True; status = "success"; log_id = "l1"; error = None; marketplace = "wb"
 
     async def fake_exec(**kw):
         return _Res()
 
+    async def fake_open(db, **kw):   # Slice 3: isolate promotion from measurement
+        return None
+
     monkeypatch.setattr(ae, "_promote_decision", fake_promote)
     monkeypatch.setattr(ae._imap, "resolve_plan", fake_resolve)
     monkeypatch.setattr(ae._executor, "execute", fake_exec)
+    monkeypatch.setattr(ae, "_open_measurement", fake_open)
 
     body = types.SimpleNamespace(overrides={}, dry_run=False)
     user = types.SimpleNamespace(id="u1")

@@ -37,6 +37,9 @@ from services.insight_decision_bridge import (
     promote_insight_to_decision as _promote_decision,
     InsightPromotionDTO as _PromotionDTO,
 )
+from services.execution_measurement_bridge import (
+    open_measurement_for_execution as _open_measurement,
+)
 from logic.simulation import generate_scenarios_for_insight as _gen_scenarios
 from logic.focus_engine import compute_operational_focus, compress_scenarios as _compress_scenarios
 from logic.focus_engine import OperationalFocus as _OperationalFocusDC
@@ -4339,6 +4342,24 @@ async def execute_insight(
         mode="manual_l3", insight_key=insight_key, decision_id=decision_id,
         dry_run=body.dry_run,
     )
+
+    # ── Insight → Decision → ExecutionLog → Measurement OPEN (bridge Slice 3) ──
+    # Best-effort, non-blocking, open-only. Real success + listing-grain action
+    # (set_price/update_card) only; token resolved server-side; baseline honesty
+    # owned downstream (null baseline when the metric is unreadable, never faked).
+    # Never closes, never attributes, never alters the execute response.
+    if res.status == "success" and not body.dry_run and decision_id:
+        try:
+            opened = await _open_measurement(
+                db, user_id=uid, decision_id=decision_id, action_key=plan.action_type,
+                marketplace=res.marketplace, entity_id=plan.payload.get("offer_id"),
+            )
+            if opened is not None:
+                await db.commit()
+        except Exception:
+            await db.rollback()
+            logger.exception("measurement open failed for decision %s", decision_id)
+
     return ExecuteInsightResponse(
         success=res.ok, status=res.status, action_type=plan.action_type,
         execution_id=res.log_id, automation_eligible=plan.automation_eligible,

@@ -173,15 +173,17 @@ def test_response_contract_unchanged(monkeypatch):
 
 # ── architecture guards ──────────────────────────────────────────────────────
 
-def test_execute_does_not_call_apply_or_measurement():
+def test_execute_does_not_close_or_apply():
     src = inspect.getsource(ae.execute_insight)
-    for forbidden in ("apply_decision", "open_measurement", "close_measurement",
-                      "decision_validation"):
+    # Slice 3 opens measurement (_open_measurement) intentionally. /execute must
+    # still NEVER close measurement, apply a decision, or run validation.
+    for forbidden in ("apply_decision", "close_measurement", "decision_validation"):
         assert forbidden not in src, f"/execute must not reference {forbidden}"
 
 
 def test_decision_id_threaded_into_both_executor_calls():
     src = inspect.getsource(ae.execute_insight)
-    # decision_id captured once, passed into every executor.execute call.
-    assert src.count("decision_id=decision_id") == 2
+    # decision_id captured once, then threaded into both executor.execute calls
+    # (single + batch) and the Slice 3 _open_measurement call = 3 occurrences.
+    assert src.count("decision_id=decision_id") == 3
     assert "decision_id = pres.decision_id if pres else None" in src
