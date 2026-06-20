@@ -32,6 +32,7 @@ from models.imported_product import ImportedProductRow
 from models.telegram_notification_log import TelegramNotificationLog
 from models.seo_rebuild import SeoRebuild
 from data.marketplace_mechanics import get_mechanic, AutomationLevel
+from services.insight_keys import build_insight_key
 from logic.simulation import generate_scenarios_for_insight as _gen_scenarios
 from logic.focus_engine import compute_operational_focus, compress_scenarios as _compress_scenarios
 from logic.focus_engine import OperationalFocus as _OperationalFocusDC
@@ -3265,7 +3266,7 @@ async def _compute_insights(
         idx = 0
         for row in p_rows:
             if row.stock is not None and 0 <= row.stock <= 5:
-                key = f"low_stock:{row.marketplace}:{row.sku}"
+                key = build_insight_key("low_stock", row.marketplace, row.sku).key
                 st = statuses.get(key, ("active", None))
                 insights.append(InsightItem(
                     id=f"ins-{idx}", key=key,
@@ -3313,8 +3314,6 @@ async def _compute_insights(
         ad_ratio   = ads / rev   if rev > 0 else None
         rev_per_ad = rev / ads   if ads > 0 else None
 
-        kp = f"{mp}:{sku}"
-
         # ── Rule 1: SEO CTR Opportunity ────────────────────────────────────────
         if (
             rating is not None and rating >= 4.2
@@ -3323,7 +3322,7 @@ async def _compute_insights(
             and rev_per_ad is not None
             and rev_per_ad < bm["revenue_per_ad"] * 0.72
         ):
-            key = f"seo_opportunity:{kp}"
+            key = build_insight_key("seo_opportunity", mp, sku).key
             st  = statuses.get(key, ("active", None))
             gap_pct  = round((bm["revenue_per_ad"] - rev_per_ad) / bm["revenue_per_ad"] * 100)
             conf     = min(88, 60 + gap_pct // 2)
@@ -3393,7 +3392,7 @@ async def _compute_insights(
             alert_ok, ctx_note, conf_penalty = _ad_degradation_context(fin["daily"], days_active)
 
             if alert_ok:
-                key          = f"high_ad_spend:{kp}"
+                key          = build_insight_key("high_ad_spend", mp, sku).key
                 st           = statuses.get(key, ("active", None))
                 excess_ratio = ad_ratio - bm["ad_spend_ratio_median"]
                 dev_pct      = round(excess_ratio / bm["ad_spend_ratio_median"] * 100)
@@ -3469,7 +3468,7 @@ async def _compute_insights(
             )
 
             if alert_ok:
-                key         = f"margin_crisis:{kp}"
+                key         = build_insight_key("margin_crisis", mp, sku).key
                 st          = statuses.get(key, ("active", None))
                 gap_pp      = round((bm["margin_median"] - margin_pct) * 100)
                 monthly_rev = rev / days_active * 30
@@ -3524,7 +3523,7 @@ async def _compute_insights(
         daily = fin["daily"]
         is_mature, periods, growth_pct, cv = _growth_maturity(daily)
         if is_mature:
-            key    = f"sales_growth:{kp}"
+            key    = build_insight_key("sales_growth", mp, sku).key
             st     = statuses.get(key, ("active", None))
             # Use most recent 3 days sum for uplift estimate
             dates_s  = sorted(daily.keys())
@@ -3578,7 +3577,7 @@ async def _compute_insights(
 
         # ── Rule 5: Low Stock ──────────────────────────────────────────────────
         if stock is not None and 0 <= stock <= 5:
-            key = f"low_stock:{kp}"
+            key = build_insight_key("low_stock", mp, sku).key
             st  = statuses.get(key, ("active", None))
             daily_avg = qty / max(len(daily), 1) if qty > 0 else 1
             days_left = round(stock / daily_avg) if daily_avg > 0 and daily_avg < stock else stock
@@ -3623,7 +3622,7 @@ async def _compute_insights(
 
         # ── Rule 6: High Rating (positive) ────────────────────────────────────
         if rating is not None and rating >= 4.8 and rev >= 3000:
-            key = f"high_rating:{kp}"
+            key = build_insight_key("high_rating", mp, sku).key
             st  = statuses.get(key, ("active", None))
 
             insights.append(InsightItem(
