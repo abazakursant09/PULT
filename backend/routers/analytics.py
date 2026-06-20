@@ -20,6 +20,7 @@ from services import decision_policy_engine as policy
 from services import execution_orchestrator as orch
 from services import execution_approval_engine as approval
 from services import autonomy_scoring_engine as autonomy
+from services import user_autonomy_profile as autonomy_profile
 
 router = APIRouter()
 
@@ -95,3 +96,11 @@ async def autonomy_level(
         score = await autonomy.compute_autonomy_level(db, uid, it)
         items.append({**it, **score})
     return {"autonomy": items}
+
+
+@router.get("/settings/autonomy-profile")
+async def autonomy_profile_settings(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    return await autonomy_profile.get_user_autonomy_profile(db, current_user.id)
