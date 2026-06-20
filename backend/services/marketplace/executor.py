@@ -16,10 +16,37 @@ from models.marketplace_connection import MarketplaceConnection
 from models.api_credential import ApiCredential
 from models.execution_log import ExecutionLog
 
+from services import capability_registry
+
 from . import action_catalog, guard, credential_vault
 from .errors import ExecutionError
 
 log = logging.getLogger(__name__)
+
+# action_type → capability_registry key (existing vocabulary only). Actions with
+# no registry write-capability key (set_price, update_card) are intentionally
+# UNMAPPED → legacy behavior preserved (no capability gate, no regression).
+_ACTION_CAPABILITY = {
+    "ad_set_bid":              "campaign_control",
+    "ad_set_state":            "campaign_control",
+    "publish_review_response": "review_reply",
+}
+
+# Connection marketplace label → registry marketplace code.
+_CANON_MP = {
+    "wildberries": "wb", "wb": "wb",
+    "ozon": "ozon",
+    "yandex": "yandex", "yandex_market": "yandex", "ym": "yandex",
+}
+
+
+def capability_for_action(action_type: str) -> str | None:
+    """Capability registry key gating this write action, or None when unmapped."""
+    return _ACTION_CAPABILITY.get(action_type)
+
+
+def _canon_mp(mp: str | None) -> str:
+    return _CANON_MP.get((mp or "").lower(), (mp or "").lower())
 
 _SECRET_KEYS = {"text"}  # payload keys safe to keep; secrets are never in payload anyway
 
@@ -104,6 +131,17 @@ async def execute(
             )
         # 3) validate payload
         spec.validate(payload)
+        # 3b) capability gate (A1): consult the registry before any write. Honest
+        # CapabilityNotSupported instead of a random downstream marketplace error.
+        # Unmapped actions (set_price, update_card) skip the gate (legacy behavior).
+        cap_key = capability_for_action(action_type)
+        if cap_key is not None:
+            v = capability_registry.verdict(cap_key, _canon_mp(target_mp))
+            if v is None or v == "impossible":
+                raise ExecutionError(
+                    ExecutionError.CAPABILITY_NOT_SUPPORTED,
+                    f"{action_type} not supported on {target_mp} (capability {cap_key})",
+                )
         # 4) guard (before any network)
         await guard.check(
             db=db, user_id=user_id, action_type=action_type,
