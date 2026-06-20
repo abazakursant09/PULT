@@ -75,6 +75,35 @@ def emit_candidates(insight_key: str) -> list["DecisionCandidate"]:
     return [DecisionCandidate(insight_key, itype, a, marketplace, sku) for a in space if a]
 
 
+async def emit_ranked_candidates(
+    db, *, user_id: str, insight_key: str, context_group: str
+) -> list["DecisionCandidate"]:
+    """
+    Same candidates as emit_candidates, but for margin_crisis SORTED by outcome
+    memory ranking (L2). Sort-only — never filters/drops a candidate. Non-margin
+    problems and the no-history / below-min_sample cases keep the deterministic
+    emit_candidates order. Read-only; creates no Decision.
+    """
+    candidates = emit_candidates(insight_key)
+    if not candidates:
+        return []
+    itype = candidates[0].itype
+    if itype != "margin_crisis":            # ranking applies to margin only
+        return candidates
+
+    from services.outcome_memory_ranking import rank_actions
+    ranked = await rank_actions(
+        db, user_id=user_id, problem_type=itype, context_group=context_group,
+        available_actions=[c.action_key for c in candidates],
+    )
+    by_action = {c.action_key: c for c in candidates}
+    ordered = [by_action[r["action_key"]] for r in ranked if r["action_key"] in by_action]
+    # Defensive: never drop a candidate the ranker didn't return (it returns all).
+    seen = {r["action_key"] for r in ranked}
+    ordered.extend(c for c in candidates if c.action_key not in seen)
+    return ordered
+
+
 @dataclass
 class InsightPromotionDTO:
     """Minimal, router-free view of an Insight needed to fixate a Decision."""
