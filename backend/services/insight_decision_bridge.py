@@ -16,6 +16,7 @@ best-effort — a miss still produces a Decision with null product/listing.
 """
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
 from typing import Optional
 
@@ -153,6 +154,10 @@ async def promote_insight_to_decision(
         severity=(insight.severity or "warn"),
         source="insight",
         status="open",
+        # Memory OS Phase 1: a new promotion starts a new chain at step 0.
+        # Existing decisions (returned above) keep their chain untouched.
+        decision_chain_id=str(uuid.uuid4()),
+        step_in_chain=0,
     )
     db.add(decision)
     try:
