@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { SellerBar, SellerAction } from '@/components/seller/Shell'
 import { byId, daysLeft, mono, rub, MP_NAME, lensDetail } from '@/lib/pultSeller'
+import LearningSurface from '@/components/LearningSurface'
 
 export default function ProductCard() {
   const params = useParams()
@@ -69,6 +70,12 @@ export default function ProductCard() {
                 <div className="c g"><div className="l">Эффект</div><div className="v">{x.e}</div></div>
               </div>
               <SellerAction insightKey={l.insightKey} />
+              {l.insightKey && (
+                <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--line)' }}>
+                  <div className="s-k" style={{ marginBottom: 8 }}>Почему PULT рекомендует это действие</div>
+                  <LearningSurface insightKey={l.insightKey} listingId={p.id} />
+                </div>
+              )}
             </div>
           )
         })()}
