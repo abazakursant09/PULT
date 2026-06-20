@@ -19,6 +19,7 @@ from services import decision_candidate_engine as cand
 from services import decision_policy_engine as policy
 from services import execution_orchestrator as orch
 from services import execution_approval_engine as approval
+from services import autonomy_scoring_engine as autonomy
 
 router = APIRouter()
 
@@ -80,3 +81,17 @@ async def approval_queue(
     uid = current_user.id
     plan = await orch.build_execution_plan(db, uid)
     return {"approval_queue": await approval.create_approval_queue(db, uid, plan)}
+
+
+@router.get("/analytics/autonomy-level")
+async def autonomy_level(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    uid = current_user.id
+    plan = await orch.build_execution_plan(db, uid)
+    items = []
+    for it in plan["execution_plan"]:
+        score = await autonomy.compute_autonomy_level(db, uid, it)
+        items.append({**it, **score})
+    return {"autonomy": items}
