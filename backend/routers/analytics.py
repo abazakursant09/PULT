@@ -15,6 +15,7 @@ from dependencies import get_current_user
 from models.user import User
 from services import decision_effect_aggregator as agg
 from services import decision_recommendation_engine as rec
+from services import decision_candidate_engine as cand
 
 router = APIRouter()
 
@@ -39,3 +40,12 @@ async def recommendations(
 ) -> dict:
     uid = current_user.id
     return {"recommendations": await rec.generate_recommendations(db, uid)}
+
+
+@router.get("/analytics/decision-candidates")
+async def decision_candidates(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    uid = current_user.id
+    return {"decision_candidates": await cand.generate_decision_candidates(db, uid)}
