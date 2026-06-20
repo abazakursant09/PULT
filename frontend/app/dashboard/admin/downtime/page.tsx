@@ -203,7 +203,7 @@ export default function DowntimePage() {
 
                   {step.cmds && (
                     <div className="rounded-xl overflow-hidden mb-3"
-                         style={{ background: '#1A1A1A', border: '1px solid rgba(0,0,0,0.06)' }}>
+                         style={{ background: 'var(--surface)', border: '1px solid rgba(0,0,0,0.06)' }}>
                       {step.cmds.map((cmd, i) => (
                         <div
                           key={i}

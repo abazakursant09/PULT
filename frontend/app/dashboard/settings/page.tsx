@@ -1,10 +1,10 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Send, Check, AlertTriangle, Bell, Calendar, Clock, RefreshCw, Trash2, AlertCircle, ArrowLeft, Key } from 'lucide-react'
-import { useRouter } from 'next/navigation'
+import { Send, Check, AlertTriangle, Bell, Calendar, Clock, RefreshCw, Trash2, AlertCircle, Key } from 'lucide-react'
 import { api, type TelegramSettings } from '@/lib/api'
 import { clearSession } from '@/lib/session'
+import { SellerBar } from '@/components/seller/Shell'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -34,7 +34,6 @@ const EVENT_TYPES: { key: keyof TelegramSettings; label: string; desc: string; c
 ]
 
 export default function SettingsPage() {
-  const router = useRouter()
   const [chatId,      setChatId]      = useState('')
   const [savedChatId, setSavedChatId] = useState<string | null>(null)
   const [chatSaving,  setChatSaving]  = useState(false)
@@ -143,13 +142,11 @@ export default function SettingsPage() {
   }
 
   return (
-    <main className="max-w-2xl mx-auto px-5 py-10 space-y-8">
+    <>
+      <SellerBar title="Настройки" sub="Telegram-уведомления · API-ключи · аккаунт" />
+      <div className="s-canvas">
+        <div className="max-w-2xl mx-auto space-y-8">
       <div>
-        <button onClick={() => router.push('/dashboard/account?tab=notifications')}
-                className="sm:hidden flex items-center gap-1.5 text-sm mb-4 rounded-lg px-2.5 py-1.5"
-                style={{ color: 'var(--text-2)', border: '1px solid var(--line)' }}>
-          <ArrowLeft size={13} /> Назад
-        </button>
         <h1 className="font-bold" style={{ fontSize: '1.5rem', color: 'var(--text)' }}>
           Telegram-уведомления
         </h1>
@@ -418,6 +415,8 @@ export default function SettingsPage() {
           )}
         </div>
       </Card>
-    </main>
+        </div>
+      </div>
+    </>
   )
 }

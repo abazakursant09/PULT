@@ -27,6 +27,22 @@ const nextConfig = {
       },
     ]
   },
+  // ПУЛЬТ V2 — старые роуты сворачиваются в 6 канонических вкладок.
+  // Закладки/письма не ломаются: 307 redirect на новую структуру.
+  async redirects() {
+    return [
+      { source: '/dashboard/leaks',           destination: '/dashboard/finance',  permanent: false },
+      { source: '/dashboard/data',            destination: '/dashboard/products', permanent: false },
+      { source: '/dashboard/monitor',         destination: '/dashboard/finance',  permanent: false },
+      { source: '/dashboard/action-engine',   destination: '/dashboard',          permanent: false },
+      { source: '/dashboard/seo',             destination: '/dashboard/products', permanent: false },
+      { source: '/dashboard/seo-cards',       destination: '/dashboard/products', permanent: false },
+      { source: '/dashboard/seo-intelligence',destination: '/dashboard/products', permanent: false },
+      { source: '/dashboard/seo-lab',         destination: '/dashboard/products', permanent: false },
+      { source: '/dashboard/notifications',   destination: '/dashboard/settings', permanent: false },
+      { source: '/dashboard/import',          destination: '/dashboard/settings', permanent: false },
+    ]
+  },
 }
 
 module.exports = nextConfig

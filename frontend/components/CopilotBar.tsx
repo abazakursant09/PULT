@@ -143,35 +143,35 @@ export function CopilotBar() {
     <div style={{
       display: 'flex', alignItems: 'center', gap: 10,
       padding: '0 20px', height: 42, flexShrink: 0,
-      background: '#0D0D10',
+      background: 'var(--bg)',
       borderBottom: '1px solid rgba(110,106,252,0.18)',
-      borderLeft: '3px solid #6E6AFC',
+      borderLeft: '3px solid var(--violet)',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-        <Zap size={11} color="#A78BFA" />
+        <Zap size={11} color="var(--violet-text)" />
         {insight.is_demo && (
-          <span style={{ fontSize: 8.5, fontWeight: 800, letterSpacing: '0.10em', color: '#A78BFA', background: 'rgba(110,106,252,0.12)', padding: '1px 5px', borderRadius: 3 }}>
+          <span style={{ fontSize: 8.5, fontWeight: 800, letterSpacing: '0.10em', color: 'var(--violet-text)', background: 'rgba(110,106,252,0.12)', padding: '1px 5px', borderRadius: 3 }}>
             DEMO
           </span>
         )}
       </div>
 
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, overflow: 'hidden' }}>
-        <span style={{ fontSize: 12, color: '#C0C0C8', lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '60%' }}>
+        <span style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '60%' }}>
           {insight.title}
         </span>
         {insight.product_name && (
-          <span style={{ fontSize: 11, color: '#52525B', whiteSpace: 'nowrap', flexShrink: 0 }}>
+          <span style={{ fontSize: 11, color: 'var(--text-3)', whiteSpace: 'nowrap', flexShrink: 0 }}>
             · {insight.product_name}
           </span>
         )}
         {loss && (
-          <span style={{ fontSize: 11, fontWeight: 700, color: '#EF4444', whiteSpace: 'nowrap', flexShrink: 0, background: 'rgba(239,68,68,0.08)', borderRadius: 20, padding: '1px 7px' }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--danger)', whiteSpace: 'nowrap', flexShrink: 0, background: 'rgba(239,68,68,0.08)', borderRadius: 20, padding: '1px 7px' }}>
             {loss}
           </span>
         )}
         {trust && !insight.is_demo && (
-          <span style={{ fontSize: 10, color: '#3F3F46', whiteSpace: 'nowrap', flexShrink: 0 }}>
+          <span style={{ fontSize: 10, color: 'var(--text-3)', whiteSpace: 'nowrap', flexShrink: 0 }}>
             {trust}
           </span>
         )}
@@ -180,7 +180,7 @@ export function CopilotBar() {
       {primary && (
         <button
           onClick={handleAction}
-          style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontWeight: 700, color: '#A78BFA', background: 'rgba(110,106,252,0.12)', border: '1px solid rgba(110,106,252,0.25)', borderRadius: 6, padding: '5px 11px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+          style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontWeight: 700, color: 'var(--violet-text)', background: 'rgba(110,106,252,0.12)', border: '1px solid rgba(110,106,252,0.25)', borderRadius: 6, padding: '5px 11px', cursor: 'pointer', whiteSpace: 'nowrap' }}
         >
           {primary.label} →
         </button>
@@ -188,7 +188,7 @@ export function CopilotBar() {
 
       <button
         onClick={handleDismiss}
-        style={{ flexShrink: 0, width: 22, height: 22, borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'none', border: 'none', cursor: 'pointer', color: '#3F3F46' }}
+        style={{ flexShrink: 0, width: 22, height: 22, borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)' }}
         title="Скрыть до следующей сессии"
       >
         <X size={12} />

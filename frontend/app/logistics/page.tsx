@@ -17,7 +17,7 @@ function Stars({ rating }: { rating: number }) {
   return (
     <span className="flex items-center gap-0.5">
       {[1,2,3,4,5].map(n => (
-        <Star key={n} size={12} style={{ color: n <= Math.round(rating) ? '#7C3AED' : 'hsl(var(--border))', fill: n <= Math.round(rating) ? '#7C3AED' : 'none' }} />
+        <Star key={n} size={12} style={{ color: n <= Math.round(rating) ? 'var(--violet)' : 'hsl(var(--border))', fill: n <= Math.round(rating) ? 'var(--violet)' : 'none' }} />
       ))}
       <span className="ml-1 text-xs text-muted-foreground">{rating.toFixed(1)}</span>
     </span>
@@ -46,7 +46,7 @@ function CompanyCard({ tc }: { tc: TransportCompanyEntry }) {
       <CardContent className="p-4">
         <div className="flex items-start gap-3">
           <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: 'rgba(110,106,252,0.10)', border: '1px solid rgba(110,106,252,0.15)' }}>
-            <Truck size={16} style={{ color: '#7C3AED' }} />
+            <Truck size={16} style={{ color: 'var(--violet)' }} />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-start justify-between gap-2">
@@ -110,7 +110,7 @@ function CompareForm({ onResults }: { onResults: (r: DeliveryResult[]) => void }
     <Card className="shadow-stripe">
       <CardHeader className="pb-3">
         <CardTitle className="text-base flex items-center gap-2" style={{ color: '#FFFFFF' }}>
-          <Truck size={16} style={{ color: '#7C3AED' }} /> Сравнение стоимости доставки
+          <Truck size={16} style={{ color: 'var(--violet)' }} /> Сравнение стоимости доставки
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -164,7 +164,7 @@ function CompareResults({ results }: { results: DeliveryResult[] }) {
       <CardContent className="p-0">
         {results.map((r, idx) => (
           <div key={r.company_id} className="flex items-center gap-4 px-5 py-4 border-b border-border/40 last:border-b-0" style={{ background: idx === 0 ? 'rgba(110,106,252,0.06)' : 'transparent' }}>
-            <div className="w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold shrink-0" style={{ background: idx === 0 ? 'rgba(110,106,252,0.12)' : 'hsl(var(--muted))', color: idx === 0 ? '#7C3AED' : '#8898AA' }}>
+            <div className="w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold shrink-0" style={{ background: idx === 0 ? 'rgba(110,106,252,0.12)' : 'hsl(var(--muted))', color: idx === 0 ? 'var(--violet)' : '#8898AA' }}>
               {idx + 1}
             </div>
             <div className="flex-1 min-w-0">
@@ -200,7 +200,7 @@ export default function LogisticsPage() {
 
   return (
     <AppShell>
-      <div className="flex-1 p-4 md:p-6" style={{ background: '#09090B' }}>
+      <div className="flex-1 p-4 md:p-6" style={{ background: 'var(--bg)' }}>
         <div className="max-w-5xl mx-auto space-y-6">
 
           <BlurFade inView>

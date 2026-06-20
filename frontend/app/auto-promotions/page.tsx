@@ -37,9 +37,9 @@ const MOCK_PROMOS: Promotion[] = [
 ]
 
 const STATUS_MAP = {
-  active:    { label: 'Активна',   color: '#22C55E' },
-  paused:    { label: 'Пауза',     color: '#71717A' },
-  triggered: { label: 'Сработала', color: '#A78BFA' },
+  active:    { label: 'Активна',   color: 'var(--success)' },
+  paused:    { label: 'Пауза',     color: 'var(--text-3)' },
+  triggered: { label: 'Сработала', color: 'var(--violet-text)' },
 }
 
 const EMPTY = { name: '', sku: '', marketplace: 'wildberries', currentPrice: '', minPrice: '' }
@@ -93,9 +93,9 @@ export default function AutoPromotionsPage() {
         <button
           onClick={() => router.back()}
           className="flex items-center gap-1.5 text-[13px] mb-6"
-          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#71717A', padding: 0 }}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: 0 }}
           onMouseEnter={e => { e.currentTarget.style.color = '#FFFFFF' }}
-          onMouseLeave={e => { e.currentTarget.style.color = '#71717A' }}
+          onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-3)' }}
         >
           <ArrowLeft size={14} /> Назад
         </button>
@@ -103,7 +103,7 @@ export default function AutoPromotionsPage() {
         <div className="mb-8">
           <p className="label mb-2">ИНСТРУМЕНТЫ</p>
           <h1 className="text-[22px] font-bold mb-1" style={{ color: '#FFFFFF' }}>Автоакции</h1>
-          <p className="text-[13px]" style={{ color: '#71717A' }}>
+          <p className="text-[13px]" style={{ color: 'var(--text-3)' }}>
             Автоматическое управление ценами — снижение при падении конкурентов
           </p>
         </div>
@@ -115,10 +115,10 @@ export default function AutoPromotionsPage() {
             { label: 'АКТИВНЫХ',     value: activeCount,   icon: TrendingDown },
             { label: 'СРАБОТАЛО',    value: triggeredCount, icon: TrendingUp },
           ].map(({ label, value, icon: Icon }, i) => (
-            <div key={i} className="p-5 rounded-[8px]" style={{ background: '#111113', border: '1px solid rgba(255,255,255,0.08)' }}>
+            <div key={i} className="p-5 rounded-[8px]" style={{ background: 'var(--surface)', border: '1px solid rgba(255,255,255,0.08)' }}>
               <div className="flex items-center justify-between mb-3">
                 <p className="label">{label}</p>
-                <Icon size={13} style={{ color: '#909096' }} />
+                <Icon size={13} style={{ color: 'var(--text-2)' }} />
               </div>
               <p className="text-[28px] font-bold mono" style={{ color: '#FFFFFF' }}>{value}</p>
             </div>
@@ -135,7 +135,7 @@ export default function AutoPromotionsPage() {
 
         {/* Add form */}
         {showForm && (
-          <div className="mb-5 p-6 rounded-[8px]" style={{ background: '#111113', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div className="mb-5 p-6 rounded-[8px]" style={{ background: 'var(--surface)', border: '1px solid rgba(255,255,255,0.08)' }}>
             <p className="text-[13px] font-semibold mb-5" style={{ color: '#FFFFFF' }}>Новое правило автоакции</p>
             <form onSubmit={handleAdd}>
               <div className="grid grid-cols-3 gap-4 mb-4">
@@ -176,8 +176,8 @@ export default function AutoPromotionsPage() {
         {promos.length === 0 ? (
           <div className="py-20 text-center">
             <Zap size={32} className="mx-auto mb-4" style={{ color: '#3A3A40' }} />
-            <p className="text-[15px] font-medium mb-2" style={{ color: '#71717A' }}>Правил пока нет</p>
-            <p className="text-[13px] mb-6" style={{ color: '#909096' }}>Добавьте первый товар для отслеживания</p>
+            <p className="text-[15px] font-medium mb-2" style={{ color: 'var(--text-3)' }}>Правил пока нет</p>
+            <p className="text-[13px] mb-6" style={{ color: 'var(--text-2)' }}>Добавьте первый товар для отслеживания</p>
             <Button onClick={() => setShowForm(true)}><Plus size={14} /> Добавить правило</Button>
           </div>
         ) : (
@@ -189,9 +189,9 @@ export default function AutoPromotionsPage() {
                 <div
                   key={p.id}
                   className="flex items-center gap-4 p-5 rounded-[8px] transition-colors duration-200"
-                  style={{ background: '#111113', border: '1px solid rgba(255,255,255,0.08)' }}
-                  onMouseEnter={e => { e.currentTarget.style.background = '#18181B' }}
-                  onMouseLeave={e => { e.currentTarget.style.background = '#111113' }}
+                  style={{ background: 'var(--surface)', border: '1px solid rgba(255,255,255,0.08)' }}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface-h)' }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'var(--surface)' }}
                 >
                   {/* Status dot */}
                   <div className="w-2 h-2 rounded-full shrink-0" style={{ background: st.color }} />
@@ -200,9 +200,9 @@ export default function AutoPromotionsPage() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
                       <p className="text-[14px] font-medium truncate" style={{ color: '#FFFFFF' }}>{p.productName}</p>
-                      <span className="text-[11px]" style={{ color: '#909096' }}>{p.marketplace}</span>
+                      <span className="text-[11px]" style={{ color: 'var(--text-2)' }}>{p.marketplace}</span>
                     </div>
-                    <div className="flex items-center gap-4 text-[12px]" style={{ color: '#909096' }}>
+                    <div className="flex items-center gap-4 text-[12px]" style={{ color: 'var(--text-2)' }}>
                       {p.sku && <span>SKU: {p.sku}</span>}
                       <span className="flex items-center gap-1"><Clock size={10} /> {p.lastCheck}</span>
                     </div>
@@ -216,11 +216,11 @@ export default function AutoPromotionsPage() {
                     </div>
                     <div className="text-right">
                       <p className="text-[11px] label mb-0.5">МИН.</p>
-                      <p className="text-[15px] font-bold mono" style={{ color: '#A78BFA' }}>{p.minPrice.toLocaleString('ru-RU')} ₽</p>
+                      <p className="text-[15px] font-bold mono" style={{ color: 'var(--violet-text)' }}>{p.minPrice.toLocaleString('ru-RU')} ₽</p>
                     </div>
                     <div className="text-right">
                       <p className="text-[11px] label mb-0.5">ДИАПАЗОН</p>
-                      <p className="text-[15px] font-bold mono" style={{ color: '#71717A' }}>−{discount}%</p>
+                      <p className="text-[15px] font-bold mono" style={{ color: 'var(--text-3)' }}>−{discount}%</p>
                     </div>
                   </div>
 
@@ -234,17 +234,17 @@ export default function AutoPromotionsPage() {
                     <button
                       onClick={() => toggleStatus(p.id)}
                       className="text-[12px] transition-colors duration-200 px-3 py-1 rounded-[8px]"
-                      style={{ background: 'transparent', color: '#909096', border: '1px solid rgba(255,255,255,0.10)', cursor: 'pointer' }}
+                      style={{ background: 'transparent', color: 'var(--text-2)', border: '1px solid rgba(255,255,255,0.10)', cursor: 'pointer' }}
                       onMouseEnter={e => { e.currentTarget.style.color = '#FFFFFF'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.20)' }}
-                      onMouseLeave={e => { e.currentTarget.style.color = '#909096'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.10)' }}
+                      onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-2)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.10)' }}
                     >
                       {p.status === 'active' ? 'Пауза' : 'Запустить'}
                     </button>
                     <button
                       onClick={() => handleDelete(p.id)}
-                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#909096', padding: '4px 6px' }}
-                      onMouseEnter={e => { e.currentTarget.style.color = '#EF4444' }}
-                      onMouseLeave={e => { e.currentTarget.style.color = '#909096' }}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-2)', padding: '4px 6px' }}
+                      onMouseEnter={e => { e.currentTarget.style.color = 'var(--danger)' }}
+                      onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-2)' }}
                     >
                       <Trash2 size={13} />
                     </button>

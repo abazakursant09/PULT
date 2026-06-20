@@ -53,7 +53,7 @@ const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
 // ─── Shared Card ──────────────────────────────────────────────────────────────
 function DarkCard({ children, className = '' }: { children: React.ReactNode; className?: string }) {
   return (
-    <div className={`rounded-[8px] p-6 ${className}`} style={{ background: '#0F0F0F', border: '1px solid #1A1A1A' }}>
+    <div className={`rounded-[8px] p-6 ${className}`} style={{ background: 'var(--bg)', border: '1px solid var(--surface)' }}>
       {children}
     </div>
   )
@@ -63,7 +63,7 @@ function SectionIcon({ icon: Icon, gold }: { icon: React.ElementType; gold?: boo
   return (
     <div className="w-9 h-9 rounded-[8px] flex items-center justify-center shrink-0"
          style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.18)' }}>
-      <Icon size={16} style={{ color: '#A78BFA' }} />
+      <Icon size={16} style={{ color: 'var(--violet-text)' }} />
     </div>
   )
 }
@@ -87,13 +87,13 @@ function ProfileTab() {
         <div className="flex items-center gap-4 mb-6">
           <div
             className="w-14 h-14 rounded-[8px] flex items-center justify-center text-[22px] font-bold shrink-0"
-            style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.18)', color: '#A78BFA' }}
+            style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.18)', color: 'var(--violet-text)' }}
           >
             {user?.name.charAt(0).toUpperCase() ?? '?'}
           </div>
           <div>
-            <p className="text-[18px] font-bold" style={{ color: '#FFFFFF' }}>{user?.name ?? '—'}</p>
-            <p className="text-[13px] mt-0.5" style={{ color: '#8A8A8A' }}>{user?.email ?? '—'}</p>
+            <p className="text-[18px] font-bold" style={{ color: 'var(--text)' }}>{user?.name ?? '—'}</p>
+            <p className="text-[13px] mt-0.5" style={{ color: 'var(--text-2)' }}>{user?.email ?? '—'}</p>
             {user?.plan && (
               <span className="badge badge-gold mt-2 inline-block">
                 {planLabel[user.plan] ?? user.plan}
@@ -109,16 +109,16 @@ function ProfileTab() {
             { label: 'ТАРИФ',  value: planLabel[user?.plan ?? ''] ?? user?.plan ?? '—' },
             { label: 'СТАТУС', value: 'Активен' },
           ].map(({ label, value }) => (
-            <div key={label} className="p-4 rounded-[8px]" style={{ background: '#0A0A0A', border: '1px solid #1A1A1A' }}>
+            <div key={label} className="p-4 rounded-[8px]" style={{ background: 'var(--bg)', border: '1px solid var(--surface)' }}>
               <p className="label mb-1">{label}</p>
-              <p className="text-[14px] font-medium" style={{ color: '#FFFFFF' }}>{value}</p>
+              <p className="text-[14px] font-medium" style={{ color: 'var(--text)' }}>{value}</p>
             </div>
           ))}
         </div>
 
-        <p className="mt-5 text-[13px]" style={{ color: '#5A5A5A' }}>
+        <p className="mt-5 text-[13px]" style={{ color: 'var(--text-3)' }}>
           Для изменения имени или email обратитесь в{' '}
-          <Link href="/support" style={{ color: '#A78BFA', textDecoration: 'none' }}>службу поддержки</Link>.
+          <Link href="/support" style={{ color: 'var(--violet-text)', textDecoration: 'none' }}>службу поддержки</Link>.
         </p>
       </DarkCard>
     </div>
@@ -193,13 +193,13 @@ function SecurityTab() {
     <div className="space-y-4">
       {success && (
         <div className="px-4 py-3 rounded-[8px] flex items-center gap-3 text-[13px]"
-             style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.22)', color: '#A78BFA' }}>
+             style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.22)', color: 'var(--violet-text)' }}>
           <Check size={14} /> {success}
         </div>
       )}
       {error && (
         <div className="px-4 py-3 rounded-[8px] flex items-center gap-3 text-[13px]"
-             style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: '#FCA5A5' }}>
+             style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: 'var(--danger)' }}>
           <AlertTriangle size={14} /> {error}
         </div>
       )}
@@ -210,21 +210,21 @@ function SecurityTab() {
             <div className="w-10 h-10 rounded-[8px] flex items-center justify-center shrink-0"
                  style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.18)' }}>
               {mfaEnabled
-                ? <ShieldCheck size={18} style={{ color: '#A78BFA' }} />
-                : <Shield size={18} style={{ color: '#A78BFA' }} />
+                ? <ShieldCheck size={18} style={{ color: 'var(--violet-text)' }} />
+                : <Shield size={18} style={{ color: 'var(--violet-text)' }} />
               }
             </div>
             <div>
-              <p className="text-[15px] font-semibold" style={{ color: '#FFFFFF' }}>Двухфакторная аутентификация (2FA)</p>
-              <p className="text-[13px] mt-0.5" style={{ color: '#8A8A8A' }}>
+              <p className="text-[15px] font-semibold" style={{ color: 'var(--text)' }}>Двухфакторная аутентификация (2FA)</p>
+              <p className="text-[13px] mt-0.5" style={{ color: 'var(--text-2)' }}>
                 {mfaEnabled ? 'Аккаунт защищён TOTP-кодом' : 'Защита не активирована'}
               </p>
             </div>
           </div>
           <div className="flex items-center gap-3 shrink-0">
             <span className="badge" style={mfaEnabled
-              ? { background: 'rgba(124,58,237,0.10)', color: '#A78BFA', borderColor: 'rgba(124,58,237,0.25)' }
-              : { background: 'rgba(255,255,255,0.04)', color: '#8A8A8A', borderColor: '#1A1A1A' }
+              ? { background: 'rgba(124,58,237,0.10)', color: 'var(--violet-text)', borderColor: 'rgba(124,58,237,0.25)' }
+              : { background: 'rgba(255,255,255,0.04)', color: 'var(--text-2)', borderColor: 'var(--surface)' }
             }>
               {mfaEnabled ? '✓ Включено' : 'Выключено'}
             </span>
@@ -243,35 +243,35 @@ function SecurityTab() {
         </div>
 
         {phase === 'setup' && (
-          <div className="mt-6 space-y-4 pt-6" style={{ borderTop: '1px solid #1A1A1A' }}>
-            <p className="text-[13px] font-medium" style={{ color: '#FFFFFF' }}>1. Отсканируйте QR-код в Google Authenticator или Aegis</p>
-            <div className="p-3 rounded-[8px] inline-block" style={{ background: '#FFFFFF', border: '1px solid #1A1A1A' }}>
+          <div className="mt-6 space-y-4 pt-6" style={{ borderTop: '1px solid var(--surface)' }}>
+            <p className="text-[13px] font-medium" style={{ color: 'var(--text)' }}>1. Отсканируйте QR-код в Google Authenticator или Aegis</p>
+            <div className="p-3 rounded-[8px] inline-block" style={{ background: 'var(--text)', border: '1px solid var(--surface)' }}>
               <img
                 src={`https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(otpauth)}&size=180x180&margin=4`}
                 alt="QR-код 2FA" width={180} height={180} style={{ borderRadius: 4, display: 'block' }}
               />
             </div>
             <div>
-              <p className="text-[13px] mb-2" style={{ color: '#8A8A8A' }}>Или введите ключ вручную:</p>
+              <p className="text-[13px] mb-2" style={{ color: 'var(--text-2)' }}>Или введите ключ вручную:</p>
               <div className="flex items-center gap-2">
                 <code
                   className="flex-1 px-3 py-2 rounded-[8px] text-[13px] mono"
-                  style={{ background: '#0A0A0A', border: '1px solid #1A1A1A', color: '#A78BFA', letterSpacing: '0.08em', wordBreak: 'break-all' }}
+                  style={{ background: 'var(--bg)', border: '1px solid var(--surface)', color: 'var(--violet-text)', letterSpacing: '0.08em', wordBreak: 'break-all' }}
                 >
                   {secret}
                 </code>
                 <button
                   onClick={copySecret}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#5A5A5A', padding: '4px 8px' }}
-                  onMouseEnter={e => { e.currentTarget.style.color = '#A78BFA' }}
-                  onMouseLeave={e => { e.currentTarget.style.color = '#5A5A5A' }}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: '4px 8px' }}
+                  onMouseEnter={e => { e.currentTarget.style.color = 'var(--violet-text)' }}
+                  onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-3)' }}
                 >
-                  {copied ? <Check size={14} style={{ color: '#A78BFA' }} /> : <Copy size={14} />}
+                  {copied ? <Check size={14} style={{ color: 'var(--violet-text)' }} /> : <Copy size={14} />}
                 </button>
               </div>
             </div>
             <div>
-              <p className="text-[13px] font-medium mb-2" style={{ color: '#FFFFFF' }}>2. Введите 6-значный код из приложения</p>
+              <p className="text-[13px] font-medium mb-2" style={{ color: 'var(--text)' }}>2. Введите 6-значный код из приложения</p>
               <div className="flex gap-3">
                 <Input
                   type="text" inputMode="numeric" pattern="[0-9]{6}" maxLength={6}
@@ -289,14 +289,14 @@ function SecurityTab() {
         )}
 
         {phase === 'disable' && (
-          <div className="mt-6 pt-6 space-y-4" style={{ borderTop: '1px solid #1A1A1A' }}>
+          <div className="mt-6 pt-6 space-y-4" style={{ borderTop: '1px solid var(--surface)' }}>
             <div className="px-4 py-3 rounded-[8px] flex items-center gap-3 text-[13px]"
-                 style={{ background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.15)', color: '#8A8A8A' }}>
-              <AlertTriangle size={14} style={{ color: '#EF4444' }} />
+                 style={{ background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.15)', color: 'var(--text-2)' }}>
+              <AlertTriangle size={14} style={{ color: 'var(--danger)' }} />
               Отключение 2FA снизит защиту аккаунта
             </div>
             <div>
-              <p className="text-[13px] font-medium mb-2" style={{ color: '#FFFFFF' }}>Введите код из приложения для подтверждения</p>
+              <p className="text-[13px] font-medium mb-2" style={{ color: 'var(--text)' }}>Введите код из приложения для подтверждения</p>
               <div className="flex gap-3">
                 <Input
                   type="text" inputMode="numeric" pattern="[0-9]{6}" maxLength={6}
@@ -386,12 +386,12 @@ function NotificationsTab() {
       <DarkCard>
         <div className="flex items-center gap-3 mb-5">
           <SectionIcon icon={Send} />
-          <p className="text-[15px] font-semibold" style={{ color: '#FFFFFF' }}>1. Подключить Telegram</p>
+          <p className="text-[15px] font-semibold" style={{ color: 'var(--text)' }}>1. Подключить Telegram</p>
         </div>
-        <div className="rounded-[8px] p-4 mb-4 text-[13px]" style={{ background: '#0A0A0A', border: '1px solid #1A1A1A' }}>
-          <p className="font-medium mb-2" style={{ color: '#FFFFFF' }}>Как узнать Chat ID:</p>
-          <ol className="space-y-1 pl-4 list-decimal" style={{ color: '#8A8A8A' }}>
-            <li>Откройте Telegram → найдите <strong style={{ color: '#A78BFA' }}>@userinfobot</strong></li>
+        <div className="rounded-[8px] p-4 mb-4 text-[13px]" style={{ background: 'var(--bg)', border: '1px solid var(--surface)' }}>
+          <p className="font-medium mb-2" style={{ color: 'var(--text)' }}>Как узнать Chat ID:</p>
+          <ol className="space-y-1 pl-4 list-decimal" style={{ color: 'var(--text-2)' }}>
+            <li>Откройте Telegram → найдите <strong style={{ color: 'var(--violet-text)' }}>@userinfobot</strong></li>
             <li>Нажмите /start — бот пришлёт ваш Chat ID</li>
             <li>Вставьте его ниже и нажмите «Сохранить»</li>
           </ol>
@@ -407,16 +407,16 @@ function NotificationsTab() {
             {!chatSaving && (chatSaved ? <><Check size={13} /> Сохранено</> : 'Сохранить')}
           </Button>
         </div>
-        {chatError && <p className="mt-2 text-[13px]" style={{ color: '#EF4444' }}>{chatError}</p>}
+        {chatError && <p className="mt-2 text-[13px]" style={{ color: 'var(--danger)' }}>{chatError}</p>}
         {savedChatId && (
           <div className="mt-3 flex flex-wrap items-center gap-3">
-            <span className="text-[13px]" style={{ color: '#8A8A8A' }}>
-              Chat ID: <code style={{ color: '#A78BFA' }}>{savedChatId}</code>
+            <span className="text-[13px]" style={{ color: 'var(--text-2)' }}>
+              Chat ID: <code style={{ color: 'var(--violet-text)' }}>{savedChatId}</code>
             </span>
             <Button variant="ghost" size="sm" onClick={sendTest} loading={testing}>
               {!testing && (
-                testResult === 'ok'  ? <><Check size={11} style={{ color: '#A78BFA' }} /> Отправлено</> :
-                testResult === 'err' ? <><AlertTriangle size={11} style={{ color: '#EF4444' }} /> Ошибка</> :
+                testResult === 'ok'  ? <><Check size={11} style={{ color: 'var(--violet-text)' }} /> Отправлено</> :
+                testResult === 'err' ? <><AlertTriangle size={11} style={{ color: 'var(--danger)' }} /> Ошибка</> :
                 'Тест'
               )}
             </Button>
@@ -427,7 +427,7 @@ function NotificationsTab() {
       <DarkCard>
         <div className="flex items-center gap-3 mb-5">
           <SectionIcon icon={Bell} />
-          <p className="text-[15px] font-semibold" style={{ color: '#FFFFFF' }}>2. Типы уведомлений</p>
+          <p className="text-[15px] font-semibold" style={{ color: 'var(--text)' }}>2. Типы уведомлений</p>
         </div>
         {sLoad || !settings ? (
           <div className="flex justify-center py-8"><div className="spinner" /></div>
@@ -437,14 +437,14 @@ function NotificationsTab() {
               <div
                 key={key}
                 className="flex items-center justify-between gap-4 px-4 py-3 rounded-[8px]"
-                style={{ background: '#0A0A0A', border: '1px solid #1A1A1A' }}
+                style={{ background: 'var(--bg)', border: '1px solid var(--surface)' }}
               >
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-[13px] font-medium" style={{ color: '#FFFFFF' }}>{label}</span>
+                    <span className="text-[13px] font-medium" style={{ color: 'var(--text)' }}>{label}</span>
                     {critical && <span className="badge badge-danger">критично</span>}
                   </div>
-                  <p className="text-[12px] mt-0.5" style={{ color: '#5A5A5A' }}>{desc}</p>
+                  <p className="text-[12px] mt-0.5" style={{ color: 'var(--text-3)' }}>{desc}</p>
                 </div>
                 <Switch
                   checked={settings[key] as boolean}
@@ -461,8 +461,8 @@ function NotificationsTab() {
           <div className="flex items-center gap-3 mb-5">
             <SectionIcon icon={RefreshCw} />
             <div>
-              <p className="text-[15px] font-semibold" style={{ color: '#FFFFFF' }}>3. Intelligence Loop</p>
-              <p className="text-[12px] mt-0.5" style={{ color: '#5A5A5A' }}>Пульт сам находит инсайты и пишет в Telegram каждые 30 минут</p>
+              <p className="text-[15px] font-semibold" style={{ color: 'var(--text)' }}>3. Intelligence Loop</p>
+              <p className="text-[12px] mt-0.5" style={{ color: 'var(--text-3)' }}>Пульт сам находит инсайты и пишет в Telegram каждые 30 минут</p>
             </div>
           </div>
           <div className="space-y-2 mb-4">
@@ -470,18 +470,18 @@ function NotificationsTab() {
               <div
                 key={key}
                 className="flex items-center justify-between gap-4 px-4 py-3 rounded-[8px]"
-                style={{ background: '#0A0A0A', border: '1px solid #1A1A1A' }}
+                style={{ background: 'var(--bg)', border: '1px solid var(--surface)' }}
               >
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-[13px] font-medium" style={{ color: '#FFFFFF' }}>{label}</span>
+                    <span className="text-[13px] font-medium" style={{ color: 'var(--text)' }}>{label}</span>
                     {badge === 'авто' && (
                       <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold"
-                            style={{ background: 'rgba(110,106,252,0.15)', color: '#6E6AFC' }}>авто</span>
+                            style={{ background: 'rgba(110,106,252,0.15)', color: 'var(--violet)' }}>авто</span>
                     )}
                     {badge === 'важно' && <span className="badge badge-danger">важно</span>}
                   </div>
-                  <p className="text-[12px] mt-0.5" style={{ color: '#5A5A5A' }}>{desc}</p>
+                  <p className="text-[12px] mt-0.5" style={{ color: 'var(--text-3)' }}>{desc}</p>
                 </div>
                 <Switch
                   checked={settings[key] as boolean}
@@ -493,17 +493,17 @@ function NotificationsTab() {
 
           {settings.notify_retention && (
             <div className="flex items-center gap-3 px-4 py-3 rounded-[8px] mb-4"
-                 style={{ background: '#0A0A0A', border: '1px solid #1A1A1A' }}>
-              <span className="text-[13px]" style={{ color: '#8A8A8A' }}>Напоминать через</span>
+                 style={{ background: 'var(--bg)', border: '1px solid var(--surface)' }}>
+              <span className="text-[13px]" style={{ color: 'var(--text-2)' }}>Напоминать через</span>
               <select
                 value={settings.retention_inactive_days}
                 onChange={e => setField('retention_inactive_days', Number(e.target.value))}
                 className="h-8 rounded-[6px] px-2 text-[13px] font-medium"
-                style={{ background: '#161616', border: '1px solid #2A2A2A', color: '#FFFFFF' }}
+                style={{ background: 'var(--surface)', border: '1px solid var(--surface-h)', color: 'var(--text)' }}
               >
                 {[1,2,3,5,7,14].map(d => <option key={d} value={d}>{d} {d === 1 ? 'день' : d < 5 ? 'дня' : 'дней'}</option>)}
               </select>
-              <span className="text-[13px]" style={{ color: '#8A8A8A' }}>бездействия</span>
+              <span className="text-[13px]" style={{ color: 'var(--text-2)' }}>бездействия</span>
             </div>
           )}
 
@@ -512,12 +512,12 @@ function NotificationsTab() {
               <Button variant="ghost" size="sm" onClick={triggerInsights} loading={triggering}>
                 {!triggering && (
                   triggerResult === null          ? <><RefreshCw size={11} /> Проверить сейчас</> :
-                  triggerResult === -1            ? <><AlertTriangle size={11} style={{ color: '#EF4444' }} /> Ошибка</> :
-                  triggerResult === 0             ? <><Check size={11} style={{ color: '#8A8A8A' }} /> Новых нет</> :
-                                                    <><Check size={11} style={{ color: '#6E6AFC' }} /> Отправлено {triggerResult}</>
+                  triggerResult === -1            ? <><AlertTriangle size={11} style={{ color: 'var(--danger)' }} /> Ошибка</> :
+                  triggerResult === 0             ? <><Check size={11} style={{ color: 'var(--text-2)' }} /> Новых нет</> :
+                                                    <><Check size={11} style={{ color: 'var(--violet)' }} /> Отправлено {triggerResult}</>
                 )}
               </Button>
-              <span className="text-[11px]" style={{ color: '#3A3A3A' }}>Принудительный запуск Intelligence Loop</span>
+              <span className="text-[11px]" style={{ color: 'var(--line)' }}>Принудительный запуск Intelligence Loop</span>
             </div>
           )}
         </DarkCard>
@@ -527,22 +527,22 @@ function NotificationsTab() {
         <DarkCard>
           <div className="flex items-center gap-3 mb-5">
             <SectionIcon icon={Calendar} />
-            <p className="text-[15px] font-semibold" style={{ color: '#FFFFFF' }}>4. Плановые отчёты</p>
+            <p className="text-[15px] font-semibold" style={{ color: 'var(--text)' }}>4. Плановые отчёты</p>
           </div>
 
           <div className="space-y-3">
-            <div className="rounded-[8px] p-4" style={{ background: '#0A0A0A', border: '1px solid #1A1A1A' }}>
+            <div className="rounded-[8px] p-4" style={{ background: 'var(--bg)', border: '1px solid var(--surface)' }}>
               <div className="flex items-center justify-between mb-2">
                 <div>
-                  <p className="text-[13px] font-medium" style={{ color: '#FFFFFF' }}>Ежедневный отчёт</p>
-                  <p className="text-[12px] mt-0.5" style={{ color: '#5A5A5A' }}>Сводка по товарам, отзывам и ценам</p>
+                  <p className="text-[13px] font-medium" style={{ color: 'var(--text)' }}>Ежедневный отчёт</p>
+                  <p className="text-[12px] mt-0.5" style={{ color: 'var(--text-3)' }}>Сводка по товарам, отзывам и ценам</p>
                 </div>
                 <Switch checked={settings.daily_report} onCheckedChange={v => setField('daily_report', v)} />
               </div>
               {settings.daily_report && (
                 <div className="flex items-center gap-2 mt-3">
-                  <Clock size={13} style={{ color: '#5A5A5A' }} />
-                  <span className="text-[12px]" style={{ color: '#8A8A8A' }}>Время:</span>
+                  <Clock size={13} style={{ color: 'var(--text-3)' }} />
+                  <span className="text-[12px]" style={{ color: 'var(--text-2)' }}>Время:</span>
                   <Input
                     type="time"
                     value={settings.daily_report_time}
@@ -554,17 +554,17 @@ function NotificationsTab() {
               )}
             </div>
 
-            <div className="rounded-[8px] p-4" style={{ background: '#0A0A0A', border: '1px solid #1A1A1A' }}>
+            <div className="rounded-[8px] p-4" style={{ background: 'var(--bg)', border: '1px solid var(--surface)' }}>
               <div className="flex items-center justify-between mb-2">
                 <div>
-                  <p className="text-[13px] font-medium" style={{ color: '#FFFFFF' }}>Еженедельная сводка</p>
-                  <p className="text-[12px] mt-0.5" style={{ color: '#5A5A5A' }}>Детальный отчёт: динамика, топ товары</p>
+                  <p className="text-[13px] font-medium" style={{ color: 'var(--text)' }}>Еженедельная сводка</p>
+                  <p className="text-[12px] mt-0.5" style={{ color: 'var(--text-3)' }}>Детальный отчёт: динамика, топ товары</p>
                 </div>
                 <Switch checked={settings.weekly_summary} onCheckedChange={v => setField('weekly_summary', v)} />
               </div>
               {settings.weekly_summary && (
                 <div className="space-y-2 mt-3">
-                  <p className="text-[12px]" style={{ color: '#8A8A8A' }}>День недели:</p>
+                  <p className="text-[12px]" style={{ color: 'var(--text-2)' }}>День недели:</p>
                   <div className="flex flex-wrap gap-1.5">
                     {DAYS.map(d => {
                       const isActive = settings.weekly_summary_day === d.value
@@ -575,9 +575,9 @@ function NotificationsTab() {
                           onClick={() => setField('weekly_summary_day', d.value)}
                           className="w-9 h-9 rounded-[8px] text-[12px] font-semibold transition-all duration-200"
                           style={{
-                            background: isActive ? '#A78BFA' : '#0A0A0A',
-                            color: isActive ? '#0A0A0A' : '#8A8A8A',
-                            border: `1px solid ${isActive ? '#A78BFA' : '#1A1A1A'}`,
+                            background: isActive ? 'var(--violet-text)' : 'var(--bg)',
+                            color: isActive ? 'var(--bg)' : 'var(--text-2)',
+                            border: `1px solid ${isActive ? 'var(--violet-text)' : 'var(--surface)'}`,
                             cursor: 'pointer',
                           }}
                         >
@@ -587,8 +587,8 @@ function NotificationsTab() {
                     })}
                   </div>
                   <div className="flex items-center gap-2 mt-1">
-                    <Clock size={13} style={{ color: '#5A5A5A' }} />
-                    <span className="text-[12px]" style={{ color: '#8A8A8A' }}>Время:</span>
+                    <Clock size={13} style={{ color: 'var(--text-3)' }} />
+                    <span className="text-[12px]" style={{ color: 'var(--text-2)' }}>Время:</span>
                     <Input
                       type="time"
                       value={settings.weekly_summary_time}
@@ -617,14 +617,14 @@ function LanguageTab() {
     <DarkCard>
       <div className="flex items-center gap-3 mb-5">
         <SectionIcon icon={Globe} />
-        <p className="text-[15px] font-semibold" style={{ color: '#FFFFFF' }}>Язык интерфейса</p>
+        <p className="text-[15px] font-semibold" style={{ color: 'var(--text)' }}>Язык интерфейса</p>
       </div>
-      <p className="text-[13px] mb-5" style={{ color: '#8A8A8A' }}>
+      <p className="text-[13px] mb-5" style={{ color: 'var(--text-2)' }}>
         Доступны три языка: русский, английский и китайский.
         Выбранный язык сохраняется в браузере.
       </p>
       <div className="flex items-center gap-3">
-        <span className="text-[13px] font-medium" style={{ color: '#FFFFFF' }}>Текущий язык:</span>
+        <span className="text-[13px] font-medium" style={{ color: 'var(--text)' }}>Текущий язык:</span>
         <LanguageSwitcher />
       </div>
     </DarkCard>
@@ -652,21 +652,21 @@ function DangerTab() {
 
   return (
     <div className="space-y-4">
-      <div className="rounded-[8px] p-6 overflow-hidden" style={{ background: '#0F0F0F', border: '1px solid rgba(239,68,68,0.25)' }}>
+      <div className="rounded-[8px] p-6 overflow-hidden" style={{ background: 'var(--bg)', border: '1px solid rgba(239,68,68,0.25)' }}>
         <div className="flex items-center gap-3 mb-5">
           <div className="w-9 h-9 rounded-[8px] flex items-center justify-center shrink-0"
                style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}>
-            <AlertCircle size={16} style={{ color: '#EF4444' }} />
+            <AlertCircle size={16} style={{ color: 'var(--danger)' }} />
           </div>
-          <p className="text-[15px] font-semibold" style={{ color: '#EF4444' }}>Удаление аккаунта</p>
+          <p className="text-[15px] font-semibold" style={{ color: 'var(--danger)' }}>Удаление аккаунта</p>
         </div>
-        <p className="text-[13px] mb-5" style={{ color: '#8A8A8A', lineHeight: 1.65 }}>
+        <p className="text-[13px] mb-5" style={{ color: 'var(--text-2)', lineHeight: 1.65 }}>
           После удаления все ваши данные будут деактивированы. Аккаунт можно восстановить,
           зарегистрировавшись с тем же email в течение 30 дней. Реферальная история сохраняется.
         </p>
         {error && (
           <div className="mb-4 px-4 py-3 rounded-[8px] text-[13px]"
-               style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: '#FCA5A5' }}>
+               style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: 'var(--danger)' }}>
             {error}
           </div>
         )}
@@ -674,8 +674,8 @@ function DangerTab() {
           <button
             onClick={() => setConfirm(true)}
             className="btn btn-ghost"
-            style={{ color: '#EF4444', borderColor: 'rgba(239,68,68,0.3)' }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = '#EF4444' }}
+            style={{ color: 'var(--danger)', borderColor: 'rgba(239,68,68,0.3)' }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--danger)' }}
             onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(239,68,68,0.3)' }}
           >
             <Trash2 size={14} /> Удалить аккаунт
@@ -683,8 +683,8 @@ function DangerTab() {
         ) : (
           <div className="space-y-3">
             <div className="p-4 rounded-[8px]" style={{ background: 'rgba(239,68,68,0.04)', border: '1px solid rgba(239,68,68,0.15)' }}>
-              <p className="text-[13px] font-semibold mb-1" style={{ color: '#EF4444' }}>Вы уверены?</p>
-              <p className="text-[13px]" style={{ color: '#8A8A8A' }}>Это действие нельзя отменить. Аккаунт будет деактивирован немедленно.</p>
+              <p className="text-[13px] font-semibold mb-1" style={{ color: 'var(--danger)' }}>Вы уверены?</p>
+              <p className="text-[13px]" style={{ color: 'var(--text-2)' }}>Это действие нельзя отменить. Аккаунт будет деактивирован немедленно.</p>
             </div>
             <div className="flex gap-3">
               <Button variant="destructive" onClick={deleteAccount} loading={deleting}>
@@ -720,18 +720,18 @@ export default function AccountPage() {
   }
 
   return (
-    <div className="p-8" style={{ background: '#0A0A0A', minHeight: '100%' }}>
+    <div className="p-8" style={{ background: 'var(--bg)', minHeight: '100%' }}>
       {/* Page header */}
       <div className="mb-8">
         <p className="label mb-2">АККАУНТ</p>
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-[8px] flex items-center justify-center shrink-0"
                style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.18)' }}>
-            <User size={18} style={{ color: '#A78BFA' }} />
+            <User size={18} style={{ color: 'var(--violet-text)' }} />
           </div>
           <div>
-            <h1 className="text-[22px] font-bold" style={{ color: '#FFFFFF' }}>Настройки аккаунта</h1>
-            <p className="text-[13px]" style={{ color: '#8A8A8A' }}>Профиль, безопасность, уведомления</p>
+            <h1 className="text-[22px] font-bold" style={{ color: 'var(--text)' }}>Настройки аккаунта</h1>
+            <p className="text-[13px]" style={{ color: 'var(--text-2)' }}>Профиль, безопасность, уведомления</p>
           </div>
         </div>
       </div>
@@ -741,7 +741,7 @@ export default function AccountPage() {
         <nav className="lg:w-48 shrink-0">
           <div
             className="flex lg:flex-col gap-0.5 overflow-x-auto lg:overflow-visible p-1 rounded-[8px]"
-            style={{ background: '#0F0F0F', border: '1px solid #1A1A1A', scrollbarWidth: 'none' }}
+            style={{ background: 'var(--bg)', border: '1px solid var(--surface)', scrollbarWidth: 'none' }}
           >
             {TABS.map(({ id, label, icon: Icon }) => {
               const isActive  = tab === id
@@ -752,16 +752,16 @@ export default function AccountPage() {
                   onClick={() => setTab(id)}
                   className="flex items-center gap-2.5 px-3 py-2.5 rounded-[8px] text-[13px] font-medium transition-all duration-200 whitespace-nowrap w-full"
                   style={isActive
-                    ? { background: isDanger ? 'rgba(239,68,68,0.08)' : 'rgba(124,58,237,0.06)', color: isDanger ? '#EF4444' : '#A78BFA' }
-                    : { color: isDanger ? '#EF4444' : '#8A8A8A', background: 'transparent' }
+                    ? { background: isDanger ? 'rgba(239,68,68,0.08)' : 'rgba(124,58,237,0.06)', color: isDanger ? 'var(--danger)' : 'var(--violet-text)' }
+                    : { color: isDanger ? 'var(--danger)' : 'var(--text-2)', background: 'transparent' }
                   }
-                  onMouseEnter={e => { if (!isActive) e.currentTarget.style.color = isDanger ? '#EF4444' : '#FFFFFF' }}
-                  onMouseLeave={e => { if (!isActive) e.currentTarget.style.color = isDanger ? '#EF4444' : '#8A8A8A' }}
+                  onMouseEnter={e => { if (!isActive) e.currentTarget.style.color = isDanger ? 'var(--danger)' : 'var(--text)' }}
+                  onMouseLeave={e => { if (!isActive) e.currentTarget.style.color = isDanger ? 'var(--danger)' : 'var(--text-2)' }}
                 >
                   <Icon
                     size={14}
                     className="shrink-0"
-                    style={{ color: isActive ? (isDanger ? '#EF4444' : '#A78BFA') : (isDanger ? '#EF4444' : '#5A5A5A') }}
+                    style={{ color: isActive ? (isDanger ? 'var(--danger)' : 'var(--violet-text)') : (isDanger ? 'var(--danger)' : 'var(--text-3)') }}
                   />
                   {label}
                 </button>

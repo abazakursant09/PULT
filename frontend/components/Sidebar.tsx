@@ -4,9 +4,10 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
-  Menu, X, LayoutDashboard, Calculator, Zap, FileText,
-  Users, Building2, Truck, BarChart2, Megaphone, CreditCard, Upload, Target, TrendingUp, FlaskConical,
+  Menu, X, LayoutDashboard, Package, TrendingUp, TrendingDown, Shield, Settings,
+  Users, Gift, Sparkles,
 } from 'lucide-react'
+import { FLAGS } from '@/lib/featureFlags'
 
 // ── ПУЛЬТ logo icon — precision monitoring / control center ──────────────────
 function PultIcon({ size = 18 }: { size?: number }) {
@@ -21,88 +22,67 @@ function PultIcon({ size = 18 }: { size?: number }) {
 
 // ── Nav structure ─────────────────────────────────────────────────────────────
 
+// ── ПУЛЬТ V2 — каноническая навигация. Ровно 6 вкладок. Товар = атом.
+// Линзы (Реклама/SEO/Отзывы/Цена) НЕ в меню — они фильтры внутри вкладок.
 const NAV_SECTIONS = [
   {
-    title: '',  // L1 — Decision Layer (единственный ежедневный экран)
+    title: '',
     items: [
-      { href: '/dashboard',          icon: LayoutDashboard, label: 'Пульт' },
+      { href: '/dashboard',               icon: LayoutDashboard, label: 'Кабинет Пульта',      desc: 'Главное за сегодня: где теряете и что делать' },
+      { href: '/dashboard/products',       icon: Package,         label: 'Товары',              desc: 'Все товары. Внутри — всё о каждом' },
+      { href: '/dashboard/opportunities',  icon: TrendingUp,      label: 'Возможности',         desc: 'Где заработать больше, в рублях' },
+      { href: '/dashboard/leaks',          icon: TrendingDown,    label: 'Что съедает прибыль', desc: 'Куда уходят деньги: реклама, комиссия, возвраты' },
+      { href: '/dashboard/risks',          icon: Shield,          label: 'Риски',               desc: 'Что грозит блокировкой или штрафом' },
+      { href: '/dashboard/settings',       icon: Settings,        label: 'Настройки',           desc: 'Подключить WB / Ozon, уведомления' },
     ],
   },
-  {
-    title: 'Данные',  // L2 — Truth Layer (факты, без рекомендаций)
+  // GROWTH-контур — заморожен. Появляется ТОЛЬКО при NEXT_PUBLIC_GROWTH_CONTOUR=1.
+  ...(FLAGS.growthContour ? [{
+    title: 'Рост',
     items: [
-      { href: '/dashboard/data',     icon: BarChart2,       label: 'Данные' },
+      { href: '/dashboard/referrals', icon: Users,    label: 'Рефералы',   desc: 'Приглашайте — получайте бонусы' },
+      { href: '/dashboard/deals',     icon: Gift,     label: 'Сделки',     desc: 'Спецпредложения для роста' },
+      { href: '/community',           icon: Sparkles, label: 'Сообщество', desc: 'Селлеры, кейсы, обмен опытом' },
     ],
-  },
-  {
-    title: 'Инструменты',  // L3 — Execution Layer
-    items: [
-      { href: '/dashboard/seo',      icon: FileText,        label: 'SEO'          },
-      { href: '/ad-strategy',        icon: Megaphone,       label: 'Реклама'      },
-      { href: '/suppliers',          icon: Building2,       label: 'Поставщики'   },
-      { href: '/logistics',          icon: Truck,           label: 'Логистика'    },
-      { href: '/ai-agents',          icon: Zap,             label: 'AI'           },
-      { href: '/dashboard/monitor',  icon: Target,          label: 'Мониторинг'   },
-    ],
-  },
-  {
-    title: 'Аккаунт',
-    items: [
-      { href: '/dashboard/billing',       icon: CreditCard,    label: 'Подписка'    },
-      { href: '/dashboard/referrals',     icon: Users,         label: 'Рефералы'    },
-      { href: '/dashboard/notifications', icon: Calculator,    label: 'Уведомления' },
-    ],
-  },
+  }] : []),
 ] as const
 
 // ── Nav item ──────────────────────────────────────────────────────────────────
 
-function NavItem({ href, icon: Icon, label, active, badge }: {
+function NavItem({ href, icon: Icon, label, desc, active, badge }: {
   href: string
   icon: React.ElementType
   label: string
+  desc?: string
   active: boolean
   badge?: number
 }) {
   return (
     <Link
       href={href}
-      className="flex items-center gap-2.5 px-3 py-2 rounded-[7px] transition-all duration-150"
-      style={active ? {
-        color: '#C4B5FD',
-        background: 'rgba(124,58,237,0.12)',
-        boxShadow: 'inset 2px 0 0 #7C3AED',
-        fontWeight: 500,
-      } : {
-        color: '#52525B',
-        fontWeight: 400,
+      className="flex items-start gap-2.5 rounded-[10px] transition-all duration-150"
+      style={{
+        padding: '9px 10px',
+        background: active ? 'var(--violet-dim)' : 'transparent',
+        boxShadow: active ? 'inset 2px 0 0 var(--violet)' : 'none',
       }}
-      onMouseEnter={e => {
-        if (!active) {
-          e.currentTarget.style.color = '#A1A1AA'
-          e.currentTarget.style.background = 'rgba(255,255,255,0.04)'
-        }
-      }}
-      onMouseLeave={e => {
-        if (!active) {
-          e.currentTarget.style.color = '#52525B'
-          e.currentTarget.style.background = 'transparent'
-        }
-      }}
+      onMouseEnter={e => { if (!active) e.currentTarget.style.background = 'var(--surface-h)' }}
+      onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent' }}
     >
-      <Icon size={14} style={{ opacity: active ? 0.9 : 0.55, flexShrink: 0 }} />
-      <span style={{ fontSize: 13, lineHeight: 1 }}>{label}</span>
-      {badge != null && badge > 0 && (
-        <span style={{
-          marginLeft: 'auto', minWidth: 16, height: 16, borderRadius: 8,
-          background: '#F59E0B', color: '#000',
-          fontSize: 9, fontWeight: 800,
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          padding: '0 4px', flexShrink: 0,
-        }}>
-          {badge}
+      <Icon size={16} style={{ flexShrink: 0, marginTop: 1, color: active ? 'var(--violet)' : 'var(--text-2)' }} />
+      <span style={{ minWidth: 0 }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 13.5, fontWeight: 600, lineHeight: 1.2, color: active ? 'var(--violet-text)' : 'var(--text)' }}>{label}</span>
+          {badge != null && badge > 0 && (
+            <span style={{
+              minWidth: 16, height: 16, borderRadius: 8, background: 'var(--warning)', color: 'var(--bg)',
+              fontSize: 9, fontWeight: 800, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 4px',
+            }}>{badge}</span>
+          )}
         </span>
-      )}
+        {/* Описание вкладки — новичок понимает назначение без наведения */}
+        {desc && <span style={{ display: 'block', fontSize: 11, color: 'var(--text-3)', lineHeight: 1.35, marginTop: 2 }}>{desc}</span>}
+      </span>
     </Link>
   )
 }
@@ -134,14 +114,14 @@ export function Sidebar() {
   useEffect(() => { setOpen(false) }, [pathname])
 
   function isActive(href: string) {
-    if (href === '/dashboard') return pathname === '/dashboard' || pathname?.startsWith('/dashboard/products')
+    if (href === '/dashboard') return pathname === '/dashboard'
     return pathname === href || pathname?.startsWith(href + '/')
   }
 
   const SidebarContent = () => (
     <div className="flex flex-col h-full" style={{
-      background: '#09090B',
-      borderRight: '1px solid #232329',
+      background: 'var(--surface)',
+      borderRight: '1px solid var(--line)',
     }}>
 
       {/* Logo */}
@@ -150,8 +130,8 @@ export function Sidebar() {
           <div style={{
             width: 30, height: 30,
             borderRadius: 8,
-            background: '#111113',
-            border: '1px solid #232329',
+            background: 'var(--surface-h)',
+            border: '1px solid var(--line)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             flexShrink: 0,
             transition: 'border-color 0.15s ease',
@@ -160,13 +140,13 @@ export function Sidebar() {
           </div>
           <div>
             <div style={{
-              fontSize: 15, fontWeight: 700, color: '#FFFFFF',
+              fontSize: 15, fontWeight: 700, color: 'var(--text)',
               letterSpacing: '-0.02em', lineHeight: 1,
             }}>
               ПУЛЬТ
             </div>
             <div style={{
-              fontSize: 10, color: '#52525B',
+              fontSize: 10, color: 'var(--text-3)',
               letterSpacing: '0.04em', marginTop: 2,
               lineHeight: 1,
             }}>
@@ -192,7 +172,7 @@ export function Sidebar() {
       </div>
 
       {/* Divider */}
-      <div style={{ height: 1, background: '#232329', margin: '0 0 8px' }} />
+      <div style={{ height: 1, background: 'var(--line)', margin: '0 0 8px' }} />
 
       {/* Nav */}
       <nav className="flex-1 flex flex-col px-2 py-1 overflow-y-auto gap-3">
@@ -202,15 +182,15 @@ export function Sidebar() {
               <p style={{
                 fontSize: 9.5, fontWeight: 700,
                 letterSpacing: '0.12em', textTransform: 'uppercase',
-                color: '#3F3F46', paddingLeft: 12, paddingBottom: 4, paddingTop: 4,
+                color: 'var(--text-3)', paddingLeft: 12, paddingBottom: 4, paddingTop: 4,
               }}>
                 {section.title}
               </p>
             )}
             <div className="flex flex-col gap-0.5">
-              {section.items.map(({ href, icon, label }) => (
+              {section.items.map(({ href, icon, label, desc }) => (
                 <NavItem
-                  key={href} href={href} icon={icon} label={label}
+                  key={href} href={href} icon={icon} label={label} desc={desc}
                   active={isActive(href)}
                 />
               ))}
@@ -222,9 +202,9 @@ export function Sidebar() {
       {/* Bottom — version */}
       <div style={{
         padding: '12px 16px',
-        borderTop: '1px solid #232329',
+        borderTop: '1px solid var(--line)',
       }}>
-        <p style={{ fontSize: 10, color: '#3F3F46', letterSpacing: '0.04em' }}>
+        <p style={{ fontSize: 10, color: 'var(--text-3)', letterSpacing: '0.04em' }}>
           ПУЛЬТ v2.0 · {new Date().getFullYear()}
         </p>
       </div>
@@ -236,17 +216,17 @@ export function Sidebar() {
       {/* Mobile topbar */}
       <header
         className="sticky top-0 z-40 sm:hidden flex items-center justify-between px-4 h-14"
-        style={{ background: '#09090B', borderBottom: '1px solid #232329' }}
+        style={{ background: 'var(--surface)', borderBottom: '1px solid var(--line)' }}
       >
         <Link href="/" className="flex items-center gap-2" style={{ textDecoration: 'none' }}>
           <PultIcon size={16} />
-          <span style={{ fontSize: 15, fontWeight: 700, color: '#FFFFFF', letterSpacing: '-0.02em' }}>
+          <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)', letterSpacing: '-0.02em' }}>
             ПУЛЬТ
           </span>
         </Link>
         <button
           onClick={() => setOpen(v => !v)}
-          style={{ color: '#71717A', background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}
+          style={{ color: 'var(--text-2)', background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}
         >
           {open ? <X size={20} /> : <Menu size={20} />}
         </button>
