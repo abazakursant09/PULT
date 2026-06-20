@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from services.insight_decision_bridge import emit_ranked_candidates
 from services.outcome_memory_ranking import rank_actions
 from services.decision_reasoning import explain_ranking
+from services.decision_memory import resolve_context_group_for_insight
 
 _NON_MARGIN_REASON = "No ranking available for this problem type. Using default action order."
 
@@ -68,3 +69,18 @@ async def get_ranked_alternatives(
         "confirmed_rate": None,
         "weighted_rate": None,
     } for i, c in enumerate(candidates, 1)]
+
+
+async def get_ranked_alternatives_for_insight(
+    db: AsyncSession, *, user_id: str, insight_key: str, listing_id: str | None = None
+) -> list[dict]:
+    """
+    Convenience wrapper (L5): resolve the context_group from insight/listing/user
+    data with the SAME logic as Memory writes, then delegate to
+    get_ranked_alternatives. Guarantees the read side queries the same
+    context_group the write side stored. Read-only.
+    """
+    context_group = await resolve_context_group_for_insight(
+        db, user_id=user_id, insight_key=insight_key, listing_id=listing_id)
+    return await get_ranked_alternatives(
+        db, user_id=user_id, insight_key=insight_key, context_group=context_group)

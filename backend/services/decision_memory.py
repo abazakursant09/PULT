@@ -154,6 +154,54 @@ async def _resolve_context(db: AsyncSession, decision, marketplace: str) -> tupl
     return category, price_band(price), margin_band(margin_pct)
 
 
+class _InsightContextShim:
+    """
+    Duck-typed stand-in so the write-side resolvers (_resolve_marketplace /
+    _resolve_context) can run for a read-side insight that has no Decision row
+    yet. Carries exactly the attributes those resolvers read via getattr.
+    """
+    __slots__ = ("user_id", "insight_key", "listing_id")
+
+    def __init__(self, user_id, insight_key, listing_id):
+        self.user_id = user_id
+        self.insight_key = insight_key
+        self.listing_id = listing_id
+
+
+async def resolve_context_group_for_insight(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    insight_key: Optional[str],
+    marketplace: Optional[str] = None,
+    sku: Optional[str] = None,
+    listing_id: Optional[str] = None,
+) -> str:
+    """
+    Read-side context_group for an insight, using the SAME enrichment logic as
+    the Memory write path (record_decision_memory): it runs the very same
+    _resolve_marketplace / _resolve_context / build_context_group helpers via a
+    lightweight shim. Given the same listing/product/finance data, the result
+    EQUALS the write-side context_group. Missing segments degrade to "unknown".
+    Read-only — no writes, no execution.
+
+    Resolution: marketplace from the listing (else the `marketplace` hint);
+    category/price_band from the listing's legacy Product; margin_band from
+    imported finance keyed by sku (from insight_key, else the `sku` hint, used
+    only when the key carried none). Thresholds are never duplicated here.
+    """
+    shim = _InsightContextShim(user_id, insight_key, listing_id)
+    mp = await _resolve_marketplace(db, shim)
+    if mp == _UNKNOWN and marketplace:
+        mp = _norm_mp(marketplace) or _UNKNOWN
+    category, p_band, m_band = await _resolve_context(db, shim, mp)
+    # sku hint only fills a gap when the insight_key carried no sku of its own.
+    if m_band == _UNKNOWN and sku and not _sku_from_key(insight_key):
+        m_band = margin_band(await _compute_margin_pct(db, user_id, mp, sku))
+    return build_context_group(
+        marketplace=mp, category=category, price_band=p_band, margin_band=m_band)
+
+
 async def record_decision_memory(
     db: AsyncSession,
     *,
