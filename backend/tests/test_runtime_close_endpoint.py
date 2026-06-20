@@ -26,10 +26,15 @@ from models.imported_finance import ImportedFinanceRow
 from repositories import decision_outcome as outcome_repo
 from services.insight_decision_bridge import promote_insight_to_decision, InsightPromotionDTO
 
+import pytest
+from fastapi import HTTPException
+
+from config import settings
 from routers.decisions import close_due_measurements_endpoint, CloseDueResponse
 
 SKU = "SKU1"
 IKEY = f"margin_crisis:wb:{SKU}"
+KEY = "test-internal-key"
 
 
 def _run(c):
@@ -64,13 +69,14 @@ async def _open_net_profit_outcome(db, decision, *, now, baseline=500.0):
     await db.commit()
 
 
-async def _call_endpoint(db, uid):
-    return await close_due_measurements_endpoint(
-        limit=None, current_user=_User(uid), db=db)
+async def _call_endpoint(db, *, key=KEY):
+    """Invoke the runtime trigger with the internal-key header value."""
+    return await close_due_measurements_endpoint(limit=None, x_internal_key=key, db=db)
 
 
 def test_endpoint_closes_records_memory_and_opens_followup():
     async def go():
+        settings.internal_api_key = KEY
         db = await _engine(); uid = str(uuid.uuid4())
         now = datetime.utcnow()
         # realized net_profit 100 < baseline 500 → close refutes
@@ -89,7 +95,7 @@ def test_endpoint_closes_records_memory_and_opens_followup():
         await _open_net_profit_outcome(db, d0, now=now)
 
         # ── runtime trigger: the ENDPOINT closes the due measurement ──────────
-        resp = await _call_endpoint(db, uid)
+        resp = await _call_endpoint(db)
         assert isinstance(resp, CloseDueResponse)
         assert resp.total_due == 1
         assert resp.refuted == 1
@@ -110,7 +116,7 @@ def test_endpoint_closes_records_memory_and_opens_followup():
         assert follow.status == "open"                 # NOT auto-executed
 
         # ── idempotent: second trigger closes nothing (no duplicate close) ────
-        resp2 = await _call_endpoint(db, uid)
+        resp2 = await _call_endpoint(db)
         assert resp2.total_due == 0 and resp2.refuted == 0
         mem2 = (await db.execute(select(DecisionMemory).where(
             DecisionMemory.decision_id == d0.id))).scalars().all()
@@ -120,8 +126,41 @@ def test_endpoint_closes_records_memory_and_opens_followup():
 
 def test_endpoint_noop_when_nothing_due():
     async def go():
-        db = await _engine(); uid = str(uuid.uuid4())
-        resp = await _call_endpoint(db, uid)
+        settings.internal_api_key = KEY
+        db = await _engine()
+        resp = await _call_endpoint(db)
         assert resp.total_due == 0
         assert resp.confirmed == 0 and resp.refuted == 0 and resp.errors == 0
+    _run(go())
+
+
+# ── G1.1 internal-key gate ───────────────────────────────────────────────────
+
+def test_rejects_without_key():
+    async def go():
+        settings.internal_api_key = KEY
+        db = await _engine()
+        with pytest.raises(HTTPException) as ei:
+            await _call_endpoint(db, key=None)        # ordinary caller, no header
+        assert ei.value.status_code == 403
+    _run(go())
+
+
+def test_rejects_wrong_key():
+    async def go():
+        settings.internal_api_key = KEY
+        db = await _engine()
+        with pytest.raises(HTTPException) as ei:
+            await _call_endpoint(db, key="not-the-key")
+        assert ei.value.status_code == 403
+    _run(go())
+
+
+def test_fail_closed_when_secret_unset():
+    async def go():
+        settings.internal_api_key = ""               # operator never configured it
+        db = await _engine()
+        with pytest.raises(HTTPException) as ei:
+            await _call_endpoint(db, key="anything")
+        assert ei.value.status_code == 403
     _run(go())

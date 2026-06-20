@@ -65,6 +65,11 @@ class Settings(BaseSettings):
     # only fire when this is on AND a per-user AutomationRule is enabled.
     automation_enabled: bool = False
 
+    # Shared secret for internal/cron-only control endpoints (e.g. the
+    # measurement close-due trigger). Empty by default → those endpoints are
+    # fail-closed (reject every caller) until an operator sets INTERNAL_API_KEY.
+    internal_api_key: str = ""
+
     model_config = {"env_file": ".env"}
 
 
