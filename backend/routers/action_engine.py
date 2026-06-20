@@ -4271,11 +4271,15 @@ async def execute_insight(
     # Best-effort, non-blocking: fixates the Decision; never applies/executes,
     # never opens measurement, never alters the execute response. Only on this
     # explicit operator path — NOT in _compute_insights / dashboard / Telegram.
+    # Slice 2: capture the promoted decision_id for ExecutionLog provenance only.
+    # Blocked promotion (or any failure) leaves decision_id None — execution
+    # proceeds unchanged.
+    decision_id = None
     try:
         _ptype, _pmp, _psku = _imap.parse_key(insight_key)
         _desc = plan.descriptor or {}
         _sev = {"sales_growth": "gain", "high_rating": "gain"}.get(_ptype, "warn")
-        await _promote_decision(db, user_id=uid, insight=_PromotionDTO(
+        pres = await _promote_decision(db, user_id=uid, insight=_PromotionDTO(
             insight_key=insight_key, itype=_ptype, marketplace=_pmp, sku=_psku,
             problem=_desc.get("reason") or _ptype,
             cause=_desc.get("reason"),
@@ -4283,6 +4287,7 @@ async def execute_insight(
             action=_desc.get("action"),
             pnl_impact=None, severity=_sev, is_demo=False,
         ))
+        decision_id = pres.decision_id if pres else None
     except Exception:
         logger.exception("insight promotion failed for %s", insight_key)
 
@@ -4309,7 +4314,7 @@ async def execute_insight(
                 db=db, user_id=uid, action_type="publish_review_response",
                 payload={"feedback_id": r.external_review_id, "text": r.response_text,
                          "rating": r.rating},
-                mode="manual_l3", insight_key=insight_key,
+                mode="manual_l3", insight_key=insight_key, decision_id=decision_id,
                 idempotency_key=f"review:{r.id}", dry_run=body.dry_run,
             )
             results.append({"review_id": r.id, "status": res.status,
@@ -4331,7 +4336,8 @@ async def execute_insight(
     # ── single action ─────────────────────────────────────────────────────────
     res = await _executor.execute(
         db=db, user_id=uid, action_type=plan.action_type, payload=plan.payload,
-        mode="manual_l3", insight_key=insight_key, dry_run=body.dry_run,
+        mode="manual_l3", insight_key=insight_key, decision_id=decision_id,
+        dry_run=body.dry_run,
     )
     return ExecuteInsightResponse(
         success=res.ok, status=res.status, action_type=plan.action_type,
