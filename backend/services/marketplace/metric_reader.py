@@ -48,6 +48,11 @@ def _adapters() -> dict[str, MetricAdapter]:
     return {"wb": WBMetricAdapter()}
 
 
+# Compute metrics are finance-backed (db), not marketplace-API. They bypass the
+# adapter registry and never call a marketplace client.
+_COMPUTE_METRICS = frozenset({"net_profit"})
+
+
 async def read_metric(
     *,
     token: str,
@@ -57,6 +62,8 @@ async def read_metric(
     window_days: int = 7,
     tariffs: Optional[set[str]] = None,
     now: Optional[datetime] = None,
+    db=None,
+    user_id=None,
 ) -> Union[MetricSample, MetricUnavailable]:
     now = now or datetime.utcnow()
 
@@ -71,6 +78,14 @@ async def read_metric(
     avail = metric_catalog.availability(metric_name, marketplace, tariffs)
     if not avail.get("available"):
         return MetricUnavailable(metric_name, avail.get("status") or "unavailable", avail.get("reason"))
+
+    # Compute (finance-backed) metrics: no marketplace adapter, no API call.
+    if metric_name in _COMPUTE_METRICS:
+        from .finance_metric_reader import read_net_profit
+        return await read_net_profit(
+            db=db, user_id=user_id, marketplace=mp, entity_id=entity_id,
+            window_days=window_days, now=now,
+        )
 
     adapter = _adapters().get(mp)
     if adapter is None:

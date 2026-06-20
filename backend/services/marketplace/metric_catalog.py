@@ -61,6 +61,7 @@ _CATALOG: dict[str, MetricSpec] = {
     "rating":           MetricSpec("rating",           "product_rating",    "rating",  "higher_better", "listing", "weighted_avg", "Средняя оценка, 1–5"),
     "search_position":  MetricSpec("search_position",  "search_position",   "rank",    "lower_better",  "listing", "min",          "Позиция в поиске по ключу (меньше — лучше)"),
     "ad_cost_ratio":    MetricSpec("ad_cost_ratio",    "drr_profit_impact", "percent", "lower_better",  "listing", "weighted_avg", "ДРР: рекл. расход / выручка, %"),
+    "net_profit":       MetricSpec("net_profit",       "net_profit",        "rub",     "higher_better", "listing", "sum",          "Чистая прибыль за окно, ₽ (compute из финансов)"),
 }
 
 
