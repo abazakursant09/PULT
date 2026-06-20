@@ -21,8 +21,52 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.decision_memory import DecisionMemory
 from models.product_listing import ProductListing
+from models.product import Product
+from models.imported_finance import ImportedFinanceRow
 
 _UNKNOWN = "unknown"
+
+# Deterministic band thresholds (L3). Missing data → "unknown", never fabricated.
+PRICE_BAND_LOW = 500.0     # ₽ — below = low
+PRICE_BAND_HIGH = 2000.0   # ₽ — at/above = high
+MARGIN_BAND_LOW = 10.0     # % — below = low_margin
+MARGIN_BAND_HIGH = 25.0    # % — at/above = high_margin
+
+# Canonical marketplace → finance-row aliases (imports may store raw labels).
+_MP_ALIASES = {
+    "wb": ("wb", "wildberries"),
+    "ozon": ("ozon",),
+    "yandex": ("yandex", "yandex_market", "ym"),
+}
+
+
+def price_band(price: Optional[float]) -> str:
+    """Deterministic price band: low | mid | high; None → unknown."""
+    if price is None:
+        return _UNKNOWN
+    if price < PRICE_BAND_LOW:
+        return "low"
+    if price < PRICE_BAND_HIGH:
+        return "mid"
+    return "high"
+
+
+def margin_band(margin_pct: Optional[float]) -> str:
+    """Deterministic margin band: low_margin | mid_margin | high_margin; None → unknown."""
+    if margin_pct is None:
+        return _UNKNOWN
+    if margin_pct < MARGIN_BAND_LOW:
+        return "low_margin"
+    if margin_pct < MARGIN_BAND_HIGH:
+        return "mid_margin"
+    return "high_margin"
+
+
+def _sku_from_key(insight_key: Optional[str]) -> Optional[str]:
+    if not insight_key:
+        return None
+    parts = insight_key.split(":")
+    return parts[2] if len(parts) > 2 else None
 
 
 def build_context_group(
@@ -56,6 +100,60 @@ async def _resolve_marketplace(db: AsyncSession, decision) -> str:
     return mp or _UNKNOWN
 
 
+def _norm_mp(mp: Optional[str]) -> str:
+    s = (mp or "").strip().lower()
+    return s
+
+
+async def _compute_margin_pct(db: AsyncSession, user_id: str, marketplace: str,
+                              sku: Optional[str]) -> Optional[float]:
+    """Margin % from imported finance for (user, marketplace, sku). None if no data."""
+    if not (user_id and sku):
+        return None
+    aliases = _MP_ALIASES.get(_norm_mp(marketplace), (_norm_mp(marketplace),))
+    row = (
+        await db.execute(
+            select(
+                func.coalesce(func.sum(ImportedFinanceRow.net_profit), 0.0),
+                func.coalesce(func.sum(ImportedFinanceRow.revenue), 0.0),
+                func.count(),
+            ).where(
+                ImportedFinanceRow.user_id == user_id,
+                ImportedFinanceRow.marketplace.in_(aliases),
+                ImportedFinanceRow.sku == str(sku),
+            )
+        )
+    ).one()
+    net, rev, n = float(row[0]), float(row[1]), int(row[2])
+    if not n or rev <= 0:
+        return None
+    return net / rev * 100.0
+
+
+async def _resolve_context(db: AsyncSession, decision, marketplace: str) -> tuple[Optional[str], str, str]:
+    """
+    Best-effort (category, price_band, margin_band) from existing domain models.
+    category/price via the listing's legacy Product; margin via imported finance.
+    Anything unavailable → 'unknown' (never fabricated). Read-only.
+    """
+    category: Optional[str] = None
+    price: Optional[float] = None
+    listing_id = getattr(decision, "listing_id", None)
+    if listing_id:
+        listing = await db.get(ProductListing, listing_id)
+        legacy_id = getattr(listing, "legacy_product_id", None) if listing else None
+        if legacy_id:
+            prod = await db.get(Product, legacy_id)
+            if prod is not None:
+                category = prod.category
+                price = prod.price
+
+    sku = _sku_from_key(getattr(decision, "insight_key", None))
+    margin_pct = await _compute_margin_pct(db, getattr(decision, "user_id", None),
+                                           marketplace, sku)
+    return category, price_band(price), margin_band(margin_pct)
+
+
 async def record_decision_memory(
     db: AsyncSession,
     *,
@@ -71,11 +169,14 @@ async def record_decision_memory(
     fields. See module docstring.
     """
     marketplace = await _resolve_marketplace(db, decision)
+    # L3: enrich context from real domain data (category/price via listing's legacy
+    # Product; margin from imported finance). Missing segments → "unknown".
+    category, p_band, m_band = await _resolve_context(db, decision, marketplace)
     context_group = build_context_group(
         marketplace=marketplace,
-        category=None,      # no spine source yet → unknown
-        price_band=None,
-        margin_band=None,
+        category=category,
+        price_band=p_band,
+        margin_band=m_band,
     )
 
     row = DecisionMemory(
