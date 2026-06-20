@@ -200,7 +200,9 @@ def test_missing_decision_skips_memory(monkeypatch):
 
 def test_single_memory_call_site():
     src = inspect.getsource(cb)
-    assert src.count("record_decision_memory(") == 1  # exactly one write site
+    # Two write sites, both in the close bridge's own best-effort hooks:
+    # the terminal outcome row + the L1 FOLLOWUP_CREATED event.
+    assert src.count("record_decision_memory(") == 2
 
 
 def test_no_learning_imports_added():

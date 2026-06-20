@@ -36,6 +36,7 @@ from models.observation import Observation
 from repositories import decision_outcome as outcome_repo
 from services.decision_memory import record_decision_memory
 from services.decision_validation import close_measurement, select_due_outcomes
+from services.refuted_loop import create_followup_for_refuted
 # Reuse the exact Slice 3 credential path (server-side, no clients/executor).
 from services.execution_measurement_bridge import _ACTION_SCOPE, _resolve_token
 
@@ -94,12 +95,18 @@ async def close_due_measurements(
                         continue
                     closed = await close_measurement(db, outcome=outcome, token=token, now=now)
 
+            # Capture the label BEFORE the post-close hooks: a hook rollback can
+            # expire `closed`, and a later attribute access would lazy-load.
+            label = closed.outcome_label
             await db.commit()
-            _tally(summary, closed.outcome_label)
+            _tally(summary, label)
             # Memory OS: record the terminal outcome. Best-effort, in its OWN
             # transaction AFTER the close committed — a memory failure can never
             # break or roll back the measurement close.
-            await _record_memory_safe(db, decision_id, closed.outcome_label)
+            await _record_memory_safe(db, decision_id, label)
+            # Learning OS L1: a refuted decision is not a dead end — create the
+            # next alternative. Best-effort, isolated; never breaks the close.
+            await _refuted_followup_safe(db, decision_id, label)
         except Exception:
             await db.rollback()
             summary.errors += 1
@@ -152,6 +159,28 @@ async def _record_memory_safe(db: AsyncSession, decision_id: str, outcome_label:
     except Exception:
         await db.rollback()
         log.warning("decision_memory write failed for decision %s", decision_id, exc_info=True)
+
+
+async def _refuted_followup_safe(db: AsyncSession, decision_id: str, outcome_label: str) -> None:
+    """
+    On REFUTED only: create the next-alternative follow-up Decision (same chain,
+    next action) and append a FOLLOWUP_CREATED memory event. Best-effort, own
+    transaction; never raises, never affects the already-committed close. No
+    ranking, no learning — deterministic next-step only.
+    """
+    if outcome_label != _REFUTED:
+        return
+    try:
+        decision = await db.get(Decision, decision_id)
+        if decision is None:
+            return
+        followup = await create_followup_for_refuted(db, decision)
+        if followup is not None:
+            await record_decision_memory(db, decision=followup, outcome="followup_created")
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        log.warning("refuted follow-up failed for decision %s", decision_id, exc_info=True)
 
 
 async def _resolve_close_token(db: AsyncSession, decision_id: str, baseline: Observation) -> Optional[str]:
