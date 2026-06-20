@@ -37,6 +37,8 @@ from repositories import decision_outcome as outcome_repo
 from services.decision_memory import record_decision_memory
 from services.decision_validation import close_measurement, select_due_outcomes
 from services.refuted_loop import create_followup_for_refuted
+# Compute metrics (e.g. net_profit) read local finance data and ignore the token.
+from services.marketplace.metric_reader import _COMPUTE_METRICS
 # Reuse the exact Slice 3 credential path (server-side, no clients/executor).
 from services.execution_measurement_bridge import _ACTION_SCOPE, _resolve_token
 
@@ -81,6 +83,10 @@ async def close_due_measurements(
 
             if outcome.baseline_observation_id is None:
                 # Nothing honest to compare → insufficient_data (no token needed).
+                closed = await close_measurement(db, outcome=outcome, token=None, now=now)
+            elif outcome.metric_name in _COMPUTE_METRICS:
+                # Compute metric (e.g. net_profit) reads local finance data and
+                # ignores the token — never gate it on a marketplace credential.
                 closed = await close_measurement(db, outcome=outcome, token=None, now=now)
             else:
                 baseline = await db.get(Observation, outcome.baseline_observation_id)
