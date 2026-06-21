@@ -1662,6 +1662,31 @@ export const api = {
       return req<DecisionOutcomeSummary>(`/api/decision-outcome/summary${s ? `?${s}` : ''}`)
     },
   },
+
+  // ── Daily Decision Feed ("what needs my decision today") ─────────────────────
+  // Read the unified feed + attention-state actions. No ranking, no priority,
+  // no score, no forecast — just the decisions, sorted by an explainable order.
+  decisionFeed: {
+    getFeed: (params: DecisionFeedFilters = {}) => {
+      const q = new URLSearchParams()
+      if (params.contour) q.set('contour', params.contour)
+      if (params.include_snoozed) q.set('include_snoozed', 'true')
+      if (params.include_dismissed) q.set('include_dismissed', 'true')
+      if (params.include_resolved) q.set('include_resolved', 'true')
+      if (params.limit != null) q.set('limit', String(params.limit))
+      const s = q.toString()
+      return req<DecisionFeedResponse>(`/api/decision-feed${s ? `?${s}` : ''}`)
+    },
+    markSeen: (itemKey: string) =>
+      req<DecisionFeedStateResult>(`/api/decision-feed/${encodeURIComponent(itemKey)}/seen`, { method: 'POST' }),
+    snooze: (itemKey: string, until: string) =>
+      req<DecisionFeedStateResult>(`/api/decision-feed/${encodeURIComponent(itemKey)}/snooze`,
+        { method: 'POST', body: JSON.stringify({ until }) }),
+    dismiss: (itemKey: string) =>
+      req<DecisionFeedStateResult>(`/api/decision-feed/${encodeURIComponent(itemKey)}/dismiss`, { method: 'POST' }),
+    markActed: (itemKey: string) =>
+      req<DecisionFeedStateResult>(`/api/decision-feed/${encodeURIComponent(itemKey)}/act`, { method: 'POST' }),
+  },
 }
 
 function rvQuery(listingId?: string, marketplace?: string): string {
@@ -2153,6 +2178,52 @@ export interface ReviewAuditResult {
   top_severity:        string | null
   reconciliation:      { created: number; updated: number; resolved: number; reopened: number; unchanged: number } | null
   reason:              string | null
+}
+
+// ── Daily Decision Feed types (decisions, not data; no score, no priority) ───
+
+export type DecisionFeedContour =
+  'seo' | 'advertising' | 'review' | 'growth' | 'legal' | 'decision_outcome'
+export type DecisionFeedState =
+  'new' | 'seen' | 'snoozed' | 'acted' | 'dismissed'
+
+export interface DecisionFeedItem {
+  item_key:           string
+  contour:            string
+  source_table:       string
+  source_id:          string
+  source_status:      string | null
+  attention_state:    string
+  marketplace:        string | null
+  sku:                string | null
+  title:              string | null
+  what_happened:      string | null
+  why_it_matters:     string | null
+  meaning:            string | null
+  recommended_action: string | null
+  expected_effect:    string | null
+  effect_status:      string | null
+  effect_band:        string | null
+  lifecycle_reason:   string | null
+  created_at:         string | null
+  updated_at:         string | null
+  source_context:     Record<string, unknown> | null
+}
+export interface DecisionFeedResponse { items: DecisionFeedItem[]; total: number }
+
+export interface DecisionFeedStateResult {
+  ok: boolean
+  item_key: string
+  state: string
+  snooze_until: string | null
+}
+
+export interface DecisionFeedFilters {
+  contour?:            string
+  include_snoozed?:    boolean
+  include_dismissed?:  boolean
+  include_resolved?:   boolean
+  limit?:              number
 }
 
 // ── Decision Outcome types (proven effect only; no score, no forecast, no ROI) ─
