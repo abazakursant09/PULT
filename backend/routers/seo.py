@@ -29,6 +29,7 @@ from services.seo.card_snapshot import CardSnapshot
 from services.seo.adapter import SnapshotUnavailable
 from services.seo.registry import get_seo_adapter
 from services.seo.audit_persist import audit_and_persist
+from services.seo.manual_source import ManualSnapshot, build_snapshot_from_manual
 
 router = APIRouter()
 
@@ -49,6 +50,7 @@ def _loads(text: Optional[str]):
 class SeoAuditRequest(BaseModel):
     listing_id: str
     marketplace: str
+    snapshot: Optional[ManualSnapshot] = None   # A9: manual mode when provided
 
 
 class ReconciliationView(BaseModel):
@@ -78,16 +80,22 @@ async def run_seo_audit(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> SeoAuditResponse:
-    adapter = get_seo_adapter(body.marketplace)
-    if adapter is None:
-        return SeoAuditResponse(ok=False, status="unknown_marketplace",
-                                listing_id=body.listing_id, marketplace=body.marketplace,
-                                reason="no_adapter_for_marketplace")
-    snap = await adapter.build_snapshot(listing_id=body.listing_id, db=db, token=None)
-    if isinstance(snap, SnapshotUnavailable):
-        return SeoAuditResponse(ok=False, status="snapshot_unavailable",
-                                listing_id=body.listing_id, marketplace=body.marketplace,
-                                reason=snap.reason)
+    # ── manual snapshot mode (A9): explicit card payload, source="manual" ────
+    if body.snapshot is not None:
+        snap = build_snapshot_from_manual(body.snapshot, listing_id=body.listing_id,
+                                          marketplace=body.marketplace)
+    else:
+        # ── adapter mode: resolve adapter → build_snapshot from internal data ─
+        adapter = get_seo_adapter(body.marketplace)
+        if adapter is None:
+            return SeoAuditResponse(ok=False, status="unknown_marketplace",
+                                    listing_id=body.listing_id, marketplace=body.marketplace,
+                                    reason="no_adapter_for_marketplace")
+        snap = await adapter.build_snapshot(listing_id=body.listing_id, db=db, token=None)
+        if isinstance(snap, SnapshotUnavailable):
+            return SeoAuditResponse(ok=False, status="snapshot_unavailable",
+                                    listing_id=body.listing_id, marketplace=body.marketplace,
+                                    reason=snap.reason)
     assert isinstance(snap, CardSnapshot)
     res = await audit_and_persist(db, user_id=current_user.id, snapshot=snap, triggered_by="manual")
     await db.commit()
