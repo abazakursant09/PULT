@@ -87,20 +87,34 @@ class CanonicalInsightType:
     action_key: str | None = None
 
 
+# Executor action binding (A6). ONLY signal types whose engine recommended action
+# already EXISTS in services/marketplace/action_catalog (_CATALOG) and needs no
+# generated content are bound — everything else stays None (no fabricated action).
+# Today the single honest binding: advertising ad_destroying_profit →
+# stop_auto_promotion (catalog action, WB+Ozon, no extra payload to invent).
+# Review/Growth/Legal/SEO recommended actions are advisory keys NOT in the catalog,
+# so they remain None until a real, payload-complete executor action exists.
+_ACTION_BINDING = {
+    "adv_ad_destroying_profit": "stop_auto_promotion",
+}
+
+
 def _build() -> Tuple[CanonicalInsightType, ...]:
     out = []
     for contour, types in _TYPES.items():
         prefix = PREFIX[contour]
         four = contour in _FOUR_PART_CONTOURS
         for t in types:
+            sk = f"{prefix}_{t}"
             out.append(CanonicalInsightType(
                 contour=contour,
-                signal_key=f"{prefix}_{t}",
+                signal_key=sk,
                 insight_type=t,
                 key_arity=4 if four else 3,
                 three_part_compatible=not four,
                 carries_review_id=four,
                 default_metric_key=_DEFAULT_METRIC[contour],
+                action_key=_ACTION_BINDING.get(sk),
             ))
     return tuple(out)
 
