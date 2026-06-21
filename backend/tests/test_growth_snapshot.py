@@ -169,10 +169,11 @@ def test_no_external_api_imports():
     assert not offenders, offenders
 
 
-# ── no rules / signals / engine yet (A3 is snapshot-only) ────────────────────
+# ── no persist / signal-builder / API yet (rule engine lands in A4) ──────────
 
-def test_no_rule_engine_yet():
+def test_no_persist_or_api_yet():
     core_dir = Path(inspect.getfile(internal_source)).parent
     names = {p.name for p in core_dir.glob("*.py")}
-    for forbidden in ("rules.py", "engine.py", "signal_builder.py", "evaluation.py"):
-        assert forbidden not in names, f"A3 must not ship {forbidden}"
+    # A3 snapshot + A4 rule engine are allowed; persist/signal/reconciliation/API are not
+    for forbidden in ("audit_persist.py", "signal_builder.py", "reconciliation.py", "router.py"):
+        assert forbidden not in names, f"must not ship {forbidden} yet"
