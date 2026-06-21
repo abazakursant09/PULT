@@ -1614,6 +1614,35 @@ export const api = {
     runGrowthAudit: (payload: GrowthAuditPayload) =>
       req<GrowthAuditResult>('/api/growth/audit', { method: 'POST', body: JSON.stringify(payload) }),
   },
+
+  // ── Legal Navigator (recommendation contour; never a legal conclusion) ───────
+  // Advisory only — never a verdict, never a promise, never an all-clear. Signals
+  // are subject/listing-scoped. No rating, no prediction, no money.
+  legalNavigator: {
+    getLegalOverview: (listingId?: string, marketplace?: string) =>
+      req<LegalOverview>(`/api/legal/overview${rvQuery(listingId, marketplace)}`),
+    getLegalSignals: (listingId?: string, marketplace?: string, status?: string, category?: string) => {
+      const q = new URLSearchParams()
+      if (listingId) q.set('listing_id', listingId)
+      if (marketplace) q.set('marketplace', marketplace)
+      if (status) q.set('status', status)
+      if (category) q.set('category', category)
+      const s = q.toString()
+      return req<LegalSignalsResponse>(`/api/legal/signals${s ? `?${s}` : ''}`)
+    },
+    getLegalAudits: (listingId?: string, marketplace?: string) =>
+      req<LegalAuditsResponse>(`/api/legal/audits${rvQuery(listingId, marketplace)}`),
+    getLegalFindings: (listingId?: string, marketplace?: string) =>
+      req<LegalFindingsResponse>(`/api/legal/findings${rvQuery(listingId, marketplace)}`),
+    runLegalAudit: (payload: LegalAuditPayload) =>
+      req<LegalAuditResult>('/api/legal/audit', { method: 'POST', body: JSON.stringify(payload) }),
+    acknowledge: (signalId: string) =>
+      req<LegalSignalActionResult>(`/api/legal/signals/${signalId}/acknowledge`, { method: 'POST' }),
+    dismiss: (signalId: string) =>
+      req<LegalSignalActionResult>(`/api/legal/signals/${signalId}/dismiss`, { method: 'POST' }),
+    reopen: (signalId: string) =>
+      req<LegalSignalActionResult>(`/api/legal/signals/${signalId}/reopen`, { method: 'POST' }),
+  },
 }
 
 function rvQuery(listingId?: string, marketplace?: string): string {
@@ -2106,6 +2135,93 @@ export interface ReviewAuditResult {
   reconciliation:      { created: number; updated: number; resolved: number; reopened: number; unchanged: number } | null
   reason:              string | null
 }
+
+// ── Legal Navigator types (advisory only; no score, no verdict, no rubles) ───
+
+export interface LegalOverview {
+  listing_id:          string | null
+  active_signals:      number
+  high_signals:        number
+  medium_signals:      number
+  unresolved_signals:  number
+  total_not_evaluated: number
+  last_audit_at:       string | null
+}
+
+export interface LegalSignal {
+  signal_id:               string
+  insight_key:             string | null
+  signal_key:              string
+  requirement_type:        string
+  category:                string | null
+  status:                  string   // active|acknowledged|dismissed|resolved|reopened|promoted_to_decision
+  lifecycle_reason:        string | null
+  priority_level:          string | null
+  risk_level:              string | null
+  effect_type:             string | null   // qualitative *_risk_reduction
+  effect_band:             string | null
+  recommended_action_key:  string | null
+  alternative_action_keys: string[]
+  // 5-part doctrine
+  what_happened:           string | null
+  why_it_matters:          string | null
+  meaning:                 string | null
+  recommended_action:      string | null
+  expected_effect:         string | null
+  subject_type:            string | null
+  subject_ref:             string | null
+  sku:                     string | null
+  marketplace:             string | null
+  created_at:              string | null
+  updated_at:              string | null
+}
+export interface LegalSignalsResponse { items: LegalSignal[]; total: number }
+
+export interface LegalAuditItem {
+  audit_id:            string
+  status:              string
+  total_findings:      number
+  total_not_evaluated: number
+  top_severity:        string | null
+  triggered_by:        string | null
+  created_at:          string | null
+}
+export interface LegalAuditsResponse { items: LegalAuditItem[]; total: number }
+
+export interface LegalFinding {
+  requirement_type:      string
+  category:              string | null
+  severity:              string
+  risk_level:            string | null
+  estimated_effect_type: string | null
+  evidence:              Record<string, unknown> | null
+  detected_at:           string | null
+}
+export interface LegalFindingsResponse { items: LegalFinding[]; total: number }
+
+export interface LegalAuditPayload {
+  marketplace:   string
+  subject_type?: string
+  subject_ref?:  string
+  sku?:          string
+  listing_id?:   string
+}
+
+export interface LegalAuditResult {
+  ok:                  boolean
+  status:              string   // completed | legal_unavailable | <reason>
+  marketplace:         string
+  subject_ref:         string | null
+  sku:                 string | null
+  audit_id:            string | null
+  total_findings:      number | null
+  total_not_evaluated: number | null
+  top_severity:        string | null
+  reconciliation:      { created: number; updated: number; reopened: number; resolved: number; unchanged: number } | null
+  reason:              string | null
+}
+
+export interface LegalSignalActionResult { ok: boolean; signal: LegalSignal }
 
 // ── Growth / Opportunity Engine types (no fabricated index, no prediction) ───
 
