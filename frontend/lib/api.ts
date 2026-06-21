@@ -1547,6 +1547,23 @@ export const api = {
     runSeoAudit: (payload: SeoAuditPayload) =>
       req<SeoAuditResult>('/api/seo/audit', { method: 'POST', body: JSON.stringify(payload) }),
   },
+
+  // ── Advertising Engine (money-first; marketplace passed on every call) ───────
+  advertising: {
+    getAdvertisingOverview: (listingId: string, marketplace: string) =>
+      req<AdvOverview>(`/api/advertising/overview?${new URLSearchParams({ listing_id: listingId, marketplace })}`),
+    getAdvertisingSignals: (listingId: string, marketplace: string, status?: string) => {
+      const q = new URLSearchParams({ listing_id: listingId, marketplace })
+      if (status) q.set('status', status)
+      return req<AdvSignalsResponse>(`/api/advertising/signals?${q}`)
+    },
+    getAdvertisingProblems: (listingId: string, marketplace: string) =>
+      req<AdvProblemsResponse>(`/api/advertising/problems?${new URLSearchParams({ listing_id: listingId, marketplace })}`),
+    getAdvertisingAudits: (listingId: string, marketplace: string) =>
+      req<AdvAuditsResponse>(`/api/advertising/audits?${new URLSearchParams({ listing_id: listingId, marketplace })}`),
+    runAdvertisingAudit: (payload: AdvAuditPayload) =>
+      req<AdvAuditResult>('/api/advertising/audit', { method: 'POST', body: JSON.stringify(payload) }),
+  },
 }
 
 // ── Catalog types ──────────────────────────────────────────────────────────────
@@ -1956,6 +1973,87 @@ export interface SeoAuditResult {
   status:              string   // completed | snapshot_unavailable | unknown_marketplace
   listing_id:          string
   marketplace:         string
+  audit_id:            string | null
+  total_problems:      number | null
+  total_not_evaluated: number | null
+  top_severity:        string | null
+  reconciliation:      { created: number; updated: number; resolved: number; reopened: number; unchanged: number } | null
+  reason:              string | null
+}
+
+// ── Advertising Engine types ─────────────────────────────────────────────────
+
+export interface AdvOverview {
+  listing_id:          string | null
+  active_signals:      number
+  critical_signals:    number
+  high_signals:        number
+  unresolved_problems: number
+  total_not_evaluated: number
+  last_audit_at:       string | null
+}
+
+export interface AdvSignal {
+  insight_key:             string | null
+  signal_key:              string
+  problem_type:            string
+  status:                  string
+  priority_level:          string | null
+  recommended_action:      string | null
+  recommended_action_key:  string | null
+  alternative_action_keys: string[]
+  what:                    string | null
+  why:                     string | null
+  meaning:                 string | null
+  expected_effect:         string | null
+  effect_band:             string | null
+  confidence:              number | null
+}
+export interface AdvSignalsResponse { items: AdvSignal[]; total: number }
+
+export interface AdvProblem {
+  problem_type:          string
+  severity:              string
+  category:              string | null
+  estimated_effect_type: string | null
+  evidence:              Record<string, unknown> | null
+  detected_at:           string | null
+}
+export interface AdvProblemsResponse { items: AdvProblem[]; total: number }
+
+export interface AdvAuditItem {
+  audit_id:            string
+  status:              string
+  total_problems:      number
+  total_not_evaluated: number
+  top_severity:        string | null
+  triggered_by:        string | null
+  created_at:          string | null
+}
+export interface AdvAuditsResponse { items: AdvAuditItem[]; total: number }
+
+export interface AdvThresholds {
+  max_drr:                        number
+  min_revenue_for_signal:         number
+  min_ad_spend_for_signal:        number
+  low_margin_threshold:           number
+  low_stock_units:                number
+  oos_risk_days:                  number
+}
+
+export interface AdvAuditPayload {
+  listing_id?: string
+  marketplace: string
+  sku:         string
+  thresholds?: AdvThresholds   // omitted → threshold rules not_evaluated
+}
+
+export interface AdvAuditResult {
+  ok:                  boolean
+  status:              string   // completed | finance_unavailable | <reason>
+  listing_id:          string | null
+  marketplace:         string
+  sku:                 string
   audit_id:            string | null
   total_problems:      number | null
   total_not_evaluated: number | null
