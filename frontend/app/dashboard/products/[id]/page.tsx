@@ -5,6 +5,10 @@ import { useParams } from 'next/navigation'
 import { SellerBar, SellerAction } from '@/components/seller/Shell'
 import { byId, daysLeft, mono, rub, MP_NAME, lensDetail } from '@/lib/pultSeller'
 import LearningSurface from '@/components/LearningSurface'
+import SeoPanel from '@/components/seo/SeoPanel'
+
+// PULT marketplace codes → backend canonical marketplace (agnostic SEO API).
+const MP_CANON: Record<string, string> = { wb: 'wildberries', ozon: 'ozon', ym: 'yandex' }
 
 export default function ProductCard() {
   const params = useParams()
@@ -79,6 +83,11 @@ export default function ProductCard() {
             </div>
           )
         })()}
+
+        <div className="s-card" style={{ marginBottom: 14 }}>
+          <div className="s-k" style={{ marginBottom: 10 }}>SEO-аудит карточки</div>
+          <SeoPanel listingId={p.id} marketplace={MP_CANON[p.m] ?? p.m} />
+        </div>
       </div>
     </>
   )
