@@ -1591,6 +1591,29 @@ export const api = {
         body: JSON.stringify({ review_id: reviewId, marketplace: marketplace ?? null }),
       }),
   },
+
+  // ── Growth / Opportunity Engine (surfaces unrealised upside) ─────────────────
+  // Growth signals ARE listing-scoped, so listingId is passed through. marketplace
+  // is provenance/context. No fabricated index, no prediction, no rival data.
+  growth: {
+    getGrowthOverview: (listingId?: string, marketplace?: string) =>
+      req<GrowthOverview>(`/api/growth/overview${rvQuery(listingId, marketplace)}`),
+    getGrowthSignals: (listingId?: string, marketplace?: string, status?: string, category?: string) => {
+      const q = new URLSearchParams()
+      if (listingId) q.set('listing_id', listingId)
+      if (marketplace) q.set('marketplace', marketplace)
+      if (status) q.set('status', status)
+      if (category) q.set('category', category)
+      const s = q.toString()
+      return req<GrowthSignalsResponse>(`/api/growth/signals${s ? `?${s}` : ''}`)
+    },
+    getGrowthProblems: (listingId?: string, marketplace?: string) =>
+      req<GrowthProblemsResponse>(`/api/growth/problems${rvQuery(listingId, marketplace)}`),
+    getGrowthAudits: (listingId?: string, marketplace?: string) =>
+      req<GrowthAuditsResponse>(`/api/growth/audits${rvQuery(listingId, marketplace)}`),
+    runGrowthAudit: (payload: GrowthAuditPayload) =>
+      req<GrowthAuditResult>('/api/growth/audit', { method: 'POST', body: JSON.stringify(payload) }),
+  },
 }
 
 function rvQuery(listingId?: string, marketplace?: string): string {
@@ -2076,6 +2099,85 @@ export interface ReviewAuditResult {
   ok:                  boolean
   status:              string   // completed | review_unavailable | <reason>
   review_id:           string
+  audit_id:            string | null
+  total_problems:      number | null
+  total_not_evaluated: number | null
+  top_severity:        string | null
+  reconciliation:      { created: number; updated: number; resolved: number; reopened: number; unchanged: number } | null
+  reason:              string | null
+}
+
+// ── Growth / Opportunity Engine types (no fabricated index, no prediction) ───
+
+export interface GrowthOverview {
+  listing_id:               string | null
+  active_signals:           number
+  high_signals:             number
+  medium_signals:           number
+  unresolved_opportunities: number
+  total_not_evaluated:      number
+  last_audit_at:            string | null
+}
+
+export interface GrowthSignal {
+  insight_key:             string | null
+  signal_key:              string
+  problem_type:            string
+  status:                  string
+  category:                string | null   // pricing|advertising|seo|inventory|reputation
+  priority_level:          string | null   // critical|high|medium|low
+  recommended_action:      string | null   // what_to_do (human text)
+  recommended_action_key:  string | null
+  alternative_action_keys: string[]
+  what:                    string | null
+  why:                     string | null
+  meaning:                 string | null
+  expected_effect:         string | null
+  effect_band:             string | null
+  confidence:              number | null
+}
+export interface GrowthSignalsResponse { items: GrowthSignal[]; total: number }
+
+export interface GrowthProblem {
+  problem_type:          string
+  severity:              string
+  category:              string | null
+  estimated_effect_type: string | null
+  evidence:              Record<string, unknown> | null
+  detected_at:           string | null
+}
+export interface GrowthProblemsResponse { items: GrowthProblem[]; total: number }
+
+export interface GrowthAuditItem {
+  audit_id:            string
+  status:              string
+  total_problems:      number
+  total_not_evaluated: number
+  top_severity:        string | null
+  triggered_by:        string | null
+  created_at:          string | null
+}
+export interface GrowthAuditsResponse { items: GrowthAuditItem[]; total: number }
+
+export interface GrowthThresholdsIn {
+  low_stock_units?:                 number | null
+  min_revenue_for_growth_signal?:    number | null
+  min_net_profit_for_growth_signal?: number | null
+}
+
+export interface GrowthAuditPayload {
+  listing_id?: string
+  marketplace: string
+  sku:         string
+  thresholds?: GrowthThresholdsIn
+}
+
+export interface GrowthAuditResult {
+  ok:                  boolean
+  status:              string   // completed | growth_unavailable | <reason>
+  listing_id:          string | null
+  marketplace:         string
+  sku:                 string
   audit_id:            string | null
   total_problems:      number | null
   total_not_evaluated: number | null

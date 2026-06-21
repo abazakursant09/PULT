@@ -8,6 +8,7 @@ import LearningSurface from '@/components/LearningSurface'
 import SeoPanel from '@/components/seo/SeoPanel'
 import AdvertisingPanel from '@/components/advertising/AdvertisingPanel'
 import ReviewAssistantPanel from '@/components/review/ReviewAssistantPanel'
+import GrowthPanel from '@/components/growth/GrowthPanel'
 
 // PULT marketplace codes → backend canonical marketplace (agnostic SEO API).
 const MP_CANON: Record<string, string> = { wb: 'wildberries', ozon: 'ozon', ym: 'yandex' }
@@ -121,6 +122,19 @@ export default function ProductCard() {
             <div className="s-card" style={{ marginBottom: 14 }}>
               <div className="s-k" style={{ marginBottom: 10 }}>Репутация: управление отзывами</div>
               <ReviewAssistantPanel marketplace={mp} />
+            </div>
+          )
+        })()}
+
+        {(() => {
+          const mp = MP_CANON[p.m] ?? p.m
+          // Рост: возможности привязаны к listing_id; держим synthetic namespace,
+          // sku продавец указывает в форме. marketplace — контекст.
+          const growthListingId = `growth:${mp}:${p.id}`
+          return (
+            <div className="s-card" style={{ marginBottom: 14 }}>
+              <div className="s-k" style={{ marginBottom: 10 }}>Рост: возможности, которые ещё не забраны</div>
+              <GrowthPanel listingId={growthListingId} marketplace={mp} />
             </div>
           )
         })()}
