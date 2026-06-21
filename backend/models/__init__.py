@@ -49,3 +49,8 @@ from .advertising_audit import AdvertisingAudit
 from .advertising_problem import AdvertisingProblem
 from .advertising_rule_evaluation import AdvertisingRuleEvaluation
 from .advertising_signal import AdvertisingSignal
+# Review Assistant data foundation (A2) — append-only audit / problem / signal + ledger
+from .review_audit import ReviewAudit
+from .review_problem import ReviewProblem
+from .review_rule_evaluation import ReviewRuleEvaluation
+from .review_signal import ReviewSignal
