@@ -16,7 +16,7 @@ from services.sentry_setup import init_sentry
 init_sentry()
 
 from database import init_db
-from routers import auth, products, reviews, pricing, monitor, finance, legal, startup, assistant, chat, mfa, notifications, success_stories, telegram_settings, supplier_verification, oauth, suppliers_catalog, logistics, deals, supplier_reviews, promo, referrals, marking, ideas, payments, ai_image_service, csv_import, seo_projects, action_engine, rebuild_tracker, seo_intelligence, creative, events, connections, execution, automation, advertising, seo_execution, product_graph, decisions, analytics, learning
+from routers import auth, products, reviews, pricing, monitor, finance, legal, startup, assistant, chat, mfa, notifications, success_stories, telegram_settings, supplier_verification, oauth, suppliers_catalog, logistics, deals, supplier_reviews, promo, referrals, marking, ideas, payments, ai_image_service, csv_import, seo_projects, action_engine, rebuild_tracker, seo_intelligence, creative, events, connections, execution, automation, advertising, seo_execution, product_graph, decisions, analytics, learning, seo
 from routers.ai_image_service import queue_worker as ai_queue_worker
 from tasks.health_monitor import run_health_monitor
 from tasks.seed_catalog import seed_catalog
@@ -160,6 +160,8 @@ app.include_router(decisions.router,             prefix="/api",         tags=["d
 app.include_router(analytics.router,             prefix="/api",         tags=["analytics"])
 # ── Learning ranked-alternatives read API (L6, read-only) ─────────────────────
 app.include_router(learning.router,              prefix="/api",         tags=["learning"])
+# ── SEO Engine read/trigger API (A7) ──────────────────────────────────────────
+app.include_router(seo.router,                   prefix="/api",         tags=["seo"])
 
 
 @app.get("/api/health", tags=["system"])
