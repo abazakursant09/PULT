@@ -48,10 +48,12 @@ class SeoSignal(Base):
     confidence            = Column(Float, nullable=True)
 
     status      = Column(String(20), nullable=False, default="active",
-                         server_default="active")  # draft|active|dismissed|promoted_to_decision|resolved
+                         server_default="active")  # active|dismissed|promoted_to_decision|resolved|reopened
+    evidence_hash = Column(String(64), nullable=True)  # change-detection for reconciliation (A6)
     decision_id = Column(String(36), nullable=True)   # soft ref → decisions.id (set on promote, later)
 
     created_at  = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at  = Column(DateTime, nullable=True)     # last lifecycle transition (A6; signal is stateful)
 
     __table_args__ = (
         Index("ix_seo_signal_user_listing", "user_id", "listing_id"),

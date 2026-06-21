@@ -137,10 +137,13 @@ def test_marketplace_agnostic():
     _run(go())
 
 
-# ── append-only contract: detection tables have no updated_at ─────────────────
+# ── append-only contract: DETECTION tables have no updated_at ─────────────────
+# seo_signal is the lifecycle entity (A6 reconciliation mutates its status), so it
+# legitimately carries updated_at; the detection layer stays strictly append-only.
 
-def test_append_only_no_updated_at():
+def test_detection_tables_append_only():
     def cols(model):
         return {c.name for c in sa_inspect(model).columns}
-    for model in (SeoAudit, SeoProblem, SeoRuleEvaluation, SeoSignal):
+    for model in (SeoAudit, SeoProblem, SeoRuleEvaluation):
         assert "updated_at" not in cols(model), f"{model.__tablename__} must be append-only"
+    assert "updated_at" in cols(SeoSignal)  # lifecycle entity

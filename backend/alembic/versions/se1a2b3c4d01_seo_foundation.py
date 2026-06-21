@@ -109,8 +109,10 @@ def upgrade() -> None:
         sa.Column("effect_band", sa.String(length=10), nullable=True),
         sa.Column("confidence", sa.Float(), nullable=True),
         sa.Column("status", sa.String(length=20), nullable=False, server_default="active"),
+        sa.Column("evidence_hash", sa.String(length=64), nullable=True),
         sa.Column("decision_id", sa.String(length=36), nullable=True),
         sa.Column("created_at", sa.DateTime(), nullable=False),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
     )
     op.create_index("ix_seo_signal_user_listing", "seo_signal", ["user_id", "listing_id"])
     op.create_index("ix_seo_signal_insight", "seo_signal", ["insight_key"])
