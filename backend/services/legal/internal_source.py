@@ -113,6 +113,7 @@ async def build_snapshot_from_internal(
         subject_ref=ref, sku=sku or (str(ref) if subject_type in ("product", "sku") else None),
         listing_id=listing_id, source="internal",
         snapshot_created_at=now or datetime.utcnow(), status=status,
+        content_text=product_text,
         available_inputs=available_inputs, missing_inputs=missing_inputs,
         field_availability=availability, requirement_candidates=REQUIREMENT_CANDIDATES,
         not_evaluated_reasons=not_evaluated_reasons,

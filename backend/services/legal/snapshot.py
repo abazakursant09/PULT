@@ -73,6 +73,10 @@ class LegalSnapshot:
     snapshot_created_at: datetime
     status:            str             # ready | not_evaluated_ready
 
+    # raw content text (title/name) used ONLY for deterministic claim-keyword
+    # scanning by the rule engine — never an AI input, never stored as a verdict
+    content_text: Optional[str]
+
     # honest input maps
     available_inputs: Tuple[str, ...]
     missing_inputs:   Tuple[str, ...]
