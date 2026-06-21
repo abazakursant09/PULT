@@ -64,3 +64,6 @@ from .legal_audit import LegalAudit
 from .legal_finding import LegalFinding
 from .legal_rule_evaluation import LegalRuleEvaluation
 from .legal_signal import LegalSignal
+# Decision Outcome / Effect Loop data foundation (A2) — signal→decision link + effect observation
+from .engine_signal_decision_link import EngineSignalDecisionLink
+from .engine_effect_observation import EngineEffectObservation
