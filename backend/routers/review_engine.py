@@ -86,7 +86,9 @@ async def run_review_audit(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ReviewAuditResponse:
-    snap = await build_snapshot_from_reviews(db, review_id=body.review_id, marketplace=body.marketplace)
+    snap = await build_snapshot_from_reviews(
+        db, review_id=body.review_id, marketplace=body.marketplace,
+        owner_user_id=current_user.id)
     if isinstance(snap, ReviewDataUnavailable):
         status = "review_unavailable" if snap.reason == "review_missing" else snap.reason
         return ReviewAuditResponse(ok=False, status=status, review_id=body.review_id, reason=snap.reason)

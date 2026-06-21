@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.review_signal import ReviewSignal
 from .evaluation import RuleResult
-from .signal_builder import build_signal
+from .signal_builder import build_signal, normalize_review_sku
 
 ACTIVE = "active"
 DISMISSED = "dismissed"
@@ -102,7 +102,7 @@ async def reconcile_signals(
 
     for e in evaluations:
         ikey = (f"rev_{e.problem_type}:{marketplace or 'unknown'}:"
-                f"{sku or 'unknown'}:{review_id or 'unknown'}")
+                f"{normalize_review_sku(sku)}:{review_id or 'unknown'}")
         sig = by_key.get(ikey)
 
         if e.result == RuleResult.TRIGGERED:

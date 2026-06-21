@@ -105,6 +105,19 @@ _TEMPLATES: Mapping[str, Mapping[str, str]] = {
 _CONFIDENCE = {"reviews": 0.9, "requires_text": 0.7}
 
 
+def normalize_review_sku(sku: Optional[str]) -> str:
+    """Canonical sku token for insight_key. None / empty / whitespace → 'unknown'.
+
+    Single source of truth shared by the signal builder and reconciliation so a
+    review with no resolvable sku always maps to the SAME insight_key (no
+    duplicate live signal across audits).
+    """
+    if sku is None:
+        return "unknown"
+    s = str(sku).strip()
+    return s or "unknown"
+
+
 class _SafeDict(dict):
     def __missing__(self, key):
         return "{" + key + "}"
@@ -125,7 +138,7 @@ def build_signal(ev: RuleEvaluation, *, marketplace: Optional[str], sku: Optiona
         problem_type=pt,
         signal_key=f"rev_{pt}",
         # review_id is mandatory for dedup
-        insight_key=f"rev_{pt}:{(marketplace or 'unknown')}:{(sku or 'unknown')}:{(review_id or 'unknown')}",
+        insight_key=f"rev_{pt}:{(marketplace or 'unknown')}:{normalize_review_sku(sku)}:{(review_id or 'unknown')}",
         recommended_action_key=primary,
         alternative_action_keys=tuple(alts),
         what=_fmt(tpl["what"], e),

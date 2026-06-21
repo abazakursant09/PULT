@@ -24,9 +24,16 @@ from .safety_policy import classify_safety
 
 async def build_snapshot_from_reviews(
     db: AsyncSession, *, review_id: str, marketplace: Optional[str] = None,
-    now: Optional[datetime] = None,
+    owner_user_id: Optional[str] = None, now: Optional[datetime] = None,
 ):
-    """ReviewSnapshot from internal review data, or honest ReviewDataUnavailable."""
+    """ReviewSnapshot from internal review data, or honest ReviewDataUnavailable.
+
+    Ownership: a ReviewResponse has no direct user_id — ownership is proven via the
+    linked Product (Product.user_id). When ``owner_user_id`` is given, a review the
+    caller cannot be shown to own (missing product, product without that owner) is
+    reported as ``review_missing`` — the SAME reason as a non-existent review, so we
+    never leak the existence of another seller's review_id.
+    """
     if db is None:
         return ReviewDataUnavailable(marketplace or "unknown", "no_db_context")
     if not review_id:
@@ -37,6 +44,10 @@ async def build_snapshot_from_reviews(
         return ReviewDataUnavailable(marketplace or "unknown", "review_missing")
 
     prod = await db.get(Product, rr.product_id) if rr.product_id else None
+
+    if owner_user_id is not None and (prod is None or prod.user_id != owner_user_id):
+        # cannot prove ownership → indistinguishable from not-found (no data leak)
+        return ReviewDataUnavailable(marketplace or "unknown", "review_missing")
     text = rr.review_text
     has_text = bool(text and text.strip())
     answered = bool(rr.response_text) or rr.status == "published"

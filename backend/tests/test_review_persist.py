@@ -29,7 +29,8 @@ from models.review_signal import ReviewSignal
 
 from services.review.snapshot import ReviewSnapshot
 from services.review.evaluation import RuleEvaluation, RuleResult
-from services.review.signal_builder import build_signal
+from services.review.signal_builder import build_signal, normalize_review_sku
+from services.review import reconciliation as _recon
 from services.review import audit_persist
 from services.review.audit_persist import audit_and_persist
 from services.review.safety_policy import OFF, MANUAL_APPROVAL, AUTO, MANUAL_ONLY, SAFE, ATTENTION, RISK
@@ -198,6 +199,53 @@ def test_agnostic():
             sig = (await db.execute(select(ReviewSignal).where(
                 ReviewSignal.audit_id == res.audit_id))).scalars().first()
             assert sig.insight_key.startswith("rev_") and f":{mp}:" in sig.insight_key
+    _run(go())
+
+
+# ── A7 hardening: SKU normalization ──────────────────────────────────────────
+
+def test_sku_none_insight_key_unknown():
+    ev = RuleEvaluation("unanswered_negative_review", "RISK", "critical", "reputation_risk",
+                        "reviews", RuleResult.TRIGGERED,
+                        evidence={"safety_category": "RISK", "default_mode": "manual_only"})
+    for bad in (None, "", "   "):
+        d = build_signal(ev, marketplace="wb", sku=bad, review_id="r1")
+        assert d.insight_key == "rev_unanswered_negative_review:wb:unknown:r1"
+
+
+def test_normalize_review_sku():
+    assert normalize_review_sku(None) == "unknown"
+    assert normalize_review_sku("") == "unknown"
+    assert normalize_review_sku("   ") == "unknown"
+    assert normalize_review_sku(" SKU1 ") == "SKU1"
+    assert normalize_review_sku("SKU1") == "SKU1"
+
+
+def test_builder_and_reconciliation_use_same_normalized_sku():
+    # reconciliation builds its lookup key inline; builder builds the stored key.
+    # both must collapse a None/blank sku to the SAME token → one signal per review.
+    pt = "unanswered_negative_review"
+    ev = RuleEvaluation(pt, "RISK", "critical", "reputation_risk", "reviews",
+                        RuleResult.TRIGGERED,
+                        evidence={"safety_category": "RISK", "default_mode": "manual_only"})
+    for sku in (None, "", "  ", "SKU1"):
+        builder_key = build_signal(ev, marketplace="wb", sku=sku, review_id="r1").insight_key
+        recon_key = (f"rev_{pt}:{'wb'}:{_recon.normalize_review_sku(sku)}:r1")
+        assert builder_key == recon_key
+
+
+def test_no_duplicate_signal_when_sku_none_across_audits():
+    async def go():
+        db = await _engine(); uid = str(uuid.uuid4())
+        snap = _snap()                       # sku="SKU1"
+        from dataclasses import replace
+        snap = replace(snap, sku=None)       # no resolvable sku
+        for _ in range(3):
+            await audit_and_persist(db, user_id=uid, snapshot=snap, now=T0); await db.commit()
+        sigs = (await db.execute(select(ReviewSignal).where(ReviewSignal.user_id == uid))).scalars().all()
+        neg = [s for s in sigs if s.problem_type == "unanswered_negative_review"]
+        assert len(neg) == 1                 # not 3 → normalized sku dedups
+        assert ":unknown:" in neg[0].insight_key
     _run(go())
 
 

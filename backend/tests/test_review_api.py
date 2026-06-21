@@ -55,6 +55,14 @@ async def _seed_review(db, uid, *, review_id, rating, marketplace="wildberries",
     db.add(ReviewResponse(id=review_id, product_id=prod.id, rating=rating, review_text=text,
                           response_text=response_text, status=status, marketplace=marketplace))
     await db.flush()
+    return prod.id
+
+
+async def _seed_review_no_product(db, *, review_id, rating, marketplace="wildberries"):
+    # review whose product_id points to a non-existent product → ownership unprovable
+    db.add(ReviewResponse(id=review_id, product_id="ghost-product", rating=rating,
+                          marketplace=marketplace, status="pending"))
+    await db.flush()
 
 
 async def _audit(db, uid, review_id, *, marketplace="wildberries"):
@@ -254,3 +262,60 @@ def test_routes_mounted():
     # shadows the explicit GET paths). Verify ordering in the app route table.
     ordered = [getattr(r, "path", "") for r in main.app.routes]
     assert ordered.index("/api/reviews/overview") < ordered.index("/api/reviews/{product_id}")
+
+
+# ── 13. owner can audit own review (A7 hardening) ────────────────────────────
+
+def test_owner_can_audit_own_review():
+    async def go():
+        db = await _engine(); uid = str(uuid.uuid4())
+        await _seed_review(db, uid, review_id="rev-1", rating=1); await db.commit()
+        resp = await _audit(db, uid, "rev-1")
+        assert resp.ok and resp.status == "completed" and resp.audit_id
+    _run(go())
+
+
+# ── 14. non-owner → review_unavailable (NOT 403, no leak) ────────────────────
+
+def test_non_owner_gets_review_unavailable():
+    async def go():
+        db = await _engine()
+        owner = str(uuid.uuid4()); attacker = str(uuid.uuid4())
+        await _seed_review(db, owner, review_id="rev-1", rating=1); await db.commit()
+        resp = await _audit(db, attacker, "rev-1")          # attacker audits owner's review
+        assert resp.ok is False and resp.status == "review_unavailable"
+        assert resp.reason == "review_missing"              # same reason as truly-missing
+        assert resp.audit_id is None
+    _run(go())
+
+
+# ── 15. missing ownership proof (no product) → review_unavailable ────────────
+
+def test_missing_ownership_proof_unavailable():
+    async def go():
+        db = await _engine(); uid = str(uuid.uuid4())
+        await _seed_review_no_product(db, review_id="rev-orphan", rating=1); await db.commit()
+        resp = await _audit(db, uid, "rev-orphan")
+        assert resp.ok is False and resp.status == "review_unavailable"
+        assert resp.reason == "review_missing" and resp.audit_id is None
+    _run(go())
+
+
+# ── 16. no data leak: foreign review response == truly-missing response ──────
+
+def test_no_data_leak_for_foreign_review():
+    async def go():
+        db = await _engine()
+        owner = str(uuid.uuid4()); attacker = str(uuid.uuid4())
+        await _seed_review(db, owner, review_id="secret-rev", rating=2, sku="SECRET",
+                           text="конфиденциально"); await db.commit()
+        foreign = (await _audit(db, attacker, "secret-rev")).model_dump()
+        ghost = (await _audit(db, attacker, "does-not-exist")).model_dump()
+        # identical externally-visible shape (sans the caller's own echoed review_id)
+        # → existence of secret-rev not revealed
+        foreign.pop("review_id"); ghost.pop("review_id")
+        assert foreign == ghost
+        blob = str(foreign).lower()
+        for leaked in ("secret", "конфиденциаль", "owner"):
+            assert leaked not in blob
+    _run(go())
