@@ -81,6 +81,10 @@ class CanonicalInsightType:
     three_part_compatible: bool
     carries_review_id: bool
     default_metric_key: str
+    # Executor action binding for promotion. Intentionally None in A2/A3 — the real
+    # one-click action_key is capability-gated and decided at the bridge (A6); the
+    # engine signal's own recommended_action_key is advisory, not an executor key.
+    action_key: str | None = None
 
 
 def _build() -> Tuple[CanonicalInsightType, ...]:
