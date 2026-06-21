@@ -9,6 +9,7 @@ import SeoPanel from '@/components/seo/SeoPanel'
 import AdvertisingPanel from '@/components/advertising/AdvertisingPanel'
 import ReviewAssistantPanel from '@/components/review/ReviewAssistantPanel'
 import GrowthPanel from '@/components/growth/GrowthPanel'
+import LegalPanel from '@/components/legal/LegalPanel'
 
 // PULT marketplace codes → backend canonical marketplace (agnostic SEO API).
 const MP_CANON: Record<string, string> = { wb: 'wildberries', ozon: 'ozon', ym: 'yandex' }
@@ -135,6 +136,19 @@ export default function ProductCard() {
             <div className="s-card" style={{ marginBottom: 14 }}>
               <div className="s-k" style={{ marginBottom: 10 }}>Рост: возможности, которые ещё не забраны</div>
               <GrowthPanel listingId={growthListingId} marketplace={mp} />
+            </div>
+          )
+        })()}
+
+        {(() => {
+          const mp = MP_CANON[p.m] ?? p.m
+          // Юридический навигатор: рекомендации, не заключение. Сигналы привязаны
+          // к listing_id; sku продавец указывает в форме. marketplace — контекст.
+          const legalListingId = `legal:${mp}:${p.id}`
+          return (
+            <div className="s-card" style={{ marginBottom: 14 }}>
+              <div className="s-k" style={{ marginBottom: 10 }}>Юридические риски: что стоит проверить</div>
+              <LegalPanel listingId={legalListingId} marketplace={mp} />
             </div>
           )
         })()}
