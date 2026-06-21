@@ -54,3 +54,8 @@ from .review_audit import ReviewAudit
 from .review_problem import ReviewProblem
 from .review_rule_evaluation import ReviewRuleEvaluation
 from .review_signal import ReviewSignal
+# Growth / Opportunity Engine data foundation (A2) — append-only audit / problem / signal + ledger
+from .growth_audit import GrowthAudit
+from .growth_problem import GrowthProblem
+from .growth_rule_evaluation import GrowthRuleEvaluation
+from .growth_signal import GrowthSignal
