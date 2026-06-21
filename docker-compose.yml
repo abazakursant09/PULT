@@ -36,6 +36,10 @@ services:
       SECRET_KEY: ${SECRET_KEY:?SECRET_KEY must be set (openssl rand -hex 32)}
       ALGORITHM: HS256
       ACCESS_TOKEN_EXPIRE_MINUTES: "1440"
+      # Shared secret for internal/cron-only control endpoints (close-due
+      # measurement trigger). Pass-through, empty default → fail-closed when
+      # unset. Set INTERNAL_API_KEY in the host env to enable the cron trigger.
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy
