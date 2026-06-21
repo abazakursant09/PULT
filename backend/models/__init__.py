@@ -67,3 +67,5 @@ from .legal_signal import LegalSignal
 # Decision Outcome / Effect Loop data foundation (A2) — signal→decision link + effect observation
 from .engine_signal_decision_link import EngineSignalDecisionLink
 from .engine_effect_observation import EngineEffectObservation
+# Daily Decision Feed data foundation (A2) — per-user attention state (no signal duplication)
+from .decision_feed_state import DecisionFeedState
