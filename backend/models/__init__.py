@@ -39,3 +39,8 @@ from .decision import Decision
 from .observation import Observation
 # Decision Outcome foundation — observed outcome state (NOT attribution)
 from .decision_outcome import DecisionOutcome
+# SEO Engine data foundation (A2) — append-only audit / problem / signal + coverage ledger
+from .seo_audit import SeoAudit
+from .seo_problem import SeoProblem
+from .seo_rule_evaluation import SeoRuleEvaluation
+from .seo_signal import SeoSignal
