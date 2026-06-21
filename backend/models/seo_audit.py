@@ -22,6 +22,7 @@ class SeoAudit(Base):
     listing_id   = Column(String(36), nullable=True)     # soft ref → product_listings.id
     marketplace  = Column(String(20), nullable=True)     # provenance / dispatch only
     sku          = Column(String(255), nullable=True)
+    source       = Column(String(20), nullable=True)     # snapshot source: api | import
 
     status               = Column(String(15), nullable=False, default="completed",
                                   server_default="completed")  # pending|running|completed|failed

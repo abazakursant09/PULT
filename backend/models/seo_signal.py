@@ -32,7 +32,8 @@ class SeoSignal(Base):
     signal_key             = Column(String(64), nullable=False)  # canonical seo_<problem_type>
     insight_key            = Column(String(64), nullable=True)   # seo_<ptype>:<mp>:<sku> (Decision bridge anchor)
     problem_type           = Column(String(40), nullable=False)
-    recommended_action_key = Column(String(64), nullable=True)   # canonical (Action Catalog)
+    recommended_action_key = Column(String(64), nullable=True)   # canonical primary (Action Catalog)
+    alternative_action_keys = Column(Text, nullable=True)        # JSON list of canonical alternatives
 
     # PULT doctrine, 5 parts (deterministic text, no metrics)
     what          = Column(Text, nullable=True)

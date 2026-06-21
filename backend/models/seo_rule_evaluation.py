@@ -15,7 +15,7 @@ Plain table mirror, append-only, marketplace-agnostic. No rule logic here.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, String, DateTime, Index, UniqueConstraint
+from sqlalchemy import Column, String, Text, DateTime, Index, UniqueConstraint
 from database import Base
 
 
@@ -30,6 +30,7 @@ class SeoRuleEvaluation(Base):
     problem_type = Column(String(40), nullable=False)    # canonical rule key
     result       = Column(String(20), nullable=False)    # triggered|not_triggered|not_evaluated
     reason       = Column(String(120), nullable=True)    # e.g. "missing_fields: category_schema"
+    evidence     = Column(Text, nullable=True)           # JSON facts when triggered (full per-rule trail)
 
     created_at   = Column(DateTime, nullable=False, default=datetime.utcnow)
 

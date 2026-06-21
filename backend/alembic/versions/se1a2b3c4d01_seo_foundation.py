@@ -31,6 +31,7 @@ def upgrade() -> None:
         sa.Column("listing_id", sa.String(length=36), nullable=True),
         sa.Column("marketplace", sa.String(length=20), nullable=True),
         sa.Column("sku", sa.String(length=255), nullable=True),
+        sa.Column("source", sa.String(length=20), nullable=True),
         sa.Column("status", sa.String(length=15), nullable=False, server_default="completed"),
         sa.Column("rule_catalog_version", sa.String(length=20), nullable=True),
         sa.Column("snapshot_hash", sa.String(length=64), nullable=True),
@@ -76,6 +77,7 @@ def upgrade() -> None:
         sa.Column("problem_type", sa.String(length=40), nullable=False),
         sa.Column("result", sa.String(length=20), nullable=False),
         sa.Column("reason", sa.String(length=120), nullable=True),
+        sa.Column("evidence", sa.Text(), nullable=True),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.UniqueConstraint("audit_id", "problem_type", name="uq_seo_rule_eval_audit_type"),
     )
@@ -96,6 +98,7 @@ def upgrade() -> None:
         sa.Column("insight_key", sa.String(length=64), nullable=True),
         sa.Column("problem_type", sa.String(length=40), nullable=False),
         sa.Column("recommended_action_key", sa.String(length=64), nullable=True),
+        sa.Column("alternative_action_keys", sa.Text(), nullable=True),
         sa.Column("what", sa.Text(), nullable=True),
         sa.Column("why", sa.Text(), nullable=True),
         sa.Column("meaning", sa.Text(), nullable=True),

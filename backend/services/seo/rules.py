@@ -21,6 +21,10 @@ from typing import Callable, Tuple, Union
 from .card_snapshot import CardSnapshot
 from .evaluation import RuleEvaluation, RuleResult
 
+# Bumped whenever the rule set / thresholds semantics change — stamped on every
+# seo_audit for cross-run determinism.
+RULE_CATALOG_VERSION = "1"
+
 # Predicate outcome (rule already passed the availability gate):
 #   ("triggered", evidence_dict) | ("not_triggered", None) | ("not_evaluated", reason)
 _Pred = Tuple[str, Union[dict, str, None]]
