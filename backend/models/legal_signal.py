@@ -56,8 +56,10 @@ class LegalSignal(Base):
     confidence     = Column(Float, nullable=True)
 
     # lifecycle: active|acknowledged|dismissed|promoted_to_decision|resolved|reopened
-    status        = Column(String(20), nullable=False, default="active", server_default="active")
-    evidence_hash = Column(String(64), nullable=True)
+    status           = Column(String(20), nullable=False, default="active", server_default="active")
+    # cautious lifecycle note (e.g. "risk_not_detected_in_latest_audit") — NEVER "compliant"
+    lifecycle_reason = Column(String(120), nullable=True)
+    evidence_hash    = Column(String(64), nullable=True)
     decision_id   = Column(String(36), nullable=True)  # soft ref → decisions.id (set on promote, later)
 
     created_at  = Column(DateTime, nullable=False, default=datetime.utcnow)
