@@ -28,7 +28,10 @@ class SeoAudit(Base):
     rule_catalog_version = Column(String(20), nullable=True)   # determinism marker
     snapshot_hash        = Column(String(64), nullable=True)   # dedup / throttle
 
-    score                = Column(Float, nullable=True)        # internal health index (NOT a metric)
+    # Internal, NON-PUBLIC deterministic health index. NOT a marketplace metric,
+    # NOT an Effect-PULT input, NEVER surfaced as an "SEO Score" in API/UI, never
+    # used as proven effect. Guarded by test (test_seo_snapshot_adapter).
+    internal_health_index = Column(Float, nullable=True)
     total_problems       = Column(Integer, nullable=False, default=0, server_default="0")
     total_not_evaluated  = Column(Integer, nullable=False, default=0, server_default="0")
     top_severity         = Column(String(10), nullable=True)   # critical|high|medium|low

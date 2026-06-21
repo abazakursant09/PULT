@@ -44,7 +44,7 @@ def test_full_seo_record_roundtrip():
         audit = SeoAudit(user_id=uid, listing_id=lid, marketplace="ozon", sku="SKU1",
                          status="completed", rule_catalog_version="v1",
                          total_problems=1, total_not_evaluated=1, top_severity="critical",
-                         triggered_by="manual", score=72.0)
+                         triggered_by="manual", internal_health_index=72.0)
         db.add(audit); await db.flush()
 
         problem = SeoProblem(audit_id=audit.id, user_id=uid, listing_id=lid, marketplace="ozon",
@@ -69,7 +69,7 @@ def test_full_seo_record_roundtrip():
         a = (await db.execute(select(SeoAudit).where(SeoAudit.id == audit.id))).scalar_one()
         p = (await db.execute(select(SeoProblem).where(SeoProblem.audit_id == audit.id))).scalar_one()
         s = (await db.execute(select(SeoSignal).where(SeoSignal.audit_id == audit.id))).scalar_one()
-        assert a.score == 72.0 and a.total_not_evaluated == 1
+        assert a.internal_health_index == 72.0 and a.total_not_evaluated == 1
         assert json.loads(p.evidence)["missing"] == ["colour", "material"]
         assert s.insight_key == "seo_required_attributes_missing:ozon:SKU1"
         assert s.status == "active"

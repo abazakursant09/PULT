@@ -34,7 +34,7 @@ def upgrade() -> None:
         sa.Column("status", sa.String(length=15), nullable=False, server_default="completed"),
         sa.Column("rule_catalog_version", sa.String(length=20), nullable=True),
         sa.Column("snapshot_hash", sa.String(length=64), nullable=True),
-        sa.Column("score", sa.Float(), nullable=True),
+        sa.Column("internal_health_index", sa.Float(), nullable=True),
         sa.Column("total_problems", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("total_not_evaluated", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("top_severity", sa.String(length=10), nullable=True),
