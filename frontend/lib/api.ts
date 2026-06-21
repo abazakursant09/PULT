@@ -1643,6 +1643,25 @@ export const api = {
     reopen: (signalId: string) =>
       req<LegalSignalActionResult>(`/api/legal/signals/${signalId}/reopen`, { method: 'POST' }),
   },
+
+  // ── Decision Outcome (proven effect of decisions; read-only feedback) ────────
+  // No score, no forecast, no ROI, no money promise. effect_status is observed-only;
+  // not_evaluated / not_measured_yet are reported truthfully.
+  decisionOutcome: {
+    getDecisionEffects: (contour?: string, effectStatus?: string) => {
+      const q = new URLSearchParams()
+      if (contour) q.set('contour', contour)
+      if (effectStatus) q.set('effect_status', effectStatus)
+      const s = q.toString()
+      return req<DecisionEffectsResponse>(`/api/decision-outcome/effects${s ? `?${s}` : ''}`)
+    },
+    getDecisionOutcomeSummary: (contour?: string) => {
+      const q = new URLSearchParams()
+      if (contour) q.set('contour', contour)
+      const s = q.toString()
+      return req<DecisionOutcomeSummary>(`/api/decision-outcome/summary${s ? `?${s}` : ''}`)
+    },
+  },
 }
 
 function rvQuery(listingId?: string, marketplace?: string): string {
@@ -2134,6 +2153,36 @@ export interface ReviewAuditResult {
   top_severity:        string | null
   reconciliation:      { created: number; updated: number; resolved: number; reopened: number; unchanged: number } | null
   reason:              string | null
+}
+
+// ── Decision Outcome types (proven effect only; no score, no forecast, no ROI) ─
+
+export interface DecisionEffect {
+  decision_id:   string | null
+  insight_key:   string | null
+  contour:       string
+  marketplace:   string | null
+  sku:           string | null
+  action_key:    string | null
+  metric_key:    string | null
+  link_status:   string
+  effect_band:   string | null
+  effect_status: string   // proven_improved|proven_unchanged|proven_worsened|not_measured_yet|not_evaluated
+  measured_at:   string | null
+  evidence:      Record<string, unknown> | null
+  what_happened: string
+  what_it_means: string
+  next_action:   string
+}
+export interface DecisionEffectsResponse { items: DecisionEffect[]; total: number }
+
+export interface DecisionOutcomeSummary {
+  proven_improved:   number
+  proven_unchanged:  number
+  proven_worsened:   number
+  not_evaluated:     number
+  not_measured_yet:  number
+  total:             number
 }
 
 // ── Legal Navigator types (advisory only; no score, no verdict, no rubles) ───

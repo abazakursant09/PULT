@@ -16,7 +16,7 @@ from services.sentry_setup import init_sentry
 init_sentry()
 
 from database import init_db
-from routers import auth, products, reviews, pricing, monitor, finance, legal, startup, assistant, chat, mfa, notifications, success_stories, telegram_settings, supplier_verification, oauth, suppliers_catalog, logistics, deals, supplier_reviews, promo, referrals, marking, ideas, payments, ai_image_service, csv_import, seo_projects, action_engine, rebuild_tracker, seo_intelligence, creative, events, connections, execution, automation, advertising, seo_execution, product_graph, decisions, analytics, learning, seo, advertising_engine, review_engine, growth_engine, legal_engine
+from routers import auth, products, reviews, pricing, monitor, finance, legal, startup, assistant, chat, mfa, notifications, success_stories, telegram_settings, supplier_verification, oauth, suppliers_catalog, logistics, deals, supplier_reviews, promo, referrals, marking, ideas, payments, ai_image_service, csv_import, seo_projects, action_engine, rebuild_tracker, seo_intelligence, creative, events, connections, execution, automation, advertising, seo_execution, product_graph, decisions, analytics, learning, seo, advertising_engine, review_engine, growth_engine, legal_engine, decision_outcome
 from routers.ai_image_service import queue_worker as ai_queue_worker
 from tasks.health_monitor import run_health_monitor
 from tasks.seed_catalog import seed_catalog
@@ -169,6 +169,7 @@ app.include_router(seo.router,                   prefix="/api",         tags=["s
 app.include_router(advertising_engine.router,    prefix="/api",         tags=["advertising-engine"])
 app.include_router(growth_engine.router,          prefix="/api",         tags=["growth-engine"])
 app.include_router(legal_engine.router,           prefix="/api",         tags=["legal-engine"])
+app.include_router(decision_outcome.router,       prefix="/api",         tags=["decision-outcome"])
 
 
 @app.get("/api/health", tags=["system"])
