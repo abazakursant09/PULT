@@ -21,7 +21,10 @@ const TABS: { k: Tab; l: string }[] = [
   { k: 'history', l: 'История' },
 ]
 
-export function SeoPanel({ listingId, marketplace }: { listingId: string; marketplace: string }) {
+export function SeoPanel(
+  { listingId, marketplace, manual = false }:
+  { listingId: string; marketplace: string; manual?: boolean },
+) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [overview, setOverview] = useState<SeoOverview | null>(null)
@@ -64,6 +67,14 @@ export function SeoPanel({ listingId, marketplace }: { listingId: string; market
 
       {!loading && !error && (
         <>
+          {manual && (
+            <div style={{
+              fontSize: 11.5, color: 'var(--text-3)', background: 'var(--surface-h)',
+              border: '1px solid var(--line)', borderRadius: 8, padding: '8px 12px',
+            }}>
+              SEO-аудит доступен в ручном режиме, потому что карточка пока не связана с backend listing_id.
+            </div>
+          )}
           {overview && <SeoOverviewCard overview={overview} notEvaluated={notEvaluated} />}
 
           {!hasAudit && (

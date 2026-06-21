@@ -72,6 +72,9 @@ export function SeoManualAuditForm(
 
   return (
     <div style={{ background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 12, padding: 16 }}>
+      <div style={{ fontSize: 11.5, color: 'var(--text-3)', marginBottom: 12 }}>
+        Ручной аудит не меняет карточку на маркетплейсе и используется для проверки SEO-проблем по введённым данным.
+      </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
         <div><label style={lab}>SKU</label><input style={inp} value={f.sku ?? ''} onChange={set('sku')} /></div>
         <div><label style={lab}>Бренд</label><input style={inp} value={f.brand ?? ''} onChange={set('brand')} /></div>

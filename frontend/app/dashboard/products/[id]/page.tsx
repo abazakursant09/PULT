@@ -84,10 +84,19 @@ export default function ProductCard() {
           )
         })()}
 
-        <div className="s-card" style={{ marginBottom: 14 }}>
-          <div className="s-k" style={{ marginBottom: 10 }}>SEO-аудит карточки</div>
-          <SeoPanel listingId={p.id} marketplace={MP_CANON[p.m] ?? p.m} />
-        </div>
+        {(() => {
+          const mp = MP_CANON[p.m] ?? p.m
+          // p.id — это id из каталога (пока не реальный backend ProductListing.id),
+          // поэтому работаем в ручном режиме под synthetic namespace, чтобы не
+          // создавать аудиты под мусорный listing_id. Реальный listing mode — позже.
+          const seoListingId = `seo-manual:${mp}:${p.id}`
+          return (
+            <div className="s-card" style={{ marginBottom: 14 }}>
+              <div className="s-k" style={{ marginBottom: 10 }}>SEO-аудит карточки</div>
+              <SeoPanel listingId={seoListingId} marketplace={mp} manual />
+            </div>
+          )
+        })()}
       </div>
     </>
   )
