@@ -1530,6 +1530,23 @@ export const api = {
       return req<DecisionEvidenceResponse>(`/api/learning/evidence?${q}`)
     },
   },
+
+  // ── SEO Engine (marketplace-agnostic; marketplace passed on every call) ──────
+  seo: {
+    getSeoOverview: (listingId: string, marketplace: string) =>
+      req<SeoOverview>(`/api/seo/overview?${new URLSearchParams({ listing_id: listingId, marketplace })}`),
+    getSeoSignals: (listingId: string, marketplace: string, status?: string) => {
+      const q = new URLSearchParams({ listing_id: listingId, marketplace })
+      if (status) q.set('status', status)
+      return req<SeoSignalsResponse>(`/api/seo/signals?${q}`)
+    },
+    getSeoProblems: (listingId: string, marketplace: string) =>
+      req<SeoProblemsResponse>(`/api/seo/problems?${new URLSearchParams({ listing_id: listingId, marketplace })}`),
+    getSeoAudits: (listingId: string, marketplace: string) =>
+      req<SeoAuditsResponse>(`/api/seo/audits?${new URLSearchParams({ listing_id: listingId, marketplace })}`),
+    runSeoAudit: (payload: SeoAuditPayload) =>
+      req<SeoAuditResult>('/api/seo/audit', { method: 'POST', body: JSON.stringify(payload) }),
+  },
 }
 
 // ── Catalog types ──────────────────────────────────────────────────────────────
@@ -1854,4 +1871,95 @@ export interface DecisionEvidence {
 export interface DecisionEvidenceResponse {
   insight_key: string
   evidence:    DecisionEvidence | null
+}
+
+// ── SEO Engine types ─────────────────────────────────────────────────────────
+
+export interface SeoOverview {
+  listing_id:          string | null
+  active_signals:      number
+  critical_signals:    number
+  high_signals:        number
+  unresolved_problems: number
+  last_audit_at:       string | null
+}
+
+export interface SeoSignal {
+  insight_key:             string | null
+  signal_key:              string
+  problem_type:            string
+  status:                  string   // active | dismissed | resolved | reopened | promoted_to_decision
+  priority_level:          string | null   // critical | high | medium | low
+  recommended_action:      string | null   // what_to_do (human text)
+  recommended_action_key:  string | null
+  alternative_action_keys: string[]
+  what:                    string | null
+  why:                     string | null
+  meaning:                 string | null
+  expected_effect:         string | null
+  effect_band:             string | null
+  confidence:              number | null
+}
+export interface SeoSignalsResponse { items: SeoSignal[]; total: number }
+
+export interface SeoProblem {
+  problem_type:          string
+  severity:              string   // critical | high | medium | low
+  category:              string | null
+  estimated_effect_type: string | null
+  evidence:              Record<string, unknown> | null
+  detected_at:           string | null
+}
+export interface SeoProblemsResponse { items: SeoProblem[]; total: number }
+
+export interface SeoAuditItem {
+  audit_id:            string
+  listing_id:          string | null
+  marketplace:         string | null
+  sku:                 string | null
+  status:              string
+  total_problems:      number
+  total_not_evaluated: number
+  top_severity:        string | null
+  triggered_by:        string | null
+  created_at:          string | null
+  completed_at:        string | null
+}
+export interface SeoAuditsResponse { items: SeoAuditItem[]; total: number }
+
+export interface SeoManualConstraints {
+  title_min_len:                 number
+  title_max_len:                 number
+  description_min_len:           number
+  media_min_images:              number
+  attribute_fill_rate_threshold: number
+  content_completeness_threshold: number
+}
+
+export interface SeoManualSnapshot {
+  sku?:         string
+  title?:       string
+  description?: string
+  brand?:       string
+  media?:       { image_count: number; video_present?: boolean }
+  constraints?: SeoManualConstraints
+}
+
+export interface SeoAuditPayload {
+  listing_id:  string
+  marketplace: string
+  snapshot?:   SeoManualSnapshot   // omitted → adapter mode
+}
+
+export interface SeoAuditResult {
+  ok:                  boolean
+  status:              string   // completed | snapshot_unavailable | unknown_marketplace
+  listing_id:          string
+  marketplace:         string
+  audit_id:            string | null
+  total_problems:      number | null
+  total_not_evaluated: number | null
+  top_severity:        string | null
+  reconciliation:      { created: number; updated: number; resolved: number; reopened: number; unchanged: number } | null
+  reason:              string | null
 }

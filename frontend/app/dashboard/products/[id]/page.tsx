@@ -5,6 +5,10 @@ import { useParams } from 'next/navigation'
 import { SellerBar, SellerAction } from '@/components/seller/Shell'
 import { byId, daysLeft, mono, rub, MP_NAME, lensDetail } from '@/lib/pultSeller'
 import LearningSurface from '@/components/LearningSurface'
+import SeoPanel from '@/components/seo/SeoPanel'
+
+// PULT marketplace codes → backend canonical marketplace (agnostic SEO API).
+const MP_CANON: Record<string, string> = { wb: 'wildberries', ozon: 'ozon', ym: 'yandex' }
 
 export default function ProductCard() {
   const params = useParams()
@@ -76,6 +80,20 @@ export default function ProductCard() {
                   <LearningSurface insightKey={l.insightKey} listingId={p.id} />
                 </div>
               )}
+            </div>
+          )
+        })()}
+
+        {(() => {
+          const mp = MP_CANON[p.m] ?? p.m
+          // p.id — это id из каталога (пока не реальный backend ProductListing.id),
+          // поэтому работаем в ручном режиме под synthetic namespace, чтобы не
+          // создавать аудиты под мусорный listing_id. Реальный listing mode — позже.
+          const seoListingId = `seo-manual:${mp}:${p.id}`
+          return (
+            <div className="s-card" style={{ marginBottom: 14 }}>
+              <div className="s-k" style={{ marginBottom: 10 }}>SEO-аудит карточки</div>
+              <SeoPanel listingId={seoListingId} marketplace={mp} manual />
             </div>
           )
         })()}
