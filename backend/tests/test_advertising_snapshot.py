@@ -125,14 +125,7 @@ def test_marketplace_agnostic():
     _run(go())
 
 
-# ── 6. reconciliation not implemented yet (persist/builder landed in A5) ─────
-
-def test_no_reconciliation_yet():
-    adv_dir = Path(inspect.getfile(internal_source)).parent
-    assert not (adv_dir / "reconciliation.py").exists(), "reconciliation is A6, not yet"
-
-
-# ── 7. core imports no marketplace clients ───────────────────────────────────
+# ── 6. core imports no marketplace clients ───────────────────────────────────
 
 def test_core_no_marketplace_client_imports():
     adv_dir = Path(inspect.getfile(internal_source)).parent

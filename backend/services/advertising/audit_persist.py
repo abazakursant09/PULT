@@ -29,13 +29,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from models.advertising_audit import AdvertisingAudit
 from models.advertising_problem import AdvertisingProblem
 from models.advertising_rule_evaluation import AdvertisingRuleEvaluation
-from models.advertising_signal import AdvertisingSignal
 
 from .snapshot import AdvertisingSnapshot
 from .engine import evaluate_snapshot
 from .evaluation import RuleResult
 from .rules import RULE_CATALOG_VERSION
-from .signal_builder import build_signal
+from .reconciliation import reconcile_signals, ReconcileResult
 
 _SEV_ORDER = {"critical": 4, "high": 3, "medium": 2, "low": 1}
 
@@ -48,7 +47,7 @@ class AdvertisingAuditPersistResult:
     top_severity: Optional[str]
     rule_evaluation_count: int
     problem_ids: List[str] = field(default_factory=list)
-    signal_ids: List[str] = field(default_factory=list)
+    reconciliation: Optional[ReconcileResult] = None
 
 
 def snapshot_hash(s: AdvertisingSnapshot) -> str:
@@ -64,11 +63,6 @@ def snapshot_hash(s: AdvertisingSnapshot) -> str:
     ]
     canon = "\x1f".join("" if p is None else str(p) for p in parts)
     return hashlib.sha256(canon.encode("utf-8")).hexdigest()
-
-
-def _evidence_hash(evidence) -> str:
-    return hashlib.sha256(
-        json.dumps(evidence or {}, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
 def _top_severity(sevs) -> Optional[str]:
@@ -108,6 +102,8 @@ async def persist_audit(
         top_severity=audit.top_severity, rule_evaluation_count=len(evaluations),
     )
 
+    # append-only detection records for every triggered problem
+    problem_id_by_type: dict = {}
     for e in triggered:
         prob = AdvertisingProblem(
             audit_id=audit.id, user_id=user_id, listing_id=snapshot.listing_id,
@@ -118,23 +114,15 @@ async def persist_audit(
         db.add(prob)
         await db.flush()
         result.problem_ids.append(prob.id)
+        problem_id_by_type[e.problem_type] = prob.id
 
-        d = build_signal(e, marketplace=snapshot.marketplace, sku=snapshot.sku)
-        sig = AdvertisingSignal(
-            audit_id=audit.id, problem_id=prob.id, user_id=user_id, listing_id=snapshot.listing_id,
-            marketplace=snapshot.marketplace, sku=snapshot.sku, signal_key=d.signal_key,
-            insight_key=d.insight_key, problem_type=d.problem_type,
-            recommended_action_key=d.recommended_action_key,
-            alternative_action_keys=json.dumps(list(d.alternative_action_keys)),
-            what=d.what, why=d.why, meaning=d.meaning, what_to_do=d.what_to_do,
-            expected_effect=d.expected_effect, priority_level=d.priority_level,
-            expected_effect_type=d.expected_effect_type, effect_band=d.effect_band,
-            confidence=d.confidence, status="active", evidence_hash=_evidence_hash(e.evidence),
-            created_at=ts, updated_at=ts,
-        )
-        db.add(sig)
-        await db.flush()
-        result.signal_ids.append(sig.id)
+    # A6: reconcile signals by insight_key (create/update/resolve/reopen) instead
+    # of blindly creating a new signal per audit. One live signal per insight_key.
+    result.reconciliation = await reconcile_signals(
+        db, user_id=user_id, listing_id=snapshot.listing_id, audit_id=audit.id,
+        marketplace=snapshot.marketplace, sku=snapshot.sku, evaluations=evaluations,
+        problem_id_by_type=problem_id_by_type, now=ts,
+    )
 
     await db.flush()
     return result
