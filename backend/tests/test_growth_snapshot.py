@@ -174,6 +174,6 @@ def test_no_external_api_imports():
 def test_no_persist_or_api_yet():
     core_dir = Path(inspect.getfile(internal_source)).parent
     names = {p.name for p in core_dir.glob("*.py")}
-    # snapshot/rules/persist/signal_builder allowed; reconciliation (A6) + API (A7) are not
-    for forbidden in ("reconciliation.py", "router.py"):
+    # snapshot/rules/persist/signal_builder/reconciliation allowed; API (A7) is not
+    for forbidden in ("router.py", "api.py"):
         assert forbidden not in names, f"must not ship {forbidden} yet"

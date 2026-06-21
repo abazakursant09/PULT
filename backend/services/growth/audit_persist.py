@@ -12,8 +12,9 @@ Pipeline:
    → return GrowthAuditPersistResult
 
 No API, no Decision bridge, no measurement, no AI, no forecast, no growth score.
-No reconciliation yet (A6) — one signal created per triggered opportunity. Flush-
-only — the caller owns the transaction.
+A6: signals are no longer created directly — they are routed through
+reconcile_signals (one live signal per user/listing/insight_key). Flush-only —
+the caller owns the transaction.
 """
 from __future__ import annotations
 
@@ -28,13 +29,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from models.growth_audit import GrowthAudit
 from models.growth_problem import GrowthProblem
 from models.growth_rule_evaluation import GrowthRuleEvaluation
-from models.growth_signal import GrowthSignal
 
 from .snapshot import GrowthSnapshot
 from .engine import evaluate_snapshot
 from .evaluation import RuleResult
 from .rules import RULE_CATALOG_VERSION, GrowthThresholds
-from .signal_builder import build_signal
+from .reconciliation import reconcile_signals, ReconcileResult
 
 _SEV_ORDER = {"critical": 4, "high": 3, "medium": 2, "low": 1}
 
@@ -47,7 +47,7 @@ class GrowthAuditPersistResult:
     top_severity: Optional[str]
     rule_evaluation_count: int
     problem_ids: List[str] = field(default_factory=list)
-    signal_ids: List[str] = field(default_factory=list)
+    reconciliation: Optional[ReconcileResult] = None
 
 
 def snapshot_hash(s: GrowthSnapshot) -> str:
@@ -59,11 +59,6 @@ def snapshot_hash(s: GrowthSnapshot) -> str:
     ]
     canon = "\x1f".join("" if p is None else str(p) for p in parts)
     return hashlib.sha256(canon.encode("utf-8")).hexdigest()
-
-
-def _evidence_hash(evidence) -> str:
-    return hashlib.sha256(
-        json.dumps(evidence or {}, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
 def _top_severity(sevs) -> Optional[str]:
@@ -103,7 +98,8 @@ async def persist_audit(
         top_severity=audit.top_severity, rule_evaluation_count=len(evaluations),
     )
 
-    # append-only detection + seller-facing signal for every triggered opportunity
+    # append-only detection record for every triggered opportunity
+    problem_id_by_type: dict = {}
     for e in triggered:
         prob = GrowthProblem(
             audit_id=audit.id, user_id=user_id, listing_id=snapshot.listing_id,
@@ -115,24 +111,15 @@ async def persist_audit(
         db.add(prob)
         await db.flush()
         result.problem_ids.append(prob.id)
+        problem_id_by_type[e.problem_type] = prob.id
 
-        draft = build_signal(e, marketplace=snapshot.marketplace, sku=snapshot.sku)
-        sig = GrowthSignal(
-            audit_id=audit.id, problem_id=prob.id, user_id=user_id,
-            listing_id=snapshot.listing_id, marketplace=snapshot.marketplace, sku=snapshot.sku,
-            signal_key=draft.signal_key, insight_key=draft.insight_key,
-            problem_type=draft.problem_type, category=draft.category,
-            recommended_action_key=draft.recommended_action_key,
-            alternative_action_keys=json.dumps(list(draft.alternative_action_keys)),
-            what=draft.what, why=draft.why, meaning=draft.meaning, what_to_do=draft.what_to_do,
-            expected_effect=draft.expected_effect, priority_level=draft.priority_level,
-            effect_type=draft.effect_type, effect_band=draft.effect_band,
-            confidence=draft.confidence, status="active",
-            evidence_hash=_evidence_hash(e.evidence), created_at=ts, updated_at=ts,
-        )
-        db.add(sig)
-        await db.flush()
-        result.signal_ids.append(sig.id)
+    # A6: reconcile signals by insight_key (growth_<type>:<mp>:<sku>) instead of
+    # blindly creating a new signal per audit. One live signal per key.
+    result.reconciliation = await reconcile_signals(
+        db, user_id=user_id, listing_id=snapshot.listing_id, audit_id=audit.id,
+        marketplace=snapshot.marketplace, sku=snapshot.sku,
+        evaluations=evaluations, problem_id_by_type=problem_id_by_type, now=ts,
+    )
 
     await db.flush()
     return result
