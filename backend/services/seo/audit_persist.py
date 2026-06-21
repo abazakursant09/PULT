@@ -51,15 +51,16 @@ class AuditPersistResult:
 
 def snapshot_hash(s: CardSnapshot) -> str:
     """Deterministic content hash of a snapshot (dedup/throttle marker)."""
+    c = s.constraints
+    cons_repr = "no_constraints" if c is None else repr(
+        (c.title_min_len, c.title_max_len, c.description_min_len, c.media_min_images,
+         c.attribute_fill_rate_threshold, c.content_completeness_threshold))
     parts = [
         s.listing_id, s.marketplace, s.sku, s.title, s.description, s.brand,
         "|".join(s.category_path), "|".join(s.expected_category_path or ()),
         repr([(a.key, a.value, a.is_filled, a.is_valid_format) for a in s.attributes]),
         "|".join(s.variants), str(s.media.image_count), str(s.media.video_present),
-        repr((s.constraints.title_min_len, s.constraints.title_max_len,
-              s.constraints.description_min_len, s.constraints.media_min_images,
-              s.constraints.attribute_fill_rate_threshold,
-              s.constraints.content_completeness_threshold)),
+        cons_repr,
     ]
     canon = "\x1f".join("" if p is None else str(p) for p in parts)
     return hashlib.sha256(canon.encode("utf-8")).hexdigest()

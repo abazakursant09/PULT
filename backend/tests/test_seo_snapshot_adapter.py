@@ -97,14 +97,20 @@ def test_registry_three_marketplaces():
 
 def test_stub_adapters_degrade_honestly():
     async def go():
-        for mp in ("wildberries", "ozon", "yandex"):
+        # Ozon/Yandex are still honest stubs.
+        for mp in ("ozon", "yandex"):
             ad = get_seo_adapter(mp)
-            assert isinstance(ad, SeoAdapter)          # satisfies the Protocol
+            assert isinstance(ad, SeoAdapter)
             assert ad.capabilities() == frozenset()    # nothing claimed
             res = await ad.build_snapshot(listing_id="L1")
             assert isinstance(res, SnapshotUnavailable)  # NOT a CardSnapshot, NOT fake
             assert res.reason == "adapter_not_implemented"
             assert res.marketplace == mp
+        # WB is real (A8) — declares capability; without a db it degrades honestly.
+        wb = get_seo_adapter("wildberries")
+        assert wb.capabilities() != frozenset()
+        res = await wb.build_snapshot(listing_id="L1", db=None)
+        assert isinstance(res, SnapshotUnavailable) and res.reason == "no_db_context"
     _run(go())
 
 

@@ -72,5 +72,8 @@ class CardSnapshot:
     variants: tuple[str, ...]        # variant attribute keys present on the card
     media: CardMedia
 
-    constraints: SeoConstraints      # MP-specific limits live HERE, not in core
+    # MP-specific limits live HERE, not in core. None when the adapter cannot
+    # source real limits — rules requiring constraints then return not_evaluated
+    # (field_availability["constraints"] = False). Limits are NEVER invented.
+    constraints: Optional[SeoConstraints]
     field_availability: Mapping[str, bool]   # honest map of which fields the adapter supplied

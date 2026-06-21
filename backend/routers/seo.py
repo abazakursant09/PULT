@@ -83,7 +83,7 @@ async def run_seo_audit(
         return SeoAuditResponse(ok=False, status="unknown_marketplace",
                                 listing_id=body.listing_id, marketplace=body.marketplace,
                                 reason="no_adapter_for_marketplace")
-    snap = await adapter.build_snapshot(listing_id=body.listing_id, token=None)
+    snap = await adapter.build_snapshot(listing_id=body.listing_id, db=db, token=None)
     if isinstance(snap, SnapshotUnavailable):
         return SeoAuditResponse(ok=False, status="snapshot_unavailable",
                                 listing_id=body.listing_id, marketplace=body.marketplace,

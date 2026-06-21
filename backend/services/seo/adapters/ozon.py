@@ -14,6 +14,7 @@ class OzonSeoAdapter:
     def capabilities(self) -> frozenset[str]:
         return frozenset()
 
-    async def build_snapshot(self, *, listing_id: str, token: Optional[str] = None) -> SnapshotResult:
+    async def build_snapshot(self, *, listing_id: str, db=None,
+                             token: Optional[str] = None) -> SnapshotResult:
         return SnapshotUnavailable("ozon", "adapter_not_implemented",
                                    "Ozon SEO snapshot not implemented (A3 stub)")

@@ -46,6 +46,9 @@ class SeoAdapter(Protocol):
         """SEO capabilities this adapter currently supports. Empty = degrades honestly."""
         ...
 
-    async def build_snapshot(self, *, listing_id: str, token: Optional[str] = None) -> SnapshotResult:
-        """Build the canonical CardSnapshot, or return SnapshotUnavailable. Never fakes."""
+    async def build_snapshot(self, *, listing_id: str, db=None,
+                             token: Optional[str] = None) -> SnapshotResult:
+        """Build the canonical CardSnapshot, or return SnapshotUnavailable. Never fakes.
+        `db` gives adapters that read internal PULT data a session; `token` is for
+        adapters that (later) read a marketplace API."""
         ...
