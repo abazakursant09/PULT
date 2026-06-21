@@ -6,6 +6,7 @@ import { SellerBar, SellerAction } from '@/components/seller/Shell'
 import { byId, daysLeft, mono, rub, MP_NAME, lensDetail } from '@/lib/pultSeller'
 import LearningSurface from '@/components/LearningSurface'
 import SeoPanel from '@/components/seo/SeoPanel'
+import AdvertisingPanel from '@/components/advertising/AdvertisingPanel'
 
 // PULT marketplace codes → backend canonical marketplace (agnostic SEO API).
 const MP_CANON: Record<string, string> = { wb: 'wildberries', ozon: 'ozon', ym: 'yandex' }
@@ -94,6 +95,19 @@ export default function ProductCard() {
             <div className="s-card" style={{ marginBottom: 14 }}>
               <div className="s-k" style={{ marginBottom: 10 }}>SEO-аудит карточки</div>
               <SeoPanel listingId={seoListingId} marketplace={mp} manual />
+            </div>
+          )
+        })()}
+
+        {(() => {
+          const mp = MP_CANON[p.m] ?? p.m
+          // p.id — каталожный id (не реальный backend listing). Реклама берёт
+          // цифры из импорта финансов по SKU; аудиты держим под synthetic namespace.
+          const advListingId = `adv-demo:${mp}:${p.id}`
+          return (
+            <div className="s-card" style={{ marginBottom: 14 }}>
+              <div className="s-k" style={{ marginBottom: 10 }}>Реклама: влияние на прибыль</div>
+              <AdvertisingPanel listingId={advListingId} marketplace={mp} />
             </div>
           )
         })()}

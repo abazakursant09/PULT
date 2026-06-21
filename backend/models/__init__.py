@@ -44,3 +44,8 @@ from .seo_audit import SeoAudit
 from .seo_problem import SeoProblem
 from .seo_rule_evaluation import SeoRuleEvaluation
 from .seo_signal import SeoSignal
+# Advertising Engine data foundation (A2) — append-only audit / problem / signal + ledger
+from .advertising_audit import AdvertisingAudit
+from .advertising_problem import AdvertisingProblem
+from .advertising_rule_evaluation import AdvertisingRuleEvaluation
+from .advertising_signal import AdvertisingSignal
