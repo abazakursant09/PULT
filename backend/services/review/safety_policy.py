@@ -52,6 +52,14 @@ def has_complaint_marker(text: Optional[str]) -> bool:
     return any(m in low for m in _COMPLAINT_MARKERS)
 
 
+def complaint_markers_found(text: Optional[str]) -> list:
+    """Deterministic list of hard complaint markers present in the text."""
+    if not text:
+        return []
+    low = text.lower()
+    return [m for m in _COMPLAINT_MARKERS if m in low]
+
+
 def classify_safety(rating: Optional[int], has_text: bool, text: Optional[str]) -> SafetyDecision:
     """Pure deterministic safety classification of one review."""
     if rating is not None and rating <= 2:

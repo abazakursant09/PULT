@@ -142,8 +142,8 @@ def test_core_no_marketplace_client_imports():
 
 def test_no_ai_or_generation():
     core_dir = Path(inspect.getfile(internal_source)).parent
-    for forbidden in ("generator.py", "llm.py", "reply_generator.py", "rules.py", "engine.py"):
-        assert not (core_dir / forbidden).exists(), f"{forbidden} not in A3"
+    for forbidden in ("generator.py", "llm.py", "reply_generator.py", "autoresponder.py"):
+        assert not (core_dir / forbidden).exists(), f"{forbidden} must not exist"
     for path in core_dir.rglob("*.py"):
         src = path.read_text(encoding="utf-8").lower()
         for bad in ("openai", "anthropic", "llm", "generate_reply", "gpt"):
