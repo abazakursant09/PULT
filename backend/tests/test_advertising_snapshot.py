@@ -125,12 +125,11 @@ def test_marketplace_agnostic():
     _run(go())
 
 
-# ── 6. signal builder not implemented yet (rule engine landed in A4) ─────────
+# ── 6. reconciliation not implemented yet (persist/builder landed in A5) ─────
 
-def test_no_signal_builder_yet():
+def test_no_reconciliation_yet():
     adv_dir = Path(inspect.getfile(internal_source)).parent
-    for forbidden in ("signal_builder.py", "audit_persist.py", "reconciliation.py"):
-        assert not (adv_dir / forbidden).exists(), f"{forbidden} should not exist yet"
+    assert not (adv_dir / "reconciliation.py").exists(), "reconciliation is A6, not yet"
 
 
 # ── 7. core imports no marketplace clients ───────────────────────────────────
