@@ -59,3 +59,8 @@ from .growth_audit import GrowthAudit
 from .growth_problem import GrowthProblem
 from .growth_rule_evaluation import GrowthRuleEvaluation
 from .growth_signal import GrowthSignal
+# Legal Navigator data foundation (A2) — append-only audit / finding / signal + ledger
+from .legal_audit import LegalAudit
+from .legal_finding import LegalFinding
+from .legal_rule_evaluation import LegalRuleEvaluation
+from .legal_signal import LegalSignal
