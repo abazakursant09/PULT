@@ -1564,6 +1564,41 @@ export const api = {
     runAdvertisingAudit: (payload: AdvAuditPayload) =>
       req<AdvAuditResult>('/api/advertising/audit', { method: 'POST', body: JSON.stringify(payload) }),
   },
+
+  // ── Review Assistant (reputation contour, NOT an autoresponder) ──────────────
+  // Review signals are not listing-scoped on the backend, so listingId is
+  // optional and usually omitted; marketplace is provenance/context only. This
+  // surface NEVER drafts, sends, or auto-publishes replies.
+  reviewAssistant: {
+    getReviewOverview: (listingId?: string, marketplace?: string) =>
+      req<ReviewOverview>(`/api/reviews/overview${rvQuery(listingId, marketplace)}`),
+    getReviewSignals: (listingId?: string, marketplace?: string, status?: string, safetyCategory?: string) => {
+      const q = new URLSearchParams()
+      if (listingId) q.set('listing_id', listingId)
+      if (marketplace) q.set('marketplace', marketplace)
+      if (status) q.set('status', status)
+      if (safetyCategory) q.set('safety_category', safetyCategory)
+      const s = q.toString()
+      return req<ReviewSignalsResponse>(`/api/reviews/signals${s ? `?${s}` : ''}`)
+    },
+    getReviewProblems: (listingId?: string, marketplace?: string) =>
+      req<ReviewProblemsResponse>(`/api/reviews/problems${rvQuery(listingId, marketplace)}`),
+    getReviewAudits: (listingId?: string, marketplace?: string) =>
+      req<ReviewAuditsResponse>(`/api/reviews/audits${rvQuery(listingId, marketplace)}`),
+    runReviewAudit: (reviewId: string, marketplace?: string) =>
+      req<ReviewAuditResult>('/api/reviews/audit', {
+        method: 'POST',
+        body: JSON.stringify({ review_id: reviewId, marketplace: marketplace ?? null }),
+      }),
+  },
+}
+
+function rvQuery(listingId?: string, marketplace?: string): string {
+  const q = new URLSearchParams()
+  if (listingId) q.set('listing_id', listingId)
+  if (marketplace) q.set('marketplace', marketplace)
+  const s = q.toString()
+  return s ? `?${s}` : ''
 }
 
 // ── Catalog types ──────────────────────────────────────────────────────────────
@@ -1973,6 +2008,74 @@ export interface SeoAuditResult {
   status:              string   // completed | snapshot_unavailable | unknown_marketplace
   listing_id:          string
   marketplace:         string
+  audit_id:            string | null
+  total_problems:      number | null
+  total_not_evaluated: number | null
+  top_severity:        string | null
+  reconciliation:      { created: number; updated: number; resolved: number; reopened: number; unchanged: number } | null
+  reason:              string | null
+}
+
+// ── Review Assistant types (reputation; no score, safety_mode always present) ─
+
+export interface ReviewOverview {
+  listing_id:          string | null
+  active_signals:      number
+  risk_signals:        number
+  attention_signals:   number
+  safe_signals:        number
+  unresolved_problems: number
+  total_not_evaluated: number
+  last_audit_at:       string | null
+}
+
+export interface ReviewSignal {
+  insight_key:             string | null
+  signal_key:              string
+  problem_type:            string
+  review_id:               string | null
+  status:                  string   // active | dismissed | resolved | reopened | promoted_to_decision
+  safety_category:         string | null   // SAFE | ATTENTION | RISK
+  safety_mode:             string | null   // off | manual_only | manual_approval | auto (never auto for RISK/ATTENTION)
+  priority_level:          string | null
+  recommended_action:      string | null   // human text (what_to_do)
+  recommended_action_key:  string | null
+  alternative_action_keys: string[]
+  what:                    string | null
+  why:                     string | null
+  meaning:                 string | null
+  expected_effect:         string | null
+  effect_band:             string | null
+  confidence:              number | null
+}
+export interface ReviewSignalsResponse { items: ReviewSignal[]; total: number }
+
+export interface ReviewProblem {
+  review_id:             string | null
+  problem_type:          string
+  severity:              string
+  category:              string | null   // SAFE | ATTENTION | RISK
+  estimated_effect_type: string | null
+  evidence:              Record<string, unknown> | null
+  detected_at:           string | null
+}
+export interface ReviewProblemsResponse { items: ReviewProblem[]; total: number }
+
+export interface ReviewAuditItem {
+  audit_id:            string
+  status:              string
+  total_problems:      number
+  total_not_evaluated: number
+  top_severity:        string | null
+  triggered_by:        string | null
+  created_at:          string | null
+}
+export interface ReviewAuditsResponse { items: ReviewAuditItem[]; total: number }
+
+export interface ReviewAuditResult {
+  ok:                  boolean
+  status:              string   // completed | review_unavailable | <reason>
+  review_id:           string
   audit_id:            string | null
   total_problems:      number | null
   total_not_evaluated: number | null
