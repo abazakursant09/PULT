@@ -27,7 +27,8 @@ from dataclasses import dataclass
 from typing import Mapping, Optional, Tuple
 
 from services.marketplace import action_catalog
-from services.decision_outcome.registry import CANONICAL_INSIGHT_TYPES
+# NOTE: decision_outcome.registry is imported LAZILY (inside _all) so that
+# decision_outcome.registry can import binding_for() from here without a cycle.
 
 # binding_status
 BOUND = "bound"
@@ -109,17 +110,40 @@ def _decide(contour: str, itype: str, signal_key: str) -> ActionBinding:
                          NO_CATALOG_ACTION, "advisory only — no executor action")
 
 
-def _build() -> Tuple[ActionBinding, ...]:
-    return tuple(_decide(c.contour, c.insight_type, c.signal_key) for c in CANONICAL_INSIGHT_TYPES)
+def binding_for(contour: str, insight_type: str, signal_key: str) -> ActionBinding:
+    """Pure binding decision for one signal type. No decision_outcome import →
+    safe to call from decision_outcome.registry during its own build."""
+    return _decide(contour, insight_type, signal_key)
 
 
-ACTION_BINDINGS: Tuple[ActionBinding, ...] = _build()
-BY_SIGNAL_TYPE = {b.signal_type: b for b in ACTION_BINDINGS}
+_CACHE: Optional[Tuple[ActionBinding, ...]] = None
+
+
+def _all() -> Tuple[ActionBinding, ...]:
+    """Full 35-type registry, built lazily over the canonical insight types. The
+    decision_outcome import is deferred to first access (after that module is fully
+    imported) so there is no import cycle."""
+    global _CACHE
+    if _CACHE is None:
+        from services.decision_outcome.registry import CANONICAL_INSIGHT_TYPES
+        _CACHE = tuple(_decide(c.contour, c.insight_type, c.signal_key)
+                       for c in CANONICAL_INSIGHT_TYPES)
+    return _CACHE
 
 
 def bound_signal_types() -> Tuple[str, ...]:
-    return tuple(b.signal_type for b in ACTION_BINDINGS if b.bindable)
+    return tuple(b.signal_type for b in _all() if b.bindable)
 
 
 def advice_only_signal_types() -> Tuple[str, ...]:
-    return tuple(b.signal_type for b in ACTION_BINDINGS if not b.bindable)
+    return tuple(b.signal_type for b in _all() if not b.bindable)
+
+
+def __getattr__(name: str):
+    # PEP 562 lazy module attributes — keeps ACTION_BINDINGS / BY_SIGNAL_TYPE as the
+    # public API while deferring the decision_outcome import.
+    if name == "ACTION_BINDINGS":
+        return _all()
+    if name == "BY_SIGNAL_TYPE":
+        return {b.signal_type: b for b in _all()}
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
