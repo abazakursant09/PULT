@@ -73,3 +73,5 @@ from .decision_feed_state import DecisionFeedState
 from .action_binding_audit import ActionBindingAudit
 # Decision Apply UX data foundation (A2) — append-only apply-intent ledger
 from .decision_apply_intent import DecisionApplyIntent
+# Promotion Activation data foundation (A2) — append-only promotion-run ledger
+from .promotion_run import PromotionRun
