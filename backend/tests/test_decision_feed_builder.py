@@ -243,3 +243,37 @@ def test_no_duplicate_items():
         keys = [i.item_key for i in feed]
         assert len(keys) == len(set(keys))
     _run(go())
+
+
+# ── 13. promoted_to_decision stays visible with decision_id (A3) ─────────────
+
+def test_promoted_to_decision_visible_with_decision_id():
+    async def go():
+        db = await _engine(); uid = str(uuid.uuid4())
+        db.add(AdvertisingSignal(audit_id=str(uuid.uuid4()), user_id=uid,
+               signal_key="adv_ad_destroying_profit", problem_type="ad_destroying_profit",
+               insight_key="adv_ad_destroying_profit:wb:SKU1", marketplace="wb", sku="SKU1",
+               status="promoted_to_decision", decision_id="dec-1", what="реклама ест прибыль",
+               why="DRR", meaning="x", what_to_do="стоп", expected_effect="маржа", created_at=T0))
+        await db.commit()
+        feed = await build_feed(db, user_id=uid, now=T0)
+        adv = next(i for i in feed if i.contour == "advertising")
+        assert adv.source_status == "promoted_to_decision"
+        assert adv.source_context.get("decision_id") == "dec-1"   # apply button prerequisite
+        assert adv.contour != "decision_outcome"
+    _run(go())
+
+
+# ── 14. resolved/dismissed still hidden by default ───────────────────────────
+
+def test_resolved_dismissed_still_hidden():
+    async def go():
+        db = await _engine(); uid = str(uuid.uuid4())
+        for st in ("resolved", "dismissed"):
+            db.add(AdvertisingSignal(audit_id=str(uuid.uuid4()), user_id=uid,
+                   signal_key="adv_ad_destroying_profit", problem_type="ad_destroying_profit",
+                   insight_key=f"adv_ad_destroying_profit:wb:{st}", marketplace="wb", sku=st,
+                   status=st, what="x", created_at=T0))
+        await db.commit()
+        assert not any(i.contour == "advertising" for i in await build_feed(db, user_id=uid, now=T0))
+    _run(go())

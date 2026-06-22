@@ -47,14 +47,16 @@ _ENGINES = (
     ("legal", LegalSignal, "legal_signal"),
 )
 
-_LIVE = {"active", "reopened", "acknowledged"}
+# promoted_to_decision stays live: the signal has a Decision and is awaiting the
+# seller's manual apply — it must remain in the feed so "Применить решение" shows.
+_LIVE = {"active", "reopened", "acknowledged", "promoted_to_decision"}
 _RESOLVED_LIKE = {"resolved", "dismissed"}
 
 # explainable order buckets (NOT a numeric priority exposed on the item)
 _ORDER = {
-    "reopened": 1, "active": 2, "acknowledged": 3,
-    "proven_worsened": 4, "not_evaluated": 5, "not_measured_yet": 6,
-    "proven_improved": 7, "proven_unchanged": 8,
+    "reopened": 1, "active": 2, "promoted_to_decision": 3, "acknowledged": 4,
+    "proven_worsened": 5, "not_evaluated": 6, "not_measured_yet": 7,
+    "proven_improved": 8, "proven_unchanged": 9,
 }
 _DO_DEFAULT_VISIBLE = {"proven_improved", "proven_worsened", "not_evaluated", "not_measured_yet"}
 
