@@ -20,6 +20,36 @@ safety_class (Human-Control doctrine):
   manual_approval — executable, but only with explicit seller approval
 
 required_capability mirrors ActionSpec.required_scope for bound bindings.
+
+Decision Spine executable contract
+----------------------------------
+An action enters the Decision Spine (becomes executable through the bound apply
+path, services/action_binding/execution_bridge.py) ONLY when ALL of:
+  1. payload is fully derivable from existing facts — no generated content/text
+     (enforced here as `bound`, and again by payload_builder at apply time);
+  2. marketplace capability exists for (action, marketplace)
+     (decision_bridge.capability_supported, re-checked at the bridge);
+  3. safety_class permits execution — execution_bridge accepts ONLY
+     `manual_approval`; `manual_only` and `auto_forbidden` are NOT executable
+     through execution_bridge (rejected with safety_not_manual_approval);
+  4. effect is reported honestly afterwards — decision_outcome/effect_measurement
+     records a real band when an observed reader exists, else `not_evaluated`;
+     a value is never fabricated.
+
+Deliberately NOT entry gates:
+  * reversibility — a RISK ATTRIBUTE (ActionSpec.reversible), not a binding gate.
+    No code path reads it to decide bindability; it drives the revert/undo helper
+    only. Forward rule (locked by a guard test, no auto tier exists today): a
+    `reversible == False` action must never be assigned an auto-permitting
+    execution class — keep it at `manual_approval` (per-instance confirm) or
+    stricter.
+  * measurability — NOT required to enter. The system intentionally binds
+    actions whose effect may be currently uncloseable and reports `not_evaluated`
+    honestly (No Fake Impact). `not_evaluated` is a VALID outcome, never a failure
+    and never "no effect".
+
+Today the only bound/executable set is the six advertising types → stop_auto_promotion
+(reversible, WB/Ozon-capable, manual_approval, measured on net_profit).
 """
 from __future__ import annotations
 

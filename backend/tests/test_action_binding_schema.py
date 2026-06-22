@@ -142,3 +142,30 @@ def test_audit_append_only_roundtrip():
         bound = next(r for r in rows if r.binding_status == "bound")
         assert bound.action_key == "stop_auto_promotion"
     _run(go())
+
+
+# ── 9. doctrine forward-guard: irreversible action may never be auto-permitting ─
+# Reversibility is a RISK ATTRIBUTE, not a binding gate (see registry docstring).
+# Forward rule: any bindable action whose catalog action is reversible == False
+# must never carry an auto-permitting execution class. No auto class exists in the
+# Decision Spine today (execution_bridge accepts only manual_approval), so the set
+# is empty and the rule holds vacuously for the current reversible-only bound set —
+# this test locks the invariant before any irreversible action is ever bound.
+
+# safety_class values that would permit unattended/auto execution. None of the
+# action_binding safety classes is auto today; "auto" is the review safety_mode
+# value (services/review/safety_policy.py) that an auto tier would reuse. Listing
+# it here makes the guard fail loudly if an irreversible binding is ever paired
+# with an auto-permitting class.
+_AUTO_PERMITTING = frozenset({"auto"})
+
+
+def test_irreversible_binding_never_auto_permitting():
+    for b in ACTION_BINDINGS:
+        if not b.bindable:
+            continue
+        spec = action_catalog.get(b.action_key)
+        if spec.reversible is False:
+            assert b.safety_class not in _AUTO_PERMITTING, b.signal_type
+            # stronger lock: irreversible bound actions stay at explicit manual approval
+            assert b.safety_class == MANUAL_APPROVAL, b.signal_type
