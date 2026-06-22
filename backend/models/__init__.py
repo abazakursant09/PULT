@@ -71,3 +71,5 @@ from .engine_effect_observation import EngineEffectObservation
 from .decision_feed_state import DecisionFeedState
 # Action Catalog Expansion data foundation (A2) — append-only action binding ledger
 from .action_binding_audit import ActionBindingAudit
+# Decision Apply UX data foundation (A2) — append-only apply-intent ledger
+from .decision_apply_intent import DecisionApplyIntent
