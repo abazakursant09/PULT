@@ -69,3 +69,5 @@ from .engine_signal_decision_link import EngineSignalDecisionLink
 from .engine_effect_observation import EngineEffectObservation
 # Daily Decision Feed data foundation (A2) — per-user attention state (no signal duplication)
 from .decision_feed_state import DecisionFeedState
+# Action Catalog Expansion data foundation (A2) — append-only action binding ledger
+from .action_binding_audit import ActionBindingAudit

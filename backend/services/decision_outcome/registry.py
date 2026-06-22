@@ -87,16 +87,23 @@ class CanonicalInsightType:
     action_key: str | None = None
 
 
-# Executor action binding (A6). ONLY signal types whose engine recommended action
-# already EXISTS in services/marketplace/action_catalog (_CATALOG) and needs no
-# generated content are bound — everything else stays None (no fabricated action).
-# Today the single honest binding: advertising ad_destroying_profit →
-# stop_auto_promotion (catalog action, WB+Ozon, no extra payload to invent).
-# Review/Growth/Legal/SEO recommended actions are advisory keys NOT in the catalog,
-# so they remain None until a real, payload-complete executor action exists.
-_ACTION_BINDING = {
-    "adv_ad_destroying_profit": "stop_auto_promotion",
-}
+# Executor action binding (A3 of Action Catalog Expansion). The single source of
+# truth is now services/action_binding/registry.ACTION_BINDINGS. A signal type
+# receives an action_key ONLY when its binding is genuinely executable:
+#   bindable AND action_key is set AND binding_status == "bound" AND the action_key
+#   is a real action_catalog action AND safety_class != auto_forbidden.
+# Everything else stays None (advice_only) — no fabricated action.
+from services.marketplace import action_catalog as _catalog
+from services.action_binding.registry import binding_for as _binding_for, BOUND as _BOUND, AUTO_FORBIDDEN as _AUTO_FORBIDDEN
+
+
+def _resolve_action_key(contour: str, insight_type: str, signal_key: str):
+    b = _binding_for(contour, insight_type, signal_key)
+    if (b.bindable and b.action_key and b.binding_status == _BOUND
+            and b.action_key in _catalog.known_actions()
+            and b.safety_class != _AUTO_FORBIDDEN):
+        return b.action_key
+    return None
 
 
 def _build() -> Tuple[CanonicalInsightType, ...]:
@@ -114,7 +121,7 @@ def _build() -> Tuple[CanonicalInsightType, ...]:
                 three_part_compatible=not four,
                 carries_review_id=four,
                 default_metric_key=_DEFAULT_METRIC[contour],
-                action_key=_ACTION_BINDING.get(sk),
+                action_key=_resolve_action_key(contour, t, sk),
             ))
     return tuple(out)
 
