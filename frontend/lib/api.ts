@@ -1687,6 +1687,20 @@ export const api = {
     markActed: (itemKey: string) =>
       req<DecisionFeedStateResult>(`/api/decision-feed/${encodeURIComponent(itemKey)}/act`, { method: 'POST' }),
   },
+
+  // ── Decision Apply (manual apply of a bound decision; preview → confirm) ─────
+  // Read-only preview + explicit confirm. No auto-execution, no direct marketplace
+  // call — delegates to the backend apply path.
+  decisionApply: {
+    getPreview: (decisionId: string, params: { marketplace: string; sku?: string }) => {
+      const q = new URLSearchParams({ marketplace: params.marketplace })
+      if (params.sku) q.set('sku', params.sku)
+      return req<DecisionApplyPreview>(`/api/decision-apply/preview/${encodeURIComponent(decisionId)}?${q}`)
+    },
+    confirm: (decisionId: string, body: { marketplace: string; sku?: string; idempotency_key: string }) =>
+      req<DecisionApplyConfirmResult>(`/api/decision-apply/confirm/${encodeURIComponent(decisionId)}`,
+        { method: 'POST', body: JSON.stringify(body) }),
+  },
 }
 
 function rvQuery(listingId?: string, marketplace?: string): string {
@@ -2178,6 +2192,33 @@ export interface ReviewAuditResult {
   top_severity:        string | null
   reconciliation:      { created: number; updated: number; resolved: number; reopened: number; unchanged: number } | null
   reason:              string | null
+}
+
+// ── Decision Apply types (manual apply; preview → confirm) ───────────────────
+
+export interface DecisionApplyPreview {
+  applyable:      boolean
+  decision_id:    string
+  action_key:     string | null
+  payload:        Record<string, unknown> | null
+  capability_ok:  boolean
+  payload_status: string | null
+  safety_class:   string | null
+  dry_run_status: string | null
+  reason:         string | null
+  marketplace:    string | null
+  sku:            string | null
+}
+
+export interface DecisionApplyConfirmResult {
+  ok:                 boolean
+  decision_id:        string
+  action_key:         string | null
+  execution_log_id:   string | null
+  status:             string
+  reason:             string | null
+  measurement_opened: boolean
+  intent_id:          string | null
 }
 
 // ── Daily Decision Feed types (decisions, not data; no score, no priority) ───

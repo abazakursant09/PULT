@@ -1,7 +1,7 @@
 'use client'
 import { useState } from 'react'
 import { api } from '@/lib/api'
-import type { DecisionFeedItem } from '@/lib/api'
+import type { DecisionFeedItem, DecisionApplyPreview, DecisionApplyConfirmResult } from '@/lib/api'
 
 // One feed item = one decision the seller can act on. No rating, no priority
 // number, no prediction — cautious, observed/advisory text only.
@@ -21,16 +21,73 @@ const EFFECT_RU: Record<string, string> = {
   not_measured_yet: 'Измерение ещё не закрыто',
 }
 
+// cautious reason copy for the apply flow — no promises, no all-clear claims
+const APPLY_REASON_RU: Record<string, string> = {
+  payload_not_derivable: 'Недостаточно данных для применения',
+  unsupported_capability: 'Маркетплейс не поддерживает это действие',
+  not_bindable: 'Это решение нельзя применить через PULT',
+  action_key_mismatch: 'Решение нельзя применить',
+  safety_not_manual_approval: 'Требуется ручная проверка',
+  rejected: 'Применение отклонено проверкой',
+  idempotency_key_required: 'Не удалось подготовить применение',
+}
+function applyReason(r: string | null): string {
+  return r ? (APPLY_REASON_RU[r] ?? r) : 'Решение пока нельзя применить'
+}
+function newIdempotencyKey(): string {
+  const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto
+  return c?.randomUUID ? c.randomUUID() : `apply-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
 function tomorrowISO(): string {
   return new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
 }
 
 type Action = 'seen' | 'snooze' | 'dismiss' | 'act'
+type ApplyUI =
+  | { kind: 'idle' }
+  | { kind: 'busy' }
+  | { kind: 'preview'; p: DecisionApplyPreview }
+  | { kind: 'done'; r: DecisionApplyConfirmResult }
+  | { kind: 'error'; msg: string }
 
 export function DecisionFeedCard(
   { item, onChanged }: { item: DecisionFeedItem; onChanged: (itemKey: string, action: Action) => void },
 ) {
   const [busy, setBusy] = useState<Action | null>(null)
+  const [apply, setApply] = useState<ApplyUI>({ kind: 'idle' })
+
+  // apply button shows ONLY for a promoted engine decision (decision_id present),
+  // never for already-measured Decision Outcome effect items.
+  const decisionId = (item.source_context?.decision_id as string | undefined) || undefined
+  const showApply = !!decisionId && item.contour !== 'decision_outcome'
+
+  async function onPreview() {
+    if (!decisionId) return
+    setApply({ kind: 'busy' })
+    try {
+      const p = await api.decisionApply.getPreview(decisionId, {
+        marketplace: item.marketplace ?? '', sku: item.sku ?? undefined,
+      })
+      setApply({ kind: 'preview', p })
+    } catch (e) {
+      setApply({ kind: 'error', msg: e instanceof Error ? e.message : 'Ошибка' })
+    }
+  }
+
+  async function onConfirm() {
+    if (!decisionId) return
+    setApply({ kind: 'busy' })
+    try {
+      const r = await api.decisionApply.confirm(decisionId, {
+        marketplace: item.marketplace ?? '', sku: item.sku ?? undefined,
+        idempotency_key: newIdempotencyKey(),
+      })
+      setApply({ kind: 'done', r })
+    } catch (e) {
+      setApply({ kind: 'error', msg: e instanceof Error ? e.message : 'Ошибка' })
+    }
+  }
 
   async function run(action: Action) {
     if (busy) return
@@ -95,6 +152,74 @@ export function DecisionFeedCard(
           }}>{label}</button>
         ))}
       </div>
+
+      {showApply && (
+        <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--line)' }}>
+          {apply.kind === 'idle' && (
+            <button onClick={onPreview} style={{
+              fontSize: 12, fontWeight: 600, padding: '6px 12px', borderRadius: 7, cursor: 'pointer',
+              border: '1px solid var(--line)', background: 'var(--surface-h)', color: 'var(--text)',
+            }}>Применить решение</button>
+          )}
+          {apply.kind === 'busy' && (
+            <div style={{ fontSize: 12, color: 'var(--text-3)' }}>Проверяем…</div>
+          )}
+
+          {apply.kind === 'preview' && !apply.p.applyable && (
+            <div style={{ fontSize: 12, color: 'var(--text-3)' }}>
+              <b style={{ color: 'var(--text-2)' }}>Решение пока нельзя применить.</b>
+              <div style={{ marginTop: 4 }}>{applyReason(apply.p.reason)}</div>
+            </div>
+          )}
+
+          {apply.kind === 'preview' && apply.p.applyable && (
+            <div style={{
+              background: 'var(--surface-h)', border: '1px solid var(--line)', borderRadius: 8,
+              padding: 12, fontSize: 12, color: 'var(--text-2)',
+            }}>
+              <div style={{ color: 'var(--text)', fontWeight: 600 }}>Можно применить · требуется подтверждение</div>
+              <div style={{ marginTop: 6 }}>Будет отправлено действие: <b>{apply.p.action_key}</b></div>
+              <div>Маркетплейс: {apply.p.marketplace} · SKU: {apply.p.sku}</div>
+              {apply.p.payload && (
+                <pre style={{
+                  fontSize: 10.5, color: 'var(--text-3)', marginTop: 6, marginBottom: 0,
+                  whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'inherit',
+                }}>{JSON.stringify(apply.p.payload, null, 0)}</pre>
+              )}
+              <div style={{ marginTop: 6, color: 'var(--text-3)' }}>
+                Действие будет применено только после подтверждения.
+              </div>
+              <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+                <button onClick={onConfirm} style={{
+                  fontSize: 12, fontWeight: 600, padding: '6px 12px', borderRadius: 7, cursor: 'pointer',
+                  border: '1px solid var(--line)', background: 'var(--surface)', color: 'var(--text)',
+                }}>Подтвердить применение</button>
+                <button onClick={() => setApply({ kind: 'idle' })} style={{
+                  fontSize: 12, padding: '6px 12px', borderRadius: 7, cursor: 'pointer',
+                  border: '1px solid var(--line)', background: 'var(--surface)', color: 'var(--text-3)',
+                }}>Отмена</button>
+              </div>
+            </div>
+          )}
+
+          {apply.kind === 'done' && apply.r.ok && (
+            <div style={{ fontSize: 12, color: 'var(--text-2)' }}>
+              Решение отправлено на применение. Статус: {apply.r.status}.
+              {apply.r.measurement_opened && (
+                <div style={{ marginTop: 4, color: 'var(--text-3)' }}>PULT начнёт измерять эффект.</div>
+              )}
+            </div>
+          )}
+          {apply.kind === 'done' && !apply.r.ok && (
+            <div style={{ fontSize: 12, color: 'var(--text-3)' }}>
+              Решение не применено: {applyReason(apply.r.reason)}.
+            </div>
+          )}
+          {apply.kind === 'error' && (
+            <div style={{ fontSize: 12, color: 'var(--text-3)' }}>Не удалось выполнить: {apply.msg}</div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
