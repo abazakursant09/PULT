@@ -24,7 +24,8 @@ from services.action_binding.payload_builder import (
 )
 
 ADV_BOUND = ("adv_ad_destroying_profit", "adv_ad_spend_without_sales",
-             "adv_ad_on_unprofitable_product", "adv_ad_on_low_stock", "adv_ad_on_oos_risk")
+             "adv_ad_on_unprofitable_product", "adv_ad_on_low_stock", "adv_ad_on_oos_risk",
+             "adv_ad_on_bad_listing")
 
 
 def _run(c):
@@ -49,9 +50,9 @@ async def _count_listings(db):
     return (await db.execute(select(func.count()).select_from(ProductListing))).scalar()
 
 
-# ── 1. all 5 advertising types build a payload ───────────────────────────────
+# ── 1. all 6 advertising types build a payload (v2 P0: + bad_listing) ─────────
 
-def test_five_adv_types_build_payload():
+def test_six_adv_types_build_payload():
     async def go():
         db = await _engine(); uid = str(uuid.uuid4())
         await _seed_listing(db, uid, external_id="SKU1")

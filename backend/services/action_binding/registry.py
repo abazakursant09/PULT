@@ -43,9 +43,13 @@ MANUAL_APPROVAL = "manual_approval"
 
 # advertising signal types whose recommended action is "stop the auto-promotion"
 # and whose payload (offer_id) is derivable from sku → listing.external_id.
+# ad_on_bad_listing joins the family (Action Catalog Expansion v2, P0): an ad on a
+# weak listing wastes spend, so the conservative, offer_id-level, reversible action
+# is the same "stop the ad" — no content generation needed (improving the listing
+# itself stays a separate, advisory path).
 _BOUND_ADV = frozenset({
     "ad_destroying_profit", "ad_spend_without_sales", "ad_on_unprofitable_product",
-    "ad_on_low_stock", "ad_on_oos_risk",
+    "ad_on_low_stock", "ad_on_oos_risk", "ad_on_bad_listing",
 })
 # negative reviews — manual_only is mandatory (Negative-Review doctrine).
 _NEGATIVE_REVIEW = frozenset({"unanswered_negative_review", "complaint_detected"})
@@ -80,7 +84,8 @@ def _decide(contour: str, itype: str, signal_key: str) -> ActionBinding:
             return ActionBinding(
                 signal_key, contour, True, ak, _STOP_PAYLOAD_RULE,
                 action_catalog.get(ak).required_scope, MANUAL_APPROVAL, BOUND, None)
-        # ad_on_bad_listing → improve_listing == update_card, needs generated content
+        # any future advertising type without a derivable stop payload would fall
+        # here (improve-listing == update_card needs generated content)
         return ActionBinding(
             signal_key, contour, False, None, None, None, MANUAL_APPROVAL,
             PAYLOAD_NOT_DERIVABLE, "update_card requires content generation")

@@ -198,8 +198,8 @@ def test_no_execution_no_effect():
 # ── 10. no fake action binding (registry honesty) ────────────────────────────
 
 def test_action_bindings_are_real_and_advertising_only():
-    # Action Catalog Expansion A3: the five advertising "stop auto-promotion" types
-    # are bound to a real catalog action; everything else stays advice-only (None).
+    # Action Catalog Expansion A3 + v2 P0: the six advertising "stop auto-promotion"
+    # types are bound to a real catalog action; everything else stays advice-only (None).
     bound = {c.signal_key: c.action_key for c in BY_SIGNAL_KEY.values() if c.action_key is not None}
     assert bound == {
         "adv_ad_destroying_profit": "stop_auto_promotion",
@@ -207,6 +207,7 @@ def test_action_bindings_are_real_and_advertising_only():
         "adv_ad_on_unprofitable_product": "stop_auto_promotion",
         "adv_ad_on_low_stock": "stop_auto_promotion",
         "adv_ad_on_oos_risk": "stop_auto_promotion",
+        "adv_ad_on_bad_listing": "stop_auto_promotion",
     }
     from services.marketplace import action_catalog
     for ak in bound.values():
