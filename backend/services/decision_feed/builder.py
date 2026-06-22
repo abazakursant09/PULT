@@ -104,6 +104,9 @@ def _engine_item(contour: str, table: str, sig) -> Optional[FeedItem]:
         "signal_key": sig.signal_key,
         "problem_type": getattr(sig, "problem_type", None) or getattr(sig, "requirement_type", None),
         "listing_id": getattr(sig, "listing_id", None),
+        # decision_id is set once the signal is promoted to a Decision — the apply
+        # UX shows "Применить решение" only when this is present.
+        "decision_id": getattr(sig, "decision_id", None),
     }
     rid = getattr(sig, "review_id", None)
     if rid:
