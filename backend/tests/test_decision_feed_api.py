@@ -204,5 +204,5 @@ def test_routes_mounted():
     assert "/decision-feed" in paths
     assert any("/decision-feed/{item_key}/seen" == p for p in paths)
     import main
-    app_paths = {getattr(r, "path", "") for r in main.app.routes}
+    app_paths = set(main.app.openapi()["paths"])  # OpenAPI paths: robust on FastAPI 0.136 (flat) and 0.137+ (nested mounts)
     assert "/api/decision-feed" in app_paths

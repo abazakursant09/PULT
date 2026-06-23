@@ -1,9 +1,9 @@
-# Pin <0.137: FastAPI 0.137+ mounts an included router as a nested sub-app
-# instead of flattening its routes into app.routes. Endpoints still serve, but
-# the routes no longer appear as flat APIRoutes — which silently breaks route
-# introspection (test_routes_mounted) and the generated OpenAPI/docs surface.
-# 0.136.x flattens correctly (verified). Revisit when adapting to the new API.
-fastapi>=0.104.0,<0.137
+# FastAPI 0.137+ mounts an included router as a nested sub-app, so its routes no
+# longer appear in the flat app.routes list (endpoints still serve, OpenAPI/docs
+# still generate). Route-mount tests assert via app.openapi()["paths"], which is
+# robust across the flat (<0.137) and nested (>=0.137) behaviours, so the upper
+# pin is no longer needed.
+fastapi>=0.104.0,<1.0.0
 uvicorn[standard]>=0.24.0,<1.0.0
 sqlalchemy>=2.0.0,<3.0.0
 aiosqlite>=0.19.0,<1.0.0

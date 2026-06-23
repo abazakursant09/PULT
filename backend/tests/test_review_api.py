@@ -256,11 +256,11 @@ def test_routes_mounted():
     assert {"/reviews/audit", "/reviews/overview", "/reviews/signals",
             "/reviews/problems", "/reviews/audits"} <= paths
     import main
-    app_paths = {getattr(r, "path", "") for r in main.app.routes}
+    app_paths = set(main.app.openapi()["paths"])  # OpenAPI paths: robust on FastAPI 0.136 (flat) and 0.137+ (nested mounts)
     assert "/api/reviews/audit" in app_paths
     # review_engine must be registered BEFORE reviews (else /reviews/{product_id}
     # shadows the explicit GET paths). Verify ordering in the app route table.
-    ordered = [getattr(r, "path", "") for r in main.app.routes]
+    ordered = list(main.app.openapi()["paths"])
     assert ordered.index("/api/reviews/overview") < ordered.index("/api/reviews/{product_id}")
 
 

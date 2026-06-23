@@ -173,5 +173,5 @@ def test_routes_mounted():
     paths = {getattr(r, "path", None) for r in do_router.router.routes}
     assert {"/decision-outcome/effects", "/decision-outcome/summary"} <= paths
     import main
-    app_paths = {getattr(r, "path", "") for r in main.app.routes}
+    app_paths = set(main.app.openapi()["paths"])  # OpenAPI paths: robust on FastAPI 0.136 (flat) and 0.137+ (nested mounts)
     assert "/api/decision-outcome/effects" in app_paths

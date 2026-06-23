@@ -191,5 +191,5 @@ def test_routes_mounted():
     assert {"/growth/audit", "/growth/overview", "/growth/signals",
             "/growth/problems", "/growth/audits"} <= paths
     import main
-    app_paths = {getattr(r, "path", "") for r in main.app.routes}
+    app_paths = set(main.app.openapi()["paths"])  # OpenAPI paths: robust on FastAPI 0.136 (flat) and 0.137+ (nested mounts)
     assert "/api/growth/audit" in app_paths
