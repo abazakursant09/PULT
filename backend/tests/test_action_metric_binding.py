@@ -35,6 +35,27 @@ def test_target_metric_lookup():
     assert action_metric_binding.target_metric("ad_set_bid") == "ad_cost_ratio"
 
 
+def test_reduce_discount_bound_to_net_profit():
+    # A2 margin alternative — measured on profit, not revenue (action_catalog doctrine).
+    assert action_metric_binding.target_metric("reduce_discount") == "net_profit"
+
+
+def test_stop_auto_promotion_bound_to_net_profit():
+    # A3 margin alternative — measured on profit, not ad spend alone.
+    assert action_metric_binding.target_metric("stop_auto_promotion") == "net_profit"
+
+
+def test_margin_actions_measure_honestly_intent_only():
+    # Binding declares INTENT: the metric must be real (closes honestly), but the
+    # binding never asserts the reader is currently available — uncloseable bindings
+    # stay measurable-by-catalog and resolve to not_evaluated downstream, never faked.
+    metrics = set(metric_catalog.known_metrics())
+    for action in ("reduce_discount", "stop_auto_promotion"):
+        metric = action_metric_binding.target_metric(action)
+        assert metric in metrics                                     # real metric, not invented
+        assert action_metric_binding.is_measurable(action) is True   # bound + real (intent), not a readability promise
+
+
 def test_target_metric_unknown_returns_none():
     assert action_metric_binding.target_metric("does_not_exist") is None
     assert action_metric_binding.target_metric(None) is None

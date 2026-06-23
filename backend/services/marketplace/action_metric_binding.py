@@ -28,6 +28,13 @@ _BINDING: dict[str, str] = {
     "ad_set_state":             "ad_cost_ratio",  # start/pause → ДРР efficiency
     "update_card":              "ctr",            # SEO/content rebuild → CTR
     "publish_review_response":  "rating",         # reputation action → rating
+    # A2/A3 margin alternatives. Measured on profit, not revenue: cutting a
+    # discount or stopping auto-promotion can raise margin while revenue/ad
+    # spend fall, so the honest target is net_profit (action_catalog declares
+    # both "measured on net_profit"). net_profit is finance-backed; where its
+    # reader is unavailable the effect closes not_evaluated, never fabricated.
+    "reduce_discount":          "net_profit",     # A2 — margin alternative → profit
+    "stop_auto_promotion":      "net_profit",     # A3 — margin alternative → profit
 }
 
 
