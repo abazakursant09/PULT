@@ -148,5 +148,5 @@ def test_routes_mounted():
     paths = {getattr(r, "path", None) for r in pa.router.routes}
     assert "/promotion-activation/run" in paths
     import main
-    app_paths = {getattr(r, "path", "") for r in main.app.routes}
+    app_paths = set(main.app.openapi()["paths"])  # OpenAPI paths: robust on FastAPI 0.136 (flat) and 0.137+ (nested mounts)
     assert "/api/promotion-activation/run" in app_paths
