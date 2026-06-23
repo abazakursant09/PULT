@@ -108,6 +108,18 @@ async def track_event(
     if body.event_type not in _ALLOWED:
         return Response(status_code=204)
 
+    # Sprint 81: an allowed UserEvent automatically reaches the constitutional
+    # substrate through the runtime_binding adapter (deterministic, read-only,
+    # fail-closed). Activation is identity-independent — it must run for every
+    # allowed event regardless of the persistence auth gate below, otherwise
+    # auth-only events without auth are dropped before ever activating.
+    # Never mutates the DB; never affects the 204 response.
+    try:
+        from runtime_binding import activate_from_track
+        activate_from_track(body.event_type, body.entity_id, body.metadata)
+    except Exception:
+        pass
+
     # Resolve identity. Authed → real user_id. Anonymous → only whitelisted
     # pre-auth events, keyed by visitor_id (UUID, ≤36 chars) for later stitching.
     if user is not None:
@@ -132,15 +144,6 @@ async def track_event(
         await db.commit()
     except Exception as exc:
         logger.warning("event_track_failed", extra={"user_id": uid, "event": body.event_type, "error": str(exc)})
-
-    # Sprint 81: a new UserEvent automatically reaches the constitutional substrate
-    # through the runtime_binding adapter (deterministic, read-only, fail-closed).
-    # Never mutates the DB; never affects the 204 response.
-    try:
-        from runtime_binding import activate_from_track
-        activate_from_track(body.event_type, body.entity_id, body.metadata)
-    except Exception:
-        pass
 
     return Response(status_code=204)
 

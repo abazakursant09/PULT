@@ -85,11 +85,17 @@ async def _seed():
         await db.commit()
 
 
-asyncio.get_event_loop().run_until_complete(_seed())
+# Module-owned event loop: never rely on the global asyncio policy loop, which a
+# prior async suite may have closed — under Python 3.13 asyncio.get_event_loop()
+# then raises "There is no current event loop in thread 'MainThread'". Seed and
+# every _run share this one loop so the aiosqlite StaticPool connection keeps its
+# single-loop affinity.
+_LOOP = asyncio.new_event_loop()
+_LOOP.run_until_complete(_seed())
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return _LOOP.run_until_complete(coro)
 
 
 async def _graph(user):
