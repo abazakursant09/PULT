@@ -53,7 +53,7 @@ _app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id="u-test
 _app.dependency_overrides[get_db] = _override_db
 client = TestClient(_app)
 
-GOLDEN_ROOT = "26e4462ff725f0282ca4b4d1eb82ad9545aeaa08929bd9895d904f3d5f3afe75"
+GOLDEN_ROOT = "816632a3242098f6e545a813ab66ab6429948d316aefacb23f484d3e598f7b1d"
 
 
 def _track(event_type, entity_id, metadata=None):

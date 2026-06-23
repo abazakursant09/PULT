@@ -10,7 +10,7 @@ from runtime_envelope.envelope_hash import domain_hash
 from root_constitution import build_root_constitution
 
 from .constitution_contract import (
-    ConstitutionReport, ENFORCEMENT_DOMAIN, ENFORCED_LAYERS, VALID, INVALID,
+    ConstitutionReport, ENFORCEMENT_DOMAIN, ENFORCED_LAYERS,
 )
 from .constitution_verifier import _verify, verify_layers
 from .constitution_contract import EXPECTED_ANCHORS, EXPECTED_ROOT

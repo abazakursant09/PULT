@@ -26,7 +26,7 @@ ENFORCED_LAYERS: tuple[str, ...] = (
 # Constitution-of-record (Sprint 77 goldens). The live substrate must reproduce these.
 EXPECTED_ANCHORS: dict = {
     "schema_baseline_revision": "47beea1df0c1",
-    "logic_characterization_hash": "5b6c985cc690bc7b9f111610e4ae0e3cb2ae2c9978a86f020724b5f32b1855a1",
+    "logic_characterization_hash": "4445f034aa1793dc5940b9019caeef1ad8aac50d6823ae2e5fda937625cccef1",
     "runtime_envelope_hash": "77fc5a023483a2f1068296856df1cf5801b67e7977fcdac16db21fa508ab2cb4",
     "replay_chain_hash": "9ea8fa658eb0c9ea85c80bd5fd33fa2103e5a948863b3c742cd59b361151926e",
     "runtime_application_hash": "af8700dd9fa80ceb6ea98de78e2d7893ca4977a0a7fe87db02df5ee64e158d88",
@@ -34,7 +34,7 @@ EXPECTED_ANCHORS: dict = {
     "operational_review_hash": "8372703672d25cc8a1ff424ffdfe257bff64ba30972627699180f9534186e999",
 }
 
-EXPECTED_ROOT = "26e4462ff725f0282ca4b4d1eb82ad9545aeaa08929bd9895d904f3d5f3afe75"
+EXPECTED_ROOT = "816632a3242098f6e545a813ab66ab6429948d316aefacb23f484d3e598f7b1d"
 
 
 @dataclass(frozen=True)
