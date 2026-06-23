@@ -62,7 +62,7 @@ async def _seed_applyable(db, uid):
            signal_key="adv_ad_destroying_profit", problem_type="ad_destroying_profit",
            insight_key=IKEY, marketplace="wildberries", sku="SKU1", status="promoted_to_decision"))
     db.add(ProductListing(physical_product_id="ph1", user_id=uid, marketplace="wb", external_id="SKU1"))
-    db.add(MarketplaceConnection(user_id=uid, marketplace="wb", status="connected",
+    db.add(MarketplaceConnection(user_id=uid, marketplace="wildberries", status="connected",
                                  scopes=["promotions"]))
     await db.commit()
     return did

@@ -68,7 +68,7 @@ async def _seed(db, uid, *, with_listing=True, with_connection=True, mp="wildber
     if with_listing:
         db.add(ProductListing(physical_product_id="ph1", user_id=uid, marketplace="wb", external_id=sku))
     if with_connection:
-        db.add(MarketplaceConnection(user_id=uid, marketplace="wb", status="connected",
+        db.add(MarketplaceConnection(user_id=uid, marketplace="wildberries", status="connected",
                                      scopes=["promotions"]))
     await db.commit()
     return did
