@@ -111,7 +111,9 @@ def test_signals_doctrine_and_filter():
         db = await _engine(); uid = str(uuid.uuid4())
         await _seed_finance(db, uid); await db.commit()
         await _audit(db, uid)
-        sg = await advertising_signals(listing_id="L1", marketplace="wb", status="active",
+        # no status filter: after the audit the actionable signal is auto-promoted
+        # to promoted_to_decision (Promotion Activation hook), still a live issue.
+        sg = await advertising_signals(listing_id="L1", marketplace="wb",
                                        current_user=_User(uid), db=db)
         assert sg.total >= 1
         s = next(x for x in sg.items if x.problem_type == "ad_destroying_profit")

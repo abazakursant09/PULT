@@ -27,10 +27,16 @@ from models.advertising_signal import AdvertisingSignal
 from services.advertising.snapshot import AdvertisingSnapshot, AdvertisingThresholds, AdvertisingDataUnavailable
 from services.advertising.internal_source import build_snapshot_from_finance
 from services.advertising.audit_persist import audit_and_persist
+from services.promotion_activation.runner import run_promotion
+
+import logging
 
 router = APIRouter()
+log = logging.getLogger(__name__)
 
-_LIVE = ("active", "reopened")
+# promoted_to_decision stays live: the signal has a Decision and awaits manual apply,
+# it is still an open advertising issue (consistent with the Daily Decision Feed).
+_LIVE = ("active", "reopened", "promoted_to_decision")
 
 
 def _loads(text: Optional[str]):
@@ -75,6 +81,14 @@ class ReconciliationView(BaseModel):
     unchanged: int
 
 
+class PromotionView(BaseModel):
+    run_id: Optional[str] = None
+    decisions_created: int = 0
+    links_created: int = 0
+    skipped: int = 0
+    status: str = "skipped"           # completed | skipped | failed
+
+
 class AdvAuditResponse(BaseModel):
     ok: bool
     status: str                       # completed | finance_unavailable | <reason>
@@ -87,6 +101,24 @@ class AdvAuditResponse(BaseModel):
     top_severity: Optional[str] = None
     reconciliation: Optional[ReconciliationView] = None
     reason: Optional[str] = None
+    # additive, optional — auto-promotion of actionable signals after a successful
+    # audit. None when the audit itself did not complete.
+    promotion: Optional[PromotionView] = None
+
+
+async def _promotion_hook(db, user_id: str) -> PromotionView:
+    """Run promotion after a successful advertising audit. Non-blocking: a failure
+    here NEVER breaks the (already-committed) audit — it is logged and reported."""
+    try:
+        r = await run_promotion(db, user_id=user_id, contour="advertising",
+                                triggered_by="audit_hook")
+        await db.commit()
+        return PromotionView(run_id=r.run_id, decisions_created=r.decisions_created,
+                             links_created=r.links_created, skipped=r.skipped, status="completed")
+    except Exception:
+        log.exception("promotion hook failed after advertising audit (audit unaffected)")
+        await db.rollback()
+        return PromotionView(status="failed")
 
 
 @router.post("/advertising/audit", response_model=AdvAuditResponse)
@@ -106,6 +138,8 @@ async def run_advertising_audit(
     assert isinstance(snap, AdvertisingSnapshot)
     res = await audit_and_persist(db, user_id=current_user.id, snapshot=snap, triggered_by="manual")
     await db.commit()
+    # audit is persisted + committed; promotion runs as a non-blocking side-effect
+    promotion = await _promotion_hook(db, current_user.id)
     rec = res.reconciliation
     return AdvAuditResponse(
         ok=True, status="completed", listing_id=body.listing_id, marketplace=body.marketplace,
@@ -114,6 +148,7 @@ async def run_advertising_audit(
         reconciliation=ReconciliationView(created=rec.created, updated=rec.updated,
                                           resolved=rec.resolved, reopened=rec.reopened,
                                           unchanged=rec.unchanged) if rec else None,
+        promotion=promotion,
     )
 
 

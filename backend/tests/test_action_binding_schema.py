@@ -58,25 +58,27 @@ def test_bound_action_in_catalog():
             assert b.action_key is None and b.binding_status != BOUND
 
 
-# ── 3. exactly the five advertising types are bound ──────────────────────────
+# ── 3. exactly the six advertising types are bound (v2 P0: + bad_listing) ─────
 
-def test_only_five_advertising_bound():
+def test_only_six_advertising_bound():
     bound = set(bound_signal_types())
     assert bound == {
         "adv_ad_destroying_profit", "adv_ad_spend_without_sales",
         "adv_ad_on_unprofitable_product", "adv_ad_on_low_stock", "adv_ad_on_oos_risk",
+        "adv_ad_on_bad_listing",
     }
-    assert len(advice_only_signal_types()) == 30
+    assert len(advice_only_signal_types()) == 29
     for st in bound:
         assert BY_SIGNAL_TYPE[st].action_key == "stop_auto_promotion"
 
 
-# ── 4. payload_not_derivable correctly set (SEO + review-text + bad listing) ─
+# ── 4. payload_not_derivable correctly set (SEO + review-text) ───────────────
 
 def test_payload_not_derivable():
     seo = [b for b in ACTION_BINDINGS if b.contour == "seo"]
     assert seo and all(b.binding_status == PAYLOAD_NOT_DERIVABLE for b in seo)
-    assert BY_SIGNAL_TYPE["adv_ad_on_bad_listing"].binding_status == PAYLOAD_NOT_DERIVABLE
+    # v2 P0: adv_ad_on_bad_listing is now BOUND (no longer payload_not_derivable)
+    assert BY_SIGNAL_TYPE["adv_ad_on_bad_listing"].binding_status == BOUND
     # review text-based → payload_not_derivable; already_answered → no_catalog_action
     assert BY_SIGNAL_TYPE["rev_unanswered_negative_review"].binding_status == PAYLOAD_NOT_DERIVABLE
     assert BY_SIGNAL_TYPE["rev_already_answered"].binding_status == NO_CATALOG_ACTION
@@ -140,3 +142,30 @@ def test_audit_append_only_roundtrip():
         bound = next(r for r in rows if r.binding_status == "bound")
         assert bound.action_key == "stop_auto_promotion"
     _run(go())
+
+
+# ── 9. doctrine forward-guard: irreversible action may never be auto-permitting ─
+# Reversibility is a RISK ATTRIBUTE, not a binding gate (see registry docstring).
+# Forward rule: any bindable action whose catalog action is reversible == False
+# must never carry an auto-permitting execution class. No auto class exists in the
+# Decision Spine today (execution_bridge accepts only manual_approval), so the set
+# is empty and the rule holds vacuously for the current reversible-only bound set —
+# this test locks the invariant before any irreversible action is ever bound.
+
+# safety_class values that would permit unattended/auto execution. None of the
+# action_binding safety classes is auto today; "auto" is the review safety_mode
+# value (services/review/safety_policy.py) that an auto tier would reuse. Listing
+# it here makes the guard fail loudly if an irreversible binding is ever paired
+# with an auto-permitting class.
+_AUTO_PERMITTING = frozenset({"auto"})
+
+
+def test_irreversible_binding_never_auto_permitting():
+    for b in ACTION_BINDINGS:
+        if not b.bindable:
+            continue
+        spec = action_catalog.get(b.action_key)
+        if spec.reversible is False:
+            assert b.safety_class not in _AUTO_PERMITTING, b.signal_type
+            # stronger lock: irreversible bound actions stay at explicit manual approval
+            assert b.safety_class == MANUAL_APPROVAL, b.signal_type

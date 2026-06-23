@@ -20,6 +20,36 @@ safety_class (Human-Control doctrine):
   manual_approval — executable, but only with explicit seller approval
 
 required_capability mirrors ActionSpec.required_scope for bound bindings.
+
+Decision Spine executable contract
+----------------------------------
+An action enters the Decision Spine (becomes executable through the bound apply
+path, services/action_binding/execution_bridge.py) ONLY when ALL of:
+  1. payload is fully derivable from existing facts — no generated content/text
+     (enforced here as `bound`, and again by payload_builder at apply time);
+  2. marketplace capability exists for (action, marketplace)
+     (decision_bridge.capability_supported, re-checked at the bridge);
+  3. safety_class permits execution — execution_bridge accepts ONLY
+     `manual_approval`; `manual_only` and `auto_forbidden` are NOT executable
+     through execution_bridge (rejected with safety_not_manual_approval);
+  4. effect is reported honestly afterwards — decision_outcome/effect_measurement
+     records a real band when an observed reader exists, else `not_evaluated`;
+     a value is never fabricated.
+
+Deliberately NOT entry gates:
+  * reversibility — a RISK ATTRIBUTE (ActionSpec.reversible), not a binding gate.
+    No code path reads it to decide bindability; it drives the revert/undo helper
+    only. Forward rule (locked by a guard test, no auto tier exists today): a
+    `reversible == False` action must never be assigned an auto-permitting
+    execution class — keep it at `manual_approval` (per-instance confirm) or
+    stricter.
+  * measurability — NOT required to enter. The system intentionally binds
+    actions whose effect may be currently uncloseable and reports `not_evaluated`
+    honestly (No Fake Impact). `not_evaluated` is a VALID outcome, never a failure
+    and never "no effect".
+
+Today the only bound/executable set is the six advertising types → stop_auto_promotion
+(reversible, WB/Ozon-capable, manual_approval, measured on net_profit).
 """
 from __future__ import annotations
 
@@ -43,9 +73,13 @@ MANUAL_APPROVAL = "manual_approval"
 
 # advertising signal types whose recommended action is "stop the auto-promotion"
 # and whose payload (offer_id) is derivable from sku → listing.external_id.
+# ad_on_bad_listing joins the family (Action Catalog Expansion v2, P0): an ad on a
+# weak listing wastes spend, so the conservative, offer_id-level, reversible action
+# is the same "stop the ad" — no content generation needed (improving the listing
+# itself stays a separate, advisory path).
 _BOUND_ADV = frozenset({
     "ad_destroying_profit", "ad_spend_without_sales", "ad_on_unprofitable_product",
-    "ad_on_low_stock", "ad_on_oos_risk",
+    "ad_on_low_stock", "ad_on_oos_risk", "ad_on_bad_listing",
 })
 # negative reviews — manual_only is mandatory (Negative-Review doctrine).
 _NEGATIVE_REVIEW = frozenset({"unanswered_negative_review", "complaint_detected"})
@@ -80,7 +114,8 @@ def _decide(contour: str, itype: str, signal_key: str) -> ActionBinding:
             return ActionBinding(
                 signal_key, contour, True, ak, _STOP_PAYLOAD_RULE,
                 action_catalog.get(ak).required_scope, MANUAL_APPROVAL, BOUND, None)
-        # ad_on_bad_listing → improve_listing == update_card, needs generated content
+        # any future advertising type without a derivable stop payload would fall
+        # here (improve-listing == update_card needs generated content)
         return ActionBinding(
             signal_key, contour, False, None, None, None, MANUAL_APPROVAL,
             PAYLOAD_NOT_DERIVABLE, "update_card requires content generation")
