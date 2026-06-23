@@ -19,6 +19,7 @@ from models.user import User
 from services.decision_outcome.effect_summary import (
     build_effect_summaries, aggregate_counts, DecisionEffectSummary,
 )
+from services.decision_outcome.effect_measurement import close_effect_measurement
 
 router = APIRouter()
 
@@ -88,6 +89,40 @@ async def decision_outcome_summary(
     summaries = await build_effect_summaries(db, user_id=current_user.id, contour=contour)
     c = aggregate_counts(summaries)
     return SummaryResponse(
+        proven_improved=c["proven_improved"], proven_unchanged=c["proven_unchanged"],
+        proven_worsened=c["proven_worsened"], not_evaluated=c["not_evaluated"],
+        not_measured_yet=c["not_measured_yet"], total=c["total"])
+
+
+# ── POST /decision-outcome/close ─────────────────────────────────────────────
+# The measurement-close trigger. Open is captured automatically when a confirmed
+# decision applies (decision_apply_ux); close reads the after value, classifies the
+# qualitative band from observed values only, and flips the link to measured. It is
+# the manual / scheduled driver of the effect loop — never auto-claims success
+# (insufficient data → not_evaluated), never forecasts, idempotent (re-running only
+# touches still-open observations). Owner-scoped.
+
+class CloseResponse(BaseModel):
+    closed: int
+    proven_improved: int
+    proven_unchanged: int
+    proven_worsened: int
+    not_evaluated: int
+    not_measured_yet: int
+    total: int
+
+
+@router.post("/decision-outcome/close", response_model=CloseResponse)
+async def decision_outcome_close(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CloseResponse:
+    res = await close_effect_measurement(db, user_id=current_user.id)
+    await db.commit()
+    summaries = await build_effect_summaries(db, user_id=current_user.id)
+    c = aggregate_counts(summaries)
+    return CloseResponse(
+        closed=res.closed,
         proven_improved=c["proven_improved"], proven_unchanged=c["proven_unchanged"],
         proven_worsened=c["proven_worsened"], not_evaluated=c["not_evaluated"],
         not_measured_yet=c["not_measured_yet"], total=c["total"])
