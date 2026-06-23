@@ -399,16 +399,31 @@ async def _send_weekly_reports() -> None:
 async def run_scheduler() -> None:
     """Main scheduler loop — checks every minute. Also drives the L4 automation
     tick (Marketplace Execution Layer), gated by settings.automation_enabled."""
-    logger.info("Scheduler started (reports + L4 automation tick)")
+    logger.info("Scheduler started (reports + L4 automation tick + measurement close)")
     while True:
         try:
             await _send_daily_reports()
             await _send_weekly_reports()
             await _automation_tick()
+            await _measurement_close_tick()
         except Exception:
             logger.exception("Scheduler iteration error")
         now = datetime.now()
         await asyncio.sleep(60 - now.second)
+
+
+async def _measurement_close_tick() -> None:
+    """Decision Outcome auto-close. Reuses the existing close path, window-gated:
+    closes only observations whose measurement window has elapsed. Read-only over
+    the marketplace (no writes), idempotent; surfaces the proven effect in the
+    outcome API + Daily Decision Feed. Never raises into the scheduler."""
+    from tasks.measurement_close import run_measurement_close
+    try:
+        n = await run_measurement_close()
+        if n:
+            logger.info("measurement close: %d observation(s) closed", n)
+    except Exception:
+        logger.exception("measurement_close tick error")
 
 
 async def _automation_tick() -> None:
