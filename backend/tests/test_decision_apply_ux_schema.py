@@ -54,7 +54,7 @@ async def _seed(db, uid, *, action_key="stop_auto_promotion", mp="wildberries",
                     insight_key=ikey, status="open"))
     if with_connection:
         # active marketplace connection with the promotions scope → dry_run can pass
-        db.add(MarketplaceConnection(user_id=uid, marketplace="wb", status="connected",
+        db.add(MarketplaceConnection(user_id=uid, marketplace="wildberries", status="connected",
                                      scopes=["promotions"]))
     if with_link:
         db.add(EngineSignalDecisionLink(user_id=uid, contour="advertising",

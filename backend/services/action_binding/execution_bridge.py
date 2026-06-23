@@ -29,13 +29,31 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from models.decision import Decision
 from models.engine_signal_decision_link import EngineSignalDecisionLink
 
-from services.product_resolver import normalize_marketplace
 from services.decision_apply import apply_decision
 from services.decision_outcome.decision_bridge import capability_supported
 from services.action_binding.registry import BY_SIGNAL_TYPE, BOUND, MANUAL_APPROVAL
 from services.action_binding.payload_builder import build_action_payload
 
 NOT_EXECUTED = "not_executed"
+
+# The executor identifies a connection (MarketplaceConnection.marketplace) and
+# routes a dispatch (action_catalog._dispatch_*) by the FULL marketplace name
+# ("wildberries" / "ozon"), never the short code. Hand the executor that form —
+# normalizing to the short "wb"/"ozon" code here made the connection lookup and
+# the dispatch fall through to "unsupported marketplace", so a real apply could
+# never succeed for stop_auto_promotion / reduce_discount. Unknown inputs pass
+# through unchanged (the executor then fails closed on connection/capability).
+_EXECUTOR_MARKETPLACE = {
+    "wb": "wildberries", "wildberries": "wildberries", "вб": "wildberries",
+    "ozon": "ozon", "озон": "ozon",
+    "yandex": "yandex", "yandex_market": "yandex", "ym": "yandex",
+}
+
+
+def _executor_marketplace(marketplace: Optional[str]) -> Optional[str]:
+    if not marketplace:
+        return marketplace
+    return _EXECUTOR_MARKETPLACE.get(marketplace.lower(), marketplace)
 
 
 @dataclass
@@ -98,7 +116,7 @@ async def execute_bound_decision(
 
     # 7) hand off to the sanctioned apply path. overrides = payload + marketplace
     #    (routing context); apply_decision owns executor/guard/capability/log/idemp.
-    overrides = {**dict(pr.payload), "marketplace": normalize_marketplace(marketplace)}
+    overrides = {**dict(pr.payload), "marketplace": _executor_marketplace(marketplace)}
     res = await apply_decision(
         db=db, user_id=user_id, decision_id=decision_id, overrides=overrides,
         idempotency_key=idempotency_key, dry_run=dry_run, measure=False, now=now)
