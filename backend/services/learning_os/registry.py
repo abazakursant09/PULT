@@ -139,3 +139,37 @@ async def get_action_learning_summary(
             metrics.add(g.metric_key)
     out.metric_key = next(iter(metrics)) if len(metrics) == 1 else None
     return out
+
+
+async def rank_action_keys_by_observed(
+    db: AsyncSession, *, user_id: str, marketplace: str, action_keys: List[str],
+    metric_key: Optional[str] = None, min_sample: int = 10,
+) -> List[str]:
+    """SORT-ONLY observed ranking of action_keys for ONE marketplace.
+
+    Never filters, never drops — returns exactly the given action_keys, reordered.
+    Marketplace-isolated: each action's record is read only for the CANONICAL
+    `marketplace`; another marketplace is NEVER a fallback. Descriptive, observed
+    counts only — no percentage, no score, no probability, no forecast.
+
+    Order rule (read-time only):
+      1. an action with >= min_sample measured outcomes ranks ahead of one without
+         (cold-start actions keep the deterministic order, never ranked on thin data);
+      2. among ranked actions: higher improved_count first, then lower worsened_count;
+      3. final tiebreaker (and the order for all sub-sample actions): the original
+         deterministic position passed in.
+    """
+    originals = list(action_keys)
+    summaries = {}
+    for ak in originals:
+        summaries[ak] = await get_action_learning_summary(
+            db, user_id=user_id, marketplace=marketplace, action_key=ak, metric_key=metric_key)
+
+    def _key(item):
+        idx, ak = item
+        s = summaries.get(ak)
+        if s is None or s.total_count < min_sample:
+            return (1, 0, 0, idx)            # sub-sample → keep deterministic order
+        return (0, -s.improved_count, s.worsened_count, idx)
+
+    return [ak for _, ak in sorted(enumerate(originals), key=_key)]

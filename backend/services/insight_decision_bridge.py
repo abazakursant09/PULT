@@ -249,7 +249,7 @@ async def promote_insight_to_decision(
 
 async def promote_insight_alternatives(
     db: AsyncSession, *, user_id: str, insight: InsightPromotionDTO,
-    context_group: Optional[str] = None,
+    context_group: Optional[str] = None, action_order: Optional[list[str]] = None,
 ) -> list[PromoteResult]:
     """
     Promote every declared alternative action for the insight (A2.6). For
@@ -268,6 +268,16 @@ async def promote_insight_alternatives(
     if not candidates:
         # No declared action space → fall back to the single legacy promotion.
         return [await promote_insight_to_decision(db, user_id=user_id, insight=insight)]
+
+    # Optional externally-supplied order (SORT-ONLY). The bridge does NOT learn or
+    # rank — a learning-aware caller (services.learning_os) may pass an observed
+    # order; here we only apply it, never dropping or adding a candidate.
+    if action_order:
+        by_action = {c.action_key: c for c in candidates}
+        ordered = [by_action[a] for a in action_order if a in by_action]
+        ordered += [c for c in candidates if c.action_key not in set(action_order)]
+        candidates = ordered
+
     results: list[PromoteResult] = []
     for c in candidates:
         results.append(await promote_insight_to_decision(

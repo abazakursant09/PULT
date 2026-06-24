@@ -23,10 +23,14 @@ from dependencies import get_current_user
 import models  # registers tables
 from models.engine_signal_decision_link import EngineSignalDecisionLink
 from models.engine_effect_observation import EngineEffectObservation
+from models.decision import Decision
 
 from services.learning_os.registry import (
     aggregate_learning_observations, get_action_learning_summary,
+    rank_action_keys_by_observed,
 )
+from services.insight_decision_bridge import InsightPromotionDTO
+from services.learning_os.promotion_ranking import promote_alternatives_observed_ranked
 from routers import decision_feed as feed_router
 
 NOW = datetime(2026, 6, 24, 12, 0, 0)
@@ -195,3 +199,101 @@ def test_feed_enrichment_is_marketplace_specific():
     oz_line = next(t for t in texts if "Ozon" in t)
     assert wb_line == "По Wildberries это решение ранее помогло в 10 случаях из 10."
     assert oz_line == "По Ozon это решение ранее помогло в 0 случаях из 10."   # observed, not blended
+
+
+# ── A2 v2. Observed sort-only ranking ────────────────────────────────────────
+
+async def _history(db, uid, *, mp, action, improved=0, worsened=0, unchanged=0, not_evaluated=0):
+    for _ in range(improved):
+        await _measured(db, uid, mp=mp, action=action, band="improved")
+    for _ in range(worsened):
+        await _measured(db, uid, mp=mp, action=action, band="worsened")
+    for _ in range(unchanged):
+        await _measured(db, uid, mp=mp, action=action, band="unchanged")
+    for _ in range(not_evaluated):
+        await _measured(db, uid, mp=mp, action=action, band="not_evaluated")
+
+
+def test_rank_enough_sample_orders_by_observed():
+    db = _run(_new_db()); uid = str(uuid.uuid4())
+    _run(_history(db, uid, mp="wb", action="reduce_discount", improved=15, worsened=2))   # 17
+    _run(_history(db, uid, mp="wb", action="set_price", improved=10, worsened=9))          # 19
+    # original deterministic order: set_price first
+    order = _run(rank_action_keys_by_observed(
+        db, user_id=uid, marketplace="wb", action_keys=["set_price", "reduce_discount"]))
+    assert order == ["reduce_discount", "set_price"]   # more improved + fewer worsened first
+
+
+def test_rank_below_min_sample_keeps_original_order():
+    db = _run(_new_db()); uid = str(uuid.uuid4())
+    _run(_history(db, uid, mp="wb", action="reduce_discount", improved=5))   # < 10
+    _run(_history(db, uid, mp="wb", action="set_price", improved=3))         # < 10
+    order = _run(rank_action_keys_by_observed(
+        db, user_id=uid, marketplace="wb", action_keys=["set_price", "reduce_discount"]))
+    assert order == ["set_price", "reduce_discount"]   # deterministic order preserved
+
+
+def test_rank_tie_keeps_original_order():
+    db = _run(_new_db()); uid = str(uuid.uuid4())
+    _run(_history(db, uid, mp="wb", action="set_price", improved=6, worsened=6))        # 12
+    _run(_history(db, uid, mp="wb", action="reduce_discount", improved=6, worsened=6))  # 12
+    order = _run(rank_action_keys_by_observed(
+        db, user_id=uid, marketplace="wb", action_keys=["set_price", "reduce_discount"]))
+    assert order == ["set_price", "reduce_discount"]   # identical stats → original order
+
+
+def test_rank_marketplace_isolation():
+    db = _run(_new_db()); uid = str(uuid.uuid4())
+    # strong WB history for reduce_discount; ZERO ozon history
+    _run(_history(db, uid, mp="wb", action="reduce_discount", improved=20))
+    _run(_history(db, uid, mp="wb", action="set_price", improved=1, worsened=15))
+    # ozon ranking must ignore WB entirely → deterministic order
+    order = _run(rank_action_keys_by_observed(
+        db, user_id=uid, marketplace="ozon", action_keys=["set_price", "reduce_discount"]))
+    assert order == ["set_price", "reduce_discount"]   # no ozon data → no reorder, no WB fallback
+
+
+def test_rank_is_sort_only_all_present():
+    db = _run(_new_db()); uid = str(uuid.uuid4())
+    _run(_history(db, uid, mp="wb", action="reduce_discount", improved=12))
+    inp = ["set_price", "reduce_discount", "stop_auto_promotion"]
+    order = _run(rank_action_keys_by_observed(db, user_id=uid, marketplace="wb", action_keys=inp))
+    assert sorted(order) == sorted(inp) and len(order) == len(inp)   # nothing dropped/added
+
+
+def test_rank_output_is_only_action_keys():
+    db = _run(_new_db()); uid = str(uuid.uuid4())
+    _run(_history(db, uid, mp="wb", action="set_price", improved=11, worsened=1))
+    order = _run(rank_action_keys_by_observed(
+        db, user_id=uid, marketplace="wb", action_keys=["set_price", "reduce_discount"]))
+    assert all(isinstance(a, str) for a in order)   # no scores / no forecast fields
+
+
+# ── A3. promotion alternatives use the observed order when sample is enough ───
+
+def _dto(itype="margin_crisis", mp="wb", sku="SKU1"):
+    return InsightPromotionDTO(insight_key=f"{itype}:{mp}:{sku}", itype=itype,
+                               marketplace=mp, sku=sku)
+
+
+def _order_of(db, results):
+    return [(_run(db.get(Decision, r.decision_id))).action_key for r in results]
+
+
+def test_promotion_alternatives_use_observed_order():
+    db = _run(_new_db()); uid = str(uuid.uuid4())
+    # reduce_discount has the stronger proven record on wb
+    _run(_history(db, uid, mp="wb", action="reduce_discount", improved=18, worsened=2))
+    _run(_history(db, uid, mp="wb", action="set_price", improved=5, worsened=14))
+    results = _run(promote_alternatives_observed_ranked(db, user_id=uid, insight=_dto())); _run(db.commit())
+    order = _order_of(db, results)
+    assert order[0] == "reduce_discount"                      # observed-better promoted first
+    assert set(order) == {"set_price", "reduce_discount", "stop_auto_promotion"}   # none dropped
+
+
+def test_promotion_alternatives_default_order_without_history():
+    db = _run(_new_db()); uid = str(uuid.uuid4())
+    results = _run(promote_alternatives_observed_ranked(db, user_id=uid, insight=_dto())); _run(db.commit())
+    order = _order_of(db, results)
+    assert order[0] == "set_price"                            # no history → deterministic order
+    assert set(order) == {"set_price", "reduce_discount", "stop_auto_promotion"}
