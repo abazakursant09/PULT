@@ -2246,6 +2246,15 @@ export interface DecisionFeedItem {
   effect_status:      string | null
   effect_band:        string | null
   learning_context:   string | null   // observed history line (counts only, not a forecast)
+  learning_explain:   {                // v5 — WHY the history line was shown (observed only)
+    source_level: string              // "similar_context" | "marketplace"
+    matched_dimensions: Record<string, unknown>
+    sample_size: number
+    improved_count: number
+    worsened_count: number
+    unchanged_count: number
+    explanation_text: string
+  } | null
   lifecycle_reason:   string | null
   created_at:         string | null
   updated_at:         string | null

@@ -450,3 +450,61 @@ def test_context_history_no_forbidden_words():
                 "прогноз", "forecast", "предсказ", "prediction", "roi", "рентаб",
                 "прибыл", "profit", "рекоменд"):
         assert bad not in line
+
+
+# ── v5. Explain WHY the learning_context was shown ───────────────────────────
+
+def test_explain_similar_context():
+    db = _run(_new_db()); uid = str(uuid.uuid4())
+    for _ in range(10):
+        _run(_measured_ctx(db, uid, mp="wildberries", action="stop_auto_promotion", band="improved", margin_pct=15))
+    items = _feed_client(db, uid).get("/api/decision-feed").json()["items"]
+    ex = next(x["learning_explain"] for x in items if x.get("learning_explain"))
+    assert ex["source_level"] == "similar_context"
+    assert ex["matched_dimensions"]["marketplace"] == "wb"
+    assert ex["matched_dimensions"]["margin_band"] == "mid_margin"
+    assert ex["sample_size"] == 10 and ex["improved_count"] == 10 and ex["worsened_count"] == 0
+    t = ex["explanation_text"].lower()
+    assert "по похожему контексту" in t and "wildberries" in t and "маржа 10–25%" in t
+    assert "не прогноз" in t
+
+
+def test_explain_marketplace_fallback():
+    db = _run(_new_db()); uid = str(uuid.uuid4())
+    for _ in range(5):    # context tier thin (< 10)
+        _run(_measured_ctx(db, uid, mp="wildberries", action="stop_auto_promotion", band="improved", margin_pct=15))
+    for _ in range(5):    # unknown-context measured → only marketplace tier reaches 10
+        _run(_measured(db, uid, mp="wildberries", action="stop_auto_promotion", band="improved"))
+    items = _feed_client(db, uid).get("/api/decision-feed").json()["items"]
+    ex = next(x["learning_explain"] for x in items if x.get("learning_explain"))
+    assert ex["source_level"] == "marketplace"
+    assert ex["matched_dimensions"] == {"marketplace": "wb"}
+    assert ex["sample_size"] == 10
+    t = ex["explanation_text"].lower()
+    assert "недостаточно" in t and "по маркетплейсу" in t and "не прогноз" in t
+
+
+def test_explain_marketplace_isolation():
+    db = _run(_new_db()); uid = str(uuid.uuid4())
+    for _ in range(10):
+        _run(_measured_ctx(db, uid, mp="wildberries", action="stop_auto_promotion", band="improved", margin_pct=15))
+    for _ in range(10):
+        _run(_measured_ctx(db, uid, mp="ozon", action="stop_auto_promotion", band="worsened", margin_pct=15))
+    items = _feed_client(db, uid).get("/api/decision-feed").json()["items"]
+    exps = [x["learning_explain"] for x in items if x.get("learning_explain")]
+    wb = next(e for e in exps if e["matched_dimensions"]["marketplace"] == "wb")
+    oz = next(e for e in exps if e["matched_dimensions"]["marketplace"] == "ozon")
+    assert wb["improved_count"] == 10 and wb["worsened_count"] == 0      # WB observed
+    assert oz["improved_count"] == 0 and oz["worsened_count"] == 10      # Ozon observed, never blended
+
+
+def test_explain_no_forbidden_words():
+    db = _run(_new_db()); uid = str(uuid.uuid4())
+    for _ in range(10):
+        _run(_measured_ctx(db, uid, mp="wildberries", action="stop_auto_promotion", band="improved", margin_pct=15))
+    items = _feed_client(db, uid).get("/api/decision-feed").json()["items"]
+    t = next(x["learning_explain"]["explanation_text"] for x in items if x.get("learning_explain")).lower()
+    # "прогноз"/"forecast" are allowed ONLY in the negated disclaimer ("не прогноз")
+    for bad in ("вероятн", "probability", "confidence", "уверенн", "score", "балл",
+                "предсказ", "prediction", "roi", "рентаб", "прибыл", "profit", "рекоменд"):
+        assert bad not in t
