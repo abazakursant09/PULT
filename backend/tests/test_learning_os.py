@@ -183,7 +183,7 @@ def test_feed_enrichment_at_gate_shows_counts():
     enriched = [x for x in items if x.get("learning_context")]
     assert enriched, "expected learning_context once >= 10 measured"
     txt = enriched[0]["learning_context"]
-    assert txt == "По Wildberries это решение ранее помогло в 8 случаях из 10."
+    assert txt == "История PULT на Wildberries: это решение помогло в 8 из 10 случаев."
     assert "%" not in txt                                  # counts only, never a percentage
 
 
@@ -197,8 +197,8 @@ def test_feed_enrichment_is_marketplace_specific():
     texts = [x["learning_context"] for x in items if x.get("learning_context")]
     wb_line = next(t for t in texts if "Wildberries" in t)
     oz_line = next(t for t in texts if "Ozon" in t)
-    assert wb_line == "По Wildberries это решение ранее помогло в 10 случаях из 10."
-    assert oz_line == "По Ozon это решение ранее помогло в 0 случаях из 10."   # observed, not blended
+    assert wb_line == "История PULT на Wildberries: это решение помогло в 10 из 10 случаев."
+    assert oz_line == "История PULT на Ozon: это решение помогло в 0 из 10 случаев."   # observed, not blended
 
 
 # ── A2 v2. Observed sort-only ranking ────────────────────────────────────────
@@ -297,3 +297,51 @@ def test_promotion_alternatives_default_order_without_history():
     order = _order_of(db, results)
     assert order[0] == "set_price"                            # no history → deterministic order
     assert set(order) == {"set_price", "reduce_discount", "stop_auto_promotion"}
+
+
+# ── v3. Observed history in the feed — framed as history, never forecast ─────
+
+import pathlib
+
+_CARD = (pathlib.Path(__file__).resolve().parents[2]
+         / "frontend" / "components" / "decision-feed" / "DecisionFeedCard.tsx")
+
+
+def test_feed_history_text_is_observed_not_forecast():
+    db = _run(_new_db()); uid = str(uuid.uuid4())
+    for _ in range(10):
+        _run(_measured(db, uid, mp="wildberries", action="stop_auto_promotion", band="improved"))
+    items = _feed_client(db, uid).get("/api/decision-feed").json()["items"]
+    line = next(x["learning_context"] for x in items if x.get("learning_context"))
+    assert line == "История PULT на Wildberries: это решение помогло в 10 из 10 случаев."
+    assert "%" not in line                                   # counts only, no percentage
+    low = line.lower()
+    for bad in ("прогноз", "вероятн", "предсказ", "score", "confidence", "roi", "рентаб", "прибыл"):
+        assert bad not in low                                # no forecast / probability / score / ROI
+
+
+def test_feed_history_marketplace_isolated():
+    db = _run(_new_db()); uid = str(uuid.uuid4())
+    for _ in range(10):
+        _run(_measured(db, uid, mp="wildberries", action="stop_auto_promotion", band="improved"))
+    for _ in range(10):
+        _run(_measured(db, uid, mp="ozon", action="stop_auto_promotion", band="worsened"))
+    texts = [x["learning_context"] for x in
+             _feed_client(db, uid).get("/api/decision-feed").json()["items"] if x.get("learning_context")]
+    assert any(t == "История PULT на Wildberries: это решение помогло в 10 из 10 случаев." for t in texts)
+    assert any(t == "История PULT на Ozon: это решение помогло в 0 из 10 случаев." for t in texts)
+    assert all("Megamarket" not in t and "Yandex" not in t for t in texts)   # WB never blended into others
+
+
+def test_feed_card_renders_history_and_disclaimer():
+    src = _CARD.read_text(encoding="utf-8")
+    assert "learning_context" in src                                   # history line is rendered
+    assert "Это не прогноз, а только прошлые наблюдения." in src        # explicit "not a forecast"
+
+
+def test_feed_card_has_no_auto_apply_for_measured():
+    src = _CARD.read_text(encoding="utf-8")
+    # the apply affordance is gated OFF for measured decision_outcome items
+    assert "item.contour !== 'decision_outcome'" in src
+    # history surface is descriptive — no apply call wired to learning_context
+    assert "learning_context" in src
