@@ -39,6 +39,7 @@ from services.decision_outcome.registry import BY_SIGNAL_KEY
 from services.decision_outcome.effect_summary import build_effect_summaries
 from services.learning_os.registry import (
     get_action_learning_summary, get_action_learning_summary_for_context,
+    get_decision_identity_for_learning,
 )
 from services.product_resolver import normalize_marketplace
 
@@ -126,10 +127,13 @@ async def _learning_context(db, user_id: str, summary) -> Optional[LearningConte
     mp = _MP_DISPLAY.get(mp_canon, summary.marketplace)
 
     # 1) similar context — only when the context carries a specific dimension.
+    # Listing Identity v1 — thread the decision's existing listing_id so the
+    # resolver reaches the real listing's category/price (None → honest fallback).
     from services.decision_memory import resolve_context_group_for_insight
+    ident = await get_decision_identity_for_learning(db, summary.decision_id)
     ctx = await resolve_context_group_for_insight(
         db, user_id=user_id, insight_key=summary.insight_key,
-        marketplace=summary.marketplace, sku=summary.sku)
+        marketplace=summary.marketplace, sku=summary.sku, listing_id=ident["listing_id"])
     matched, phrases = _ctx_matched(ctx, mp_canon)
     segments = _context_segments(ctx)
     if segments:

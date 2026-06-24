@@ -175,6 +175,20 @@ async def rank_action_keys_by_observed(
     return [ak for _, ak in sorted(enumerate(originals), key=_key)]
 
 
+async def get_decision_identity_for_learning(db: AsyncSession, decision_id):
+    """Existing listing/product identity of a Decision, for enriching context
+    resolution. Reads ONLY the Decision's existing identity columns — no new
+    storage, no migration. Returns None values when decision_id is missing or the
+    Decision is not found (so the caller falls back honestly)."""
+    if not decision_id:
+        return {"listing_id": None, "physical_product_id": None}
+    from models.decision import Decision
+    d = await db.get(Decision, decision_id)
+    if d is None:
+        return {"listing_id": None, "physical_product_id": None}
+    return {"listing_id": d.listing_id, "physical_product_id": d.physical_product_id}
+
+
 async def get_action_learning_summary_for_context(
     db: AsyncSession, *, user_id: str, marketplace: str, action_key: str,
     context_group: str, metric_key: Optional[str] = None,
@@ -209,9 +223,13 @@ async def get_action_learning_summary_for_context(
             continue
         if metric_key is not None and obs.metric_key != metric_key:
             continue
+        # Listing Identity v1 — follow obs → link.decision_id → Decision.listing_id
+        # so the resolver reaches the real listing's category/price. None → honest
+        # fallback (resolver degrades the missing dimensions to "unknown").
+        ident = await get_decision_identity_for_learning(db, link.decision_id)
         ctx = await resolve_context_group_for_insight(
             db, user_id=user_id, insight_key=obs.insight_key,
-            marketplace=link.marketplace, sku=link.sku)
+            marketplace=link.marketplace, sku=link.sku, listing_id=ident["listing_id"])
         if ctx != context_group:                        # context isolation (exact key)
             continue
         out._add(obs.effect_band or _NOT_EVALUATED)

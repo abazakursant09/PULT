@@ -24,11 +24,13 @@ import models  # registers tables
 from models.engine_signal_decision_link import EngineSignalDecisionLink
 from models.engine_effect_observation import EngineEffectObservation
 from models.decision import Decision
+from models.product import Product
+from models.product_listing import ProductListing
 
 from services.learning_os.registry import (
     aggregate_learning_observations, get_action_learning_summary,
     get_action_learning_summary_for_context,
-    rank_action_keys_by_observed,
+    rank_action_keys_by_observed, get_decision_identity_for_learning,
 )
 from services.insight_decision_bridge import InsightPromotionDTO
 from services.learning_os.promotion_ranking import promote_alternatives_observed_ranked
@@ -508,3 +510,88 @@ def test_explain_no_forbidden_words():
     for bad in ("вероятн", "probability", "confidence", "уверенн", "score", "балл",
                 "предсказ", "prediction", "roi", "рентаб", "прибыл", "profit", "рекоменд"):
         assert bad not in t
+
+
+# ── Listing Identity v1 — context resolved through Decision.listing_id ────────
+
+async def _measured_with_listing(db, uid, *, mp, action, band, category, price, margin_pct,
+                                 metric="ad_profit_impact"):
+    """Measured observation whose Decision carries a real listing_id → Product, so
+    the resolver reaches category/price (not 'unknown'). margin from seeded finance."""
+    sku = f"SKU-{uuid.uuid4().hex[:8]}"; ik = f"adv_ad_destroying_profit:{mp}:{sku}"
+    pid = str(uuid.uuid4()); ppid = str(uuid.uuid4()); lid = str(uuid.uuid4()); did = str(uuid.uuid4())
+    _pmp = "wb" if mp in ("wb", "wildberries") else mp
+    db.add(Product(id=pid, user_id=uid, name="товар", marketplace=_pmp, category=category, price=price))
+    db.add(ProductListing(id=lid, physical_product_id=ppid, user_id=uid, marketplace="wb" if mp in ("wb", "wildberries") else mp,
+                          external_id=sku, legacy_product_id=pid))
+    db.add(Decision(id=did, user_id=uid, problem="adv", listing_id=lid, physical_product_id=ppid,
+                    action_key=action, insight_key=ik, status="open"))
+    link = EngineSignalDecisionLink(
+        user_id=uid, contour="advertising", signal_table="advertising_signal",
+        signal_id=str(uuid.uuid4()), insight_key=ik, action_key=action, decision_id=did,
+        link_status="measured", marketplace=mp, sku=sku)
+    db.add(link); await db.flush()
+    db.add(EngineEffectObservation(
+        link_id=link.id, user_id=uid, insight_key=ik, metric_key=metric, window_days=14,
+        baseline_captured_at=PAST, measured_at=NOW, effect_band=band,
+        evidence=json.dumps({"baseline": 100, "after": 200}), created_at=PAST))
+    db.add(_Fin(import_id="imp", user_id=uid, marketplace="wb" if mp in ("wb", "wildberries") else mp,
+                sku=sku, revenue=1000.0, net_profit=1000.0 * margin_pct / 100.0, date=NOW.date().isoformat()))
+    await db.commit()
+    return did, lid
+
+
+def test_decision_identity_helper():
+    db = _run(_new_db()); uid = str(uuid.uuid4())
+    did, lid = _run(_measured_with_listing(db, uid, mp="wildberries", action="stop_auto_promotion",
+                                           band="improved", category="одежда", price=1200.0, margin_pct=15))
+    ident = _run(get_decision_identity_for_learning(db, did))
+    assert ident["listing_id"] == lid and ident["physical_product_id"] is not None
+    # missing / not found → None values, no crash
+    assert _run(get_decision_identity_for_learning(db, None)) == {"listing_id": None, "physical_product_id": None}
+    assert _run(get_decision_identity_for_learning(db, "ghost"))["listing_id"] is None
+
+
+def test_listing_identity_enriches_feed_context():
+    db = _run(_new_db()); uid = str(uuid.uuid4())
+    for _ in range(10):
+        _run(_measured_with_listing(db, uid, mp="wildberries", action="stop_auto_promotion",
+                                    band="improved", category="одежда", price=1200.0, margin_pct=15))
+    items = _feed_client(db, uid).get("/api/decision-feed").json()["items"]
+    line = next(x["learning_context"] for x in items if x.get("learning_context"))
+    ex = next(x["learning_explain"] for x in items if x.get("learning_explain"))
+    # category + price no longer 'unknown' — they appear in the context line
+    assert "категории Одежда" in line and "ценой 500–2000 ₽" in line and "маржой 10–25%" in line
+    assert ex["source_level"] == "similar_context"
+    assert ex["matched_dimensions"]["category"] == "одежда"
+    assert ex["matched_dimensions"]["price_band"] == "mid"
+    assert ex["matched_dimensions"]["margin_band"] == "mid_margin"
+    assert ex["matched_dimensions"]["marketplace"] == "wb"
+
+
+def test_historical_fallback_when_no_listing_id():
+    db = _run(_new_db()); uid = str(uuid.uuid4())
+    for _ in range(10):   # no Decision row / no listing_id → identity None → fallback
+        _run(_measured(db, uid, mp="wildberries", action="stop_auto_promotion", band="improved"))
+    items = _feed_client(db, uid).get("/api/decision-feed").json()["items"]
+    lines = [x["learning_context"] for x in items if x.get("learning_context")]
+    assert any(l == "История PULT на Wildberries: это решение помогло в 10 из 10 случаев." for l in lines)
+    assert all("для товаров" not in l for l in lines)   # marketplace-wide fallback, no crash
+
+
+def test_listing_context_marketplace_isolation():
+    db = _run(_new_db()); uid = str(uuid.uuid4())
+    for _ in range(10):
+        _run(_measured_with_listing(db, uid, mp="wildberries", action="stop_auto_promotion",
+                                    band="improved", category="одежда", price=1200.0, margin_pct=15))
+    for _ in range(10):
+        _run(_measured_with_listing(db, uid, mp="ozon", action="stop_auto_promotion",
+                                    band="worsened", category="одежда", price=1200.0, margin_pct=15))
+    wb = _run(get_action_learning_summary_for_context(
+        db, user_id=uid, marketplace="wildberries", action_key="stop_auto_promotion",
+        context_group="wb|одежда|mid|mid_margin"))
+    oz = _run(get_action_learning_summary_for_context(
+        db, user_id=uid, marketplace="ozon", action_key="stop_auto_promotion",
+        context_group="ozon|одежда|mid|mid_margin"))
+    assert wb.total_count == 10 and wb.improved_count == 10     # WB observed
+    assert oz.total_count == 10 and oz.worsened_count == 10     # Ozon observed, never enriches WB
