@@ -35,7 +35,7 @@ import services.decision_apply_ux.confirm as confirm_mod
 from services.decision_apply_ux.confirm import confirm_and_apply_decision, ApplyConfirmResult
 from services.action_binding.execution_bridge import BoundExecutionResult
 
-IKEY = "adv_ad_destroying_profit:wildberries:SKU1"
+IKEY = "adv_ad_on_low_stock:wildberries:SKU1"  # stop_auto_promotion path (A2.2-bind: overspend moved to ad_set_state)
 
 
 def _run(c):
@@ -59,7 +59,7 @@ async def _seed_applyable(db, uid):
            action_key="stop_auto_promotion", decision_id=did, link_status="promoted",
            marketplace="wildberries", sku="SKU1"))
     db.add(AdvertisingSignal(audit_id=str(uuid.uuid4()), user_id=uid,
-           signal_key="adv_ad_destroying_profit", problem_type="ad_destroying_profit",
+           signal_key="adv_ad_on_low_stock", problem_type="ad_on_low_stock",
            insight_key=IKEY, marketplace="wildberries", sku="SKU1", status="promoted_to_decision"))
     db.add(ProductListing(physical_product_id="ph1", user_id=uid, marketplace="wb", external_id="SKU1"))
     db.add(MarketplaceConnection(user_id=uid, marketplace="wildberries", status="connected",

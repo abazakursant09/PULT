@@ -82,12 +82,15 @@ def test_wb_ad_set_state_still_succeeds():
     _run(go())
 
 
-# ── (5) bridge cannot present Ozon ad_set_state as executable ─────────────────
+# ── (5) ad_set_state binding scope (A2.2-bind) ────────────────────────────────
 
-def test_ad_set_state_is_not_bound_to_any_signal():
-    # No action binding produces ad_set_state, so the Decision bridge can never
-    # promote/bind it (Ozon or otherwise) until the adapter exists.
+def test_ad_set_state_bound_to_overspend_only():
+    # A2.2-bind: ad_set_state is bound to the 3 direct-overspend types (campaign
+    # pause); ad_set_bid stays unbound (cpm would be a forecast).
     from services.action_binding import registry as binding_registry
-    bound = {b.action_key for b in binding_registry.ACTION_BINDINGS if b.bindable}
-    assert "ad_set_state" not in bound
-    assert "ad_set_bid" not in bound
+    bound = {b.signal_type for b in binding_registry.ACTION_BINDINGS
+             if b.bindable and b.action_key == "ad_set_state"}
+    assert bound == {"adv_ad_destroying_profit", "adv_ad_spend_without_sales",
+                     "adv_ad_on_unprofitable_product"}
+    all_bound = {b.action_key for b in binding_registry.ACTION_BINDINGS if b.bindable}
+    assert "ad_set_bid" not in all_bound

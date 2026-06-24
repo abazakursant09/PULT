@@ -42,6 +42,17 @@ _DEFAULT_METRIC = {
     "legal": "legal_risk_open",
 }
 
+# Per-insight-type metric override (A2.2-bind). The direct-overspend advertising
+# signals are bound to ad_set_state (campaign pause); their honest observed effect
+# is advertising efficiency — ДРР — so they measure on ad_cost_ratio (lower-better),
+# not the contour-default ad_profit_impact. Registry-layer routing only; the Effect
+# Measurement lifecycle is unchanged (it still reads default_metric_key).
+_METRIC_OVERRIDE = {
+    "ad_destroying_profit": "ad_cost_ratio",
+    "ad_spend_without_sales": "ad_cost_ratio",
+    "ad_on_unprofitable_product": "ad_cost_ratio",
+}
+
 # bare insight types per contour (RULE_REGISTRY keys, master e4968cc)
 _TYPES = {
     "seo": (
@@ -120,7 +131,7 @@ def _build() -> Tuple[CanonicalInsightType, ...]:
                 key_arity=4 if four else 3,
                 three_part_compatible=not four,
                 carries_review_id=four,
-                default_metric_key=_DEFAULT_METRIC[contour],
+                default_metric_key=_METRIC_OVERRIDE.get(t, _DEFAULT_METRIC[contour]),
                 action_key=_resolve_action_key(contour, t, sk),
             ))
     return tuple(out)

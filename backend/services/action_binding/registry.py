@@ -48,8 +48,11 @@ Deliberately NOT entry gates:
     honestly (No Fake Impact). `not_evaluated` is a VALID outcome, never a failure
     and never "no effect".
 
-Today the only bound/executable set is the six advertising types → stop_auto_promotion
-(reversible, WB/Ozon-capable, manual_approval, measured on net_profit).
+Bound/executable advertising set: the three direct-overspend types → ad_set_state
+(pause the campaign; campaign_id from the campaign_identity resolver, single match
+only; WB/Ozon-capable, manual_approval, measured on ad_cost_ratio), and the three
+indirect stock/listing types → stop_auto_promotion (offer_id-level, reversible,
+WB/Ozon-capable, manual_approval, measured on net_profit).
 """
 from __future__ import annotations
 
@@ -77,8 +80,15 @@ MANUAL_APPROVAL = "manual_approval"
 # weak listing wastes spend, so the conservative, offer_id-level, reversible action
 # is the same "stop the ad" — no content generation needed (improving the listing
 # itself stays a separate, advisory path).
-_BOUND_ADV = frozenset({
+# Direct overspend signals (A2.2-bind) → pause the wasteful campaign (ad_set_state).
+# The campaign_id comes ONLY from the campaign_identity resolver (single match);
+# the action is the const "pause". Measured on ad_cost_ratio (lower ДРР is better).
+_OVERSPEND_ADV = frozenset({
     "ad_destroying_profit", "ad_spend_without_sales", "ad_on_unprofitable_product",
+})
+# Indirect (stock / listing) advertising problems keep the offer_id-level
+# stop_auto_promotion — they are NOT campaign-pause cases.
+_STOP_ADV = frozenset({
     "ad_on_low_stock", "ad_on_oos_risk", "ad_on_bad_listing",
 })
 # negative reviews — manual_only is mandatory (Negative-Review doctrine).
@@ -90,6 +100,13 @@ _STOP_PAYLOAD_RULE: Mapping[str, str] = {
     "offer_id": "resolve: sku -> listing.external_id",
     "marketplace": "signal.marketplace",
     "enabled": "const:false",
+}
+
+# ad_set_state pause: campaign_id resolved (single match) + const pause. No
+# generated content, no seller text, no guessed id.
+_PAUSE_PAYLOAD_RULE: Mapping[str, str] = {
+    "campaign_id": "resolve: campaign_identity(single match only)",
+    "action": "const:pause",
 }
 
 
@@ -109,13 +126,20 @@ class ActionBinding:
 def _decide(contour: str, itype: str, signal_key: str) -> ActionBinding:
     # ── advertising ──────────────────────────────────────────────────────────
     if contour == "advertising":
-        if itype in _BOUND_ADV:
+        if itype in _OVERSPEND_ADV:
+            ak = "ad_set_state"
+            # required_capability mirrors the ActionSpec scope (invariant); the
+            # campaign_control capability gates execution in the executor.
+            return ActionBinding(
+                signal_key, contour, True, ak, _PAUSE_PAYLOAD_RULE,
+                action_catalog.get(ak).required_scope, MANUAL_APPROVAL, BOUND, None)
+        if itype in _STOP_ADV:
             ak = "stop_auto_promotion"
             return ActionBinding(
                 signal_key, contour, True, ak, _STOP_PAYLOAD_RULE,
                 action_catalog.get(ak).required_scope, MANUAL_APPROVAL, BOUND, None)
-        # any future advertising type without a derivable stop payload would fall
-        # here (improve-listing == update_card needs generated content)
+        # any future advertising type without a derivable payload falls here
+        # (improve-listing == update_card needs generated content)
         return ActionBinding(
             signal_key, contour, False, None, None, None, MANUAL_APPROVAL,
             PAYLOAD_NOT_DERIVABLE, "update_card requires content generation")

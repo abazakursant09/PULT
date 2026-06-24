@@ -68,8 +68,13 @@ def test_only_six_advertising_bound():
         "adv_ad_on_bad_listing",
     }
     assert len(advice_only_signal_types()) == 29
+    # A2.2-bind: direct overspend → ad_set_state (campaign pause); the indirect
+    # stock/listing types keep stop_auto_promotion.
+    overspend = {"adv_ad_destroying_profit", "adv_ad_spend_without_sales",
+                 "adv_ad_on_unprofitable_product"}
     for st in bound:
-        assert BY_SIGNAL_TYPE[st].action_key == "stop_auto_promotion"
+        expect = "ad_set_state" if st in overspend else "stop_auto_promotion"
+        assert BY_SIGNAL_TYPE[st].action_key == expect
 
 
 # ── 4. payload_not_derivable correctly set (SEO + review-text) ───────────────
@@ -107,7 +112,9 @@ def test_capability_matches_action_spec():
     for b in ACTION_BINDINGS:
         if b.bindable:
             assert b.required_capability == action_catalog.get(b.action_key).required_scope
-            assert b.required_capability == "promotions"   # stop_auto_promotion scope
+    # two bound families: ad_set_state (advert scope) + stop_auto_promotion (promotions)
+    scopes = {b.required_capability for b in ACTION_BINDINGS if b.bindable}
+    assert scopes == {"advert", "promotions"}
 
 
 # ── 7. growth + legal advice_only with reasons ───────────────────────────────

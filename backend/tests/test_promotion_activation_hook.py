@@ -79,7 +79,7 @@ def test_audit_hook_promotes_actionable():
             AdvertisingSignal.problem_type == "ad_destroying_profit"))).scalars().one()
         assert sig.status == "promoted_to_decision" and sig.decision_id
         d = (await db.execute(select(Decision).where(Decision.id == sig.decision_id))).scalars().one()
-        assert d.action_key == "stop_auto_promotion"
+        assert d.action_key == "ad_set_state"   # A2.2-bind: overspend → campaign pause
         feed = await build_feed(db, user_id=uid)
         promoted = [i for i in feed if i.source_context.get("decision_id") == sig.decision_id]
         assert promoted and promoted[0].source_status == "promoted_to_decision"

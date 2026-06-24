@@ -35,6 +35,16 @@ from services.decision_outcome.decision_bridge import (
 NEW_ADV = ("ad_spend_without_sales", "ad_on_unprofitable_product",
            "ad_on_low_stock", "ad_on_oos_risk")
 
+# A2.2-bind: overspend → ad_set_state (campaign pause); stock/listing → stop_auto_promotion.
+EXPECTED_AK = {
+    "ad_destroying_profit": "ad_set_state",
+    "ad_spend_without_sales": "ad_set_state",
+    "ad_on_unprofitable_product": "ad_set_state",
+    "ad_on_low_stock": "stop_auto_promotion",
+    "ad_on_oos_risk": "stop_auto_promotion",
+    "ad_on_bad_listing": "stop_auto_promotion",
+}
+
 
 def _run(c):
     return asyncio.run(c)
@@ -62,7 +72,7 @@ def test_registry_action_keys():
     from services.decision_outcome.registry import BY_SIGNAL_KEY
     for it in ("ad_destroying_profit",) + NEW_ADV:
         ak = BY_SIGNAL_KEY[f"adv_{it}"].action_key
-        assert ak == "stop_auto_promotion" and ak in action_catalog.known_actions()
+        assert ak == EXPECTED_AK[it] and ak in action_catalog.known_actions()
 
 
 # ── 2. candidate_engine: the new types are eligible when active ──────────────
@@ -75,7 +85,7 @@ def test_new_types_eligible():
         cands = {c.canonical_insight_key: c for c in await build_promotion_candidates(db, user_id=uid)}
         for it in NEW_ADV:
             c = cands[f"adv_{it}:wildberries:SKU1"]
-            assert c.promotion_status == ELIGIBLE and c.action_key == "stop_auto_promotion"
+            assert c.promotion_status == ELIGIBLE and c.action_key == EXPECTED_AK[it]
     _run(go())
 
 
@@ -86,7 +96,7 @@ def test_old_type_still_eligible():
         db = await _engine(); uid = str(uuid.uuid4())
         await _adv(db, uid, "ad_destroying_profit")
         c = (await build_promotion_candidates(db, user_id=uid))[0]
-        assert c.promotion_status == ELIGIBLE and c.action_key == "stop_auto_promotion"
+        assert c.promotion_status == ELIGIBLE and c.action_key == "ad_set_state"
     _run(go())
 
 
@@ -121,7 +131,7 @@ def test_bridge_promotes_new_type_wb():
         res = await bridge_links_to_decisions(db, user_id=uid); await db.commit()
         assert res.promoted == 1 and res.items[0].outcome == PROMOTED
         d = (await db.execute(select(Decision))).scalars().one()
-        assert d.action_key == "stop_auto_promotion"
+        assert d.action_key == "ad_set_state"
         assert d.insight_key == "adv_ad_spend_without_sales:wildberries:SKU1"
     _run(go())
 

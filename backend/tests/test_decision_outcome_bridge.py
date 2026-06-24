@@ -94,7 +94,7 @@ def test_supported_action_creates_decision():
         ds = await _decisions(db)
         assert len(ds) == 1
         assert ds[0].insight_key == "adv_ad_destroying_profit:wildberries:SKU1"   # canonical 3-part
-        assert ds[0].action_key == "stop_auto_promotion"
+        assert ds[0].action_key == "ad_set_state"
         link = await _link(db, uid)
         assert link.decision_id == ds[0].id and link.link_status == "promoted"
         sig = (await db.execute(select(AdvertisingSignal))).scalars().one()
@@ -202,9 +202,11 @@ def test_action_bindings_are_real_and_advertising_only():
     # types are bound to a real catalog action; everything else stays advice-only (None).
     bound = {c.signal_key: c.action_key for c in BY_SIGNAL_KEY.values() if c.action_key is not None}
     assert bound == {
-        "adv_ad_destroying_profit": "stop_auto_promotion",
-        "adv_ad_spend_without_sales": "stop_auto_promotion",
-        "adv_ad_on_unprofitable_product": "stop_auto_promotion",
+        # A2.2-bind: direct overspend → ad_set_state (campaign pause)
+        "adv_ad_destroying_profit": "ad_set_state",
+        "adv_ad_spend_without_sales": "ad_set_state",
+        "adv_ad_on_unprofitable_product": "ad_set_state",
+        # indirect stock/listing → stop_auto_promotion (unchanged)
         "adv_ad_on_low_stock": "stop_auto_promotion",
         "adv_ad_on_oos_risk": "stop_auto_promotion",
         "adv_ad_on_bad_listing": "stop_auto_promotion",

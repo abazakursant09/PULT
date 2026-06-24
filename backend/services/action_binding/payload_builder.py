@@ -2,13 +2,19 @@
 Action Payload Builder (Action Catalog Expansion A4) — safe construction of a
 valid executor payload for a BOUND signal type. Read-only.
 
-It NEVER calls a marketplace, NEVER executes, NEVER generates text/content, NEVER
-guesses a value, NEVER fabricates a payload. It only assembles a payload whose
-every field is DERIVABLE from existing PULT data:
+It NEVER executes, NEVER generates text/content, NEVER guesses a value, NEVER
+fabricates a payload. It only assembles a payload whose every field is DERIVABLE
+from existing PULT data or a READ-ONLY marketplace lookup (campaign identity):
 
-  the five advertising "stop auto-promotion" types →
+  the indirect stock/listing advertising types →
     action_key = stop_auto_promotion
     payload    = {"offer_id": listing.external_id}   (sku → ProductListing → external_id)
+
+  the direct-overspend advertising types →
+    action_key = ad_set_state
+    payload    = {"campaign_id": <resolver single match>, "action": "pause"}
+    (campaign_id ONLY from resolve_campaign_identity, single unambiguous match;
+     a read-only call, never an execution and never a guessed id)
 
 If the signal type is not bindable → ok=False, reason from the binding
 (no_binding for no_catalog_action, payload_not_derivable otherwise). If a bound
@@ -24,7 +30,13 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.product_listing import ProductListing
+from models.marketplace_connection import MarketplaceConnection
+from models.api_credential import ApiCredential
 from services.product_resolver import normalize_marketplace, normalize_sku
+from services.marketplace import credential_vault
+from services.marketplace.campaign_identity import (
+    resolve_campaign_identity, CampaignIdentity,
+)
 from services.action_binding.registry import (
     BY_SIGNAL_TYPE, BOUND, NO_CATALOG_ACTION, PAYLOAD_NOT_DERIVABLE,
 )
@@ -32,9 +44,13 @@ from services.action_binding.registry import (
 REASON_NO_BINDING = "no_binding"
 REASON_PAYLOAD_NOT_DERIVABLE = "payload_not_derivable"
 
+# canonical code → MarketplaceConnection.marketplace label.
+_CONNECTION_MP = {"wb": "wildberries", "ozon": "ozon", "yandex": "yandex"}
+
 # allowed payload keys per action — the builder will never emit anything else.
 _ALLOWED_FIELDS = {
     "stop_auto_promotion": {"offer_id"},
+    "ad_set_state": {"campaign_id", "action"},
 }
 
 
@@ -83,6 +99,53 @@ async def build_action_payload(
         assert set(payload) <= _ALLOWED_FIELDS[b.action_key]   # only allowed fields
         return PayloadBuildResult(ok=True, action_key=b.action_key, payload=payload)
 
+    if b.action_key == "ad_set_state":
+        return await _build_ad_set_state(db, user_id=user_id, marketplace=marketplace, sku=sku)
+
     # bound to an action with no builder yet → honest payload_not_derivable
     return PayloadBuildResult(ok=False, action_key=b.action_key,
                               reason=REASON_PAYLOAD_NOT_DERIVABLE)
+
+
+async def _resolve_connection(db: AsyncSession, user_id: str, marketplace: str):
+    """user + marketplace → MarketplaceConnection (or None)."""
+    mp = normalize_marketplace(marketplace)
+    label = _CONNECTION_MP.get(mp, mp)
+    return (await db.execute(select(MarketplaceConnection).where(
+        MarketplaceConnection.user_id == user_id,
+        MarketplaceConnection.marketplace == label))).scalars().first()
+
+
+async def _wb_advert_token(db: AsyncSession, connection_id: str) -> Optional[str]:
+    """WB advert credential (scope='advert') → decrypted token, else None."""
+    cred = (await db.execute(select(ApiCredential).where(
+        ApiCredential.connection_id == connection_id,
+        ApiCredential.scope == "advert"))).scalars().first()
+    return credential_vault.decrypt(cred.secret_enc) if cred is not None else None
+
+
+async def _build_ad_set_state(db: AsyncSession, *, user_id: str, marketplace: str,
+                              sku: Optional[str]) -> PayloadBuildResult:
+    """ad_set_state pause payload: {campaign_id (resolver, single match), action:'pause'}.
+
+    campaign_id comes ONLY from resolve_campaign_identity, ONLY on a single unambiguous
+    match. Zero / multiple / no-relation / no-credential / unsupported marketplace →
+    ok=False with the resolver's EXACT reason. Never guesses, never auto-picks, never
+    uses seller text or AI."""
+    mp = normalize_marketplace(marketplace)
+    if mp not in ("wb", "ozon"):
+        # Yandex / Megamarket / unknown — honest unsupported (resolver would say no_adapter)
+        return PayloadBuildResult(ok=False, action_key="ad_set_state", reason="no_adapter")
+
+    conn = await _resolve_connection(db, user_id, marketplace)
+    connection_id = conn.id if conn is not None else None
+    token = await _wb_advert_token(db, connection_id) if (mp == "wb" and connection_id) else None
+
+    identity = await resolve_campaign_identity(
+        marketplace, sku=sku, token=token, db=db, connection_id=connection_id)
+    if isinstance(identity, CampaignIdentity):
+        payload = {"campaign_id": identity.campaign_id, "action": "pause"}
+        assert set(payload) <= _ALLOWED_FIELDS["ad_set_state"]   # only allowed fields
+        return PayloadBuildResult(ok=True, action_key="ad_set_state", payload=payload)
+    # CampaignUnavailable → not derivable; surface the exact reason
+    return PayloadBuildResult(ok=False, action_key="ad_set_state", reason=identity.reason)

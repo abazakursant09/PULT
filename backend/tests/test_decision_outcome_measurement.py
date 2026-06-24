@@ -48,8 +48,8 @@ async def _engine():
 
 async def _promote_adv(db, uid, *, mp="wildberries", sku="SKU1"):
     db.add(AdvertisingSignal(audit_id=str(uuid.uuid4()), user_id=uid,
-           signal_key="adv_ad_destroying_profit", problem_type="ad_destroying_profit",
-           insight_key=f"adv_ad_destroying_profit:{mp}:{sku}", marketplace=mp, sku=sku,
+           signal_key="adv_ad_on_low_stock", problem_type="ad_on_low_stock",
+           insight_key=f"adv_ad_on_low_stock:{mp}:{sku}", marketplace=mp, sku=sku,
            status="active", what="x", why="y", expected_effect="z", what_to_do="w",
            priority_level="critical"))
     await db.commit()

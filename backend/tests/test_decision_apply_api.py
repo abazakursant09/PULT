@@ -33,7 +33,7 @@ from routers.decision_apply import (
     PreviewResponse, ConfirmResponse,
 )
 
-IKEY = "adv_ad_destroying_profit:wildberries:SKU1"
+IKEY = "adv_ad_on_low_stock:wildberries:SKU1"
 
 
 def _run(c):
@@ -63,7 +63,7 @@ async def _seed(db, uid, *, with_listing=True, with_connection=True, mp="wildber
            action_key="stop_auto_promotion", decision_id=did, link_status="promoted",
            marketplace=mp, sku=sku))
     db.add(AdvertisingSignal(audit_id=str(uuid.uuid4()), user_id=uid,
-           signal_key="adv_ad_destroying_profit", problem_type="ad_destroying_profit",
+           signal_key="adv_ad_on_low_stock", problem_type="ad_on_low_stock",
            insight_key=ikey, marketplace=mp, sku=sku, status="promoted_to_decision"))
     if with_listing:
         db.add(ProductListing(physical_product_id="ph1", user_id=uid, marketplace="wb", external_id=sku))
@@ -115,7 +115,7 @@ def test_preview_unsupported_capability():
     async def go():
         db = await _engine(); uid = str(uuid.uuid4())
         did = await _seed(db, uid, mp="yandex", sku="SKU9",
-                          ikey="adv_ad_destroying_profit:yandex:SKU9", with_connection=False)
+                          ikey="adv_ad_on_low_stock:yandex:SKU9", with_connection=False)
         r = await decision_apply_preview(did, marketplace="yandex", sku="SKU9",
                                          current_user=_User(uid), db=db)
         assert r.applyable is False and r.reason == "unsupported_capability" and r.capability_ok is False
