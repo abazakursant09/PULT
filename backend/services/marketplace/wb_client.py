@@ -118,6 +118,41 @@ class WBClient:
             "GET", path, token=token, params={"id": int(campaign_id)}
         )
 
+    async def list_adverts_for_nm(self, *, token: str, nm_id) -> list[dict]:
+        """WB Promotion API read (campaign identity, A2.2-pre-a). Returns ONLY the
+        adverts observed from WB that actually target ``nm_id`` — never a fabricated
+        campaign.
+
+            GET /adv/v1/promotion/adverts  ->  [ {advertId, type, status, params:[{nms:[..]}]}, .. ]
+
+        Each WB advert carries the nmIDs it promotes inside ``params[].nms``. We
+        filter to adverts whose nms include nm_id and normalize to the campaign
+        identity fields, leaving any field WB does not return as None (no guessing).
+        """
+        nm = int(nm_id)
+        data = await self._advert().request("GET", "/adv/v1/promotion/adverts", token=token)
+        adverts = data if isinstance(data, list) else []
+        out: list[dict] = []
+        for adv in adverts:
+            if not isinstance(adv, dict):
+                continue
+            nms: set[int] = set()
+            for p in adv.get("params") or []:
+                if isinstance(p, dict):
+                    for n in p.get("nms") or []:
+                        try:
+                            nms.add(int(n))
+                        except (TypeError, ValueError):
+                            continue
+            if nm not in nms:
+                continue
+            out.append({
+                "campaign_id": adv.get("advertId"),
+                "campaign_type": adv.get("type"),
+                "campaign_state": adv.get("status"),
+            })
+        return out
+
     def _advert(self) -> "BaseMarketplaceClient":
         # lazy: advert base only needed for ME-4
         if not hasattr(self, "_advert_client"):

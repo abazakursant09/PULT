@@ -39,7 +39,7 @@ from models.review_signal import ReviewSignal
 from models.growth_signal import GrowthSignal
 from models.legal_signal import LegalSignal
 
-from services.marketplace.finance_metric_reader import read_net_profit
+from services.marketplace.finance_metric_reader import read_ad_cost_ratio, read_net_profit
 from services.marketplace.metric_reader import MetricSample
 from .registry import BY_SIGNAL_KEY
 
@@ -52,6 +52,7 @@ _MODELS = {
 # ONLY metrics with a real observed reader are measurable; the rest → not_evaluated.
 _READERS = {
     "ad_profit_impact": (read_net_profit, +1),
+    "ad_cost_ratio": (read_ad_cost_ratio, -1),   # ДРР: lower observed ratio is better
 }
 
 _EPS_REL = 0.05   # within 5% of baseline magnitude → unchanged (no fabricated precision)
