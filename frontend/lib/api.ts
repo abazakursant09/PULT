@@ -2245,6 +2245,7 @@ export interface DecisionFeedItem {
   expected_effect:    string | null
   effect_status:      string | null
   effect_band:        string | null
+  learning_context:   string | null   // observed history line (counts only, not a forecast)
   lifecycle_reason:   string | null
   created_at:         string | null
   updated_at:         string | null

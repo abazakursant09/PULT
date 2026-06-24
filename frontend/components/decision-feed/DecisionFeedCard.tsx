@@ -132,6 +132,19 @@ export function DecisionFeedCard(
           {item.effect_band ? ` (${item.effect_band})` : ''}
         </div>
       )}
+      {/* Learning OS v3 — observed HISTORY for this marketplace (counts only),
+          with an explicit "not a forecast" disclaimer. Never a prediction/score. */}
+      {item.learning_context && (
+        <div style={{
+          marginTop: 8, padding: '7px 10px', borderRadius: 7,
+          background: 'var(--surface-h)', border: '1px solid var(--line)',
+        }}>
+          <div style={{ fontSize: 12, color: 'var(--text-2)' }}>{item.learning_context}</div>
+          <div style={{ fontSize: 10.5, color: 'var(--text-3)', marginTop: 3, fontStyle: 'italic' }}>
+            Это не прогноз, а только прошлые наблюдения.
+          </div>
+        </div>
+      )}
       {item.lifecycle_reason && (
         <div style={{ fontSize: 10.5, color: 'var(--text-3)', marginTop: 6 }}>Статус: {item.lifecycle_reason}</div>
       )}

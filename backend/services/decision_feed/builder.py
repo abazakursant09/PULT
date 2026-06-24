@@ -58,8 +58,11 @@ async def _learning_context(db, user_id: str, summary) -> Optional[str]:
     if agg is None or agg.total_count < _LEARNING_MIN_SAMPLE:
         return None
     mp = _MP_DISPLAY.get(agg.marketplace or "", agg.marketplace or "")
-    return (f"По {mp} это решение ранее помогло в "
-            f"{agg.improved_count} случаях из {agg.total_count}.")
+    # Learning OS v3 — observed HISTORY line (not a forecast). Counts only,
+    # marketplace-specific. The "this is history, not a prediction" disclaimer is
+    # rendered alongside in the feed card.
+    return (f"История PULT на {mp}: это решение помогло в "
+            f"{agg.improved_count} из {agg.total_count} случаев.")
 
 # contour → (model, signal_table)
 _ENGINES = (
