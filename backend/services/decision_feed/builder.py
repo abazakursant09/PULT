@@ -37,6 +37,29 @@ from models.legal_signal import LegalSignal
 
 from services.decision_outcome.registry import BY_SIGNAL_KEY
 from services.decision_outcome.effect_summary import build_effect_summaries
+from services.learning_os.registry import get_action_learning_summary
+
+# Learning OS v1 — feed enrichment gate. Show the observed learning line ONLY when
+# this (marketplace, action) has at least this many measured outcomes. Below the
+# gate: show nothing (never a thin, misleading sample).
+_LEARNING_MIN_SAMPLE = 10
+_MP_DISPLAY = {"wb": "Wildberries", "ozon": "Ozon", "yandex": "Yandex Market",
+               "megamarket": "Megamarket"}
+
+
+async def _learning_context(db, user_id: str, summary) -> Optional[str]:
+    """Observed-only descriptive line for a MEASURED effect, gated by min sample.
+    Counts only — no percentage, no probability, no forecast. None when ungated or
+    no action/marketplace. Marketplace-isolated (per canonical marketplace)."""
+    if not summary.action_key or not summary.marketplace:
+        return None
+    agg = await get_action_learning_summary(
+        db, user_id=user_id, marketplace=summary.marketplace, action_key=summary.action_key)
+    if agg is None or agg.total_count < _LEARNING_MIN_SAMPLE:
+        return None
+    mp = _MP_DISPLAY.get(agg.marketplace or "", agg.marketplace or "")
+    return (f"По {mp} это решение ранее помогло в "
+            f"{agg.improved_count} случаях из {agg.total_count}.")
 
 # contour → (model, signal_table)
 _ENGINES = (
@@ -80,6 +103,10 @@ class FeedItem:
     effect_status: Optional[str] = None
     effect_band: Optional[str] = None
     lifecycle_reason: Optional[str] = None
+    # Learning OS v1 — optional, observed-only descriptive context for a MEASURED
+    # effect (counts, marketplace-specific). None unless the minimum sample gate
+    # passes. Never a percentage / score / forecast.
+    learning_context: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     source_context: Mapping[str, object] = field(default_factory=dict)
@@ -187,6 +214,10 @@ async def build_feed(
                 continue   # proven_unchanged only when explicitly requested
             it = _do_item(s)
             if it is not None:
+                # Learning OS v1 — attach observed learning context for measured
+                # effects only (gated; observed counts, marketplace-isolated).
+                if s.measured_at is not None:
+                    it.learning_context = await _learning_context(db, user_id, s)
                 items.append(it)
 
     # ── attention overlay + visibility ────────────────────────────────────────
