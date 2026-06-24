@@ -1,5 +1,7 @@
 'use client'
 import { useState } from 'react'
+import { Check, X, Minus, HelpCircle, Clock } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { api } from '@/lib/api'
 import type { DecisionFeedItem, DecisionApplyPreview, DecisionApplyConfirmResult } from '@/lib/api'
 
@@ -13,12 +15,24 @@ const CONTOUR_RU: Record<string, string> = {
 const ATTENTION_RU: Record<string, string> = {
   new: 'Новое', seen: 'Просмотрено', snoozed: 'Отложено', acted: 'Выполнено', dismissed: 'Скрыто',
 }
-const EFFECT_RU: Record<string, string> = {
-  proven_improved: 'Улучшение подтверждено наблюдением',
-  proven_worsened: 'После решения метрика ухудшилась',
-  proven_unchanged: 'Заметного изменения не зафиксировано',
-  not_evaluated: 'Недостаточно данных, чтобы доказать эффект',
-  not_measured_yet: 'Измерение ещё не закрыто',
+
+// A2 — verdict mapping, effect_status ONLY. No calculation, no score, no ROL.
+// tone drives neutral styling; not_evaluated and not_measured_yet stay neutral.
+type Tone = 'good' | 'bad' | 'neutral'
+const VERDICT: Record<string, { Icon: LucideIcon; label: string; tone: Tone }> = {
+  proven_improved:  { Icon: Check,      label: 'Решение помогло',                          tone: 'good' },
+  proven_worsened:  { Icon: X,          label: 'Решение ухудшило результат',               tone: 'bad' },
+  proven_unchanged: { Icon: Minus,      label: 'Заметного изменения не зафиксировано',     tone: 'neutral' },
+  not_evaluated:    { Icon: HelpCircle, label: 'Недостаточно данных для оценки результата.', tone: 'neutral' },
+  not_measured_yet: { Icon: Clock,      label: 'Измерение ещё не завершено',               tone: 'neutral' },
+}
+// A3 — the prominent verdict badge shows only for these (a closed measurement).
+const BADGE_STATUSES = new Set(['proven_improved', 'proven_worsened', 'proven_unchanged', 'not_evaluated'])
+
+const TONE_STYLE: Record<Tone, { fg: string; bg: string; bd: string }> = {
+  good:    { fg: '#15803d', bg: 'rgba(21,128,61,0.10)',  bd: 'rgba(21,128,61,0.35)' },
+  bad:     { fg: '#b91c1c', bg: 'rgba(185,28,28,0.10)',  bd: 'rgba(185,28,28,0.35)' },
+  neutral: { fg: 'var(--text-2)', bg: 'var(--surface-h)', bd: 'var(--line)' },
 }
 
 // cautious reason copy for the apply flow — no promises, no all-clear claims
@@ -106,9 +120,19 @@ export function DecisionFeedCard(
   const ctx = [CONTOUR_RU[item.contour] ?? item.contour, item.marketplace, item.sku]
     .filter(Boolean).join(' · ')
 
+  // A2/A4 — verdict + measured state, derived from existing fields only.
+  const verdict = item.effect_status ? VERDICT[item.effect_status] : undefined
+  const tone = verdict ? TONE_STYLE[verdict.tone] : TONE_STYLE.neutral
+  const isMeasured = item.contour === 'decision_outcome'
+  const showBadge = !!item.effect_status && !!verdict && BADGE_STATUSES.has(item.effect_status)
+  const VerdictIcon = verdict?.Icon
+
   return (
     <div style={{
       background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 12, padding: 14,
+      // A4 — measured cards are visually distinct from active tasks (subtle, not
+      // louder): toned left accent + muted surface. Ordering stays backend-driven.
+      ...(isMeasured ? { borderLeft: `3px solid ${tone.bd}`, background: 'var(--surface-h)' } : {}),
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
         <span style={{
@@ -116,6 +140,12 @@ export function DecisionFeedCard(
           borderRadius: 5, background: 'var(--surface-h)', color: 'var(--text-2)', border: '1px solid var(--line)',
         }}>{ctx}</span>
         <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{ATTENTION_RU[item.attention_state] ?? item.attention_state}</span>
+        {isMeasured && (
+          <span style={{
+            fontSize: 9.5, fontWeight: 700, textTransform: 'uppercase', padding: '3px 8px',
+            borderRadius: 5, background: 'var(--surface)', color: 'var(--text-3)', border: '1px solid var(--line)',
+          }}>Измерено</span>
+        )}
       </div>
 
       {item.title && <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)' }}>{item.title}</div>}
@@ -126,10 +156,22 @@ export function DecisionFeedCard(
       {item.meaning && <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 2 }}>{item.meaning}</div>}
       {item.recommended_action && <div style={{ fontSize: 12.5, color: 'var(--text)', marginTop: 6 }}><b>Что сделать:</b> {item.recommended_action}</div>}
       {item.expected_effect && <div style={{ fontSize: 11.5, color: 'var(--text-3)', marginTop: 4 }}>Ожидаемый эффект: {item.expected_effect}</div>}
-      {item.effect_status && (
-        <div style={{ fontSize: 11.5, color: 'var(--text-3)', marginTop: 4 }}>
-          {EFFECT_RU[item.effect_status] ?? item.effect_status}
-          {item.effect_band ? ` (${item.effect_band})` : ''}
+      {/* A3 — prominent verdict badge for a closed measurement (proven_* / not_evaluated). */}
+      {showBadge && VerdictIcon && verdict && (
+        <div style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 8,
+          padding: '4px 9px', borderRadius: 7, fontSize: 12, fontWeight: 600,
+          color: tone.fg, background: tone.bg, border: `1px solid ${tone.bd}`,
+        }}>
+          <VerdictIcon size={14} strokeWidth={2.5} />
+          <span>{verdict.label}</span>
+        </div>
+      )}
+      {/* A3 — measurement still open: quiet status line, no verdict badge. */}
+      {item.effect_status === 'not_measured_yet' && VerdictIcon && verdict && (
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 6, fontSize: 11.5, color: 'var(--text-3)' }}>
+          <VerdictIcon size={12} />
+          <span>{verdict.label}</span>
         </div>
       )}
       {/* Learning OS v3 — observed HISTORY for this marketplace (counts only),
