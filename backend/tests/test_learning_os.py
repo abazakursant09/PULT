@@ -27,6 +27,7 @@ from models.decision import Decision
 
 from services.learning_os.registry import (
     aggregate_learning_observations, get_action_learning_summary,
+    get_action_learning_summary_for_context,
     rank_action_keys_by_observed,
 )
 from services.insight_decision_bridge import InsightPromotionDTO
@@ -345,3 +346,107 @@ def test_feed_card_has_no_auto_apply_for_measured():
     assert "item.contour !== 'decision_outcome'" in src
     # history surface is descriptive — no apply call wired to learning_context
     assert "learning_context" in src
+
+
+# ── v4. Similar-context experience (context_group: marketplace|cat|price|margin) ─
+
+from models.imported_finance import ImportedFinanceRow as _Fin
+
+
+async def _measured_ctx(db, uid, *, mp, action, band, margin_pct, metric="ad_profit_impact"):
+    """One measured observation whose context margin_band is driven by seeded
+    finance (rev=1000, net=rev*margin%). No listing → category/price stay unknown."""
+    did = str(uuid.uuid4()); sku = f"SKU-{uuid.uuid4().hex[:8]}"
+    ik = f"adv_ad_destroying_profit:{mp}:{sku}"
+    link = EngineSignalDecisionLink(
+        user_id=uid, contour="advertising", signal_table="advertising_signal",
+        signal_id=str(uuid.uuid4()), insight_key=ik, action_key=action, decision_id=did,
+        link_status="measured", marketplace=mp, sku=sku)
+    db.add(link); await db.flush()
+    db.add(EngineEffectObservation(
+        link_id=link.id, user_id=uid, insight_key=ik, metric_key=metric, window_days=14,
+        baseline_captured_at=PAST, measured_at=NOW, effect_band=band,
+        evidence=json.dumps({"baseline": 100, "after": 200}), created_at=PAST))
+    db.add(_Fin(import_id="imp", user_id=uid, marketplace=mp, sku=sku,
+                revenue=1000.0, net_profit=1000.0 * margin_pct / 100.0, date=NOW.date().isoformat()))
+    await db.commit()
+    return sku
+
+
+def _ctx_of(mp, margin_band):
+    # no listing → category/price unknown; marketplace component is the lowercased hint
+    return f"{mp.lower()}|unknown|unknown|{margin_band}"
+
+
+def test_context_isolation_by_margin_band():
+    db = _run(_new_db()); uid = str(uuid.uuid4())
+    for _ in range(10):
+        _run(_measured_ctx(db, uid, mp="wildberries", action="stop_auto_promotion", band="improved", margin_pct=15))   # mid_margin
+    for _ in range(8):
+        _run(_measured_ctx(db, uid, mp="wildberries", action="stop_auto_promotion", band="worsened", margin_pct=30))   # high_margin
+    mid = _run(get_action_learning_summary_for_context(
+        db, user_id=uid, marketplace="wildberries", action_key="stop_auto_promotion",
+        context_group=_ctx_of("wildberries", "mid_margin")))
+    high = _run(get_action_learning_summary_for_context(
+        db, user_id=uid, marketplace="wildberries", action_key="stop_auto_promotion",
+        context_group=_ctx_of("wildberries", "high_margin")))
+    assert mid.total_count == 10 and mid.improved_count == 10            # only mid_margin counted
+    assert high.total_count == 8 and high.worsened_count == 8            # separate context
+    assert mid.total_count + high.total_count == 18                      # never blended
+
+
+def test_context_marketplace_isolation():
+    db = _run(_new_db()); uid = str(uuid.uuid4())
+    for _ in range(10):
+        _run(_measured_ctx(db, uid, mp="wildberries", action="stop_auto_promotion", band="improved", margin_pct=15))
+    for _ in range(10):
+        _run(_measured_ctx(db, uid, mp="ozon", action="stop_auto_promotion", band="worsened", margin_pct=15))
+    wb = _run(get_action_learning_summary_for_context(
+        db, user_id=uid, marketplace="wildberries", action_key="stop_auto_promotion",
+        context_group=_ctx_of("wildberries", "mid_margin")))
+    assert wb.total_count == 10 and wb.improved_count == 10              # ozon never mixed in
+
+
+def test_feed_shows_context_history_when_enough():
+    db = _run(_new_db()); uid = str(uuid.uuid4())
+    for _ in range(10):
+        _run(_measured_ctx(db, uid, mp="wildberries", action="stop_auto_promotion", band="improved", margin_pct=15))
+    items = _feed_client(db, uid).get("/api/decision-feed").json()["items"]
+    line = next(x["learning_context"] for x in items if x.get("learning_context"))
+    assert line == ("История PULT на Wildberries для товаров с маржой 10–25%: "
+                    "это решение помогло в 10 из 10 случаев.")
+    assert "%" not in line.replace("10–25%", "")    # no percentage in the count phrasing
+
+
+def test_feed_falls_back_to_marketplace_when_context_thin():
+    db = _run(_new_db()); uid = str(uuid.uuid4())
+    # only 5 in the mid_margin context, but 10 marketplace-wide (rest unknown context)
+    for _ in range(5):
+        _run(_measured_ctx(db, uid, mp="wildberries", action="stop_auto_promotion", band="improved", margin_pct=15))
+    for _ in range(5):
+        _run(_measured(db, uid, mp="wildberries", action="stop_auto_promotion", band="improved"))  # no finance → unknown ctx
+    items = _feed_client(db, uid).get("/api/decision-feed").json()["items"]
+    lines = [x["learning_context"] for x in items if x.get("learning_context")]
+    # context tier (<10) is skipped → marketplace-wide line (10 total) shown
+    assert any(l == "История PULT на Wildberries: это решение помогло в 10 из 10 случаев." for l in lines)
+    assert all("для товаров" not in l for l in lines)   # no context line below the gate
+
+
+def test_feed_no_history_below_all_gates():
+    db = _run(_new_db()); uid = str(uuid.uuid4())
+    for _ in range(5):
+        _run(_measured(db, uid, mp="wildberries", action="stop_auto_promotion", band="improved"))
+    items = _feed_client(db, uid).get("/api/decision-feed").json()["items"]
+    assert all(x.get("learning_context") in (None, "") for x in items)   # < 10 anywhere → nothing
+
+
+def test_context_history_no_forbidden_words():
+    db = _run(_new_db()); uid = str(uuid.uuid4())
+    for _ in range(10):
+        _run(_measured_ctx(db, uid, mp="wildberries", action="stop_auto_promotion", band="improved", margin_pct=15))
+    items = _feed_client(db, uid).get("/api/decision-feed").json()["items"]
+    line = next(x["learning_context"] for x in items if x.get("learning_context")).lower()
+    for bad in ("вероятн", "probability", "confidence", "увер", "score", "балл",
+                "прогноз", "forecast", "предсказ", "prediction", "roi", "рентаб",
+                "прибыл", "profit", "рекоменд"):
+        assert bad not in line

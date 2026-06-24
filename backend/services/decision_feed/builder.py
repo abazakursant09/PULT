@@ -37,7 +37,10 @@ from models.legal_signal import LegalSignal
 
 from services.decision_outcome.registry import BY_SIGNAL_KEY
 from services.decision_outcome.effect_summary import build_effect_summaries
-from services.learning_os.registry import get_action_learning_summary
+from services.learning_os.registry import (
+    get_action_learning_summary, get_action_learning_summary_for_context,
+)
+from services.product_resolver import normalize_marketplace
 
 # Learning OS v1 — feed enrichment gate. Show the observed learning line ONLY when
 # this (marketplace, action) has at least this many measured outcomes. Below the
@@ -46,23 +49,64 @@ _LEARNING_MIN_SAMPLE = 10
 _MP_DISPLAY = {"wb": "Wildberries", "ozon": "Ozon", "yandex": "Yandex Market",
                "megamarket": "Megamarket"}
 
+# Learning OS v4 — readable display for the context_group price/margin bands. Ranges
+# mirror services.decision_memory thresholds (PRICE 500/2000 ₽, MARGIN 10/25%).
+_PRICE_DISPLAY = {"low": "до 500 ₽", "mid": "500–2000 ₽", "high": "от 2000 ₽"}
+_MARGIN_DISPLAY = {"low_margin": "до 10%", "mid_margin": "10–25%", "high_margin": "от 25%"}
+_CTX_UNKNOWN = "unknown"
+
+
+def _context_segments(context_group: str) -> str:
+    """Readable 'для товаров ...' segments from a context_group, using ONLY its
+    known (non-unknown) dimensions beyond marketplace. Empty when nothing specific."""
+    parts = (context_group or "").split("|")
+    category = parts[1] if len(parts) > 1 else _CTX_UNKNOWN
+    price = parts[2] if len(parts) > 2 else _CTX_UNKNOWN
+    margin = parts[3] if len(parts) > 3 else _CTX_UNKNOWN
+    seg = []
+    if category and category != _CTX_UNKNOWN:
+        seg.append(f"категории {category.capitalize()}")
+    if price in _PRICE_DISPLAY:
+        seg.append(f"с ценой {_PRICE_DISPLAY[price]}")
+    if margin in _MARGIN_DISPLAY:
+        seg.append(f"с маржой {_MARGIN_DISPLAY[margin]}")
+    return " ".join(seg)
+
 
 async def _learning_context(db, user_id: str, summary) -> Optional[str]:
-    """Observed-only descriptive line for a MEASURED effect, gated by min sample.
-    Counts only — no percentage, no probability, no forecast. None when ungated or
-    no action/marketplace. Marketplace-isolated (per canonical marketplace)."""
+    """Observed-only HISTORY line for a MEASURED effect (counts only — no percentage,
+    no probability, no score, no forecast). Marketplace-isolated.
+
+    Fallback chain (Learning OS v4): similar-context history → marketplace-wide
+    history → nothing. Each tier is gated by >= _LEARNING_MIN_SAMPLE measured
+    observations; below the gate the next tier is tried."""
     if not summary.action_key or not summary.marketplace:
         return None
+    mp = _MP_DISPLAY.get(normalize_marketplace(summary.marketplace), summary.marketplace)
+
+    # 1) similar context — only when the context carries a specific dimension.
+    from services.decision_memory import resolve_context_group_for_insight
+    ctx = await resolve_context_group_for_insight(
+        db, user_id=user_id, insight_key=summary.insight_key,
+        marketplace=summary.marketplace, sku=summary.sku)
+    segments = _context_segments(ctx)
+    if segments:
+        cagg = await get_action_learning_summary_for_context(
+            db, user_id=user_id, marketplace=summary.marketplace,
+            action_key=summary.action_key, context_group=ctx)
+        if cagg is not None and cagg.total_count >= _LEARNING_MIN_SAMPLE:
+            return (f"История PULT на {mp} для товаров {segments}: "
+                    f"это решение помогло в {cagg.improved_count} из {cagg.total_count} случаев.")
+
+    # 2) marketplace-wide history (v3 fallback).
     agg = await get_action_learning_summary(
         db, user_id=user_id, marketplace=summary.marketplace, action_key=summary.action_key)
-    if agg is None or agg.total_count < _LEARNING_MIN_SAMPLE:
-        return None
-    mp = _MP_DISPLAY.get(agg.marketplace or "", agg.marketplace or "")
-    # Learning OS v3 — observed HISTORY line (not a forecast). Counts only,
-    # marketplace-specific. The "this is history, not a prediction" disclaimer is
-    # rendered alongside in the feed card.
-    return (f"История PULT на {mp}: это решение помогло в "
-            f"{agg.improved_count} из {agg.total_count} случаев.")
+    if agg is not None and agg.total_count >= _LEARNING_MIN_SAMPLE:
+        return (f"История PULT на {mp}: это решение помогло в "
+                f"{agg.improved_count} из {agg.total_count} случаев.")
+
+    # 3) no history.
+    return None
 
 # contour → (model, signal_table)
 _ENGINES = (
