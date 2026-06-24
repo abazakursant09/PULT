@@ -62,6 +62,43 @@ class OzonClient:
         return await self._performance().request(
             "POST", path, token=f"Bearer {token}", auth_header="Authorization")
 
+    async def list_campaigns_for_sku(self, *, token: str, sku=None) -> list[dict]:
+        """Ozon Performance API campaign read (campaign identity, A2.2-pre-a.2).
+
+        `token` is a Performance OAuth bearer (acquired by ozon_performance_auth;
+        never logged). Returns ONLY the campaigns observed from the API, normalized;
+        never a fabricated campaign and never a guessed listing relation.
+
+        Endpoint:
+            GET /api/client/campaign   ->  {"list": [ {id|campaignId, advObjectType|type,
+                                                        state|status, ... } ]}
+
+        TODO(ozon-perf-docs): the exact campaigns-list path, the campaign→product
+        (sku) membership field, and per-campaign objects endpoint are NOT yet
+        confirmed against Ozon Performance docs. This seam normalizes defensively
+        and surfaces the sku relation ONLY when the response actually carries it;
+        the resolver treats a missing relation as honest-unavailable (never a guess).
+        `sku` is accepted for a future server-side filter; today filtering is the
+        resolver's job over the observed relation.
+        """
+        data = await self._performance().request(
+            "GET", "/api/client/campaign", token=f"Bearer {token}", auth_header="Authorization")
+        rows = data.get("list") if isinstance(data, dict) else data
+        rows = rows if isinstance(rows, list) else []
+        out: list[dict] = []
+        for c in rows:
+            if not isinstance(c, dict):
+                continue
+            out.append({
+                "campaign_id": c.get("id", c.get("campaignId")),
+                "campaign_type": c.get("advObjectType", c.get("type")),
+                "campaign_state": c.get("state", c.get("status")),
+                # relation surfaced ONLY if present; otherwise None (never inferred)
+                "sku": c.get("sku", c.get("offer_id")),
+                "relation_present": ("sku" in c or "offer_id" in c),
+            })
+        return out
+
     def _performance(self) -> "BaseMarketplaceClient":
         # lazy: Performance API base (separate from Seller API)
         if not hasattr(self, "_performance_client"):

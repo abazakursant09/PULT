@@ -101,11 +101,12 @@ def test_wb_invalid_listing_identity(fake_wb):
 
 # ── non-WB marketplaces: honest reasons, no WB call ──────────────────────────
 
-def test_ozon_not_implemented(monkeypatch):
+def test_ozon_without_connection_no_scope(monkeypatch):
+    # No db/connection_id → cannot resolve the advert_performance credential.
     monkeypatch.setattr(ci, "wb_client", _ExplodingWB())
     r = _run(resolve_campaign_identity("ozon", sku="12345", token="t"))
     assert isinstance(r, CampaignUnavailable)
-    assert r.marketplace == "ozon" and r.reason == NOT_IMPLEMENTED
+    assert r.marketplace == "ozon" and r.reason == NO_SCOPE
 
 
 def test_yandex_no_adapter(monkeypatch):
@@ -135,3 +136,129 @@ def test_non_wb_never_calls_wb_client(monkeypatch):
     for mp in ("ozon", "yandex", "megamarket", "unknown_mp"):
         r = _run(resolve_campaign_identity(mp, sku="12345", token="t"))
         assert isinstance(r, CampaignUnavailable)   # _ExplodingWB would have raised on any call
+
+
+# ── Ozon real read (Performance bearer) ──────────────────────────────────────
+
+class _FakeOzon:
+    """Records calls; returns scripted normalized campaigns."""
+    def __init__(self, campaigns):
+        self._c = campaigns
+        self.calls = 0
+    async def list_campaigns_for_sku(self, *, token, sku=None):
+        self.calls += 1
+        self.last = {"token": token, "sku": sku}
+        return list(self._c)
+
+
+class _ExplodingOzon:
+    async def list_campaigns_for_sku(self, *, token, sku=None):
+        raise AssertionError("WB resolve must NOT call the Ozon client")
+
+
+def _install_ozon(monkeypatch, campaigns):
+    fake = _FakeOzon(campaigns)
+    monkeypatch.setattr(ci, "ozon_client", fake)
+    async def fake_bearer(_db, *, connection_id, **kw):
+        return "BEARER"
+    monkeypatch.setattr(ci.ozon_performance_auth, "acquire_bearer", fake_bearer)
+    return fake
+
+
+def _cmp(cid, sku, *, type=None, state=None, rel=True):
+    d = {"campaign_id": cid, "campaign_type": type, "campaign_state": state,
+         "relation_present": rel}
+    if rel:
+        d["sku"] = sku
+    return d
+
+
+def test_ozon_single_matching_campaign(monkeypatch):
+    fake = _install_ozon(monkeypatch, [_cmp(101, "SKU-1", type="SKU", state="running"),
+                                       _cmp(102, "SKU-9")])
+    r = _run(resolve_campaign_identity("ozon", sku="SKU-1", db=object(), connection_id="c"))
+    assert isinstance(r, CampaignIdentity)
+    assert r.marketplace == "ozon" and r.campaign_id == 101
+    assert r.campaign_type == "SKU" and r.campaign_state == "running"
+    assert r.source == "ozon_performance_api"
+    assert fake.last["token"] == "BEARER"        # used the Performance bearer, not a raw token
+
+
+def test_ozon_zero_matching_no_campaign(monkeypatch):
+    _install_ozon(monkeypatch, [_cmp(102, "SKU-9"), _cmp(103, "SKU-8")])
+    r = _run(resolve_campaign_identity("ozon", sku="SKU-1", db=object(), connection_id="c"))
+    assert isinstance(r, CampaignUnavailable) and r.reason == NO_CAMPAIGN_FOR_LISTING
+
+
+def test_ozon_multiple_matching_ambiguous(monkeypatch):
+    _install_ozon(monkeypatch, [_cmp(201, "SKU-1"), _cmp(202, "SKU-1")])
+    r = _run(resolve_campaign_identity("ozon", sku="SKU-1", db=object(), connection_id="c"))
+    assert isinstance(r, CampaignUnavailable) and r.reason == AMBIGUOUS_MULTIPLE
+
+
+def test_ozon_relation_unavailable_not_implemented(monkeypatch):
+    # campaigns observed but none carry a listing relation → no guess, honest unavailable
+    _install_ozon(monkeypatch, [_cmp(301, None, rel=False), _cmp(302, None, rel=False)])
+    r = _run(resolve_campaign_identity("ozon", sku="SKU-1", db=object(), connection_id="c"))
+    assert isinstance(r, CampaignUnavailable) and r.reason == NOT_IMPLEMENTED
+
+
+def test_ozon_missing_credential_no_scope(monkeypatch):
+    from services.marketplace.errors import ExecutionError
+    monkeypatch.setattr(ci, "ozon_client", _ExplodingOzon())   # must not be reached
+    async def boom_bearer(_db, *, connection_id, **kw):
+        raise ExecutionError(ExecutionError.MISSING_SCOPE, "no advert_performance credential")
+    monkeypatch.setattr(ci.ozon_performance_auth, "acquire_bearer", boom_bearer)
+    r = _run(resolve_campaign_identity("ozon", sku="SKU-1", db=object(), connection_id="c"))
+    assert isinstance(r, CampaignUnavailable) and r.reason == NO_SCOPE
+
+
+def test_ozon_no_sku_invalid_identity(monkeypatch):
+    _install_ozon(monkeypatch, [_cmp(101, "SKU-1")])
+    r = _run(resolve_campaign_identity("ozon", db=object(), connection_id="c"))  # no sku
+    assert isinstance(r, CampaignUnavailable) and r.reason == INVALID_LISTING_IDENTITY
+
+
+# ── isolation both ways: WB resolve never calls the Ozon client ──────────────
+
+def test_wb_never_calls_ozon_client(monkeypatch):
+    monkeypatch.setattr(ci, "ozon_client", _ExplodingOzon())
+    monkeypatch.setattr(ci, "wb_client", _FakeWB([{"campaign_id": 5}]))
+    r = _run(resolve_campaign_identity("wb", sku="12345", token="t"))
+    assert isinstance(r, CampaignIdentity) and r.marketplace == "wb"
+
+
+def test_ozon_resolve_never_calls_wb_client(monkeypatch):
+    monkeypatch.setattr(ci, "wb_client", _ExplodingWB())
+    _install_ozon(monkeypatch, [_cmp(101, "SKU-1")])
+    r = _run(resolve_campaign_identity("ozon", sku="SKU-1", db=object(), connection_id="c"))
+    assert isinstance(r, CampaignIdentity) and r.marketplace == "ozon"
+
+
+# ── Ozon adapter request shape + normalization (real method) ─────────────────
+
+def test_ozon_adapter_request_shape_and_normalization(monkeypatch):
+    from services.marketplace.ozon_client import ozon_client
+    cap = []
+    async def fake_request(method, path, *, token, auth_header):
+        cap.append((method, path, token, auth_header))
+        return {"list": [{"id": 101, "advObjectType": "SKU", "state": "running", "sku": "SKU-1"},
+                         {"campaignId": 102, "type": "SEARCH", "status": "stopped"}]}
+    monkeypatch.setattr(ozon_client._performance(), "request", fake_request)
+    rows = _run(ozon_client.list_campaigns_for_sku(token="B", sku="SKU-1"))
+    assert cap == [("GET", "/api/client/campaign", "Bearer B", "Authorization")]
+    assert rows[0] == {"campaign_id": 101, "campaign_type": "SKU", "campaign_state": "running",
+                       "sku": "SKU-1", "relation_present": True}
+    # second campaign carries no relation field → relation_present False, sku None (never guessed)
+    assert rows[1]["campaign_id"] == 102 and rows[1]["relation_present"] is False
+    assert rows[1]["sku"] is None
+
+
+# ── (9) no schema change: resolver/adapter add no model/table ─────────────────
+
+def test_no_new_schema():
+    # campaign identity is a pure read seam — no ORM model is defined by it.
+    import services.marketplace.campaign_identity as mod
+    from database import Base
+    assert not any(getattr(v, "__tablename__", None) and isinstance(v, type)
+                   and issubclass(v, Base) for v in vars(mod).values())
