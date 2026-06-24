@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Mapping, Optional
 
 from sqlalchemy import select
@@ -162,9 +162,15 @@ async def open_effect_measurement(
 
 async def close_effect_measurement(
     db: AsyncSession, *, user_id: str, now: Optional[datetime] = None,
+    only_expired: bool = False,
 ) -> CloseResult:
     """Close still-open observations: read the after value, classify the band, flip
-    the link to measured. Idempotent (only measured_at IS NULL rows). Flush-only."""
+    the link to measured. Idempotent (only measured_at IS NULL rows). Flush-only.
+
+    only_expired=True closes ONLY observations whose window has elapsed
+    (baseline_captured_at + window_days <= now) — used by the automatic close tick
+    so an effect is never read before its observation window is over. The default
+    (False) closes every open observation (the explicit manual driver)."""
     ts = now or datetime.utcnow()
     open_obs = (await db.execute(select(EngineEffectObservation).where(
         EngineEffectObservation.user_id == user_id,
@@ -172,6 +178,12 @@ async def close_effect_measurement(
 
     res = CloseResult()
     for obs in open_obs:
+        if only_expired:
+            captured = obs.baseline_captured_at
+            window = timedelta(days=obs.window_days or 14)
+            if captured is None or captured + window > ts:
+                res.skipped += 1   # window not elapsed yet — leave open, read no value
+                continue
         link = await db.get(EngineSignalDecisionLink, obs.link_id)
         ev = {}
         try:
