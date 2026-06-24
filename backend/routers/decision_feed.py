@@ -49,6 +49,7 @@ class FeedItemView(BaseModel):
     effect_band: Optional[str]
     learning_context: Optional[str]
     learning_explain: Optional[dict]
+    ranking_explain: Optional[dict]
     lifecycle_reason: Optional[str]
     created_at: Optional[str]
     updated_at: Optional[str]
@@ -64,6 +65,7 @@ def _view(i: FeedItem) -> FeedItemView:
         expected_effect=i.expected_effect, effect_status=i.effect_status, effect_band=i.effect_band,
         learning_context=i.learning_context,
         learning_explain=dict(i.learning_explain) if i.learning_explain else None,
+        ranking_explain=dict(i.ranking_explain) if i.ranking_explain else None,
         lifecycle_reason=i.lifecycle_reason,
         created_at=i.created_at.isoformat() if i.created_at else None,
         updated_at=i.updated_at.isoformat() if i.updated_at else None,

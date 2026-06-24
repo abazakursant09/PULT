@@ -144,6 +144,12 @@ export function DecisionFeedCard(
           <div style={{ fontSize: 10.5, color: 'var(--text-3)', marginTop: 3, fontStyle: 'italic' }}>
             {item.learning_explain?.explanation_text ?? 'Это не прогноз, а только прошлые наблюдения.'}
           </div>
+          {/* v6 — why this action ranks above its alternatives (observed only). */}
+          {item.ranking_explain && (
+            <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 5 }}>
+              {item.ranking_explain.explanation_text}
+            </div>
+          )}
         </div>
       )}
       {item.lifecycle_reason && (

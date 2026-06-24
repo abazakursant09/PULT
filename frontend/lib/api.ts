@@ -2255,6 +2255,12 @@ export interface DecisionFeedItem {
     unchanged_count: number
     explanation_text: string
   } | null
+  ranking_explain:    {                // v6 — WHY this action ranks above alternatives (observed only)
+    compared_action_keys: string[]
+    source_level: string
+    sample_size: number
+    explanation_text: string
+  } | null
   lifecycle_reason:   string | null
   created_at:         string | null
   updated_at:         string | null
