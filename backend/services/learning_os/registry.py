@@ -173,3 +173,49 @@ async def rank_action_keys_by_observed(
         return (0, -s.improved_count, s.worsened_count, idx)
 
     return [ak for _, ak in sorted(enumerate(originals), key=_key)]
+
+
+async def get_action_learning_summary_for_context(
+    db: AsyncSession, *, user_id: str, marketplace: str, action_key: str,
+    context_group: str, metric_key: Optional[str] = None,
+) -> Optional[LearningAggregate]:
+    """Observed counts for ONE action on ONE marketplace, restricted to a single
+    business context_group (marketplace|category|price_band|margin_band).
+
+    Learning OS v4. Marketplace-isolated (canonical) AND context-isolated: each
+    measured observation's context is computed with the SAME resolver the Decision
+    Memory write path uses, and only observations whose context_group EQUALS the
+    given one are counted — never another marketplace, never another context.
+    Returns None when there is no measured history for that exact context. Observed
+    counts only — no score, no probability, no forecast."""
+    from services.decision_memory import resolve_context_group_for_insight
+
+    mp = _mp_key(marketplace)
+    rows = (await db.execute(
+        select(EngineEffectObservation, EngineSignalDecisionLink)
+        .join(EngineSignalDecisionLink,
+              EngineSignalDecisionLink.id == EngineEffectObservation.link_id)
+        .where(
+            EngineEffectObservation.user_id == user_id,
+            EngineEffectObservation.measured_at.isnot(None),
+        ))).all()
+
+    out = LearningAggregate(marketplace=mp, action_key=action_key, metric_key=None)
+    metrics = set()
+    for obs, link in rows:
+        if _mp_key(link.marketplace) != mp:            # marketplace isolation
+            continue
+        if link.action_key != action_key:
+            continue
+        if metric_key is not None and obs.metric_key != metric_key:
+            continue
+        ctx = await resolve_context_group_for_insight(
+            db, user_id=user_id, insight_key=obs.insight_key,
+            marketplace=link.marketplace, sku=link.sku)
+        if ctx != context_group:                        # context isolation (exact key)
+            continue
+        out._add(obs.effect_band or _NOT_EVALUATED)
+        if obs.metric_key:
+            metrics.add(obs.metric_key)
+    out.metric_key = next(iter(metrics)) if len(metrics) == 1 else None
+    return out if out.total_count else None
