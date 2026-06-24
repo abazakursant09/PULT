@@ -140,8 +140,9 @@ export function DecisionFeedCard(
           background: 'var(--surface-h)', border: '1px solid var(--line)',
         }}>
           <div style={{ fontSize: 12, color: 'var(--text-2)' }}>{item.learning_context}</div>
+          {/* v5 — small "why this was shown" explanation (observed history, not forecast). */}
           <div style={{ fontSize: 10.5, color: 'var(--text-3)', marginTop: 3, fontStyle: 'italic' }}>
-            Это не прогноз, а только прошлые наблюдения.
+            {item.learning_explain?.explanation_text ?? 'Это не прогноз, а только прошлые наблюдения.'}
           </div>
         </div>
       )}

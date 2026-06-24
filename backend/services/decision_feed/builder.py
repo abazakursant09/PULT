@@ -73,37 +73,93 @@ def _context_segments(context_group: str) -> str:
     return " ".join(seg)
 
 
-async def _learning_context(db, user_id: str, summary) -> Optional[str]:
-    """Observed-only HISTORY line for a MEASURED effect (counts only — no percentage,
-    no probability, no score, no forecast). Marketplace-isolated.
+@dataclass
+class LearningContextView:
+    """Learning OS v5 — the shown history line + an honest explanation of WHY it was
+    shown (which source level, which dimensions matched, the observed counts).
+    Descriptive only: no score, no probability, no forecast."""
+    text: str
+    source_level: str            # "similar_context" | "marketplace"
+    matched_dimensions: dict
+    sample_size: int
+    improved_count: int
+    worsened_count: int
+    unchanged_count: int
+    explanation_text: str
 
-    Fallback chain (Learning OS v4): similar-context history → marketplace-wide
-    history → nothing. Each tier is gated by >= _LEARNING_MIN_SAMPLE measured
-    observations; below the gate the next tier is tried."""
+
+def _ctx_matched(context_group: str, mp_canon: str):
+    """(matched_dimensions dict, readable phrases) for a context_group — only the
+    known (non-unknown) dimensions beyond marketplace."""
+    parts = (context_group or "").split("|")
+    category = parts[1] if len(parts) > 1 else _CTX_UNKNOWN
+    price = parts[2] if len(parts) > 2 else _CTX_UNKNOWN
+    margin = parts[3] if len(parts) > 3 else _CTX_UNKNOWN
+    matched = {"marketplace": mp_canon}
+    phrases = []
+    if category and category != _CTX_UNKNOWN:
+        matched["category"] = category
+        phrases.append(f"категория {category.capitalize()}")
+    if price in _PRICE_DISPLAY:
+        matched["price_band"] = price
+        phrases.append(f"цена {_PRICE_DISPLAY[price]}")
+    if margin in _MARGIN_DISPLAY:
+        matched["margin_band"] = margin
+        phrases.append(f"маржа {_MARGIN_DISPLAY[margin]}")
+    return matched, phrases
+
+
+_NOT_FORECAST = "Это прошлые измеренные результаты, не прогноз."
+
+
+async def _learning_context(db, user_id: str, summary) -> Optional[LearningContextView]:
+    """Observed-only HISTORY for a MEASURED effect, with a WHY explanation (v5).
+    Counts only — no percentage, no probability, no score, no forecast.
+    Marketplace-isolated.
+
+    Fallback chain (v4): similar-context → marketplace-wide → nothing. Each tier is
+    gated by >= _LEARNING_MIN_SAMPLE measured observations; below the gate the next
+    tier is tried. source_level records which tier produced the line."""
     if not summary.action_key or not summary.marketplace:
         return None
-    mp = _MP_DISPLAY.get(normalize_marketplace(summary.marketplace), summary.marketplace)
+    mp_canon = normalize_marketplace(summary.marketplace)
+    mp = _MP_DISPLAY.get(mp_canon, summary.marketplace)
 
     # 1) similar context — only when the context carries a specific dimension.
     from services.decision_memory import resolve_context_group_for_insight
     ctx = await resolve_context_group_for_insight(
         db, user_id=user_id, insight_key=summary.insight_key,
         marketplace=summary.marketplace, sku=summary.sku)
+    matched, phrases = _ctx_matched(ctx, mp_canon)
     segments = _context_segments(ctx)
     if segments:
         cagg = await get_action_learning_summary_for_context(
             db, user_id=user_id, marketplace=summary.marketplace,
             action_key=summary.action_key, context_group=ctx)
         if cagg is not None and cagg.total_count >= _LEARNING_MIN_SAMPLE:
-            return (f"История PULT на {mp} для товаров {segments}: "
+            text = (f"История PULT на {mp} для товаров {segments}: "
                     f"это решение помогло в {cagg.improved_count} из {cagg.total_count} случаев.")
+            explain = (f"Показана история по похожему контексту: {mp}, "
+                       f"{', '.join(phrases)}. {_NOT_FORECAST}")
+            return LearningContextView(
+                text=text, source_level="similar_context", matched_dimensions=matched,
+                sample_size=cagg.total_count, improved_count=cagg.improved_count,
+                worsened_count=cagg.worsened_count, unchanged_count=cagg.unchanged_count,
+                explanation_text=explain)
 
     # 2) marketplace-wide history (v3 fallback).
     agg = await get_action_learning_summary(
         db, user_id=user_id, marketplace=summary.marketplace, action_key=summary.action_key)
     if agg is not None and agg.total_count >= _LEARNING_MIN_SAMPLE:
-        return (f"История PULT на {mp}: это решение помогло в "
+        text = (f"История PULT на {mp}: это решение помогло в "
                 f"{agg.improved_count} из {agg.total_count} случаев.")
+        explain = (f"По похожему контексту данных недостаточно, показана история "
+                   f"по маркетплейсу: {mp}. {_NOT_FORECAST}")
+        return LearningContextView(
+            text=text, source_level="marketplace", matched_dimensions={"marketplace": mp_canon},
+            sample_size=agg.total_count, improved_count=agg.improved_count,
+            worsened_count=agg.worsened_count, unchanged_count=agg.unchanged_count,
+            explanation_text=explain)
 
     # 3) no history.
     return None
@@ -154,6 +210,9 @@ class FeedItem:
     # effect (counts, marketplace-specific). None unless the minimum sample gate
     # passes. Never a percentage / score / forecast.
     learning_context: Optional[str] = None
+    # Learning OS v5 — WHY the history line was shown (source level, matched
+    # dimensions, observed counts, explanation). None when no history. Descriptive.
+    learning_explain: Optional[Mapping[str, object]] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     source_context: Mapping[str, object] = field(default_factory=dict)
@@ -261,10 +320,22 @@ async def build_feed(
                 continue   # proven_unchanged only when explicitly requested
             it = _do_item(s)
             if it is not None:
-                # Learning OS v1 — attach observed learning context for measured
-                # effects only (gated; observed counts, marketplace-isolated).
+                # Learning OS v1/v5 — attach observed learning history + the WHY
+                # explanation for measured effects only (gated; observed counts,
+                # marketplace-isolated).
                 if s.measured_at is not None:
-                    it.learning_context = await _learning_context(db, user_id, s)
+                    lc = await _learning_context(db, user_id, s)
+                    if lc is not None:
+                        it.learning_context = lc.text
+                        it.learning_explain = {
+                            "source_level": lc.source_level,
+                            "matched_dimensions": lc.matched_dimensions,
+                            "sample_size": lc.sample_size,
+                            "improved_count": lc.improved_count,
+                            "worsened_count": lc.worsened_count,
+                            "unchanged_count": lc.unchanged_count,
+                            "explanation_text": lc.explanation_text,
+                        }
                 items.append(it)
 
     # ── attention overlay + visibility ────────────────────────────────────────
