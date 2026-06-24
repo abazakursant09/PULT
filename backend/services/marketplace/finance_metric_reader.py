@@ -90,3 +90,71 @@ async def read_net_profit(
         source="compute",
         quality=f"rows={int(row.n)}",
     )
+
+
+_METRIC_DRR = "ad_cost_ratio"
+
+
+async def read_ad_cost_ratio(
+    *,
+    db: Optional[AsyncSession],
+    user_id: Optional[str],
+    marketplace: Optional[str],
+    entity_id,
+    window_days: int = 7,
+    now: Optional[datetime] = None,
+) -> Union[MetricSample, MetricUnavailable]:
+    """Observed ДРР (ad_cost_ratio) = ad_spend / revenue * 100, %, over the window.
+
+    Compute reader over already-imported finance rows (same seam as read_net_profit).
+    Returns the OBSERVED ratio or MetricUnavailable — never an estimate, never a
+    fabricated 0. Unavailable when: no db/user/entity, no finance rows in the window,
+    or revenue <= 0 (a ratio is undefined — honest absence, never inferred).
+    Marketplace coverage follows the finance-row aliases (wb / ozon / yandex);
+    marketplaces with no imported finance (e.g. megamarket) yield no rows → None."""
+    now = now or datetime.utcnow()
+
+    if db is None:
+        return MetricUnavailable(_METRIC_DRR, "no_db", "compute reader requires a db session")
+    if not user_id:
+        return MetricUnavailable(_METRIC_DRR, "no_scope", "compute reader requires user_id")
+    if not entity_id:
+        return MetricUnavailable(_METRIC_DRR, "no_entity", "compute reader requires entity_id (sku)")
+
+    date_from = (now - timedelta(days=window_days)).date().isoformat()
+    date_to = now.date().isoformat()
+    aliases = _MP_ALIASES.get((marketplace or "").lower(), ((marketplace or "").lower(),))
+
+    res = await db.execute(
+        select(
+            func.count().label("n"),
+            func.coalesce(func.sum(ImportedFinanceRow.revenue), 0.0).label("revenue"),
+            func.coalesce(func.sum(ImportedFinanceRow.ad_spend), 0.0).label("ad_spend"),
+        ).where(
+            ImportedFinanceRow.user_id == user_id,
+            ImportedFinanceRow.marketplace.in_(aliases),
+            ImportedFinanceRow.sku == str(entity_id),
+            ImportedFinanceRow.date.isnot(None),
+            ImportedFinanceRow.date >= date_from,
+            ImportedFinanceRow.date <= date_to,
+        )
+    )
+    row = res.one()
+
+    if not row.n:  # no finance rows in the window → honest absence, never a fabricated 0
+        return MetricUnavailable(_METRIC_DRR, "no_finance_rows",
+                                 f"no finance rows for {marketplace}/{entity_id} in {window_days}d window")
+
+    revenue = float(row.revenue)
+    if revenue <= 0:  # ratio undefined without revenue — never inferred
+        return MetricUnavailable(_METRIC_DRR, "no_revenue",
+                                 f"revenue <= 0 for {marketplace}/{entity_id}; ДРР undefined")
+
+    drr = float(row.ad_spend) / revenue * 100.0
+    return MetricSample(
+        value=round(drr, 2),
+        unit="percent",
+        observed_at=now,
+        source="compute",
+        quality=f"rows={int(row.n)}",
+    )
