@@ -49,6 +49,25 @@ class OzonClient:
             json={"product_ids": [str(offer_id)]},
         )
 
+    # ── Advertising / Performance (campaign state control, A2.2-pre-b.4) ───────
+    async def set_campaign_state(self, *, token: str, campaign_id, action: str) -> dict:
+        """Ozon Performance API campaign state. `token` is a Performance OAuth bearer
+        (acquired by ozon_performance_auth; never logged). `action` ∈ activate|deactivate.
+            POST /api/client/campaign/{id}/activate|deactivate
+        """
+        if action not in ("activate", "deactivate"):
+            raise ExecutionError(ExecutionError.VALIDATION,
+                                 "ozon campaign action must be 'activate' or 'deactivate'")
+        path = f"/api/client/campaign/{int(campaign_id)}/{action}"
+        return await self._performance().request(
+            "POST", path, token=f"Bearer {token}", auth_header="Authorization")
+
+    def _performance(self) -> "BaseMarketplaceClient":
+        # lazy: Performance API base (separate from Seller API)
+        if not hasattr(self, "_performance_client"):
+            self._performance_client = BaseMarketplaceClient(settings.ozon_performance_base)
+        return self._performance_client
+
     # ── deferred ──────────────────────────────────────────────────────────────
     async def publish_feedback_answer(self, **_):  # premium Reviews API
         raise ExecutionError(
