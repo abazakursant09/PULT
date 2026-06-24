@@ -46,22 +46,23 @@ async def _setup(marketplace="ozon"):
     return db, uid
 
 
-# ── (1)(2)(3) Ozon fails honestly as CAPABILITY_NOT_SUPPORTED ─────────────────
+# ── Ozon without the Performance credential fails honestly (guard replaced) ───
+# A2.2-pre-b.4 wired the real Ozon path: campaign_control now authenticates via the
+# advert_performance grant. A connection lacking that scope/credential fails
+# honestly as MISSING_SCOPE — never a generic VALIDATION, never a fake success.
 
-def test_ozon_ad_set_state_capability_not_supported():
+def test_ozon_ad_set_state_without_performance_scope_missing_scope():
     async def go():
-        db, uid = await _setup("ozon")
+        db, uid = await _setup("ozon")   # connection has only "advert", not advert_performance
         res = await executor.execute(
             db=db, user_id=uid, action_type="ad_set_state",
             payload={"marketplace": "ozon", "campaign_id": 7, "action": "pause"},
         )
-        assert res.status == "failed"
+        assert res.status == "rejected"
         code = res.error["code"]
-        assert code == ExecutionError.CAPABILITY_NOT_SUPPORTED       # (2)
-        assert code != ExecutionError.VALIDATION                     # (1) not generic validation
-        detail = (res.error.get("detail") or "").lower()
-        assert "performance oauth" in detail                          # (3) clear reason
-        assert "not implemented" in detail
+        assert code == ExecutionError.MISSING_SCOPE
+        assert code != ExecutionError.VALIDATION                       # not generic validation
+        assert "advert_performance" in (res.error.get("detail") or "")
     _run(go())
 
 

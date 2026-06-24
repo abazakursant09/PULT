@@ -20,6 +20,7 @@ from services import capability_registry
 
 from . import action_catalog, guard, credential_vault
 from .errors import ExecutionError
+from .ozon_performance_auth import PERFORMANCE_SCOPE
 
 log = logging.getLogger(__name__)
 
@@ -127,9 +128,16 @@ async def execute(
             )
         conn = await _resolve_connection(db, user_id, target_mp, connection_id)
         target_mp = conn.marketplace
-        if spec.required_scope not in (conn.scopes or []):
+        # Ozon campaign_control authenticates via Performance OAuth (resolved in
+        # dispatch), not a static scoped token — its grant/credential is
+        # advert_performance. Every other action keeps the existing scoped path,
+        # so the WB path is byte-identical.
+        ozon_perf = (capability_for_action(action_type) == "campaign_control"
+                     and _canon_mp(target_mp) == "ozon")
+        effective_scope = PERFORMANCE_SCOPE if ozon_perf else spec.required_scope
+        if effective_scope not in (conn.scopes or []):
             raise ExecutionError(
-                ExecutionError.MISSING_SCOPE, f"connection lacks scope '{spec.required_scope}'"
+                ExecutionError.MISSING_SCOPE, f"connection lacks scope '{effective_scope}'"
             )
         # 3) validate payload
         spec.validate(payload)
@@ -165,7 +173,8 @@ async def execute(
                                result={"would_send": _safe_payload(payload)},
                                reversible=spec.reversible)
 
-    ctx = {"marketplace": conn.marketplace, "ozon_client_id": conn.ozon_client_id}
+    ctx = {"marketplace": conn.marketplace, "ozon_client_id": conn.ozon_client_id,
+           "db": db, "connection_id": conn.id}
 
     # 5) idempotency: return prior success instead of re-calling the API
     if idempotency_key:
@@ -194,7 +203,9 @@ async def execute(
 
     # 7) fetch token (vault) + 8) dispatch
     try:
-        token = await _resolve_token(db, conn.id, spec.required_scope)
+        # Ozon campaign_control resolves its bearer in-dispatch (Performance OAuth);
+        # no static scoped token to fetch. All other actions fetch as before.
+        token = None if ozon_perf else await _resolve_token(db, conn.id, spec.required_scope)
         result = await spec.dispatch(token, payload, ctx)
     except ExecutionError as e:
         rec.status = "failed"

@@ -179,3 +179,31 @@ async def resolve_performance_credential(
         client_id=str(client_id),
         client_secret=credential_vault.decrypt(cred.secret_enc),
     )
+
+
+async def acquire_bearer(
+    db: AsyncSession,
+    *,
+    connection_id: str,
+    force_refresh: bool = False,
+    now: Optional[datetime] = None,
+    base_url: Optional[str] = None,
+    transport: Optional[httpx.AsyncBaseTransport] = None,
+) -> str:
+    """Resolve a usable Performance bearer for a connection: read its credential,
+    then return a cached-or-freshly-exchanged access_token (keyed by connection_id).
+
+    `force_refresh=True` drops the cached token first — used after a 401 so the next
+    call exchanges a new bearer exactly once. Never logs/returns the client_secret."""
+    cred = await resolve_performance_credential(db, connection_id=connection_id)
+    c = cache()
+    if force_refresh:
+        c.invalidate(connection_id)
+
+    async def _fetch() -> OzonPerformanceToken:
+        return await get_ozon_performance_token(
+            client_id=cred.client_id, client_secret=cred.client_secret,
+            base_url=base_url, transport=transport, now=now)
+
+    token = await c.get_token(key=connection_id, fetch=_fetch, now=now)
+    return token.access_token

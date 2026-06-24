@@ -12,6 +12,10 @@ from typing import Awaitable, Callable, Optional
 from .errors import ExecutionError
 from .wb_client import wb_client
 from .ozon_client import ozon_client
+from . import ozon_performance_auth
+
+# ad_set_state action vocabulary (start|pause) → Ozon Performance verbs.
+_OZON_STATE_VERB = {"start": "activate", "pause": "deactivate"}
 
 
 @dataclass(frozen=True)
@@ -213,20 +217,41 @@ async def _dispatch_set_bid(token: str, payload: dict, ctx: dict) -> dict:
 async def _dispatch_set_state(token: str, payload: dict, ctx: dict) -> dict:
     mp = ctx.get("marketplace")
     if mp == "ozon":
-        # Ozon campaign state control = Performance API (separate OAuth) — the
-        # capability registry says api, but the adapter is not wired (A2.2-pre-b).
-        # Fail HONESTLY as a capability gap, not a generic payload validation error,
-        # so no caller mistakes Ozon ad_set_state for an executable action.
-        raise ExecutionError(
-            ExecutionError.CAPABILITY_NOT_SUPPORTED,
-            "ad_set_state: Ozon campaign state control requires Performance OAuth "
-            "and is not implemented yet",
-        )
+        return await _dispatch_set_state_ozon(payload, ctx)
     if mp != "wildberries":
         raise ExecutionError(ExecutionError.VALIDATION, f"ad_set_state: unsupported marketplace {mp}")
     resp = await wb_client.set_campaign_state(
         token=token, campaign_id=int(payload["campaign_id"]), action=payload["action"]
     )
+    return {"api_request_id": (resp or {}).get("requestId") if isinstance(resp, dict) else None,
+            "campaign_id": payload["campaign_id"], "state": payload["action"]}
+
+
+async def _dispatch_set_state_ozon(payload: dict, ctx: dict) -> dict:
+    """Ozon campaign state via Performance API + OAuth bearer (A2.2-pre-b.4).
+
+    Bearer is resolved from the advert_performance credential through the cached
+    OAuth helper — never from the executor's generic token, never logged. On a 401
+    (expired bearer) the cache is invalidated and a fresh bearer is tried exactly
+    once; no infinite retry."""
+    db = ctx.get("db")
+    connection_id = ctx.get("connection_id")
+    if db is None or not connection_id:
+        raise ExecutionError(ExecutionError.NO_CONNECTION,
+                             "ad_set_state: Ozon dispatch requires connection context")
+    verb = _OZON_STATE_VERB[payload["action"]]   # start→activate, pause→deactivate
+    campaign_id = int(payload["campaign_id"])
+
+    bearer = await ozon_performance_auth.acquire_bearer(db, connection_id=connection_id)
+    try:
+        resp = await ozon_client.set_campaign_state(token=bearer, campaign_id=campaign_id, action=verb)
+    except ExecutionError as e:
+        if e.code != ExecutionError.AUTH:
+            raise
+        # expired/invalid bearer → refresh ONCE and retry ONCE
+        bearer = await ozon_performance_auth.acquire_bearer(
+            db, connection_id=connection_id, force_refresh=True)
+        resp = await ozon_client.set_campaign_state(token=bearer, campaign_id=campaign_id, action=verb)
     return {"api_request_id": (resp or {}).get("requestId") if isinstance(resp, dict) else None,
             "campaign_id": payload["campaign_id"], "state": payload["action"]}
 
