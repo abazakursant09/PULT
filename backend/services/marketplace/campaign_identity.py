@@ -23,6 +23,9 @@ from typing import Optional, Union
 
 from .metric_catalog import normalize_marketplace
 from .wb_client import wb_client
+from .ozon_client import ozon_client
+from . import ozon_performance_auth
+from .errors import ExecutionError
 
 # ── unavailable reasons ─────────────────────────────────────────────────────
 NO_ADAPTER = "no_adapter"                       # marketplace has no campaign adapter at all
@@ -86,6 +89,47 @@ async def _resolve_wb(*, listing_id, sku, nm_id, token) -> Union[CampaignIdentit
     )
 
 
+async def _resolve_ozon(*, listing_id, sku, connection_id, db) -> Union[CampaignIdentity, CampaignUnavailable]:
+    """Ozon campaign identity via Performance API + OAuth bearer.
+
+    Bearer is resolved from the advert_performance credential (acquire_bearer); a
+    missing credential is honest NO_SCOPE. The campaign→listing relation is used
+    ONLY when the API actually carries it — if no observed campaign exposes the
+    relation, we return NOT_IMPLEMENTED rather than guess which campaign owns the
+    sku. Never auto-picks among multiple matches."""
+    if db is None or not connection_id:
+        return CampaignUnavailable("ozon", NO_SCOPE, "no db/connection_id for performance credential")
+    if sku is None:
+        return CampaignUnavailable("ozon", INVALID_LISTING_IDENTITY, "no sku to relate campaigns")
+    try:
+        bearer = await ozon_performance_auth.acquire_bearer(db, connection_id=connection_id)
+    except ExecutionError:
+        # controlled, secret-free: missing/partial advert_performance credential
+        return CampaignUnavailable("ozon", NO_SCOPE, "no advert_performance credential")
+
+    campaigns = await ozon_client.list_campaigns_for_sku(token=bearer, sku=sku)
+    if campaigns and not any(c.get("relation_present") for c in campaigns):
+        # API returned campaigns but none carry a listing relation → cannot relate honestly
+        return CampaignUnavailable("ozon", NOT_IMPLEMENTED,
+                                   "ozon campaigns carry no listing relation; cannot map sku")
+    matched = [c for c in campaigns
+               if c.get("relation_present") and str(c.get("sku")) == str(sku)]
+    if not matched:
+        return CampaignUnavailable("ozon", NO_CAMPAIGN_FOR_LISTING,
+                                   f"no ozon campaign relates to sku {sku}")
+    if len(matched) > 1:
+        return CampaignUnavailable("ozon", AMBIGUOUS_MULTIPLE,
+                                   f"{len(matched)} ozon campaigns relate to sku {sku}; will not auto-pick")
+    c = matched[0]
+    return CampaignIdentity(
+        marketplace="ozon",
+        campaign_id=c.get("campaign_id"),
+        campaign_type=c.get("campaign_type"),
+        campaign_state=c.get("campaign_state"),
+        source="ozon_performance_api",
+    )
+
+
 async def resolve_campaign_identity(
     marketplace,
     *,
@@ -94,20 +138,20 @@ async def resolve_campaign_identity(
     nm_id=None,
     token=None,
     db=None,
+    connection_id=None,
 ) -> Union[CampaignIdentity, CampaignUnavailable]:
     """listing / sku / nmID → campaign identity, or an honest unavailable reason.
 
-    Marketplace-isolated: only the WB branch touches the WB client; ozon / yandex /
-    megamarket / unknown return their reason WITHOUT any adapter call (no cross-read,
-    no blending)."""
+    Marketplace-isolated: the WB branch touches ONLY the WB client; the Ozon branch
+    touches ONLY the Ozon client (via the Performance bearer); yandex / megamarket /
+    unknown return their reason WITHOUT any adapter call (no cross-read, no blending)."""
     mp = normalize_marketplace(marketplace)
 
     if mp == "wb":
         return await _resolve_wb(listing_id=listing_id, sku=sku, nm_id=nm_id, token=token)
     if mp == "ozon":
-        # Ozon advertising = Performance API (separate OAuth) — adapter present but unwired.
-        return CampaignUnavailable("ozon", NOT_IMPLEMENTED,
-                                   "ozon performance campaign read not implemented")
+        return await _resolve_ozon(listing_id=listing_id, sku=sku,
+                                   connection_id=connection_id, db=db)
     if mp == "yandex":
         return CampaignUnavailable("yandex", NO_ADAPTER, "no yandex campaign adapter")
 
