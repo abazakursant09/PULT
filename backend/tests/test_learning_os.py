@@ -595,3 +595,115 @@ def test_listing_context_marketplace_isolation():
         context_group="ozon|одежда|mid|mid_margin"))
     assert wb.total_count == 10 and wb.improved_count == 10     # WB observed
     assert oz.total_count == 10 and oz.worsened_count == 10     # Ozon observed, never enriches WB
+
+
+# ── v6. Explain action ranking (why A is preferred over B) ───────────────────
+
+async def _measured_margin(db, uid, *, mp, action, band, with_listing=False,
+                           category="одежда", price=1200.0, margin_pct=15):
+    """Measured margin_crisis observation for `action` (so the action space has
+    alternatives). with_listing → Decision carries a real listing → context tier."""
+    sku = f"SKU-{uuid.uuid4().hex[:8]}"; ik = f"margin_crisis:{mp}:{sku}"
+    did = str(uuid.uuid4()); lid = None; ppid = str(uuid.uuid4())
+    pmp = "wb" if mp in ("wb", "wildberries") else mp
+    if with_listing:
+        pid = str(uuid.uuid4()); lid = str(uuid.uuid4())
+        db.add(Product(id=pid, user_id=uid, name="товар", marketplace=pmp, category=category, price=price))
+        db.add(ProductListing(id=lid, physical_product_id=ppid, user_id=uid, marketplace=pmp,
+                              external_id=sku, legacy_product_id=pid))
+        db.add(Decision(id=did, user_id=uid, problem="margin", listing_id=lid, physical_product_id=ppid,
+                        action_key=action, insight_key=ik, status="open"))
+        db.add(_Fin(import_id="imp", user_id=uid, marketplace=pmp, sku=sku,
+                    revenue=1000.0, net_profit=1000.0 * margin_pct / 100.0, date=NOW.date().isoformat()))
+    link = EngineSignalDecisionLink(
+        user_id=uid, contour="advertising", signal_table="advertising_signal",
+        signal_id=str(uuid.uuid4()), insight_key=ik, action_key=action, decision_id=did,
+        link_status="measured", marketplace=mp, sku=sku)
+    db.add(link); await db.flush()
+    db.add(EngineEffectObservation(
+        link_id=link.id, user_id=uid, insight_key=ik, metric_key="ad_profit_impact", window_days=14,
+        baseline_captured_at=PAST, measured_at=NOW, effect_band=band,
+        evidence=json.dumps({"baseline": 100, "after": 200}), created_at=PAST))
+    await db.commit()
+
+
+def _items(db, uid):
+    return _feed_client(db, uid).get("/api/decision-feed").json()["items"]
+
+
+def _rank_for(items, action_substr):
+    # decision_outcome items don't expose action_key; pick by ranking presence + sample
+    return [x for x in items if x.get("ranking_explain")]
+
+
+def test_ranking_explain_present_marketplace():
+    db = _run(_new_db()); uid = str(uuid.uuid4())
+    for _ in range(14):
+        _run(_measured_margin(db, uid, mp="wildberries", action="reduce_discount", band="improved"))
+    for _ in range(3):
+        _run(_measured_margin(db, uid, mp="wildberries", action="reduce_discount", band="worsened"))
+    for _ in range(5):
+        _run(_measured_margin(db, uid, mp="wildberries", action="set_price", band="improved"))
+    for _ in range(9):
+        _run(_measured_margin(db, uid, mp="wildberries", action="set_price", band="worsened"))
+    ranked = [x["ranking_explain"] for x in _items(db, uid) if x.get("ranking_explain")]
+    assert ranked, "expected a ranking_explain on the observed-preferred action"
+    r = ranked[0]
+    assert r["source_level"] == "marketplace"
+    assert set(r["compared_action_keys"]) == {"set_price", "stop_auto_promotion"}
+    assert r["sample_size"] == 17
+    t = r["explanation_text"]
+    assert "чаще приводил к улучшению результата" in t and "не прогноз" in t
+
+
+def test_ranking_absent_for_inferior_action():
+    db = _run(_new_db()); uid = str(uuid.uuid4())
+    # reduce_discount strong (17), set_price weak (14) — only reduce_discount outranks
+    for _ in range(14): _run(_measured_margin(db, uid, mp="wildberries", action="reduce_discount", band="improved"))
+    for _ in range(3):  _run(_measured_margin(db, uid, mp="wildberries", action="reduce_discount", band="worsened"))
+    for _ in range(5):  _run(_measured_margin(db, uid, mp="wildberries", action="set_price", band="improved"))
+    for _ in range(9):  _run(_measured_margin(db, uid, mp="wildberries", action="set_price", band="worsened"))
+    # both actions have learning_context (>=10 each); exactly ONE carries ranking_explain
+    items = _items(db, uid)
+    with_ctx = [x for x in items if x.get("learning_context")]
+    with_rank = [x for x in items if x.get("ranking_explain")]
+    assert len(with_ctx) >= 2 and len(with_rank) >= 1
+    # the set_price items (improved 5 < 14) must NOT claim "shown above"
+    sp_items = [x for x in with_ctx if "5 из 14" in (x.get("learning_context") or "")]
+    assert sp_items and all(x.get("ranking_explain") is None for x in sp_items)
+
+
+def test_ranking_marketplace_isolation():
+    db = _run(_new_db()); uid = str(uuid.uuid4())
+    for _ in range(14): _run(_measured_margin(db, uid, mp="wildberries", action="reduce_discount", band="improved"))
+    for _ in range(3):  _run(_measured_margin(db, uid, mp="wildberries", action="reduce_discount", band="worsened"))
+    for _ in range(12): _run(_measured_margin(db, uid, mp="wildberries", action="set_price", band="worsened"))
+    # Ozon has its OWN strong set_price — must not change WB ranking
+    for _ in range(15): _run(_measured_margin(db, uid, mp="ozon", action="set_price", band="improved"))
+    ranked = [x["ranking_explain"] for x in _items(db, uid) if x.get("ranking_explain")]
+    wb = next(r for r in ranked if r["sample_size"] == 17)        # WB reduce_discount (14+3)
+    assert "set_price" in wb["compared_action_keys"]              # compared within WB only
+    # WB reduce_discount still preferred — Ozon set_price never blended in
+
+
+def test_ranking_context_isolation():
+    db = _run(_new_db()); uid = str(uuid.uuid4())
+    # context tier (listing-backed): reduce_discount strong in-context, set_price weak in-context
+    for _ in range(10): _run(_measured_margin(db, uid, mp="wildberries", action="reduce_discount", band="improved", with_listing=True))
+    for _ in range(10): _run(_measured_margin(db, uid, mp="wildberries", action="set_price", band="worsened", with_listing=True))
+    ranked = [x["ranking_explain"] for x in _items(db, uid) if x.get("ranking_explain")]
+    assert ranked and ranked[0]["source_level"] == "similar_context"
+    assert "в похожем контексте" in ranked[0]["explanation_text"]
+
+
+def test_ranking_no_forbidden_words_and_no_auto_apply():
+    db = _run(_new_db()); uid = str(uuid.uuid4())
+    for _ in range(14): _run(_measured_margin(db, uid, mp="wildberries", action="reduce_discount", band="improved"))
+    for _ in range(3):  _run(_measured_margin(db, uid, mp="wildberries", action="reduce_discount", band="worsened"))
+    for _ in range(5):  _run(_measured_margin(db, uid, mp="wildberries", action="set_price", band="improved"))
+    t = next(x["ranking_explain"]["explanation_text"] for x in _items(db, uid) if x.get("ranking_explain")).lower()
+    for bad in ("вероятн", "probability", "confidence", "уверенн", "score", "балл",
+                "предсказ", "prediction", "roi", "рентаб", "прибыл", "profit"):
+        assert bad not in t
+    for apply_word in ("примен", "нажмите", "сделайте", "auto", "автоприм"):   # no auto-apply implication
+        assert apply_word not in t

@@ -87,6 +87,9 @@ class LearningContextView:
     worsened_count: int
     unchanged_count: int
     explanation_text: str
+    # Learning OS v6 — why this action ranks above its alternatives (observed only).
+    # None unless this action is the observed-preferred among its problem's space.
+    ranking: Optional[dict] = None
 
 
 def _ctx_matched(context_group: str, mp_canon: str):
@@ -111,6 +114,52 @@ def _ctx_matched(context_group: str, mp_canon: str):
 
 
 _NOT_FORECAST = "Это прошлые измеренные результаты, не прогноз."
+_NOT_FORECAST_SHORT = "Это прошлые наблюдения, а не прогноз."
+
+
+def _preferred_over(a_imp, a_wor, b_imp, b_wor) -> bool:
+    """Observed comparator (mirrors rank_action_keys_by_observed): more improved
+    first, then fewer worsened. No score, no probability."""
+    if a_imp != b_imp:
+        return a_imp > b_imp
+    return a_wor < b_wor
+
+
+async def _ranking_explain(db, user_id, summary, *, source_level, ctx, this_imp, this_wor, this_total):
+    """Learning OS v6 — explain WHY this action ranks above its alternatives, from
+    OBSERVED counts at the SAME tier (similar_context / marketplace). Marketplace-
+    isolated. Returns None unless this action is observed-preferred over at least one
+    alternative that also has history. No forecast, no score, no probability."""
+    from services.marketplace.action_metric_binding import problem_action_space
+    itype = (summary.insight_key or "").split(":", 1)[0]
+    space = problem_action_space(itype)
+    if len(space) <= 1 or summary.action_key not in space:
+        return None
+    others = [a for a in space if a != summary.action_key]
+    outranked = []
+    for a in others:
+        if source_level == "similar_context":
+            s = await get_action_learning_summary_for_context(
+                db, user_id=user_id, marketplace=summary.marketplace, action_key=a, context_group=ctx)
+        else:
+            s = await get_action_learning_summary(
+                db, user_id=user_id, marketplace=summary.marketplace, action_key=a)
+        if s is None:                                 # no observed history for this alternative
+            continue
+        if _preferred_over(this_imp, this_wor, s.improved_count, s.worsened_count):
+            outranked.append(a)
+    if not outranked:
+        return None
+    where = ("в похожем контексте" if source_level == "similar_context"
+             else "по наблюдениям на маркетплейсе")
+    txt = (f"Этот вариант показан выше, потому что {where} он чаще приводил к "
+           f"улучшению результата. {_NOT_FORECAST_SHORT}")
+    return {
+        "compared_action_keys": others,
+        "source_level": source_level,
+        "sample_size": this_total,
+        "explanation_text": txt,
+    }
 
 
 async def _learning_context(db, user_id: str, summary) -> Optional[LearningContextView]:
@@ -145,11 +194,14 @@ async def _learning_context(db, user_id: str, summary) -> Optional[LearningConte
                     f"это решение помогло в {cagg.improved_count} из {cagg.total_count} случаев.")
             explain = (f"Показана история по похожему контексту: {mp}, "
                        f"{', '.join(phrases)}. {_NOT_FORECAST}")
+            ranking = await _ranking_explain(
+                db, user_id, summary, source_level="similar_context", ctx=ctx,
+                this_imp=cagg.improved_count, this_wor=cagg.worsened_count, this_total=cagg.total_count)
             return LearningContextView(
                 text=text, source_level="similar_context", matched_dimensions=matched,
                 sample_size=cagg.total_count, improved_count=cagg.improved_count,
                 worsened_count=cagg.worsened_count, unchanged_count=cagg.unchanged_count,
-                explanation_text=explain)
+                explanation_text=explain, ranking=ranking)
 
     # 2) marketplace-wide history (v3 fallback).
     agg = await get_action_learning_summary(
@@ -159,11 +211,14 @@ async def _learning_context(db, user_id: str, summary) -> Optional[LearningConte
                 f"{agg.improved_count} из {agg.total_count} случаев.")
         explain = (f"По похожему контексту данных недостаточно, показана история "
                    f"по маркетплейсу: {mp}. {_NOT_FORECAST}")
+        ranking = await _ranking_explain(
+            db, user_id, summary, source_level="marketplace", ctx=ctx,
+            this_imp=agg.improved_count, this_wor=agg.worsened_count, this_total=agg.total_count)
         return LearningContextView(
             text=text, source_level="marketplace", matched_dimensions={"marketplace": mp_canon},
             sample_size=agg.total_count, improved_count=agg.improved_count,
             worsened_count=agg.worsened_count, unchanged_count=agg.unchanged_count,
-            explanation_text=explain)
+            explanation_text=explain, ranking=ranking)
 
     # 3) no history.
     return None
@@ -217,6 +272,8 @@ class FeedItem:
     # Learning OS v5 — WHY the history line was shown (source level, matched
     # dimensions, observed counts, explanation). None when no history. Descriptive.
     learning_explain: Optional[Mapping[str, object]] = None
+    # Learning OS v6 — why this action ranks above its alternatives (observed only).
+    ranking_explain: Optional[Mapping[str, object]] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     source_context: Mapping[str, object] = field(default_factory=dict)
@@ -340,6 +397,7 @@ async def build_feed(
                             "unchanged_count": lc.unchanged_count,
                             "explanation_text": lc.explanation_text,
                         }
+                        it.ranking_explain = lc.ranking
                 items.append(it)
 
     # ── attention overlay + visibility ────────────────────────────────────────
