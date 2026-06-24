@@ -212,6 +212,16 @@ async def _dispatch_set_bid(token: str, payload: dict, ctx: dict) -> dict:
 
 async def _dispatch_set_state(token: str, payload: dict, ctx: dict) -> dict:
     mp = ctx.get("marketplace")
+    if mp == "ozon":
+        # Ozon campaign state control = Performance API (separate OAuth) — the
+        # capability registry says api, but the adapter is not wired (A2.2-pre-b).
+        # Fail HONESTLY as a capability gap, not a generic payload validation error,
+        # so no caller mistakes Ozon ad_set_state for an executable action.
+        raise ExecutionError(
+            ExecutionError.CAPABILITY_NOT_SUPPORTED,
+            "ad_set_state: Ozon campaign state control requires Performance OAuth "
+            "and is not implemented yet",
+        )
     if mp != "wildberries":
         raise ExecutionError(ExecutionError.VALIDATION, f"ad_set_state: unsupported marketplace {mp}")
     resp = await wb_client.set_campaign_state(
