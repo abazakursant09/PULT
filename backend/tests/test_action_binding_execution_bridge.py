@@ -31,7 +31,10 @@ from services.action_binding.execution_bridge import (
 )
 
 T0 = datetime(2026, 6, 22)
-IKEY = "adv_ad_destroying_profit:wildberries:SKU1"
+# Stock/listing type (stop_auto_promotion, offer_id-derivable) exercises the bridge's
+# apply hand-off. Overspend types now bind ad_set_state (campaign pause) and are
+# covered by the A2.2-bind tests with a campaign resolver.
+IKEY = "adv_ad_on_low_stock:wildberries:SKU1"
 _BRIDGE_REJECTS = {"decision_not_found", "link_not_found", "not_bindable",
                    "safety_not_manual_approval", "action_key_mismatch",
                    "unsupported_capability", "payload_not_derivable"}
@@ -59,7 +62,7 @@ async def _seed(db, uid, *, action_key="stop_auto_promotion", mp="wildberries",
            action_key="stop_auto_promotion", decision_id=did, link_status="promoted",
            marketplace=mp, sku=sku))
     db.add(AdvertisingSignal(audit_id=str(uuid.uuid4()), user_id=uid,
-           signal_key="adv_ad_destroying_profit", problem_type="ad_destroying_profit",
+           signal_key="adv_ad_on_low_stock", problem_type="ad_on_low_stock",
            insight_key=ikey, marketplace=mp, sku=sku, status="promoted_to_decision"))
     if with_listing:
         db.add(ProductListing(physical_product_id="ph1", user_id=uid, marketplace="wb",
@@ -108,7 +111,7 @@ def test_safety_not_manual_approval_rejected():
     async def go():
         db = await _engine(); uid = str(uuid.uuid4())
         did = await _seed(db, uid)
-        key = "adv_ad_destroying_profit"
+        key = "adv_ad_on_low_stock"
         orig = eb.BY_SIGNAL_TYPE[key]
         eb.BY_SIGNAL_TYPE[key] = dataclasses.replace(orig, safety_class="manual_only")
         try:
@@ -140,7 +143,7 @@ def test_unsupported_capability_rejected():
     async def go():
         db = await _engine(); uid = str(uuid.uuid4())
         did = await _seed(db, uid, mp="yandex", sku="SKU9",
-                          ikey="adv_ad_destroying_profit:yandex:SKU9")
+                          ikey="adv_ad_on_low_stock:yandex:SKU9")
         res = await execute_bound_decision(db, user_id=uid, decision_id=did,
                                            marketplace="yandex", sku="SKU9", dry_run=True)
         assert res.ok is False and res.reason == "unsupported_capability"

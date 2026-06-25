@@ -28,8 +28,19 @@ from models.decision_apply_intent import DecisionApplyIntent
 from services.action_binding.registry import BY_SIGNAL_TYPE
 from services.action_binding.execution_bridge import execute_bound_decision, NOT_EXECUTED
 
+from services.marketplace import campaign_identity as _ci
+
 PAYLOAD_OK = "ok"
 PAYLOAD_NOT_DERIVABLE = "payload_not_derivable"
+
+# Bridge reject reasons that mean "payload could not be derived" (vs capability /
+# binding / not-found). Includes the campaign_identity resolver reasons surfaced by
+# the ad_set_state builder — all are honest non-applyable, payload-level blocks.
+_PAYLOAD_REASONS = {
+    PAYLOAD_NOT_DERIVABLE,
+    _ci.NO_ADAPTER, _ci.NOT_IMPLEMENTED, _ci.NO_SCOPE,
+    _ci.NO_CAMPAIGN_FOR_LISTING, _ci.AMBIGUOUS_MULTIPLE, _ci.INVALID_LISTING_IDENTITY,
+}
 
 
 @dataclass
@@ -72,7 +83,7 @@ async def build_apply_preview(
     if res.status == NOT_EXECUTED:
         # blocked before the executor — map the bridge reason to preview fields
         capability_ok = res.reason != "unsupported_capability"
-        payload_status = PAYLOAD_NOT_DERIVABLE if res.reason == PAYLOAD_NOT_DERIVABLE else None
+        payload_status = PAYLOAD_NOT_DERIVABLE if res.reason in _PAYLOAD_REASONS else None
         return ApplyPreview(
             applyable=False, decision_id=decision_id, action_key=res.action_key,
             payload=None, capability_ok=capability_ok, payload_status=payload_status,

@@ -78,8 +78,8 @@ async def _seed_open_at(db, uid, *, baseline, captured_at):
     """Promote an advertising signal → link/decision, capture a baseline observation
     AT captured_at (controls window expiry)."""
     db.add(AdvertisingSignal(audit_id=str(uuid.uuid4()), user_id=uid,
-           signal_key="adv_ad_destroying_profit", problem_type="ad_destroying_profit",
-           insight_key=f"adv_ad_destroying_profit:{MP}:{SKU}", marketplace=MP, sku=SKU,
+           signal_key="adv_ad_on_low_stock", problem_type="ad_on_low_stock",
+           insight_key=f"adv_ad_on_low_stock:{MP}:{SKU}", marketplace=MP, sku=SKU,
            status="active", what="x", why="y", expected_effect="z", what_to_do="w",
            priority_level="critical"))
     await db.commit()

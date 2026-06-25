@@ -47,7 +47,7 @@ async def _engine():
     return sessionmaker(e, class_=AsyncSession, expire_on_commit=False)()
 
 
-async def _adv(db, uid, *, mp="wildberries", sku="SKU1", itype="ad_destroying_profit"):
+async def _adv(db, uid, *, mp="wildberries", sku="SKU1", itype="ad_on_low_stock"):
     db.add(AdvertisingSignal(audit_id=str(uuid.uuid4()), user_id=uid,
            signal_key=f"adv_{itype}", problem_type=itype,
            insight_key=f"adv_{itype}:{mp}:{sku}", marketplace=mp, sku=sku, status="active",
@@ -155,8 +155,8 @@ def test_feed_builder_surfaces_decision_id():
         db = await _engine(); uid = str(uuid.uuid4())
         # a live signal that already carries a decision_id → builder exposes it
         db.add(AdvertisingSignal(audit_id=str(uuid.uuid4()), user_id=uid,
-               signal_key="adv_ad_destroying_profit", problem_type="ad_destroying_profit",
-               insight_key="adv_ad_destroying_profit:wb:SKU1", marketplace="wb", sku="SKU1",
+               signal_key="adv_ad_on_low_stock", problem_type="ad_on_low_stock",
+               insight_key="adv_ad_on_low_stock:wb:SKU1", marketplace="wb", sku="SKU1",
                status="active", decision_id="dec-1", what="x", why="y", what_to_do="w",
                expected_effect="z", created_at=T0))
         await db.commit()

@@ -23,9 +23,11 @@ from services.action_binding.payload_builder import (
     build_action_payload, PayloadBuildResult, REASON_NO_BINDING, REASON_PAYLOAD_NOT_DERIVABLE,
 )
 
-ADV_BOUND = ("adv_ad_destroying_profit", "adv_ad_spend_without_sales",
-             "adv_ad_on_unprofitable_product", "adv_ad_on_low_stock", "adv_ad_on_oos_risk",
-             "adv_ad_on_bad_listing")
+# A2.2-bind: overspend types rebind to ad_set_state (campaign pause, resolver-derived);
+# the indirect stock/listing types keep stop_auto_promotion (offer_id-derived).
+ADV_STOP = ("adv_ad_on_low_stock", "adv_ad_on_oos_risk", "adv_ad_on_bad_listing")
+ADV_OVERSPEND = ("adv_ad_destroying_profit", "adv_ad_spend_without_sales",
+                 "adv_ad_on_unprofitable_product")
 
 
 def _run(c):
@@ -50,19 +52,35 @@ async def _count_listings(db):
     return (await db.execute(select(func.count()).select_from(ProductListing))).scalar()
 
 
-# ── 1. all 6 advertising types build a payload (v2 P0: + bad_listing) ─────────
+# ── 1. the 3 stock/listing adv types build a stop_auto_promotion payload ──────
 
-def test_six_adv_types_build_payload():
+def test_stop_adv_types_build_payload():
     async def go():
         db = await _engine(); uid = str(uuid.uuid4())
         await _seed_listing(db, uid, external_id="SKU1")
-        for st in ADV_BOUND:
+        for st in ADV_STOP:
             res = await build_action_payload(db, user_id=uid, signal_type=st,
                                              marketplace="wildberries", sku="SKU1")
             assert isinstance(res, PayloadBuildResult) and res.ok
             assert res.action_key == "stop_auto_promotion"
             assert res.payload == {"offer_id": "SKU1"}
             assert res.action_key == BY_SIGNAL_TYPE[st].action_key   # matches registry
+    _run(go())
+
+
+# ── 1b. overspend types now bind ad_set_state — payload not derivable without a
+#       resolvable single campaign (no connection/campaign here) ───────────────
+
+def test_overspend_types_bind_ad_set_state_not_derivable_without_campaign():
+    async def go():
+        db = await _engine(); uid = str(uuid.uuid4())
+        await _seed_listing(db, uid, external_id="SKU1")
+        for st in ADV_OVERSPEND:
+            res = await build_action_payload(db, user_id=uid, signal_type=st,
+                                             marketplace="wildberries", sku="SKU1")
+            assert res.action_key == "ad_set_state"
+            assert res.action_key == BY_SIGNAL_TYPE[st].action_key
+            assert res.ok is False and res.payload is None     # no guessed campaign_id
     _run(go())
 
 
@@ -130,7 +148,7 @@ def test_payload_only_allowed_fields():
     async def go():
         db = await _engine(); uid = str(uuid.uuid4())
         await _seed_listing(db, uid, external_id="SKU1")
-        res = await build_action_payload(db, user_id=uid, signal_type="adv_ad_destroying_profit",
+        res = await build_action_payload(db, user_id=uid, signal_type="adv_ad_on_low_stock",
                                          marketplace="wildberries", sku="SKU1")
         assert set(res.payload.keys()) == {"offer_id"}   # nothing extra, nothing generated
     _run(go())
