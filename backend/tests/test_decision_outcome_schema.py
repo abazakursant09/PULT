@@ -148,6 +148,7 @@ def test_registry_covers_live_engine_types():
     from services.review.rules import RULE_REGISTRY as REV
     from services.growth.rules import RULE_REGISTRY as GROW
     from services.legal.snapshot import REQUIREMENT_CANDIDATES as LEGAL
+    from services.pricing.rules import RULE_REGISTRY as PRICING
 
     live = set()
     live |= {f"seo_{r.problem_type}" for r in SEO}
@@ -155,13 +156,14 @@ def test_registry_covers_live_engine_types():
     live |= {f"rev_{r.problem_type}" for r in REV}
     live |= {f"growth_{r.problem_type}" for r in GROW}
     live |= {f"legal_{rt}" for rt in LEGAL}
+    live |= {f"pricing_{r.problem_type}" for r in PRICING}   # A3-pre
 
     registry = set(BY_SIGNAL_KEY.keys())
     missing = live - registry
     extra = registry - live
     assert not missing, f"registry missing live signal types: {missing}"
     assert not extra, f"registry has stale types not in engines: {extra}"
-    assert set(CONTOURS) == {"seo", "advertising", "review", "growth", "legal"}
+    assert set(CONTOURS) == {"seo", "advertising", "review", "growth", "legal", "pricing"}
 
 
 # ── 9. incompatible insight keys surfaced (Review 4-part only) ───────────────

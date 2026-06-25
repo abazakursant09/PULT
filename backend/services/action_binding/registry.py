@@ -164,6 +164,11 @@ def _decide(contour: str, itype: str, signal_key: str) -> ActionBinding:
         return ActionBinding(signal_key, contour, False, None, None, None, MANUAL_APPROVAL,
                              NO_CATALOG_ACTION, "no catalog action for this opportunity")
 
+    # ── pricing → advice-only for now; set_price binding is A3-bind (not yet) ──
+    if contour == "pricing":
+        return ActionBinding(signal_key, contour, False, None, None, None, MANUAL_APPROVAL,
+                             NO_CATALOG_ACTION, "set_price binding pending (A3-bind)")
+
     # ── legal → advisory only, never automatable ─────────────────────────────
     return ActionBinding(signal_key, contour, False, None, None, None, AUTO_FORBIDDEN,
                          NO_CATALOG_ACTION, "advisory only — no executor action")
@@ -179,9 +184,9 @@ _CACHE: Optional[Tuple[ActionBinding, ...]] = None
 
 
 def _all() -> Tuple[ActionBinding, ...]:
-    """Full 35-type registry, built lazily over the canonical insight types. The
-    decision_outcome import is deferred to first access (after that module is fully
-    imported) so there is no import cycle."""
+    """Full canonical-type registry, built lazily over the canonical insight types.
+    The decision_outcome import is deferred to first access (after that module is
+    fully imported) so there is no import cycle."""
     global _CACHE
     if _CACHE is None:
         from services.decision_outcome.registry import CANONICAL_INSIGHT_TYPES

@@ -43,7 +43,7 @@ async def _engine():
 
 def test_registry_covers_all_signal_types():
     assert set(BY_SIGNAL_TYPE.keys()) == set(BY_SIGNAL_KEY.keys())
-    assert len(ACTION_BINDINGS) == 35
+    assert len(ACTION_BINDINGS) == 38   # +3 pricing types (A3-pre)
 
 
 # ── 2. bound action_key is a real catalog action ────────────────────────────
@@ -67,7 +67,7 @@ def test_only_six_advertising_bound():
         "adv_ad_on_unprofitable_product", "adv_ad_on_low_stock", "adv_ad_on_oos_risk",
         "adv_ad_on_bad_listing",
     }
-    assert len(advice_only_signal_types()) == 29
+    assert len(advice_only_signal_types()) == 32   # +3 pricing advice-only (A3-pre)
     # A2.2-bind: direct overspend → ad_set_state (campaign pause); the indirect
     # stock/listing types keep stop_auto_promotion.
     overspend = {"adv_ad_destroying_profit", "adv_ad_spend_without_sales",
