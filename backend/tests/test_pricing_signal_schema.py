@@ -91,16 +91,16 @@ def test_pricing_in_spine_model_maps():
 
 # ── (9) no set_price binding yet ─────────────────────────────────────────────
 
-def test_margin_signals_remain_advice_only():
-    # A3-bind binds ONLY price_below_floor → set_price; the two margin signals stay
-    # advice-only (a margin-target price needs cost-plus/COGS — not wired here).
-    for t in ("negative_margin", "margin_below_target"):
+def test_pricing_binding_state():
+    # A3-bind: price_below_floor → set_price (floor). A4-bind: negative_margin →
+    # set_price (break-even). margin_below_target stays advice-only (no target margin).
+    for t in ("price_below_floor", "negative_margin"):
         b = BY_SIGNAL_TYPE[f"pricing_{t}"]
-        assert b.bindable is False and b.action_key is None
-        assert b.binding_status == "no_catalog_action"
-    floor = BY_SIGNAL_TYPE["pricing_price_below_floor"]
-    assert floor.bindable and floor.action_key == "set_price"
-    assert len(bound_signal_types()) == 7   # 6 advertising + price_below_floor
+        assert b.bindable and b.action_key == "set_price"
+    mbt = BY_SIGNAL_TYPE["pricing_margin_below_target"]
+    assert mbt.bindable is False and mbt.action_key is None
+    assert mbt.binding_status == "no_catalog_action"
+    assert len(bound_signal_types()) == 8   # 6 advertising + floor + break-even
 
 
 # ── (10/11/12) no payload builder / executor / frontend change in this slice ─
