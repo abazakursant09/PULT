@@ -72,11 +72,12 @@ def test_price_below_floor_binds_set_price():
     assert "set_price" in {x.action_key for x in BY_SIGNAL_TYPE.values() if x.bindable}
 
 
-def test_other_pricing_signals_not_bound():
-    for t in ("pricing_negative_margin", "pricing_margin_below_target"):
-        b = BY_SIGNAL_TYPE[t]
-        assert b.bindable is False and b.action_key is None
-        assert b.binding_status == "no_catalog_action"
+def test_margin_below_target_not_bound():
+    # A4-bind binds negative_margin (break-even); margin_below_target stays advice-only
+    # (needs a persisted target margin — no field).
+    b = BY_SIGNAL_TYPE["pricing_margin_below_target"]
+    assert b.bindable is False and b.action_key is None
+    assert b.binding_status == "no_catalog_action"
 
 
 # ── (11) metric_key = net_profit ─────────────────────────────────────────────
