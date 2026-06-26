@@ -31,6 +31,7 @@ from typing import Tuple
 # contour → engine signal_key prefix
 PREFIX = {
     "seo": "seo", "advertising": "adv", "review": "rev", "growth": "growth", "legal": "legal",
+    "pricing": "pricing",
 }
 
 # contour → metric NAME a future measurement would observe (no number, no forecast)
@@ -40,6 +41,9 @@ _DEFAULT_METRIC = {
     "review": "reputation_handling",
     "growth": "growth_realized",
     "legal": "legal_risk_open",
+    # pricing/margin problems are measured on profit (A3-pre): a price fix can raise
+    # margin while revenue/units fall, so net_profit is the honest target.
+    "pricing": "net_profit",
 }
 
 # Per-insight-type metric override (A2.2-bind). The direct-overspend advertising
@@ -76,6 +80,11 @@ _TYPES = {
     "legal": (
         "product_certification", "trademark_usage", "labeling_requirements",
         "marketplace_offer_terms", "return_policy_obligations", "content_claim_risk",
+    ),
+    # Pricing/margin (A3-pre) — observed finance-backed margin problems. Advice-only
+    # for now; the set_price binding is a later sprint (A3-bind).
+    "pricing": (
+        "negative_margin", "margin_below_target", "price_below_floor",
     ),
 }
 
