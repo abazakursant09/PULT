@@ -54,6 +54,7 @@ _MODELS = {
 _READERS = {
     "ad_profit_impact": (read_net_profit, +1),
     "ad_cost_ratio": (read_ad_cost_ratio, -1),   # ДРР: lower observed ratio is better
+    "net_profit": (read_net_profit, +1),         # pricing contour metric (higher is better)
 }
 
 _EPS_REL = 0.05   # within 5% of baseline magnitude → unchanged (no fabricated precision)
