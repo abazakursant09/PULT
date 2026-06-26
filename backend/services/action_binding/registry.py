@@ -109,6 +109,15 @@ _PAUSE_PAYLOAD_RULE: Mapping[str, str] = {
     "action": "const:pause",
 }
 
+# set_price floor-restore: price comes ONLY from the seller's PricingRule.min_price
+# (observed, deterministic). No competitor price, no compute_recommendation, no
+# forecast, no cost-plus, no guess.
+_PRICE_FLOOR_PAYLOAD_RULE: Mapping[str, str] = {
+    "offer_id": "resolve: sku -> listing.external_id",
+    "price": "resolve: product -> PricingRule.min_price",
+    "old_price": "resolve: product.price (for revert)",
+}
+
 
 @dataclass(frozen=True)
 class ActionBinding:
@@ -164,10 +173,19 @@ def _decide(contour: str, itype: str, signal_key: str) -> ActionBinding:
         return ActionBinding(signal_key, contour, False, None, None, None, MANUAL_APPROVAL,
                              NO_CATALOG_ACTION, "no catalog action for this opportunity")
 
-    # ── pricing → advice-only for now; set_price binding is A3-bind (not yet) ──
+    # ── pricing → only price_below_floor binds to set_price (A3-bind) ─────────
+    # new_price = PricingRule.min_price (user/rule-defined, observed, deterministic).
+    # negative_margin / margin_below_target stay advice-only: a margin-target price
+    # needs cost-plus (COGS) which is NOT wired here, and the competitor-based
+    # compute_recommendation is forbidden for canonical pricing.
     if contour == "pricing":
+        if itype == "price_below_floor":
+            ak = "set_price"
+            return ActionBinding(
+                signal_key, contour, True, ak, _PRICE_FLOOR_PAYLOAD_RULE,
+                action_catalog.get(ak).required_scope, MANUAL_APPROVAL, BOUND, None)
         return ActionBinding(signal_key, contour, False, None, None, None, MANUAL_APPROVAL,
-                             NO_CATALOG_ACTION, "set_price binding pending (A3-bind)")
+                             NO_CATALOG_ACTION, "needs cost-plus target price (A3-bind-2)")
 
     # ── legal → advisory only, never automatable ─────────────────────────────
     return ActionBinding(signal_key, contour, False, None, None, None, AUTO_FORBIDDEN,

@@ -66,14 +66,18 @@ def test_only_six_advertising_bound():
         "adv_ad_destroying_profit", "adv_ad_spend_without_sales",
         "adv_ad_on_unprofitable_product", "adv_ad_on_low_stock", "adv_ad_on_oos_risk",
         "adv_ad_on_bad_listing",
+        "pricing_price_below_floor",   # A3-bind: floor-restore → set_price
     }
-    assert len(advice_only_signal_types()) == 32   # +3 pricing advice-only (A3-pre)
-    # A2.2-bind: direct overspend → ad_set_state (campaign pause); the indirect
-    # stock/listing types keep stop_auto_promotion.
+    assert len(advice_only_signal_types()) == 31   # A3-bind: price_below_floor now bound
+    # A2.2-bind: overspend → ad_set_state; indirect → stop_auto_promotion.
+    # A3-bind: pricing_price_below_floor → set_price.
     overspend = {"adv_ad_destroying_profit", "adv_ad_spend_without_sales",
                  "adv_ad_on_unprofitable_product"}
     for st in bound:
-        expect = "ad_set_state" if st in overspend else "stop_auto_promotion"
+        if st == "pricing_price_below_floor":
+            expect = "set_price"
+        else:
+            expect = "ad_set_state" if st in overspend else "stop_auto_promotion"
         assert BY_SIGNAL_TYPE[st].action_key == expect
 
 
@@ -112,9 +116,10 @@ def test_capability_matches_action_spec():
     for b in ACTION_BINDINGS:
         if b.bindable:
             assert b.required_capability == action_catalog.get(b.action_key).required_scope
-    # two bound families: ad_set_state (advert scope) + stop_auto_promotion (promotions)
+    # three bound families: ad_set_state (advert) + stop_auto_promotion (promotions)
+    # + set_price (prices, A3-bind)
     scopes = {b.required_capability for b in ACTION_BINDINGS if b.bindable}
-    assert scopes == {"advert", "promotions"}
+    assert scopes == {"advert", "promotions", "prices"}
 
 
 # ── 7. growth + legal advice_only with reasons ───────────────────────────────

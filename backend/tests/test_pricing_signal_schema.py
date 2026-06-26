@@ -91,24 +91,24 @@ def test_pricing_in_spine_model_maps():
 
 # ── (9) no set_price binding yet ─────────────────────────────────────────────
 
-def test_no_set_price_binding_yet():
-    for t in ("negative_margin", "margin_below_target", "price_below_floor"):
+def test_margin_signals_remain_advice_only():
+    # A3-bind binds ONLY price_below_floor → set_price; the two margin signals stay
+    # advice-only (a margin-target price needs cost-plus/COGS — not wired here).
+    for t in ("negative_margin", "margin_below_target"):
         b = BY_SIGNAL_TYPE[f"pricing_{t}"]
-        assert b.bindable is False and b.action_key is None     # advice-only
+        assert b.bindable is False and b.action_key is None
         assert b.binding_status == "no_catalog_action"
-    # set_price is bound to NO canonical signal
-    assert "set_price" not in {b.action_key for b in BY_SIGNAL_TYPE.values() if b.bindable}
-    # bound set unchanged (still the 6 advertising types)
-    assert len(bound_signal_types()) == 6
+    floor = BY_SIGNAL_TYPE["pricing_price_below_floor"]
+    assert floor.bindable and floor.action_key == "set_price"
+    assert len(bound_signal_types()) == 7   # 6 advertising + price_below_floor
 
 
 # ── (10/11/12) no payload builder / executor / frontend change in this slice ─
 
-def test_no_payload_or_executor_change_for_pricing():
-    # payload builder has no pricing/set_price arm
-    import services.action_binding.payload_builder as pbmod
-    assert "pricing" not in pbmod._ALLOWED_FIELDS and "set_price" not in pbmod._ALLOWED_FIELDS
-    # pricing service modules IMPORT no executor / payload builder / apply path
+def test_pricing_signal_service_stays_pure():
+    # the pricing SIGNAL service (generation/reconciliation) imports no executor /
+    # payload builder / apply path — it only detects, never acts. (set_price payload
+    # lives in action_binding.payload_builder, the A3-bind wiring, not here.)
     import ast
     import inspect
     import services.pricing.generator as gen

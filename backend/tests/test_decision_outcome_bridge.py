@@ -210,6 +210,8 @@ def test_action_bindings_are_real_and_advertising_only():
         "adv_ad_on_low_stock": "stop_auto_promotion",
         "adv_ad_on_oos_risk": "stop_auto_promotion",
         "adv_ad_on_bad_listing": "stop_auto_promotion",
+        # A3-bind: pricing floor-restore → set_price
+        "pricing_price_below_floor": "set_price",
     }
     from services.marketplace import action_catalog
     for ak in bound.values():
