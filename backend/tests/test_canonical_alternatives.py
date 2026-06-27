@@ -144,13 +144,14 @@ def test_marketplace_isolation(monkeypatch):
     _run(go())
 
 
-# ── (8) registry: action_keys backward-compatible (single per signal today) ──
+# ── (8) registry: action_keys consistent; primary is action_keys[0] ──────────
 
-def test_registry_backward_compatible():
+def test_registry_action_keys_consistent():
     for k, e in BY_SIGNAL_KEY.items():
         if e.action_key is None:
             assert e.action_keys == ()                 # advice-only
         else:
-            assert e.action_keys == (e.action_key,)    # single lever today
-    # no canonical signal ships with >1 lever yet (foundation only)
-    assert not [k for k, e in BY_SIGNAL_KEY.items() if len(e.action_keys) > 1]
+            assert e.action_keys[0] == e.action_key    # primary first
+            assert len(e.action_keys) == len(set(e.action_keys))   # no dups
+    # pricing_negative_margin is the first multi-lever signal (set_price + reduce_discount)
+    assert BY_SIGNAL_KEY["pricing_negative_margin"].action_keys == ("set_price", "reduce_discount")

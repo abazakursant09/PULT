@@ -31,7 +31,9 @@ from models.engine_signal_decision_link import EngineSignalDecisionLink
 
 from services.decision_apply import apply_decision
 from services.decision_outcome.decision_bridge import capability_supported
-from services.action_binding.registry import BY_SIGNAL_TYPE, BOUND, MANUAL_APPROVAL
+from services.action_binding.registry import (
+    BY_SIGNAL_TYPE, BOUND, MANUAL_APPROVAL, binding_for_action,
+)
 from services.action_binding.payload_builder import build_action_payload
 
 NOT_EXECUTED = "not_executed"
@@ -94,23 +96,26 @@ async def execute_bound_decision(
     # 3) signal_type from the canonical insight_key (<signal_type>:<mp>:<sku>)
     signal_type = (link.insight_key or "").split(":", 1)[0] or None
 
-    # 4) binding checks
-    b = BY_SIGNAL_TYPE.get(signal_type)
+    # 4) binding checks — resolve the binding for THIS Decision's action_key (the
+    #    signal may carry several alternative levers; pick the matching one).
+    b = binding_for_action(signal_type, decision.action_key)
     if b is None or not b.bindable or b.binding_status != BOUND or not b.action_key:
-        return _reject(decision_id, decision.action_key, "not_bindable")
+        primary = BY_SIGNAL_TYPE.get(signal_type)
+        if primary is None or not primary.bindable:
+            return _reject(decision_id, decision.action_key, "not_bindable")
+        return _reject(decision_id, decision.action_key, "action_key_mismatch")
     if b.safety_class != MANUAL_APPROVAL:
         return _reject(decision_id, decision.action_key, "safety_not_manual_approval")
-    if b.action_key != decision.action_key:
-        return _reject(decision_id, decision.action_key, "action_key_mismatch")
 
     # 5) capability pre-gate (same source of truth as the promotion bridge) — never
     #    bypassing the executor's own gate, just an honest early skip.
     if not capability_supported(decision.action_key, marketplace):
         return _reject(decision_id, decision.action_key, "unsupported_capability")
 
-    # 6) build the payload from derivable data only
+    # 6) build the payload for THIS lever (derivable data only)
     pr = await build_action_payload(db, user_id=user_id, signal_type=signal_type,
-                                    marketplace=marketplace, sku=sku)
+                                    marketplace=marketplace, sku=sku,
+                                    action_key=decision.action_key)
     if not pr.ok or not pr.payload:
         return _reject(decision_id, decision.action_key, pr.reason or "payload_not_derivable")
 

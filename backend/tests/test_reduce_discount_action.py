@@ -60,10 +60,12 @@ def test_reduce_discount_registered_reversible():
 # ── capability matrix ────────────────────────────────────────────────────────
 
 def test_capability_matrix():
+    # reduce_discount is the WB discount API only; Ozon has no discount API (honest).
     assert executor.capability_for_action("reduce_discount") == "discounts.write"
     assert capability_registry.verdict("discounts.write", "wb") == "api"
-    assert capability_registry.verdict("discounts.write", "ozon") == "api"
+    assert capability_registry.verdict("discounts.write", "ozon") == "impossible"
     assert capability_registry.verdict("discounts.write", "yandex") == "impossible"
+    assert action_catalog.get("reduce_discount").marketplace == "wildberries"
 
 
 # ── adapter routing (WB discount, Ozon price) ────────────────────────────────
@@ -85,44 +87,32 @@ def test_wb_routes_to_set_discount(monkeypatch):
     _run(go())
 
 
-def test_ozon_routes_to_set_price(monkeypatch):
-    seen = {}
-    async def fake(*, token, client_id, offer_id, price):
-        seen.update(offer_id=offer_id, price=price)
-        return {"requestId": "oz1"}
-    monkeypatch.setattr(action_catalog.ozon_client, "set_price", fake)
-
-    async def go():
-        db = await _engine(); uid = str(uuid.uuid4())
-        await _conn(db, uid, "ozon")
-        res = await executor.execute(db=db, user_id=uid, action_type="reduce_discount",
-                                     payload={"marketplace": "ozon", "offer_id": "OF1", "price": 990})
-        assert res.status == "success" and seen == {"offer_id": "OF1", "price": 990.0}
-    _run(go())
-
-
-def test_yandex_capability_not_supported(monkeypatch):
+def test_ozon_reduce_discount_unsupported_never_set_price(monkeypatch):
+    # Ozon must NOT route reduce_discount through set_price — honest capability gate.
     called = []
-    async def fake(**k): called.append(1); return {}
-    monkeypatch.setattr(action_catalog.wb_client, "set_discount", fake)
-
+    monkeypatch.setattr(action_catalog.ozon_client, "set_price",
+                        lambda **k: called.append(1))
+    from services.decision_outcome.decision_bridge import capability_supported
+    assert capability_supported("reduce_discount", "ozon") is False
     async def go():
-        db = await _engine(); uid = str(uuid.uuid4())
-        c = MarketplaceConnection(id=str(uuid.uuid4()), user_id=uid, marketplace="yandex",
-                                  status="connected", scopes=["prices"])
-        db.add(c)
-        db.add(ApiCredential(id=str(uuid.uuid4()), connection_id=c.id, scope="prices",
-                             secret_enc=credential_vault.encrypt("t")))
-        await db.flush()
-        res = await executor.execute(db=db, user_id=uid, action_type="reduce_discount",
-                                     payload={"marketplace": "yandex", "offer_id": "x", "discount": 3},
-                                     decision_id="dY")
-        assert res.status == "rejected"
-        assert res.error["code"] == ExecutionError.CAPABILITY_NOT_SUPPORTED
-        assert called == []  # client never called
-        log = (await db.execute(select(ExecutionLog).where(ExecutionLog.user_id == uid))).scalars().first()
-        assert log.status == "rejected" and log.decision_id == "dY"
+        # the dispatcher itself rejects Ozon (never set_price)
+        err = None
+        try:
+            await action_catalog._dispatch_reduce_discount(
+                "tok", {"offer_id": "OF1", "discount": 0}, {"marketplace": "ozon"})
+        except ExecutionError as e:
+            err = e
+        assert err is not None and err.code == ExecutionError.CAPABILITY_NOT_SUPPORTED
+        assert called == []
     _run(go())
+
+
+def test_reduce_discount_capability_gate_honest():
+    from services.decision_outcome.decision_bridge import capability_supported
+    assert capability_supported("reduce_discount", "wildberries") is True
+    assert capability_supported("reduce_discount", "ozon") is False
+    assert capability_supported("reduce_discount", "yandex") is False
+    assert capability_supported("reduce_discount", "megamarket") is False
 
 
 # ── measurement binding ──────────────────────────────────────────────────────
@@ -153,9 +143,3 @@ def test_reverter_wb_restores_old_discount():
     action, inv = spec.reverter(
         {"marketplace": "wildberries", "offer_id": "1", "discount": 5, "old_discount": 12}, {})
     assert action == "reduce_discount" and inv["discount"] == 12
-
-def test_reverter_ozon_restores_old_price():
-    spec = action_catalog.get("reduce_discount")
-    action, inv = spec.reverter(
-        {"marketplace": "ozon", "offer_id": "1", "price": 990, "old_price": 1200}, {})
-    assert inv["price"] == 1200

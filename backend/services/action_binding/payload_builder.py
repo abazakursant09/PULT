@@ -42,7 +42,7 @@ from services.marketplace.campaign_identity import (
     resolve_campaign_identity, CampaignIdentity,
 )
 from services.action_binding.registry import (
-    BY_SIGNAL_TYPE, BOUND, NO_CATALOG_ACTION, PAYLOAD_NOT_DERIVABLE,
+    BY_SIGNAL_TYPE, BOUND, NO_CATALOG_ACTION, PAYLOAD_NOT_DERIVABLE, binding_for_action,
 )
 
 REASON_NO_BINDING = "no_binding"
@@ -56,6 +56,7 @@ _ALLOWED_FIELDS = {
     "stop_auto_promotion": {"offer_id"},
     "ad_set_state": {"campaign_id", "action"},
     "set_price": {"offer_id", "price", "old_price"},
+    "reduce_discount": {"offer_id", "discount"},
 }
 
 
@@ -83,12 +84,21 @@ async def _resolve_external_id(db: AsyncSession, user_id: str, marketplace: str,
 
 async def build_action_payload(
     db: AsyncSession, *, user_id: str, signal_type: str, marketplace: str,
-    sku: Optional[str], source_context: Optional[Mapping[str, object]] = None,
+    sku: Optional[str], action_key: Optional[str] = None,
+    source_context: Optional[Mapping[str, object]] = None,
 ) -> PayloadBuildResult:
-    """Build a validated executor payload for a bound signal type. Read-only."""
-    b = BY_SIGNAL_TYPE.get(signal_type)
-    if b is None:
-        return PayloadBuildResult(ok=False, action_key=None, reason=REASON_NO_BINDING)
+    """Build a validated executor payload for a bound signal type. Read-only.
+
+    `action_key` selects WHICH lever to build for a multi-action signal (Canonical
+    Alternatives); when None it falls back to the primary binding (backward compatible)."""
+    if action_key is not None:
+        b = binding_for_action(signal_type, action_key)
+        if b is None:
+            return PayloadBuildResult(ok=False, action_key=None, reason=REASON_NO_BINDING)
+    else:
+        b = BY_SIGNAL_TYPE.get(signal_type)
+        if b is None:
+            return PayloadBuildResult(ok=False, action_key=None, reason=REASON_NO_BINDING)
 
     if not b.bindable or b.binding_status != BOUND or not b.action_key:
         reason = REASON_NO_BINDING if b.binding_status == NO_CATALOG_ACTION else REASON_PAYLOAD_NOT_DERIVABLE
@@ -115,9 +125,30 @@ async def build_action_payload(
             return await _build_cost_plus(db, user_id=user_id, marketplace=marketplace, sku=sku)
         return await _build_set_price(db, user_id=user_id, marketplace=marketplace, sku=sku)
 
+    if b.action_key == "reduce_discount":
+        return await _build_reduce_discount(db, user_id=user_id, marketplace=marketplace, sku=sku)
+
     # bound to an action with no builder yet → honest payload_not_derivable
     return PayloadBuildResult(ok=False, action_key=b.action_key,
                               reason=REASON_PAYLOAD_NOT_DERIVABLE)
+
+
+async def _build_reduce_discount(db: AsyncSession, *, user_id: str, marketplace: str,
+                                 sku: Optional[str]) -> PayloadBuildResult:
+    """reduce_discount payload: {offer_id, discount:0} — remove the WB discount.
+
+    One business operation: lower/remove the discount. offer_id from the observed
+    listing; discount is the const 0. NEVER a price (that is set_price), NEVER
+    competitor / compute_recommendation / forecast / AI. payload_not_derivable when
+    the listing / external_id is missing. (WB-only is enforced by the capability gate;
+    the payload itself carries no marketplace-specific magnitude.)"""
+    offer_id = await _resolve_external_id(db, user_id, marketplace, sku)
+    if not offer_id:
+        return PayloadBuildResult(ok=False, action_key="reduce_discount",
+                                  reason=REASON_PAYLOAD_NOT_DERIVABLE)
+    payload = {"offer_id": offer_id, "discount": 0}
+    assert set(payload) <= _ALLOWED_FIELDS["reduce_discount"]
+    return PayloadBuildResult(ok=True, action_key="reduce_discount", payload=payload)
 
 
 async def _build_set_price(db: AsyncSession, *, user_id: str, marketplace: str,

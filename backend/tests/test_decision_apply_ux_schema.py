@@ -152,13 +152,15 @@ def test_preview_safety_not_manual_approval():
         db = await _engine(); uid = str(uuid.uuid4())
         did = await _seed(db, uid)
         key = "adv_ad_on_low_stock"
-        orig = eb.BY_SIGNAL_TYPE[key]
-        eb.BY_SIGNAL_TYPE[key] = dataclasses.replace(orig, safety_class="manual_only")
+        orig = eb.binding_for_action(key, "stop_auto_promotion")
+        manual_only = dataclasses.replace(orig, safety_class="manual_only")
+        eb_orig = eb.binding_for_action
+        eb.binding_for_action = lambda st, ak: manual_only if st == key else eb_orig(st, ak)
         try:
             p = await build_apply_preview(db, user_id=uid, decision_id=did,
                                           marketplace="wildberries", sku="SKU1")
         finally:
-            eb.BY_SIGNAL_TYPE[key] = orig
+            eb.binding_for_action = eb_orig
         assert p.applyable is False and p.reason == "safety_not_manual_approval"
     _run(go())
 
