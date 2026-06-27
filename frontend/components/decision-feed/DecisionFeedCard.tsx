@@ -166,6 +166,14 @@ export function DecisionFeedCard(
           )}
         </div>
       )}
+      {/* Learning-driven primary: WHY this lever is shown first (observed history,
+          not a promise). Only when there is no learning_context block above to avoid
+          duplicating the same explanation. */}
+      {!item.learning_context && item.action_role === 'primary' && item.ranking_explain && (
+        <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 6, fontStyle: 'italic' }}>
+          {item.ranking_explain.explanation_text}
+        </div>
+      )}
       {item.lifecycle_reason && (
         <div style={{ fontSize: 10.5, color: 'var(--text-3)', marginTop: 6 }}>Статус: {item.lifecycle_reason}</div>
       )}
