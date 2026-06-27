@@ -251,6 +251,11 @@ _ORDER = {
 }
 _DO_DEFAULT_VISIBLE = {"proven_improved", "proven_worsened", "not_evaluated", "not_measured_yet"}
 
+# Decision Priority Engine v1 — secondary sort key WITHIN one _order_bucket, from the
+# signal's OBSERVED qualitative severity class (priority_level). NOT a numeric score,
+# NOT exposed on the DTO, NOT a forecast, NOT money. Unknown/missing → end of its bucket.
+_PRIORITY = {"critical": 0, "high": 1, "medium": 2, "low": 3, None: 4}
+
 
 @dataclass
 class FeedItem:
@@ -293,6 +298,9 @@ class FeedItem:
     source_context: Mapping[str, object] = field(default_factory=dict)
     # internal sort bucket (NOT a numeric priority field for callers)
     _order_bucket: str = "active"
+    # internal secondary sort key (Priority Engine v1) — observed priority_level class
+    # (critical|high|medium|low|None). NOT exposed on the DTO, NOT a numeric score.
+    _priority_bucket: Optional[str] = None
 
 
 def _canonical_key(sig) -> Optional[str]:
@@ -334,6 +342,7 @@ def _engine_item(contour: str, table: str, sig) -> Optional[FeedItem]:
         created_at=sig.created_at, updated_at=getattr(sig, "updated_at", None),
         source_context={k: v for k, v in ctx.items() if v is not None},
         _order_bucket=sig.status or "active",
+        _priority_bucket=getattr(sig, "priority_level", None),   # observed severity class
     )
 
 
@@ -526,5 +535,12 @@ async def build_feed(
         visible.append(it)
 
     # ── ordering (explainable, no numeric priority) ──────────────────────────
-    visible.sort(key=lambda i: (_ORDER.get(i._order_bucket, 99), -_ts(i.created_at)))
+    # Priority Engine v1: lifecycle/effect bucket stays primary; WITHIN a bucket the
+    # observed severity class (priority_level) ranks higher problems first; recency is
+    # the final tiebreak. Sort-only — no item dropped, no DTO field, no group change.
+    visible.sort(key=lambda i: (
+        _ORDER.get(i._order_bucket, 99),
+        _PRIORITY.get(i._priority_bucket, 4),
+        -_ts(i.created_at),
+    ))
     return visible[: max(1, limit)]
