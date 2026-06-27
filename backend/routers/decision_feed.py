@@ -47,6 +47,9 @@ class FeedItemView(BaseModel):
     expected_effect: Optional[str]
     effect_status: Optional[str]
     effect_band: Optional[str]
+    group_key: Optional[str] = None
+    action_key: Optional[str] = None
+    action_role: Optional[str] = None
     learning_context: Optional[str]
     learning_explain: Optional[dict]
     ranking_explain: Optional[dict]
@@ -63,6 +66,7 @@ def _view(i: FeedItem) -> FeedItemView:
         marketplace=i.marketplace, sku=i.sku, title=i.title, what_happened=i.what_happened,
         why_it_matters=i.why_it_matters, meaning=i.meaning, recommended_action=i.recommended_action,
         expected_effect=i.expected_effect, effect_status=i.effect_status, effect_band=i.effect_band,
+        group_key=i.group_key, action_key=i.action_key, action_role=i.action_role,
         learning_context=i.learning_context,
         learning_explain=dict(i.learning_explain) if i.learning_explain else None,
         ranking_explain=dict(i.ranking_explain) if i.ranking_explain else None,

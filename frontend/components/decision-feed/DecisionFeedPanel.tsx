@@ -33,6 +33,33 @@ export function DecisionFeedPanel() {
     return () => { alive = false }
   }, [contour])
 
+  // Group items by group_key (canonical insight_key, carries marketplace → WB/Ozon
+  // never merge). Items without a group_key stay standalone (keyed by item_key).
+  // Order is preserved by first appearance.
+  function groupItems(list: DecisionFeedItem[]): DecisionFeedItem[][] {
+    const order: string[] = []
+    const map = new Map<string, DecisionFeedItem[]>()
+    for (const it of list) {
+      const key = it.group_key ?? `solo:${it.item_key}`
+      if (!map.has(key)) { map.set(key, []); order.push(key) }
+      map.get(key)!.push(it)
+    }
+    // primary first within each group
+    return order.map((k) => {
+      const arr = map.get(k)!
+      return [...arr].sort(
+        (a: DecisionFeedItem, b: DecisionFeedItem) =>
+          (a.action_role === 'primary' ? -1 : 0) - (b.action_role === 'primary' ? -1 : 0),
+      )
+    })
+  }
+
+  function roleLabel(it: DecisionFeedItem): string | null {
+    if (it.action_role === 'primary') return 'Основной вариант'
+    if (it.action_role === 'alternative') return 'Альтернатива'
+    return null
+  }
+
   // local update so the list reacts immediately after an action
   function onChanged(itemKey: string, action: Action) {
     setItems((prev) => {
@@ -66,8 +93,28 @@ export function DecisionFeedPanel() {
             <DecisionFeedEmptyState />
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {items.map((i) => (
-                <DecisionFeedCard key={i.item_key} item={i} onChanged={onChanged} />
+              {groupItems(items).map((group) => (
+                group.length === 1 ? (
+                  <DecisionFeedCard key={group[0].item_key} item={group[0]} onChanged={onChanged} />
+                ) : (
+                  <div key={group[0].group_key ?? group[0].item_key} style={{
+                    border: '1px solid var(--line)', borderRadius: 12, padding: 12,
+                    background: 'var(--surface)', display: 'flex', flexDirection: 'column', gap: 8,
+                  }}>
+                    {/* one problem shown once for the whole group */}
+                    {group[0].what_happened && (
+                      <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)' }}>{group[0].what_happened}</div>
+                    )}
+                    {group[0].why_it_matters && (
+                      <div style={{ fontSize: 12, color: 'var(--text-2)' }}><b>Почему важно:</b> {group[0].why_it_matters}</div>
+                    )}
+                    <div style={{ fontSize: 11.5, color: 'var(--text-3)' }}>Варианты решения:</div>
+                    {group.map((i) => (
+                      <DecisionFeedCard key={i.item_key} item={i} onChanged={onChanged}
+                        roleLabel={roleLabel(i)} hideProblem />
+                    ))}
+                  </div>
+                )
               ))}
             </div>
           )
