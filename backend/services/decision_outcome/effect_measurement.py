@@ -39,6 +39,7 @@ from models.review_signal import ReviewSignal
 from models.growth_signal import GrowthSignal
 from models.legal_signal import LegalSignal
 from models.pricing_signal import PricingSignal
+from models.operations_signal import OperationsSignal
 
 from services.marketplace.finance_metric_reader import read_ad_cost_ratio, read_net_profit
 from services.marketplace.metric_reader import MetricSample
@@ -47,6 +48,7 @@ from .registry import BY_SIGNAL_KEY
 _MODELS = {
     "seo": SeoSignal, "advertising": AdvertisingSignal, "review": ReviewSignal,
     "growth": GrowthSignal, "legal": LegalSignal, "pricing": PricingSignal,
+    "operations": OperationsSignal,
 }
 
 # metric_key (from registry) → (reader, direction). direction +1 = higher is better.
