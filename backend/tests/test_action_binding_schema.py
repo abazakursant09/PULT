@@ -68,14 +68,15 @@ def test_only_six_advertising_bound():
         "adv_ad_on_bad_listing",
         "pricing_price_below_floor",    # A3-bind: floor-restore → set_price
         "pricing_negative_margin",      # A4-bind: break-even → set_price
+        "pricing_margin_below_target",  # A4-margin-target: cost-plus → set_price
     }
-    assert len(advice_only_signal_types()) == 30   # A4-bind: negative_margin now bound too
+    assert len(advice_only_signal_types()) == 29   # all 3 pricing signals now bound
     # A2.2-bind: overspend → ad_set_state; indirect → stop_auto_promotion.
-    # A3/A4-bind: pricing floor + break-even → set_price.
+    # A3/A4-bind: all three pricing signals → set_price.
     overspend = {"adv_ad_destroying_profit", "adv_ad_spend_without_sales",
                  "adv_ad_on_unprofitable_product"}
     for st in bound:
-        if st in ("pricing_price_below_floor", "pricing_negative_margin"):
+        if st.startswith("pricing_"):
             expect = "set_price"
         else:
             expect = "ad_set_state" if st in overspend else "stop_auto_promotion"

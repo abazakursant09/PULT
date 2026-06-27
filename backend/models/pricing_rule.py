@@ -14,7 +14,8 @@ class PricingRule(Base):
     min_price           = Column(Float,   nullable=False)
     max_price           = Column(Float,   nullable=False)
     target_position     = Column(String(50),  nullable=False, default="below_top_3")
-    target_percent      = Column(Float,   nullable=False, default=5.0)
+    target_percent      = Column(Float,   nullable=False, default=5.0)  # competitor-relative (NOT a margin)
+    target_margin_pct   = Column(Float,   nullable=True)  # seller net-margin target, percent (25.0=25%); null=unset
     reaction_threshold  = Column(Float,   nullable=False, default=3.0)
     frequency           = Column(String(20),  nullable=False, default="once_per_day")
     auto_mode           = Column(Boolean, nullable=False, default=False)

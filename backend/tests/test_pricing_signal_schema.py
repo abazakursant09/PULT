@@ -36,7 +36,7 @@ def test_alembic_single_head():
     from alembic.script import ScriptDirectory
     cfg = Config("alembic.ini")
     heads = ScriptDirectory.from_config(cfg).get_heads()
-    assert heads == ["pr1c1a2b3c4d01"], heads        # exactly one head, the pricing rev
+    assert heads == ["tm1c1a2b3c4d02"], heads        # single head (A4-margin-target rev)
 
 
 def test_migration_is_additive_only():
@@ -92,15 +92,12 @@ def test_pricing_in_spine_model_maps():
 # ── (9) no set_price binding yet ─────────────────────────────────────────────
 
 def test_pricing_binding_state():
-    # A3-bind: price_below_floor → set_price (floor). A4-bind: negative_margin →
-    # set_price (break-even). margin_below_target stays advice-only (no target margin).
-    for t in ("price_below_floor", "negative_margin"):
+    # All three pricing signals bind to set_price: floor (A3), break-even (A4),
+    # cost-plus (A4-margin-target). Distinct observed price derivations.
+    for t in ("price_below_floor", "negative_margin", "margin_below_target"):
         b = BY_SIGNAL_TYPE[f"pricing_{t}"]
         assert b.bindable and b.action_key == "set_price"
-    mbt = BY_SIGNAL_TYPE["pricing_margin_below_target"]
-    assert mbt.bindable is False and mbt.action_key is None
-    assert mbt.binding_status == "no_catalog_action"
-    assert len(bound_signal_types()) == 8   # 6 advertising + floor + break-even
+    assert len(bound_signal_types()) == 9   # 6 advertising + 3 pricing
 
 
 # ── (10/11/12) no payload builder / executor / frontend change in this slice ─

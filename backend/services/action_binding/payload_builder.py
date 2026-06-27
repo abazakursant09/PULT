@@ -108,9 +108,11 @@ async def build_action_payload(
         return await _build_ad_set_state(db, user_id=user_id, marketplace=marketplace, sku=sku)
 
     if b.action_key == "set_price":
-        # price source depends on the signal: floor restore vs observed break-even.
+        # price source depends on the signal: floor / break-even / cost-plus.
         if signal_type == "pricing_negative_margin":
             return await _build_break_even(db, user_id=user_id, marketplace=marketplace, sku=sku)
+        if signal_type == "pricing_margin_below_target":
+            return await _build_cost_plus(db, user_id=user_id, marketplace=marketplace, sku=sku)
         return await _build_set_price(db, user_id=user_id, marketplace=marketplace, sku=sku)
 
     # bound to an action with no builder yet → honest payload_not_derivable
@@ -241,6 +243,98 @@ async def _build_break_even(db: AsyncSession, *, user_id: str, marketplace: str,
     payload = {"offer_id": offer_id, "price": break_even}
     if current_price is not None:
         payload["old_price"] = current_price
+    assert set(payload) <= _ALLOWED_FIELDS["set_price"]
+    return PayloadBuildResult(ok=True, action_key="set_price", payload=payload)
+
+
+async def _build_cost_plus(db: AsyncSession, *, user_id: str, marketplace: str,
+                           sku: Optional[str]) -> PayloadBuildResult:
+    """set_price cost-plus payload (A4-margin-target, pricing_margin_below_target).
+
+        target_margin = PricingRule.target_margin_pct / 100   (persisted, seller-defined)
+        cost_plus = (cogs/unit + logistics/unit) / (1 - commission_rate - target_margin)
+
+    Observed inputs (PhysicalProduct.cogs + ImportedFinanceRow) + the seller's explicit
+    target margin. NEVER compute_recommendation, competitor, target_percent,
+    PricingThresholds, ad_spend, forecast, AI, guess. Clamped to PricingRule
+    [min_price, max_price]. payload_not_derivable on: missing listing, no PricingRule,
+    target_margin_pct null/<=0/>=100, missing COGS, no finance, quantity<=0, revenue<=0,
+    commission_rate + target_margin >= 1, or non-positive price."""
+    def _nd():
+        return PayloadBuildResult(ok=False, action_key="set_price",
+                                  reason=REASON_PAYLOAD_NOT_DERIVABLE)
+
+    offer_id = await _resolve_external_id(db, user_id, marketplace, sku)
+    if not offer_id:
+        return _nd()
+    mp = normalize_marketplace(marketplace)
+    sku_n = normalize_sku(sku)
+
+    # PricingRule (product-level, per marketplace) → target margin + bounds + product price
+    prow = (await db.execute(
+        select(PricingRule.target_margin_pct, PricingRule.min_price, PricingRule.max_price,
+               Product.price).join(Product, Product.id == PricingRule.product_id).where(
+            Product.user_id == user_id, func.upper(Product.sku) == sku_n).limit(1))).first()
+    if prow is None:
+        return _nd()                                  # no PricingRule
+    target_margin_pct, min_price, max_price, current_price = prow
+    if target_margin_pct is None:
+        return _nd()                                  # target margin unset
+    try:
+        tmp = float(target_margin_pct)
+    except (TypeError, ValueError):
+        return _nd()
+    if tmp <= 0 or tmp >= 100:                         # out of (0, 100)
+        return _nd()
+    target_margin = tmp / 100.0
+
+    # COGS (observed) via listing → physical_product
+    cogs = (await db.execute(
+        select(PhysicalProduct.cogs).join(
+            ProductListing, ProductListing.physical_product_id == PhysicalProduct.id).where(
+            ProductListing.user_id == user_id, ProductListing.marketplace == mp,
+            func.upper(ProductListing.external_id) == sku_n,
+            PhysicalProduct.cogs.isnot(None)).limit(1))).scalar()
+    if cogs is None or float(cogs) < 0:
+        return _nd()
+
+    aliases = _FIN_ALIASES.get(mp or "", ((mp or ""),))
+    frow = (await db.execute(
+        select(
+            func.coalesce(func.sum(ImportedFinanceRow.revenue), 0.0),
+            func.coalesce(func.sum(ImportedFinanceRow.commission), 0.0),
+            func.coalesce(func.sum(ImportedFinanceRow.logistics), 0.0),
+            func.coalesce(func.sum(ImportedFinanceRow.quantity), 0),
+            func.count(),
+        ).where(
+            ImportedFinanceRow.user_id == user_id,
+            ImportedFinanceRow.marketplace.in_(aliases),
+            ImportedFinanceRow.sku == str(sku)))).one()
+    revenue, commission, logistics, quantity, n = (
+        float(frow[0]), float(frow[1]), float(frow[2]), int(frow[3]), int(frow[4]))
+    if n == 0 or revenue <= 0 or quantity <= 0:
+        return _nd()
+
+    commission_rate = commission / revenue
+    denom = 1.0 - commission_rate - target_margin
+    if denom <= 0:                                    # commission + target margin swallow the price
+        return _nd()
+    logistics_per_unit = logistics / quantity
+    price = (float(cogs) + logistics_per_unit) / denom
+    if price <= 0:
+        return _nd()
+    price = round(price, 2)
+
+    if min_price is not None:
+        price = max(price, float(min_price))
+    if max_price is not None:
+        price = min(price, float(max_price))
+    if price <= 0:
+        return _nd()
+
+    payload = {"offer_id": offer_id, "price": price}
+    if current_price is not None:
+        payload["old_price"] = float(current_price)
     assert set(payload) <= _ALLOWED_FIELDS["set_price"]
     return PayloadBuildResult(ok=True, action_key="set_price", payload=payload)
 
