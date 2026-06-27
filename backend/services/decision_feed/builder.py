@@ -133,6 +133,12 @@ async def _ranking_explain(db, user_id, summary, *, source_level, ctx, this_imp,
     from services.marketplace.action_metric_binding import problem_action_space
     itype = (summary.insight_key or "").split(":", 1)[0]
     space = problem_action_space(itype)
+    if len(space) <= 1:
+        # decision_outcome insight_keys (e.g. pricing_negative_margin) are not keyed
+        # in problem_action_space; fall back to the SAME registry the feed role uses.
+        entry = BY_SIGNAL_KEY.get(itype)
+        if entry and len(entry.action_keys) > 1:
+            space = entry.action_keys
     if len(space) <= 1 or summary.action_key not in space:
         return None
     others = [a for a in space if a != summary.action_key]
@@ -380,6 +386,37 @@ async def _learning_action_roles(db, user_id: str, summaries) -> dict:
     return {s.decision_id: role_by_ak.get(s.action_key, "alternative") for s in grp}
 
 
+# approved copy — observed-only, no promise/forecast/"best" wording
+_PRE_APPLY_EXPLAIN = (
+    "Этот вариант показан выше, потому что по прошлым наблюдениям на этом "
+    "маркетплейсе он чаще приводил к улучшению результата. "
+    "Это прошлые наблюдения, а не обещание результата."
+)
+
+
+async def _pre_apply_ranking_explain(db, user_id: str, summary):
+    """WHY this NOT-yet-measured lever is primary — for a primary whose role was
+    picked by Learning history (PR #47). Returns a ranking_explain dict ONLY when:
+    the primary action has >= _RANK_MIN_SAMPLE (10) observed outcomes on THIS
+    marketplace AND is observed-preferred over at least one alternative that also has
+    history. Reuses _ranking_explain for the comparison + None gating; marketplace-
+    isolated. Observed counts only — no score, no forecast, no promise. Equal counts
+    (registry tiebreak) or sub-sample → None (silent, honest fallback)."""
+    if not summary.action_key or not summary.marketplace:
+        return None
+    agg = await get_action_learning_summary(
+        db, user_id=user_id, marketplace=summary.marketplace, action_key=summary.action_key)
+    if agg is None or agg.total_count < _RANK_MIN_SAMPLE:
+        return None
+    rk = await _ranking_explain(
+        db, user_id, summary, source_level="marketplace", ctx=None,
+        this_imp=agg.improved_count, this_wor=agg.worsened_count, this_total=agg.total_count)
+    if rk is None:                                    # not observed-preferred → silent
+        return None
+    rk["explanation_text"] = _PRE_APPLY_EXPLAIN       # approved wording
+    return rk
+
+
 def _do_item(summary) -> Optional[FeedItem]:
     if not summary.decision_id:
         return None
@@ -468,6 +505,11 @@ async def build_feed(
                             "explanation_text": lc.explanation_text,
                         }
                         it.ranking_explain = lc.ranking
+                # Pre-apply primary: explain the learning-chosen role from observed
+                # history (gated, marketplace-isolated). Only for the primary lever;
+                # alternatives and fallback-order primaries stay silent.
+                elif it.action_role == "primary":
+                    it.ranking_explain = await _pre_apply_ranking_explain(db, user_id, s)
                 items.append(it)
 
     # ── attention overlay + visibility ────────────────────────────────────────
