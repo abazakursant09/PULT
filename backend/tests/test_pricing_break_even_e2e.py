@@ -27,6 +27,7 @@ from models.physical_product import PhysicalProduct
 from models.pricing_signal import PricingSignal
 from models.decision import Decision
 from models.engine_effect_observation import EngineEffectObservation
+from models.engine_signal_decision_link import EngineSignalDecisionLink
 from models.marketplace_connection import MarketplaceConnection
 from models.api_credential import ApiCredential
 from models.imported_finance import ImportedFinanceRow
@@ -113,6 +114,15 @@ async def _promote(db, uid):
     await bridge_links_to_decisions(db, user_id=uid); await db.commit()
 
 
+async def _set_price_obs(db):
+    """The effect observation for the set_price link (negative_margin may also carry
+    a reduce_discount link on WB; this isolates the primary lever's observation)."""
+    link = (await db.execute(select(EngineSignalDecisionLink).where(
+        EngineSignalDecisionLink.action_key == "set_price"))).scalars().one()
+    return (await db.execute(select(EngineEffectObservation).where(
+        EngineEffectObservation.link_id == link.id))).scalars().one()
+
+
 async def _full_loop(monkeypatch, *, mp):
     _explode_recommendation(monkeypatch)
     calls = []
@@ -120,10 +130,11 @@ async def _full_loop(monkeypatch, *, mp):
     db = await _engine(); uid = str(uuid.uuid4()); sku = "SKU1"
     await _seed(db, uid, mp=mp, sku=sku)
 
-    # 1) promote + bridge → Decision(set_price), manual approval, metric net_profit
+    # 1) promote + bridge → set_price Decision (primary). negative_margin also offers
+    # reduce_discount; on WB both promote, on Ozon reduce_discount is honest-unavailable.
     await _promote(db, uid)
-    decision = (await db.execute(select(Decision))).scalars().one()
-    assert decision.action_key == "set_price"
+    decision = (await db.execute(select(Decision).where(
+        Decision.action_key == "set_price"))).scalars().one()
     assert BY_SIGNAL_TYPE["pricing_negative_margin"].safety_class == "manual_approval"
     assert BY_SIGNAL_KEY["pricing_negative_margin"].default_metric_key == "net_profit"
 
@@ -141,7 +152,7 @@ async def _full_loop(monkeypatch, *, mp):
 
     # 4) measurement open on net_profit (NOT ad_profit_impact / ad_cost_ratio)
     await open_effect_measurement(db, user_id=uid, window_days=14, now=T0); await db.commit()
-    obs = (await db.execute(select(EngineEffectObservation))).scalars().one()
+    obs = await _set_price_obs(db)
     assert obs.metric_key == "net_profit"
     assert obs.metric_key not in ("ad_profit_impact", "ad_cost_ratio")
     assert json.loads(obs.evidence)["baseline"] == -500.0
@@ -149,7 +160,7 @@ async def _full_loop(monkeypatch, *, mp):
     # 5) net_profit recovers → close → improved (higher is better)
     await _fin_after(db, uid, mp=mp, sku=sku, net_profit=500.0)
     await close_effect_measurement(db, user_id=uid, now=T1); await db.commit()
-    obs = (await db.execute(select(EngineEffectObservation))).scalars().one()
+    obs = await _set_price_obs(db)
     assert obs.effect_band == IMPROVED
 
     # 6) Learning OS aggregates the improved set_price/net_profit outcome
@@ -177,7 +188,7 @@ def test_unavailable_metric_not_evaluated(monkeypatch):
         await open_effect_measurement(db, user_id=uid, window_days=14, now=T0); await db.commit()
         # NO post-action finance in the close window → not_evaluated
         await close_effect_measurement(db, user_id=uid, now=T1); await db.commit()
-        obs = (await db.execute(select(EngineEffectObservation))).scalars().one()
+        obs = await _set_price_obs(db)
         assert obs.effect_band == NOT_EVALUATED
         assert "after" not in json.loads(obs.evidence)
     _run(go())

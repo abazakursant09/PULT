@@ -225,29 +225,80 @@ def binding_for(contour: str, insight_type: str, signal_key: str) -> ActionBindi
 
 
 def bindings_for(contour: str, insight_type: str, signal_key: str) -> Tuple[ActionBinding, ...]:
-    """ALL admissible bindings for one signal type (Canonical Alternatives foundation).
+    """ALL admissible bindings for one signal type (Canonical Alternatives).
 
-    Today every signal type yields exactly one binding, so behaviour is identical to
-    binding_for(). This is the single extension point: a signal whose problem has
-    several distinct executable levers (e.g. a margin problem → set_price OR
-    reduce_discount) returns several bindings here — each a clean, separate action
-    that is promoted as its own Decision. Pure; no DB; order is stable (primary first)."""
-    return (_decide(contour, insight_type, signal_key),)
+    Primary first (= binding_for), then any alternative levers. A margin problem
+    (pricing_negative_margin) gets a SECOND, distinct lever: reduce_discount (remove
+    the WB discount) alongside set_price (raise price to break-even). Each is a clean
+    separate action promoted as its own Decision; capability honesty (WB-only discount)
+    is enforced at the bridge, not here. Pure; no DB; stable order."""
+    primary = _decide(contour, insight_type, signal_key)
+    out = [primary]
+    if primary.bindable:                       # only add alternatives to an executable signal
+        for ak in _ALTERNATIVE_ACTIONS.get(signal_key, ()):
+            out.append(_alternative_binding(signal_key, contour, ak))
+    return tuple(out)
+
+
+# signal_key → additional executable levers (besides the primary). reduce_discount
+# is a distinct margin lever (remove WB discount) for the negative-margin signal.
+_ALTERNATIVE_ACTIONS: Mapping[str, Tuple[str, ...]] = {
+    "pricing_negative_margin": ("reduce_discount",),
+}
+
+# observed-only payload rule per alternative action.
+_ALT_PAYLOAD_RULE: Mapping[str, Mapping[str, str]] = {
+    # remove the WB discount: offer_id from the listing, discount = const 0. No price,
+    # no competitor, no compute_recommendation, no forecast.
+    "reduce_discount": {
+        "offer_id": "resolve: sku -> listing.external_id",
+        "discount": "const:0",
+    },
+}
+
+
+def _alternative_binding(signal_key: str, contour: str, action_key: str) -> ActionBinding:
+    """A bound alternative ActionBinding for a real catalog action (manual_approval).
+    Payload derivation lives in payload_builder; marketplace honesty at the bridge."""
+    return ActionBinding(
+        signal_key, contour, True, action_key, _ALT_PAYLOAD_RULE.get(action_key),
+        action_catalog.get(action_key).required_scope, MANUAL_APPROVAL, BOUND, None)
 
 
 _CACHE: Optional[Tuple[ActionBinding, ...]] = None
+_BY_TYPE_ALL: Optional[Mapping[str, Tuple[ActionBinding, ...]]] = None
 
 
 def _all() -> Tuple[ActionBinding, ...]:
-    """Full canonical-type registry, built lazily over the canonical insight types.
-    The decision_outcome import is deferred to first access (after that module is
-    fully imported) so there is no import cycle."""
+    """Primary binding per canonical-type (one per signal_type), built lazily over the
+    canonical insight types. The decision_outcome import is deferred to first access
+    (after that module is fully imported) so there is no import cycle. ACTION_BINDINGS /
+    BY_SIGNAL_TYPE expose the PRIMARY binding — backward compatible single-action view."""
     global _CACHE
     if _CACHE is None:
         from services.decision_outcome.registry import CANONICAL_INSIGHT_TYPES
         _CACHE = tuple(_decide(c.contour, c.insight_type, c.signal_key)
                        for c in CANONICAL_INSIGHT_TYPES)
     return _CACHE
+
+
+def bindings_by_type(signal_type: str) -> Tuple[ActionBinding, ...]:
+    """ALL bindings (primary + alternatives) for one signal_type — used by the Apply
+    path to resolve the binding for a specific Decision's action_key."""
+    global _BY_TYPE_ALL
+    if _BY_TYPE_ALL is None:
+        from services.decision_outcome.registry import CANONICAL_INSIGHT_TYPES
+        _BY_TYPE_ALL = {c.signal_key: bindings_for(c.contour, c.insight_type, c.signal_key)
+                        for c in CANONICAL_INSIGHT_TYPES}
+    return _BY_TYPE_ALL.get(signal_type, ())
+
+
+def binding_for_action(signal_type: str, action_key: str) -> Optional[ActionBinding]:
+    """The binding for a specific (signal_type, action_key), or None when not bound."""
+    for b in bindings_by_type(signal_type):
+        if b.bindable and b.action_key == action_key:
+            return b
+    return None
 
 
 def bound_signal_types() -> Tuple[str, ...]:

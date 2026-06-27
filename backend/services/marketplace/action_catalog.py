@@ -100,53 +100,37 @@ def _revert_set_price(payload: dict, result: dict) -> tuple[str, dict]:
 
 # ── Advertising (ME-4) ─────────────────────────────────────────────────────────
 def _validate_reduce_discount(payload: dict) -> None:
-    # offer_id required; the marketplace-specific magnitude (discount for WB,
-    # price for Ozon) is validated at dispatch where the marketplace is known.
+    # reduce_discount is ONE operation: lower/remove the WB discount. offer_id + a
+    # numeric discount are required; never a price (that would be set_price).
     _require(payload, "offer_id")
+    if payload.get("discount") is None:
+        raise ExecutionError(ExecutionError.VALIDATION, "reduce_discount requires 'discount'")
 
 
 async def _dispatch_reduce_discount(token: str, payload: dict, ctx: dict) -> dict:
+    # reduce_discount = change the discount %, a Wildberries-only operation. It must
+    # NEVER fall back to set_price (Ozon has no discount API → honest unavailable).
     mp = ctx.get("marketplace")
-    if mp == "wildberries":
-        if payload.get("discount") is None:
-            raise ExecutionError(ExecutionError.VALIDATION,
-                                 "reduce_discount: Wildberries requires 'discount'")
-        resp = await wb_client.set_discount(
-            token=token, offer_id=str(payload["offer_id"]),
-            discount=float(payload["discount"]),
-        )
-    elif mp == "ozon":
-        # Ozon has no discount-% field; a reduced discount = a higher price.
-        if payload.get("price") is None:
-            raise ExecutionError(ExecutionError.VALIDATION,
-                                 "reduce_discount: Ozon requires 'price' (reduced-discount price)")
-        resp = await ozon_client.set_price(
-            token=token, client_id=ctx.get("ozon_client_id"),
-            offer_id=str(payload["offer_id"]), price=float(payload["price"]),
-        )
-    else:
-        raise ExecutionError(ExecutionError.VALIDATION,
-                             f"reduce_discount: unsupported marketplace {mp}")
+    if mp != "wildberries":
+        raise ExecutionError(ExecutionError.CAPABILITY_NOT_SUPPORTED,
+                             f"reduce_discount: {mp} has no discount API (Wildberries only)")
+    resp = await wb_client.set_discount(
+        token=token, offer_id=str(payload["offer_id"]), discount=float(payload["discount"]),
+    )
     return {
         "api_request_id": (resp or {}).get("requestId") if isinstance(resp, dict) else None,
-        "offer_id": payload["offer_id"],
+        "offer_id": payload["offer_id"], "discount": payload["discount"],
     }
 
 
 def _revert_reduce_discount(payload: dict, result: dict) -> tuple[str, dict]:
-    """Inverse = restore the recorded prior discount (WB) / prior price (Ozon)."""
-    mp = payload.get("marketplace")
-    if mp == "wildberries":
-        old = payload.get("old_discount")
-        if old is None:
-            raise ExecutionError.guard("NOT_REVERSIBLE", "no old_discount recorded")
-        return "reduce_discount", {"marketplace": mp, "offer_id": payload["offer_id"],
-                                   "discount": old, "old_discount": payload.get("discount")}
-    old = payload.get("old_price")
+    """Inverse = restore the recorded prior WB discount."""
+    old = payload.get("old_discount")
     if old is None:
-        raise ExecutionError.guard("NOT_REVERSIBLE", "no old_price recorded")
-    return "reduce_discount", {"marketplace": mp, "offer_id": payload["offer_id"],
-                               "price": old, "old_price": payload.get("price")}
+        raise ExecutionError.guard("NOT_REVERSIBLE", "no old_discount recorded")
+    return "reduce_discount", {"marketplace": payload.get("marketplace"),
+                               "offer_id": payload["offer_id"],
+                               "discount": old, "old_discount": payload.get("discount")}
 
 
 def _validate_stop_auto_promotion(payload: dict) -> None:
@@ -317,9 +301,9 @@ _CATALOG: dict[str, ActionSpec] = {
         reversible=True,
         reverter=_revert_set_price,
     ),
-    "reduce_discount": ActionSpec(        # A2 — margin alternative; measured on net_profit
+    "reduce_discount": ActionSpec(        # margin alternative; measured on net_profit
         action_type="reduce_discount",
-        marketplace=None,                 # WB (discount) / Ozon (price); Yandex gated impossible
+        marketplace="wildberries",        # discount API is WB-only; others honest-unavailable
         required_scope="prices",
         validate=_validate_reduce_discount,
         dispatch=_dispatch_reduce_discount,
