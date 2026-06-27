@@ -218,9 +218,21 @@ def _decide(contour: str, itype: str, signal_key: str) -> ActionBinding:
 
 
 def binding_for(contour: str, insight_type: str, signal_key: str) -> ActionBinding:
-    """Pure binding decision for one signal type. No decision_outcome import →
-    safe to call from decision_outcome.registry during its own build."""
-    return _decide(contour, insight_type, signal_key)
+    """Pure binding decision for one signal type — the PRIMARY (first) binding. No
+    decision_outcome import → safe to call from decision_outcome.registry during its
+    own build. Backward-compatible single-action accessor."""
+    return bindings_for(contour, insight_type, signal_key)[0]
+
+
+def bindings_for(contour: str, insight_type: str, signal_key: str) -> Tuple[ActionBinding, ...]:
+    """ALL admissible bindings for one signal type (Canonical Alternatives foundation).
+
+    Today every signal type yields exactly one binding, so behaviour is identical to
+    binding_for(). This is the single extension point: a signal whose problem has
+    several distinct executable levers (e.g. a margin problem → set_price OR
+    reduce_discount) returns several bindings here — each a clean, separate action
+    that is promoted as its own Decision. Pure; no DB; order is stable (primary first)."""
+    return (_decide(contour, insight_type, signal_key),)
 
 
 _CACHE: Optional[Tuple[ActionBinding, ...]] = None

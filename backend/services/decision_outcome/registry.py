@@ -101,10 +101,13 @@ class CanonicalInsightType:
     three_part_compatible: bool
     carries_review_id: bool
     default_metric_key: str
-    # Executor action binding for promotion. Intentionally None in A2/A3 — the real
-    # one-click action_key is capability-gated and decided at the bridge (A6); the
-    # engine signal's own recommended_action_key is advisory, not an executor key.
+    # Executor binding for promotion. `action_key` is the PRIMARY (first) executable
+    # lever — kept for backward compatibility. `action_keys` is the full set of
+    # admissible levers (Canonical Alternatives): each becomes its own Candidate →
+    # Decision under the same insight_key. Single-action signals have
+    # action_keys == (action_key,); advice-only signals have both empty/None.
     action_key: str | None = None
+    action_keys: Tuple[str, ...] = ()
 
 
 # Executor action binding (A3 of Action Catalog Expansion). The single source of
@@ -114,16 +117,25 @@ class CanonicalInsightType:
 #   is a real action_catalog action AND safety_class != auto_forbidden.
 # Everything else stays None (advice_only) — no fabricated action.
 from services.marketplace import action_catalog as _catalog
-from services.action_binding.registry import binding_for as _binding_for, BOUND as _BOUND, AUTO_FORBIDDEN as _AUTO_FORBIDDEN
+from services.action_binding.registry import (
+    bindings_for as _bindings_for, BOUND as _BOUND, AUTO_FORBIDDEN as _AUTO_FORBIDDEN,
+)
 
 
-def _resolve_action_key(contour: str, insight_type: str, signal_key: str):
-    b = _binding_for(contour, insight_type, signal_key)
-    if (b.bindable and b.action_key and b.binding_status == _BOUND
-            and b.action_key in _catalog.known_actions()
-            and b.safety_class != _AUTO_FORBIDDEN):
-        return b.action_key
-    return None
+def _is_executable(b) -> bool:
+    return bool(b.bindable and b.action_key and b.binding_status == _BOUND
+                and b.action_key in _catalog.known_actions()
+                and b.safety_class != _AUTO_FORBIDDEN)
+
+
+def _resolve_action_keys(contour: str, insight_type: str, signal_key: str) -> Tuple[str, ...]:
+    """All admissible executor action_keys for one signal type, primary first.
+    Empty when advice-only. De-duplicated, order preserved."""
+    seen: dict[str, None] = {}
+    for b in _bindings_for(contour, insight_type, signal_key):
+        if _is_executable(b) and b.action_key not in seen:
+            seen[b.action_key] = None
+    return tuple(seen)
 
 
 def _build() -> Tuple[CanonicalInsightType, ...]:
@@ -133,6 +145,7 @@ def _build() -> Tuple[CanonicalInsightType, ...]:
         four = contour in _FOUR_PART_CONTOURS
         for t in types:
             sk = f"{prefix}_{t}"
+            aks = _resolve_action_keys(contour, t, sk)
             out.append(CanonicalInsightType(
                 contour=contour,
                 signal_key=sk,
@@ -141,7 +154,8 @@ def _build() -> Tuple[CanonicalInsightType, ...]:
                 three_part_compatible=not four,
                 carries_review_id=four,
                 default_metric_key=_METRIC_OVERRIDE.get(t, _DEFAULT_METRIC[contour]),
-                action_key=_resolve_action_key(contour, t, sk),
+                action_key=aks[0] if aks else None,   # primary (backward compatible)
+                action_keys=aks,
             ))
     return tuple(out)
 

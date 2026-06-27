@@ -95,43 +95,52 @@ def _source_context(contour: str, sig) -> dict:
     return {k: v for k, v in ctx.items() if v is not None}
 
 
-def _normalize(contour: str, table: str, sig) -> SnapshotItem:
+def _normalize(contour: str, table: str, sig) -> List[SnapshotItem]:
+    """Normalize one signal row into one snapshot PER admissible action_key
+    (Canonical Alternatives). Single-action signals → one snapshot (unchanged);
+    advice-only → one snapshot with action_key=None; >1 action_key → one snapshot
+    each, all sharing the same canonical_insight_key. Invalid rows → one item."""
     raw = sig.insight_key
     ctx = _source_context(contour, sig)
     entry = BY_SIGNAL_KEY.get(sig.signal_key)
 
     if entry is None:
-        return InvalidSignalItem(contour, table, sig.id, raw,
-                                 reason=f"unknown_signal_type: {sig.signal_key}", source_context=ctx)
+        return [InvalidSignalItem(contour, table, sig.id, raw,
+                                  reason=f"unknown_signal_type: {sig.signal_key}", source_context=ctx)]
     if not raw:
-        return InvalidSignalItem(contour, table, sig.id, raw,
-                                 reason="missing_insight_key", source_context=ctx)
+        return [InvalidSignalItem(contour, table, sig.id, raw,
+                                  reason="missing_insight_key", source_context=ctx)]
 
     parts = raw.split(":")
     if entry.carries_review_id:
         # review: expect 4 parts → canonical is first 3; keep review_id
         if len(parts) != 4:
-            return InvalidSignalItem(contour, table, sig.id, raw,
-                                     reason=f"unexpected_key_arity: {len(parts)} (expected 4)",
-                                     source_context=ctx)
+            return [InvalidSignalItem(contour, table, sig.id, raw,
+                                      reason=f"unexpected_key_arity: {len(parts)} (expected 4)",
+                                      source_context=ctx)]
         canonical = ":".join(parts[:3])
         if "review_id" not in ctx:
             ctx["review_id"] = parts[3]
     else:
         if len(parts) != 3:
-            return InvalidSignalItem(contour, table, sig.id, raw,
-                                     reason=f"unexpected_key_arity: {len(parts)} (expected 3)",
-                                     source_context=ctx)
+            return [InvalidSignalItem(contour, table, sig.id, raw,
+                                      reason=f"unexpected_key_arity: {len(parts)} (expected 3)",
+                                      source_context=ctx)]
         canonical = raw
 
-    return EngineSignalSnapshot(
-        contour=contour, signal_table=table, signal_id=sig.id,
-        raw_insight_key=raw, canonical_insight_key=canonical,
-        marketplace=sig.marketplace, sku=sig.sku,
-        action_key=entry.action_key, metric_key=entry.default_metric_key,
-        status=sig.status, evidence_hash=sig.evidence_hash, created_at=sig.created_at,
-        source_context=ctx,
-    )
+    # one snapshot per admissible action_key; advice-only → a single None-action snapshot
+    action_keys = entry.action_keys or (entry.action_key,)
+    return [
+        EngineSignalSnapshot(
+            contour=contour, signal_table=table, signal_id=sig.id,
+            raw_insight_key=raw, canonical_insight_key=canonical,
+            marketplace=sig.marketplace, sku=sig.sku,
+            action_key=ak, metric_key=entry.default_metric_key,
+            status=sig.status, evidence_hash=sig.evidence_hash, created_at=sig.created_at,
+            source_context=ctx,
+        )
+        for ak in action_keys
+    ]
 
 
 async def build_signal_snapshot(
@@ -154,5 +163,5 @@ async def build_signal_snapshot(
             stmt = stmt.where(model.listing_id == listing_id)
         rows = (await db.execute(stmt)).scalars().all()
         for sig in rows:
-            out.append(_normalize(name, table, sig))
+            out.extend(_normalize(name, table, sig))   # one snapshot per admissible action_key
     return out
