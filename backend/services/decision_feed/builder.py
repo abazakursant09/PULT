@@ -39,7 +39,7 @@ from services.decision_outcome.registry import BY_SIGNAL_KEY
 from services.decision_outcome.effect_summary import build_effect_summaries
 from services.learning_os.registry import (
     get_action_learning_summary, get_action_learning_summary_for_context,
-    get_decision_identity_for_learning,
+    get_decision_identity_for_learning, rank_action_keys_by_observed,
 )
 from services.product_resolver import normalize_marketplace
 
@@ -345,6 +345,41 @@ def _action_role(insight_key: Optional[str], action_key: Optional[str]) -> Optio
     return "primary"   # single/legacy lever → primary, not fake
 
 
+_RANK_MIN_SAMPLE = 10   # an alternative needs >= this many measured outcomes to outrank
+
+
+async def _learning_action_roles(db, user_id: str, summaries) -> dict:
+    """Learning-driven action_role (primary | alternative) for ONE insight_key group.
+
+    SORT-ONLY: the registry lever order is the fallback; rank_action_keys_by_observed
+    reorders ONLY when an alternative has >= _RANK_MIN_SAMPLE measured outcomes on THIS
+    marketplace (marketplace-isolated — WB history never touches Ozon/Yandex/Megamarket).
+    Nothing is dropped, no Decision/Apply/Effect/Learning change, no new computation.
+
+    Returns {decision_id: role}. Falls back to the static registry role for: a single
+    lever, no/sub-sample history, equal counts (tiebreak = registry order), or an
+    unresolved signal/action space.
+    """
+    grp = [s for s in summaries if s.decision_id and s.action_key]
+    if not grp:
+        return {}
+    signal_key = (grp[0].insight_key or "").split(":", 1)[0]
+    entry = BY_SIGNAL_KEY.get(signal_key)
+    registry_aks = list(entry.action_keys) if entry else []
+    present = [s.action_key for s in grp]
+    # fallback order: registry order first, any legacy/unknown lever keeps the tail
+    ordered = [ak for ak in registry_aks if ak in present]
+    ordered += [ak for ak in present if ak not in ordered]
+    if len(ordered) <= 1:                                   # single lever → primary
+        return {s.decision_id: "primary" for s in grp}
+
+    ranked = await rank_action_keys_by_observed(
+        db, user_id=user_id, marketplace=grp[0].marketplace,
+        action_keys=ordered, min_sample=_RANK_MIN_SAMPLE)
+    role_by_ak = {ak: ("primary" if i == 0 else "alternative") for i, ak in enumerate(ranked)}
+    return {s.decision_id: role_by_ak.get(s.action_key, "alternative") for s in grp}
+
+
 def _do_item(summary) -> Optional[FeedItem]:
     if not summary.decision_id:
         return None
@@ -401,11 +436,21 @@ async def build_feed(
     # ── Decision Outcome source (via the A8 read-service) ─────────────────────
     if not contour or contour == "decision_outcome":
         summaries = await build_effect_summaries(db, user_id=user_id)
-        for s in summaries:
-            if s.effect_status not in _DO_DEFAULT_VISIBLE and not include_resolved:
-                continue   # proven_unchanged only when explicitly requested
+        visible = [s for s in summaries
+                   if s.effect_status in _DO_DEFAULT_VISIBLE or include_resolved]
+        # Learning-driven action_role: group by insight_key (carries marketplace), let
+        # observed history pick the primary lever. Sort-only; registry order is fallback.
+        roles: dict = {}
+        groups: dict = {}
+        for s in visible:
+            groups.setdefault(s.insight_key, []).append(s)
+        for grp in groups.values():
+            roles.update(await _learning_action_roles(db, user_id, grp))
+        for s in visible:
             it = _do_item(s)
             if it is not None:
+                if s.decision_id in roles:
+                    it.action_role = roles[s.decision_id]   # learning override (or registry fallback)
                 # Learning OS v1/v5 — attach observed learning history + the WHY
                 # explanation for measured effects only (gated; observed counts,
                 # marketplace-isolated).
