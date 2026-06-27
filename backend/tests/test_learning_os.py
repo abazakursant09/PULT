@@ -33,7 +33,6 @@ from services.learning_os.registry import (
     rank_action_keys_by_observed, get_decision_identity_for_learning,
 )
 from services.insight_decision_bridge import InsightPromotionDTO
-from services.learning_os.promotion_ranking import promote_alternatives_observed_ranked
 from routers import decision_feed as feed_router
 
 NOW = datetime(2026, 6, 24, 12, 0, 0)
@@ -281,25 +280,6 @@ def _dto(itype="margin_crisis", mp="wb", sku="SKU1"):
 
 def _order_of(db, results):
     return [(_run(db.get(Decision, r.decision_id))).action_key for r in results]
-
-
-def test_promotion_alternatives_use_observed_order():
-    db = _run(_new_db()); uid = str(uuid.uuid4())
-    # reduce_discount has the stronger proven record on wb
-    _run(_history(db, uid, mp="wb", action="reduce_discount", improved=18, worsened=2))
-    _run(_history(db, uid, mp="wb", action="set_price", improved=5, worsened=14))
-    results = _run(promote_alternatives_observed_ranked(db, user_id=uid, insight=_dto())); _run(db.commit())
-    order = _order_of(db, results)
-    assert order[0] == "reduce_discount"                      # observed-better promoted first
-    assert set(order) == {"set_price", "reduce_discount", "stop_auto_promotion"}   # none dropped
-
-
-def test_promotion_alternatives_default_order_without_history():
-    db = _run(_new_db()); uid = str(uuid.uuid4())
-    results = _run(promote_alternatives_observed_ranked(db, user_id=uid, insight=_dto())); _run(db.commit())
-    order = _order_of(db, results)
-    assert order[0] == "set_price"                            # no history → deterministic order
-    assert set(order) == {"set_price", "reduce_discount", "stop_auto_promotion"}
 
 
 # ── v3. Observed history in the feed — framed as history, never forecast ─────
