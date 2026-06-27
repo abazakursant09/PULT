@@ -265,6 +265,14 @@ class FeedItem:
     effect_status: Optional[str] = None
     effect_band: Optional[str] = None
     lifecycle_reason: Optional[str] = None
+    # Alternatives Feed — group several Decisions of ONE problem (same canonical
+    # insight_key) under one feed group. group_key = canonical insight_key (carries
+    # the marketplace → WB/Ozon never share a group). action_key = this Decision's
+    # lever; action_role = primary (registry's first lever) | alternative. None for
+    # engine items / legacy rows without a canonical action.
+    group_key: Optional[str] = None
+    action_key: Optional[str] = None
+    action_role: Optional[str] = None
     # Learning OS v1 — optional, observed-only descriptive context for a MEASURED
     # effect (counts, marketplace-specific). None unless the minimum sample gate
     # passes. Never a percentage / score / forecast.
@@ -323,6 +331,20 @@ def _engine_item(contour: str, table: str, sig) -> Optional[FeedItem]:
     )
 
 
+def _action_role(insight_key: Optional[str], action_key: Optional[str]) -> Optional[str]:
+    """primary | alternative for a Decision's lever, from the registry's lever order
+    (primary = first). Single-action signals are primary. Unknown/legacy levers fall
+    back to primary (safe, never fabricated). None when there is no action_key."""
+    if not action_key:
+        return None
+    signal_key = (insight_key or "").split(":", 1)[0]
+    entry = BY_SIGNAL_KEY.get(signal_key)
+    aks = entry.action_keys if entry else ()
+    if aks and action_key in aks:
+        return "primary" if action_key == aks[0] else "alternative"
+    return "primary"   # single/legacy lever → primary, not fake
+
+
 def _do_item(summary) -> Optional[FeedItem]:
     if not summary.decision_id:
         return None
@@ -338,6 +360,9 @@ def _do_item(summary) -> Optional[FeedItem]:
         created_at=summary.measured_at, updated_at=summary.measured_at,
         source_context=dict(summary.evidence) if summary.evidence else {},
         _order_bucket=summary.effect_status,
+        group_key=summary.insight_key,                 # canonical insight_key (carries mp)
+        action_key=summary.action_key,
+        action_role=_action_role(summary.insight_key, summary.action_key),
     )
 
 

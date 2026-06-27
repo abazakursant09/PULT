@@ -52,7 +52,12 @@ type ApplyUI =
   | { kind: 'error'; msg: string }
 
 export function DecisionFeedCard(
-  { item, onChanged }: { item: DecisionFeedItem; onChanged: (itemKey: string, action: Action) => void },
+  { item, onChanged, roleLabel, hideProblem }: {
+    item: DecisionFeedItem
+    onChanged: (itemKey: string, action: Action) => void
+    roleLabel?: string | null   // "Основной вариант" | "Альтернатива" — shown when grouped
+    hideProblem?: boolean        // grouped variant: problem text is shown once in the group header
+  },
 ) {
   const [busy, setBusy] = useState<Action | null>(null)
   const [apply, setApply] = useState<ApplyUI>({ kind: 'idle' })
@@ -115,15 +120,24 @@ export function DecisionFeedCard(
           fontSize: 9.5, fontWeight: 700, textTransform: 'uppercase', padding: '3px 8px',
           borderRadius: 5, background: 'var(--surface-h)', color: 'var(--text-2)', border: '1px solid var(--line)',
         }}>{ctx}</span>
+        {roleLabel && (
+          <span style={{
+            fontSize: 9.5, fontWeight: 700, textTransform: 'uppercase', padding: '3px 8px',
+            borderRadius: 5,
+            background: item.action_role === 'primary' ? 'var(--accent-soft, var(--surface-h))' : 'var(--surface-h)',
+            color: item.action_role === 'primary' ? 'var(--text)' : 'var(--text-2)',
+            border: '1px solid var(--line)',
+          }}>{roleLabel}</span>
+        )}
         <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{ATTENTION_RU[item.attention_state] ?? item.attention_state}</span>
       </div>
 
-      {item.title && <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)' }}>{item.title}</div>}
-      {item.what_happened && item.what_happened !== item.title && (
+      {!hideProblem && item.title && <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)' }}>{item.title}</div>}
+      {!hideProblem && item.what_happened && item.what_happened !== item.title && (
         <div style={{ fontSize: 12.5, color: 'var(--text)', marginTop: 4 }}>{item.what_happened}</div>
       )}
-      {item.why_it_matters && <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 4 }}><b>Почему важно:</b> {item.why_it_matters}</div>}
-      {item.meaning && <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 2 }}>{item.meaning}</div>}
+      {!hideProblem && item.why_it_matters && <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 4 }}><b>Почему важно:</b> {item.why_it_matters}</div>}
+      {!hideProblem && item.meaning && <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 2 }}>{item.meaning}</div>}
       {item.recommended_action && <div style={{ fontSize: 12.5, color: 'var(--text)', marginTop: 6 }}><b>Что сделать:</b> {item.recommended_action}</div>}
       {item.expected_effect && <div style={{ fontSize: 11.5, color: 'var(--text-3)', marginTop: 4 }}>Ожидаемый эффект: {item.expected_effect}</div>}
       {item.effect_status && (

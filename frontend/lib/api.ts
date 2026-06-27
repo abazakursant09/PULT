@@ -2245,6 +2245,12 @@ export interface DecisionFeedItem {
   expected_effect:    string | null
   effect_status:      string | null
   effect_band:        string | null
+  // Alternatives Feed — group several Decisions of ONE problem (same canonical
+  // insight_key) under one group. group_key carries the marketplace → WB/Ozon never
+  // share a group. action_role = 'primary' (first lever) | 'alternative'.
+  group_key:          string | null
+  action_key:         string | null
+  action_role:        string | null
   learning_context:   string | null   // observed history line (counts only, not a forecast)
   learning_explain:   {                // v5 — WHY the history line was shown (observed only)
     source_level: string              // "similar_context" | "marketplace"
