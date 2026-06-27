@@ -31,7 +31,7 @@ from typing import Tuple
 # contour → engine signal_key prefix
 PREFIX = {
     "seo": "seo", "advertising": "adv", "review": "rev", "growth": "growth", "legal": "legal",
-    "pricing": "pricing",
+    "pricing": "pricing", "operations": "operations",
 }
 
 # contour → metric NAME a future measurement would observe (no number, no forecast)
@@ -44,6 +44,9 @@ _DEFAULT_METRIC = {
     # pricing/margin problems are measured on profit (A3-pre): a price fix can raise
     # margin while revenue/units fall, so net_profit is the honest target.
     "pricing": "net_profit",
+    # operations auto-promotion margin drain — stopping a loss-making auto-promo is
+    # honestly measured on profit, not revenue.
+    "operations": "net_profit",
 }
 
 # Per-insight-type metric override (A2.2-bind). The direct-overspend advertising
@@ -85,6 +88,12 @@ _TYPES = {
     # for now; the set_price binding is a later sprint (A3-bind).
     "pricing": (
         "negative_margin", "margin_below_target", "price_below_floor",
+    ),
+    # Operations (Slice 1) — observed auto-promotion margin drain; binds to the
+    # existing stop_auto_promotion lever (Ozon-capable). Multi-marketplace honesty
+    # enforced at the bridge / producer (Ozon only; WB/Yandex/Megamarket → no signal).
+    "operations": (
+        "auto_promo_margin_drain",
     ),
 }
 

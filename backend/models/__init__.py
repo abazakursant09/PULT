@@ -61,6 +61,8 @@ from .growth_rule_evaluation import GrowthRuleEvaluation
 from .growth_signal import GrowthSignal
 # Pricing/Margin Engine data foundation (A3-pre) — canonical pricing contour signal
 from .pricing_signal import PricingSignal
+# Operations contour data foundation (Slice 1) — canonical operations contour signal
+from .operations_signal import OperationsSignal
 # Legal Navigator data foundation (A2) — append-only audit / finding / signal + ledger
 from .legal_audit import LegalAudit
 from .legal_finding import LegalFinding

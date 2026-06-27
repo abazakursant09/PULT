@@ -36,7 +36,7 @@ def test_alembic_single_head():
     from alembic.script import ScriptDirectory
     cfg = Config("alembic.ini")
     heads = ScriptDirectory.from_config(cfg).get_heads()
-    assert heads == ["tm1c1a2b3c4d02"], heads        # single head (A4-margin-target rev)
+    assert heads == ["ops1a2b3c4d01"], heads         # single head (operations Slice 1 rev)
 
 
 def test_migration_is_additive_only():
@@ -97,7 +97,7 @@ def test_pricing_binding_state():
     for t in ("price_below_floor", "negative_margin", "margin_below_target"):
         b = BY_SIGNAL_TYPE[f"pricing_{t}"]
         assert b.bindable and b.action_key == "set_price"
-    assert len(bound_signal_types()) == 9   # 6 advertising + 3 pricing
+    assert len(bound_signal_types()) == 10  # 6 advertising + 3 pricing + 1 operations
 
 
 # ── (10/11/12) no payload builder / executor / frontend change in this slice ─

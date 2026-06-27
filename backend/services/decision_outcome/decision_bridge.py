@@ -35,6 +35,7 @@ from models.review_signal import ReviewSignal
 from models.growth_signal import GrowthSignal
 from models.legal_signal import LegalSignal
 from models.pricing_signal import PricingSignal
+from models.operations_signal import OperationsSignal
 
 from services.marketplace import action_catalog
 from services.product_resolver import normalize_marketplace
@@ -43,6 +44,7 @@ from services.insight_decision_bridge import promote_insight_to_decision, Insigh
 _MODELS = {
     "seo": SeoSignal, "advertising": AdvertisingSignal, "review": ReviewSignal,
     "growth": GrowthSignal, "legal": LegalSignal, "pricing": PricingSignal,
+    "operations": OperationsSignal,
 }
 # spec.marketplace=None → WB/Ozon only (compared in canon slugs from
 # normalize_marketplace, where "wildberries"→"wb").

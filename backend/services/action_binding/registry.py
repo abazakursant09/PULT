@@ -212,6 +212,19 @@ def _decide(contour: str, itype: str, signal_key: str) -> ActionBinding:
         return ActionBinding(signal_key, contour, False, None, None, None, MANUAL_APPROVAL,
                              NO_CATALOG_ACTION, "no catalog action for this pricing signal")
 
+    # ── operations → auto-promotion margin drain stops the auto-promotion ─────
+    # Same observed-derivable offer_id payload as the advertising _STOP_ADV family;
+    # capability honesty (Ozon-capable; Yandex/Megamarket impossible) is enforced at
+    # the bridge, not here. No content generation, no forecast.
+    if contour == "operations":
+        if itype == "auto_promo_margin_drain":
+            ak = "stop_auto_promotion"
+            return ActionBinding(
+                signal_key, contour, True, ak, _STOP_PAYLOAD_RULE,
+                action_catalog.get(ak).required_scope, MANUAL_APPROVAL, BOUND, None)
+        return ActionBinding(signal_key, contour, False, None, None, None, MANUAL_APPROVAL,
+                             NO_CATALOG_ACTION, "no catalog action for this operations signal")
+
     # ── legal → advisory only, never automatable ─────────────────────────────
     return ActionBinding(signal_key, contour, False, None, None, None, AUTO_FORBIDDEN,
                          NO_CATALOG_ACTION, "advisory only — no executor action")
