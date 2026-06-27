@@ -35,6 +35,7 @@ from models.review_signal import ReviewSignal
 from models.growth_signal import GrowthSignal
 from models.legal_signal import LegalSignal
 from models.pricing_signal import PricingSignal
+from models.operations_signal import OperationsSignal
 
 from .registry import BY_SIGNAL_KEY
 
@@ -46,6 +47,7 @@ _CONTOUR_MODELS = (
     ("growth", GrowthSignal, "growth_signal"),
     ("legal", LegalSignal, "legal_signal"),
     ("pricing", PricingSignal, "pricing_signal"),
+    ("operations", OperationsSignal, "operations_signal"),
 )
 
 

@@ -214,6 +214,8 @@ def test_action_bindings_are_real_and_advertising_only():
         "pricing_price_below_floor": "set_price",
         "pricing_negative_margin": "set_price",
         "pricing_margin_below_target": "set_price",
+        # Slice 1: operations auto-promo margin drain → stop_auto_promotion (Ozon)
+        "operations_auto_promo_margin_drain": "stop_auto_promotion",
     }
     from services.marketplace import action_catalog
     for ak in bound.values():

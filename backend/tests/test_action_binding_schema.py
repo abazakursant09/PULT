@@ -43,7 +43,7 @@ async def _engine():
 
 def test_registry_covers_all_signal_types():
     assert set(BY_SIGNAL_TYPE.keys()) == set(BY_SIGNAL_KEY.keys())
-    assert len(ACTION_BINDINGS) == 38   # +3 pricing types (A3-pre)
+    assert len(ACTION_BINDINGS) == 39   # +3 pricing (A3-pre) +1 operations (Slice 1)
 
 
 # ── 2. bound action_key is a real catalog action ────────────────────────────
@@ -69,15 +69,19 @@ def test_only_six_advertising_bound():
         "pricing_price_below_floor",    # A3-bind: floor-restore → set_price
         "pricing_negative_margin",      # A4-bind: break-even → set_price
         "pricing_margin_below_target",  # A4-margin-target: cost-plus → set_price
+        "operations_auto_promo_margin_drain",   # Slice 1: stop_auto_promotion (Ozon)
     }
-    assert len(advice_only_signal_types()) == 29   # all 3 pricing signals now bound
+    assert len(advice_only_signal_types()) == 29   # +1 type and +1 bound → unchanged
     # A2.2-bind: overspend → ad_set_state; indirect → stop_auto_promotion.
     # A3/A4-bind: all three pricing signals → set_price.
+    # Slice 1: operations auto-promo drain → stop_auto_promotion.
     overspend = {"adv_ad_destroying_profit", "adv_ad_spend_without_sales",
                  "adv_ad_on_unprofitable_product"}
     for st in bound:
         if st.startswith("pricing_"):
             expect = "set_price"
+        elif st.startswith("operations_"):
+            expect = "stop_auto_promotion"
         else:
             expect = "ad_set_state" if st in overspend else "stop_auto_promotion"
         assert BY_SIGNAL_TYPE[st].action_key == expect
