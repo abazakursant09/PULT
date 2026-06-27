@@ -127,6 +127,16 @@ _BREAK_EVEN_PAYLOAD_RULE: Mapping[str, str] = {
     "old_price": "resolve: product.price (for revert)",
 }
 
+# set_price cost-plus: price = (cogs/unit + logistics/unit) / (1 - commission_rate -
+# target_margin), where target_margin = PricingRule.target_margin_pct/100 (persisted,
+# seller-defined). Observed inputs + the seller's explicit margin target. No competitor,
+# no target_percent, no compute_recommendation, no PricingThresholds, no forecast/AI.
+_COST_PLUS_PAYLOAD_RULE: Mapping[str, str] = {
+    "offer_id": "resolve: sku -> listing.external_id",
+    "price": "compute: (cogs/unit + logistics/unit) / (1 - commission_rate - target_margin)",
+    "old_price": "resolve: product.price (for revert)",
+}
+
 
 @dataclass(frozen=True)
 class ActionBinding:
@@ -182,21 +192,25 @@ def _decide(contour: str, itype: str, signal_key: str) -> ActionBinding:
         return ActionBinding(signal_key, contour, False, None, None, None, MANUAL_APPROVAL,
                              NO_CATALOG_ACTION, "no catalog action for this opportunity")
 
-    # ── pricing → set_price binds for the two observed-derivable signals ──────
-    # price_below_floor  → PricingRule.min_price (A3-bind, floor restore)
-    # negative_margin    → break-even price from observed finance + COGS (A4-bind)
-    # margin_below_target stays advice-only: a cost-plus target needs a target margin
-    # that is NOT persisted anywhere (no field) — never invented, never competitor.
-    # compute_recommendation (competitor-based) is forbidden for canonical pricing.
+    # ── pricing → all three observed-derivable signals bind to set_price ──────
+    # price_below_floor    → PricingRule.min_price (A3-bind, floor restore)
+    # negative_margin      → break-even price from observed finance + COGS (A4-bind)
+    # margin_below_target  → cost-plus to PricingRule.target_margin_pct (A4-margin-target)
+    # All observed/deterministic. NEVER competitor, target_percent, compute_recommendation,
+    # PricingThresholds, forecast, AI.
     if contour == "pricing":
-        if itype in ("price_below_floor", "negative_margin"):
+        _PRICING_RULE = {
+            "price_below_floor": _PRICE_FLOOR_PAYLOAD_RULE,
+            "negative_margin": _BREAK_EVEN_PAYLOAD_RULE,
+            "margin_below_target": _COST_PLUS_PAYLOAD_RULE,
+        }
+        if itype in _PRICING_RULE:
             ak = "set_price"
-            rule = _PRICE_FLOOR_PAYLOAD_RULE if itype == "price_below_floor" else _BREAK_EVEN_PAYLOAD_RULE
             return ActionBinding(
-                signal_key, contour, True, ak, rule,
+                signal_key, contour, True, ak, _PRICING_RULE[itype],
                 action_catalog.get(ak).required_scope, MANUAL_APPROVAL, BOUND, None)
         return ActionBinding(signal_key, contour, False, None, None, None, MANUAL_APPROVAL,
-                             NO_CATALOG_ACTION, "needs persisted target margin (deferred)")
+                             NO_CATALOG_ACTION, "no catalog action for this pricing signal")
 
     # ── legal → advisory only, never automatable ─────────────────────────────
     return ActionBinding(signal_key, contour, False, None, None, None, AUTO_FORBIDDEN,
