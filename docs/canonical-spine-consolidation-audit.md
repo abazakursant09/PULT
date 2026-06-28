@@ -8,6 +8,11 @@ Spine: which legacy/dead code was removed, which look-alike code was deliberatel
 kept, and which larger legacy↔canonical zones still need a product decision before
 they can be touched.
 
+> **Up →** [`pult-system-doctrine.md`](./pult-system-doctrine.md) — the umbrella
+> two-surface frame. The open legacy↔canonical zone in §6 below is, in that frame, an
+> **Advisory-surface vs Executable-surface** question for the same margin problem
+> (Telegram alert vs in-app Decision Feed).
+
 ---
 
 ## 1. What was verified

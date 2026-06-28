@@ -4,6 +4,10 @@
 > reference for the unit of learning in Learning OS. A PR that changes the Learning
 > aggregation key, or that adds a new axis to it, must conform to this doctrine or be
 > rejected. See also [`canonical-surface-doctrine.md`](./canonical-surface-doctrine.md).
+>
+> **Up →** [`pult-system-doctrine.md`](./pult-system-doctrine.md) — Learning OS belongs
+> to the **Executable Surface only**; the Advisory Surface writes no lever outcomes
+> into this key space (System Doctrine §6).
 
 ## 1. Unit of learning
 
