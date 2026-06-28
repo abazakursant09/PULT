@@ -36,7 +36,7 @@ def test_alembic_single_head():
     from alembic.script import ScriptDirectory
     cfg = Config("alembic.ini")
     heads = ScriptDirectory.from_config(cfg).get_heads()
-    assert heads == ["ops1a2b3c4d01"], heads         # single head (operations Slice 1 rev)
+    assert heads == ["advr1a2b3c4d01"], heads        # single head (advisory-run foundation rev)
 
 
 def test_migration_is_additive_only():

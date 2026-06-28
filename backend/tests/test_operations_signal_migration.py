@@ -61,10 +61,11 @@ def test_operations_signal_migration_roundtrip(monkeypatch):
     import db_migrations as dbm
     cfg = dbm._alembic_config()
 
-    # (5) history has exactly one head, and it is the operations revision
+    # (5) history has exactly one head (now the advisory-run foundation rev, which
+    # chains past this operations revision)
     script = ScriptDirectory.from_config(cfg)
     heads = script.get_heads()
-    assert heads == [REV], f"expected single head {REV}, got {heads}"
+    assert heads == ["advr1a2b3c4d01"], f"expected single head, got {heads}"
 
     # (1) upgrade to ops1a2b3c4d01 creates the table
     command.upgrade(cfg, REV)
@@ -80,7 +81,7 @@ def test_operations_signal_migration_roundtrip(monkeypatch):
     assert _current(sync_url) == PRIOR
     assert TABLE not in _tables(sync_url)
 
-    # (4) upgrade head again restores it (idempotent, re-runnable)
-    command.upgrade(cfg, "head")
+    # (4) re-upgrade to this revision restores its table (idempotent, re-runnable)
+    command.upgrade(cfg, REV)
     assert _current(sync_url) == REV
     assert TABLE in _tables(sync_url)

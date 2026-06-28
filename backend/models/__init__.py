@@ -79,3 +79,5 @@ from .action_binding_audit import ActionBindingAudit
 from .decision_apply_intent import DecisionApplyIntent
 # Promotion Activation data foundation (A2) — append-only promotion-run ledger
 from .promotion_run import PromotionRun
+# Advisory Runtime data foundation (Phase-0) — append-only advisory-run ledger
+from .advisory_run import AdvisoryRun

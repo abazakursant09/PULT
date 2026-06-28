@@ -90,7 +90,7 @@ def test_alembic_single_head():
     from alembic.config import Config
     from alembic.script import ScriptDirectory
     heads = ScriptDirectory.from_config(Config("alembic.ini")).get_heads()
-    assert heads == ["ops1a2b3c4d01"], heads   # operations signal foundation (Slice 1)
+    assert heads == ["advr1a2b3c4d01"], heads   # advisory-run foundation (Phase-0)
 
 
 def test_migration_additive_only():
