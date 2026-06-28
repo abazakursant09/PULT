@@ -3,6 +3,10 @@
 > Normative project-level document. This is **not** a report — it is the binding
 > reference for reviewing every future PR that adds or changes an executable Action.
 > A PR that conflicts with this doctrine must be rejected.
+>
+> **Up →** [`pult-system-doctrine.md`](./pult-system-doctrine.md) — the umbrella
+> two-surface frame. This document is the subordinate **gate** that decides whether an
+> Advisory use-case may cross into the Executable Surface.
 
 ## 1. Цель
 
