@@ -22,6 +22,33 @@ const EFFECT_RU: Record<string, string> = {
   not_measured_yet: 'Измерение ещё не закрыто',
 }
 
+// Honest localization of the OBSERVED reason codes already carried in
+// source_context (reason/missing). No new reason is generated or interpreted —
+// an unknown code falls back to the raw code, never invented text.
+const REASON_RU: Record<string, string> = {
+  no_finance_rows: 'Нет финансовых данных за период измерения',
+  no_revenue: 'Нет выручки для расчёта ДРР',
+  insufficient_data: 'Недостаточно наблюдаемых данных',
+  baseline: 'Не получено значение до решения',
+  after: 'Не получено значение после решения',
+  no_metric: 'Для этого действия не определена метрика',
+  no_observed_reader: 'Для этой метрики нет наблюдаемого источника',
+  no_db: 'Нет доступа к данным измерения',
+  no_scope: 'Не определён продавец для измерения',
+  no_entity: 'Не определён товар для измерения',
+}
+// Only for the unmeasured statuses; measured effects never show a reason line.
+const _UNMEASURED = new Set(['not_evaluated', 'not_measured_yet'])
+function notEvaluatedReason(
+  effectStatus: string | null | undefined,
+  sc: Record<string, unknown> | null | undefined,
+): string | null {
+  if (!effectStatus || !_UNMEASURED.has(effectStatus) || !sc) return null
+  const code = (sc.missing ?? sc.reason)   // missing has priority over reason
+  if (typeof code !== 'string' || !code) return null
+  return REASON_RU[code] ?? code           // unknown code → raw code, never invented
+}
+
 // cautious reason copy for the apply flow — no promises, no all-clear claims
 const APPLY_REASON_RU: Record<string, string> = {
   payload_not_derivable: 'Недостаточно данных для применения',
@@ -145,6 +172,11 @@ export function DecisionFeedCard(
         <div style={{ fontSize: 11.5, color: 'var(--text-3)', marginTop: 4 }}>
           {EFFECT_RU[item.effect_status] ?? item.effect_status}
           {item.effect_band ? ` (${item.effect_band})` : ''}
+        </div>
+      )}
+      {notEvaluatedReason(item.effect_status, item.source_context) && (
+        <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>
+          Причина: {notEvaluatedReason(item.effect_status, item.source_context)}
         </div>
       )}
       {/* Learning OS v3 — observed HISTORY for this marketplace (counts only),
