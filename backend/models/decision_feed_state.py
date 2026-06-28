@@ -30,7 +30,7 @@ class DecisionFeedState(Base):
     # stable feed item identity — canonical insight_key, or decision_id for the
     # Decision Outcome contour. NEVER a raw signal_key or a 4-part Review key.
     item_key     = Column(String(80), nullable=False)
-    contour      = Column(String(20), nullable=False)    # seo|advertising|review|growth|legal|decision_outcome
+    contour      = Column(String(20), nullable=False)    # seo|advertising|review|growth|legal|pricing|operations|decision_outcome
 
     # attention lifecycle: new | seen | snoozed | acted | dismissed
     state        = Column(String(15), nullable=False, default="new", server_default="new")

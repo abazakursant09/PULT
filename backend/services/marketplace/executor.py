@@ -28,6 +28,14 @@ log = logging.getLogger(__name__)
 # no registry write-capability key (set_price, update_card) are intentionally
 # UNMAPPED → legacy behavior preserved (no capability gate, no regression).
 _ACTION_CAPABILITY = {
+    # ad_set_bid is a LEGACY-ONLY execute path (insight_decision_bridge:
+    # high_ad_spend -> ad_set_bid). campaign_control here is a legacy-SHARED gate:
+    # bid-write and campaign on/off are semantically different operations, but the
+    # legacy path reuses this capability. The CANONICAL registry must NOT make
+    # ad_set_bid executable without a separate doctrine/Phase-0 decision (cpm has no
+    # observed-derivable payload — see Canonical Surface Doctrine). A dedicated
+    # campaign_bid / ad_bid_write capability is intentionally deferred to Phase-0
+    # (legacy<->canonical consolidation), NOT this hardening slice. Do not remap here.
     "ad_set_bid":              "campaign_control",
     "ad_set_state":            "campaign_control",
     "publish_review_response": "review_reply",

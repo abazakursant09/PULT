@@ -26,7 +26,7 @@ class EngineSignalDecisionLink(Base):
 
     id           = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id      = Column(String(36), nullable=False)    # soft ref → users.id (seller)
-    contour      = Column(String(20), nullable=False)    # seo|advertising|review|growth|legal
+    contour      = Column(String(20), nullable=False)    # seo|advertising|review|growth|legal|pricing|operations
     signal_table = Column(String(40), nullable=False)    # e.g. seo_signal, legal_signal
     signal_id    = Column(String(36), nullable=False)    # soft ref → <contour>_signal.id
     insight_key  = Column(String(80), nullable=False)    # canonical engine insight_key
