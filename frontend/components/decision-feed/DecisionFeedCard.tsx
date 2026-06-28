@@ -179,6 +179,33 @@ export function DecisionFeedCard(
           Причина: {notEvaluatedReason(item.effect_status, item.source_context)}
         </div>
       )}
+      {(() => {
+        // Measure Quality — observed finance-data freshness for unmeasured effects.
+        // Facts only: last data date, last import, rows in window, the window itself.
+        // No verdict, no "outdated", no advice.
+        const sc = item.source_context
+        if (!sc || !item.effect_status || !_UNMEASURED.has(item.effect_status)) return null
+        const f = sc.freshness as Record<string, unknown> | undefined
+        if (!f) return null
+        const lastDate = (f.last_finance_date as string | null) ?? null
+        const lastImport = (f.last_import_at as string | null) ?? null
+        const rows = typeof f.rows_in_window === 'number' ? f.rows_in_window : null
+        const wStart = (f.window_start as string | null) ?? null
+        const wEnd = (f.window_end as string | null) ?? null
+        return (
+          <div style={{
+            marginTop: 6, padding: '6px 9px', borderRadius: 6,
+            background: 'var(--surface-h)', border: '1px solid var(--line)',
+            fontSize: 10.5, color: 'var(--text-3)',
+          }}>
+            <div style={{ fontWeight: 600, color: 'var(--text-2)' }}>Данные для измерения:</div>
+            <div>последняя дата финансовых данных: {lastDate ?? 'нет данных'}</div>
+            <div>последний импорт: {lastImport ? lastImport.replace('T', ' ').slice(0, 16) : 'нет данных'}</div>
+            <div>строк в окне измерения: {rows ?? 'нет данных'}</div>
+            {wStart && wEnd && <div>окно: {wStart} — {wEnd}</div>}
+          </div>
+        )
+      })()}
       {/* Learning OS v3 — observed HISTORY for this marketplace (counts only),
           with an explicit "not a forecast" disclaimer. Never a prediction/score. */}
       {item.learning_context && (
