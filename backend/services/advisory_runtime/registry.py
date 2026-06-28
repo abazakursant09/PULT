@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Awaitable, Callable, Tuple
 
 from .runtime import RuntimeContext, ProducerResult
+from .producers import run_growth_producer
 
 
 @dataclass(frozen=True)
@@ -28,5 +29,8 @@ class ProducerSpec:
     enabled: bool
 
 
-# Empty until a producer adapter is added (later slice). Nothing runs.
-ADVISORY_PRODUCERS: Tuple[ProducerSpec, ...] = ()
+# Registered producers. `enabled=False` everywhere in Phase-0 — NOTHING runs
+# automatically (no scheduler tick, no runner are wired yet).
+ADVISORY_PRODUCERS: Tuple[ProducerSpec, ...] = (
+    ProducerSpec(key="growth", run=run_growth_producer, cadence_seconds=3600, enabled=False),
+)
