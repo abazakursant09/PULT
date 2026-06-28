@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from models.engine_signal_decision_link import EngineSignalDecisionLink
 from models.engine_effect_observation import EngineEffectObservation
 from models.decision import Decision
+from services.marketplace.finance_freshness import finance_freshness
 
 # effect_status values
 PROVEN_IMPROVED = "proven_improved"
@@ -31,6 +32,11 @@ PROVEN_UNCHANGED = "proven_unchanged"
 PROVEN_WORSENED = "proven_worsened"
 NOT_MEASURED_YET = "not_measured_yet"
 NOT_EVALUATED = "not_evaluated"
+
+# Measure Quality — finance-backed metrics whose freshness is observable from
+# ImportedFinanceRow. Only these get a freshness block, and only when unmeasured.
+_FINANCE_METRICS = frozenset({"net_profit", "ad_profit_impact", "ad_cost_ratio"})
+_UNMEASURED = frozenset({NOT_EVALUATED, NOT_MEASURED_YET})
 
 _BAND_TO_STATUS = {
     "improved": PROVEN_IMPROVED,
@@ -119,7 +125,7 @@ def _summary(link: EngineSignalDecisionLink, obs: Optional[EngineEffectObservati
 
 async def build_effect_summaries(
     db: AsyncSession, *, user_id: str, contour: Optional[str] = None,
-    effect_status: Optional[str] = None,
+    effect_status: Optional[str] = None, now: Optional[datetime] = None,
 ) -> List[DecisionEffectSummary]:
     """One summary per promoted decision (link with a decision_id). Read-only."""
     stmt = select(EngineSignalDecisionLink).where(
@@ -138,7 +144,20 @@ async def build_effect_summaries(
         if cur is None or (o.measured_at or o.created_at) >= (cur.measured_at or cur.created_at):
             by_link[o.link_id] = o
 
-    out = [_summary(l, by_link.get(l.id)) for l in links]
+    out = []
+    for l in links:
+        obs = by_link.get(l.id)
+        s = _summary(l, obs)
+        # Measure Quality — attach OBSERVED finance freshness, read-only, ONLY for
+        # finance-backed metrics whose effect is still unmeasured. No score, no
+        # threshold, no verdict — facts the user can read to see the data situation.
+        if s.metric_key in _FINANCE_METRICS and s.effect_status in _UNMEASURED:
+            fr = await finance_freshness(
+                db, user_id=user_id, marketplace=l.marketplace, sku=l.sku,
+                window_days=(obs.window_days if obs and obs.window_days else 14), now=now)
+            if fr is not None:
+                s.evidence = {**s.evidence, "freshness": fr}
+        out.append(s)
     if effect_status:
         out = [s for s in out if s.effect_status == effect_status]
     return out
