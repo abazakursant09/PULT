@@ -9,6 +9,7 @@ import type { DecisionFeedItem, DecisionApplyPreview, DecisionApplyConfirmResult
 const CONTOUR_RU: Record<string, string> = {
   seo: 'SEO', advertising: 'Реклама', review: 'Отзывы', growth: 'Рост',
   legal: 'Юридические риски', decision_outcome: 'Эффект решений',
+  operations: 'Операции', pricing: 'Ценообразование',
 }
 const ATTENTION_RU: Record<string, string> = {
   new: 'Новое', seen: 'Просмотрено', snoozed: 'Отложено', acted: 'Выполнено', dismissed: 'Скрыто',
