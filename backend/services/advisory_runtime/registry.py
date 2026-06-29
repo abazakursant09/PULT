@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from typing import Awaitable, Callable, Tuple
 
 from .runtime import RuntimeContext, ProducerResult
-from .producers import run_growth_producer
+from .producers import run_growth_producer, run_legal_producer
 
 
 @dataclass(frozen=True)
@@ -33,4 +33,8 @@ class ProducerSpec:
 # automatically (no scheduler tick, no runner are wired yet).
 ADVISORY_PRODUCERS: Tuple[ProducerSpec, ...] = (
     ProducerSpec(key="growth", run=run_growth_producer, cadence_seconds=3600, enabled=False),
+    # Legal is the first live-safe candidate (advisory-only, AUTO_FORBIDDEN,
+    # threshold-free, DB-headless). Shipped DISABLED here — flip to enabled in a
+    # separate PR after shadow validation. Daily cadence (legal changes slowly).
+    ProducerSpec(key="legal", run=run_legal_producer, cadence_seconds=86400, enabled=False),
 )
