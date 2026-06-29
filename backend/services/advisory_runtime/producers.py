@@ -28,6 +28,11 @@ from services.growth.rules import GrowthThresholds
 from services.legal.persist import audit_and_persist as legal_audit_and_persist
 from services.legal.snapshot import LegalDataUnavailable
 
+from models.review_response import ReviewResponse
+from services.review.internal_source import build_snapshot_from_reviews
+from services.review.snapshot import ReviewSnapshot, ReviewDataUnavailable
+from services.review.audit_persist import audit_and_persist as review_audit_and_persist
+
 from .runtime import RuntimeContext, ProducerResult
 
 
@@ -133,6 +138,49 @@ async def run_legal_producer(ctx: RuntimeContext) -> ProducerResult:
 
     return ProducerResult(ok=True, stats={
         "subjects_seen": seen,
+        "audits_created": audits,
+        "unavailable": unavailable,
+        "signals_reconciled": reconciled,
+    })
+
+
+async def _review_subjects(db: AsyncSession, user_id: str):
+    """The seller's reviews. ReviewResponse has no user_id — ownership is proven via
+    the linked Product (Product.user_id). Observed, DB-headless."""
+    rows = (await db.execute(
+        select(ReviewResponse.id, ReviewResponse.marketplace)
+        .join(Product, Product.id == ReviewResponse.product_id)
+        .where(Product.user_id == user_id))).all()
+    return [(rid, mp) for rid, mp in rows]
+
+
+async def run_review_producer(ctx: RuntimeContext) -> ProducerResult:
+    """Review advisory producer adapter. Runs the EXISTING review audit_and_persist per
+    owned review (snapshot from ReviewResponse / Product — no marketplace read, no
+    thresholds, no auto-reply). Flush-only; no commit.
+
+    Advisory-only: review signals never bind an executor (publish_review_response is
+    PAYLOAD_NOT_DERIVABLE — reply text is human-written; negative reviews are
+    MANUAL_ONLY). Reconciliation keeps one live review_signal per insight_key."""
+    db, uid = ctx.db, ctx.user_id
+
+    seen = audits = unavailable = reconciled = 0
+    for review_id, marketplace in await _review_subjects(db, uid):
+        seen += 1
+        snap = await build_snapshot_from_reviews(
+            db, review_id=review_id, marketplace=marketplace, owner_user_id=uid, now=ctx.now)
+        if isinstance(snap, ReviewDataUnavailable):
+            unavailable += 1
+            continue
+        assert isinstance(snap, ReviewSnapshot)
+        res = await review_audit_and_persist(
+            db, user_id=uid, snapshot=snap, triggered_by=ctx.triggered_by, now=ctx.now)
+        audits += 1
+        if res.reconciliation is not None:
+            reconciled += res.reconciliation.created + res.reconciliation.updated
+
+    return ProducerResult(ok=True, stats={
+        "reviews_seen": seen,
         "audits_created": audits,
         "unavailable": unavailable,
         "signals_reconciled": reconciled,
