@@ -29,9 +29,13 @@ from datetime import datetime
 from logging import Logger
 from typing import Mapping, Optional
 
+from datetime import timedelta
+
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.advisory_run import AdvisoryRun
+from models.imported_finance import ImportedFinanceRow
 
 
 @dataclass(frozen=True)
@@ -54,6 +58,22 @@ class ProducerResult:
 
 class AdvisoryRuntimeError(Exception):
     """Runtime-level failure (e.g. unknown producer_key). Not a producer error."""
+
+
+@dataclass(frozen=True)
+class RuntimeTickResult:
+    """Aggregate of one run_due_producers pass. Counts only — no producer semantics."""
+    ran: int = 0
+    skipped: int = 0
+    errors: int = 0
+
+
+async def _active_user_ids(db: AsyncSession):
+    """Honest minimal active-user source: sellers that have imported finance data —
+    the advisory anchor (mirrors measurement_close enumerating its own table). No new
+    active-user mechanism invented."""
+    return (await db.execute(
+        select(ImportedFinanceRow.user_id).distinct())).scalars().all()
 
 
 class AdvisoryRuntime:
@@ -112,3 +132,46 @@ class AdvisoryRuntime:
         if producer_error is not None:
             raise producer_error
         return row
+
+    async def _is_due(self, db: AsyncSession, user_id: str, spec, ts: datetime) -> bool:
+        """Due = no SUCCESSFUL AdvisoryRun for (user, producer) within cadence_seconds."""
+        cutoff = ts - timedelta(seconds=spec.cadence_seconds)
+        recent = (await db.execute(select(AdvisoryRun.id).where(
+            AdvisoryRun.user_id == user_id,
+            AdvisoryRun.producer_key == spec.key,
+            AdvisoryRun.status == "ok",
+            AdvisoryRun.started_at >= cutoff,
+        ).limit(1))).scalar()
+        return recent is None
+
+    async def run_due_producers(
+        self, db: AsyncSession, *, now: Optional[datetime] = None,
+        slot_budget: int = 10, triggered_by: str = "scheduled",
+    ) -> RuntimeTickResult:
+        """Run every DUE (active-user × enabled-producer) pair, capped at slot_budget.
+        Shadow-safe: when no ProducerSpec is enabled it returns immediately, touching
+        no user. One producer/user failure never aborts the tick (error-isolated)."""
+        from .registry import ADVISORY_PRODUCERS          # lazy: break import cycle
+
+        ts = now or datetime.utcnow()
+        enabled = [s for s in ADVISORY_PRODUCERS if s.enabled]
+        if not enabled:
+            return RuntimeTickResult(ran=0, skipped=0, errors=0)
+
+        users = await _active_user_ids(db)
+        ran = skipped = errors = 0
+        for spec in enabled:
+            for uid in users:
+                if not await self._is_due(db, uid, spec, ts):
+                    skipped += 1
+                    continue
+                if ran >= slot_budget:          # budget exhausted — remaining due wait
+                    skipped += 1
+                    continue
+                try:
+                    await self.run_one(db, user_id=uid, producer_key=spec.key,
+                                       now=ts, triggered_by=triggered_by)
+                    ran += 1
+                except Exception:               # producer/user failure isolated
+                    errors += 1
+        return RuntimeTickResult(ran=ran, skipped=skipped, errors=errors)

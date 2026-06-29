@@ -406,6 +406,7 @@ async def run_scheduler() -> None:
             await _send_weekly_reports()
             await _automation_tick()
             await _measurement_close_tick()
+            await _advisory_runtime_tick()
         except Exception:
             logger.exception("Scheduler iteration error")
         now = datetime.now()
@@ -424,6 +425,22 @@ async def _measurement_close_tick() -> None:
             logger.info("measurement close: %d observation(s) closed", n)
     except Exception:
         logger.exception("measurement_close tick error")
+
+
+async def _advisory_runtime_tick() -> None:
+    """Advisory Runtime tick. SHADOW-SAFE: while every ProducerSpec is enabled=False
+    (today) run_due_producers returns immediately, touching no user and creating no
+    AdvisoryRun. Owns its own session; never raises into the scheduler."""
+    from database import AsyncSessionLocal
+    from services.advisory_runtime.runtime import AdvisoryRuntime
+    try:
+        async with AsyncSessionLocal() as db:
+            res = await AdvisoryRuntime().run_due_producers(db)
+        if res.ran or res.errors:
+            logger.info("advisory runtime: ran=%d skipped=%d errors=%d",
+                        res.ran, res.skipped, res.errors)
+    except Exception:
+        logger.exception("advisory_runtime tick error")
 
 
 async def _automation_tick() -> None:
