@@ -70,7 +70,7 @@ async def _legal_sigs(db, uid):
 def test_registry_has_legal_spec():
     spec = next((s for s in ADVISORY_PRODUCERS if s.key == "legal"), None)
     assert spec is not None
-    assert spec.enabled is False
+    assert spec.enabled is True                 # A8: legal is the first live producer
     assert spec.cadence_seconds == 86400
     assert spec.run is run_legal_producer
 
@@ -157,4 +157,33 @@ def test_run_one_shadow_validation():
         assert len(await _legal_sigs(db, uid)) >= 1
         # (5) no Decision created (advisory only)
         assert (await db.execute(select(Decision).where(Decision.user_id == uid))).scalars().all() == []
+    _run(go())
+
+
+# ── A8 live regression: scheduler path runs legal, advisory-only ─────────────
+
+def test_run_due_producers_runs_legal_advisory_only():
+    from models.imported_finance import ImportedFinanceRow
+    from models.engine_signal_decision_link import EngineSignalDecisionLink
+
+    async def go():
+        db = await _db(); uid = str(uuid.uuid4())
+        # active user (finance anchor) + a legal subject with a denylist claim
+        db.add(ImportedFinanceRow(import_id=str(uuid.uuid4()), user_id=uid, marketplace="ozon",
+                                  date="2026-06-20", sku="SKU1", revenue=100.0, net_profit=10.0))
+        await _seed_claim(db, uid)
+
+        res = await AdvisoryRuntime().run_due_producers(db, now=NOW)   # REAL registry: legal enabled
+        assert res.ran >= 1 and res.errors == 0
+
+        runs = (await db.execute(select(AdvisoryRun))).scalars().all()
+        keys = {r.producer_key for r in runs}
+        assert "legal" in keys                       # scheduler picked legal
+        assert "growth" not in keys                  # growth disabled → never run
+        assert all(r.status == "ok" for r in runs if r.producer_key == "legal")
+
+        # advisory-only: a legal signal exists, but NOTHING executable downstream
+        assert len(await _legal_sigs(db, uid)) >= 1
+        assert (await db.execute(select(Decision))).scalars().all() == []
+        assert (await db.execute(select(EngineSignalDecisionLink))).scalars().all() == []
     _run(go())

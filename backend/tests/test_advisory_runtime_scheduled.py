@@ -65,12 +65,17 @@ async def _runs(db):
     return (await db.execute(select(AdvisoryRun))).scalars().all()
 
 
-# ── (1) all disabled → no-op, no rows ────────────────────────────────────────
+# ── (1) no enabled specs → no-op, no rows ────────────────────────────────────
 
-def test_disabled_registry_no_op():
+def test_no_enabled_specs_no_op(monkeypatch):
+    # monkeypatch a disabled-only registry (independent of the real registry, where
+    # legal is now enabled) to lock the no-op path.
+    monkeypatch.setattr(registry_mod, "ADVISORY_PRODUCERS",
+                        (_spec("t_off", _ok_producer, enabled=False),))
+
     async def go():
         db = await _db(); await _active(db, str(uuid.uuid4()))
-        res = await AdvisoryRuntime().run_due_producers(db, now=NOW)   # real registry: growth disabled
+        res = await AdvisoryRuntime().run_due_producers(db, now=NOW)
         assert (res.ran, res.skipped, res.errors) == (0, 0, 0)
         assert await _runs(db) == []
     _run(go())
