@@ -129,9 +129,11 @@ def test_producer_spec_fields_exact():
 
 # ── C. registry ──────────────────────────────────────────────────────────────
 
-def test_registry_all_disabled():
+def test_registry_growth_disabled_legal_enabled():
     assert isinstance(ADVISORY_PRODUCERS, tuple)
-    assert all(not s.enabled for s in ADVISORY_PRODUCERS)   # nothing runs automatically
+    by_key = {s.key: s for s in ADVISORY_PRODUCERS}
+    assert by_key["growth"].enabled is False   # threshold-blocked → stays off
+    assert by_key["legal"].enabled is True      # A8: first live-safe producer
 
 
 # ── D. guard — foundation imports no scheduler / producer / Telegram / Spine ──
