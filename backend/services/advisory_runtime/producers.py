@@ -17,12 +17,16 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.imported_finance import ImportedFinanceRow
+from models.product import Product
 from models.product_listing import ProductListing
 
 from services.growth.internal_source import build_snapshot_from_internal
 from services.growth.snapshot import GrowthSnapshot, GrowthDataUnavailable
 from services.growth.audit_persist import audit_and_persist
 from services.growth.rules import GrowthThresholds
+
+from services.legal.persist import audit_and_persist as legal_audit_and_persist
+from services.legal.snapshot import LegalDataUnavailable
 
 from .runtime import RuntimeContext, ProducerResult
 
@@ -91,5 +95,45 @@ async def run_growth_producer(ctx: RuntimeContext) -> ProducerResult:
         "unavailable": unavailable,
         "audits_created": audits,
         "problems_detected": problems,
+        "signals_reconciled": reconciled,
+    })
+
+
+async def _legal_subjects(db: AsyncSession, user_id: str):
+    """Distinct (marketplace, sku) legal subjects from the seller's catalog. Observed,
+    DB-headless. Legal is per-seller-subject and advisory-only (AUTO_FORBIDDEN)."""
+    rows = (await db.execute(
+        select(Product.marketplace, Product.sku).where(
+            Product.user_id == user_id,
+            Product.marketplace.isnot(None),
+            Product.sku.isnot(None)).distinct())).all()
+    return [(mp, sku) for mp, sku in rows]
+
+
+async def run_legal_producer(ctx: RuntimeContext) -> ProducerResult:
+    """Legal advisory producer adapter. Runs the EXISTING legal audit_and_persist per
+    catalog subject (builds its own snapshot internally from Product / ImportedProductRow
+    — no marketplace read, no thresholds, no content generation). Flush-only; no commit.
+
+    Legal is advisory-only and AUTO_FORBIDDEN — it can never bind an executor action.
+    Reconciliation keeps one live legal_signal per insight_key."""
+    db, uid = ctx.db, ctx.user_id
+
+    seen = audits = unavailable = reconciled = 0
+    for marketplace, sku in await _legal_subjects(db, uid):
+        seen += 1
+        res = await legal_audit_and_persist(
+            db, seller_id=uid, marketplace=marketplace, subject_type="product",
+            sku=sku, triggered_by=ctx.triggered_by, now=ctx.now)
+        if isinstance(res, LegalDataUnavailable):
+            unavailable += 1
+            continue
+        audits += 1
+        reconciled += getattr(res, "signals_created", 0) + getattr(res, "signals_updated", 0)
+
+    return ProducerResult(ok=True, stats={
+        "subjects_seen": seen,
+        "audits_created": audits,
+        "unavailable": unavailable,
         "signals_reconciled": reconciled,
     })
