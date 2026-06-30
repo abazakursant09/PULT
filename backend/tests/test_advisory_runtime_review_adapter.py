@@ -70,15 +70,15 @@ async def _rev_sigs(db, uid):
         ReviewSignal.user_id == uid, ReviewSignal.status.in_(("active", "reopened"))))).scalars().all()
 
 
-# ── (1) registry: review disabled, legal enabled, growth disabled ────────────
+# ── (1) registry: review enabled (A10), legal enabled, growth disabled ───────
 
 def test_registry_state():
     by_key = {s.key: s for s in ADVISORY_PRODUCERS}
-    assert by_key["review"].enabled is False
+    assert by_key["review"].enabled is True       # A10: second live producer
     assert by_key["review"].cadence_seconds == 86400
     assert by_key["review"].run is run_review_producer
-    assert by_key["legal"].enabled is True       # unchanged
-    assert by_key["growth"].enabled is False      # unchanged
+    assert by_key["legal"].enabled is True        # unchanged
+    assert by_key["growth"].enabled is False       # unchanged
 
 
 # ── (2) shadow validation via run_one ────────────────────────────────────────
@@ -125,6 +125,42 @@ def test_review_advisory_only():
     for st, binding in BY_SIGNAL_TYPE.items():
         if st.startswith("rev_"):
             assert binding.action_key != "publish_review_response" or binding.binding_status != "bound"
+
+
+# ── A10 live regression: scheduler runs Legal + Review, advisory-only ────────
+
+def test_run_due_producers_runs_legal_and_review_advisory_only():
+    from models.imported_finance import ImportedFinanceRow
+    from models.legal_signal import LegalSignal
+
+    async def go():
+        db = await _db(); uid = str(uuid.uuid4()); pid = str(uuid.uuid4())
+        # active user (finance anchor)
+        db.add(ImportedFinanceRow(import_id=str(uuid.uuid4()), user_id=uid, marketplace="ozon",
+                                  date="2026-06-20", sku="SKU1", revenue=100.0, net_profit=10.0))
+        # one product serves BOTH: legal subject (denylist title) + review subject
+        db.add(Product(id=pid, user_id=uid, name="оригинал товар", marketplace="ozon",
+                       sku="SKU1", price=100.0))
+        db.add(ReviewResponse(id=str(uuid.uuid4()), product_id=pid, rating=5, review_text=None,
+                              response_text=None, status="pending", marketplace="ozon"))
+        await db.commit()
+
+        res = await AdvisoryRuntime().run_due_producers(db, now=NOW)   # REAL registry
+        assert res.ran >= 2 and res.errors == 0
+
+        keys = {r.producer_key for r in (await db.execute(select(AdvisoryRun))).scalars().all()}
+        assert "legal" in keys and "review" in keys     # scheduler runs both
+        assert "growth" not in keys                      # growth disabled → never run
+
+        # both advisory signals produced
+        assert any("legal_content_claim_risk" in (s.signal_key or "") for s in
+                   (await db.execute(select(LegalSignal).where(LegalSignal.user_id == uid))).scalars().all())
+        assert len(await _rev_sigs(db, uid)) >= 1
+
+        # advisory-only: NOTHING executable downstream
+        assert (await db.execute(select(Decision))).scalars().all() == []
+        assert (await db.execute(select(EngineSignalDecisionLink))).scalars().all() == []
+    _run(go())
 
 
 # ── (5) import guard — adapter pulls in no live/executable module ────────────
