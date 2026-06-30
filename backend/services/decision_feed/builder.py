@@ -34,6 +34,7 @@ from models.advertising_signal import AdvertisingSignal
 from models.review_signal import ReviewSignal
 from models.growth_signal import GrowthSignal
 from models.legal_signal import LegalSignal
+from models.operations_signal import OperationsSignal
 
 from services.decision_outcome.registry import BY_SIGNAL_KEY
 from services.decision_outcome.effect_summary import build_effect_summaries
@@ -236,6 +237,7 @@ _ENGINES = (
     ("review", ReviewSignal, "review_signal"),
     ("growth", GrowthSignal, "growth_signal"),
     ("legal", LegalSignal, "legal_signal"),
+    ("operations", OperationsSignal, "operations_signal"),
 )
 
 # promoted_to_decision stays live: the signal has a Decision and is awaiting the
