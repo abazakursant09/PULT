@@ -33,6 +33,9 @@ from services.review.internal_source import build_snapshot_from_reviews
 from services.review.snapshot import ReviewSnapshot, ReviewDataUnavailable
 from services.review.audit_persist import audit_and_persist as review_audit_and_persist
 
+from models.imported_product import ImportedProductRow
+from services.operations.low_stock_source import build_low_stock_signal, LOW_STOCK_UNITS
+
 from .runtime import RuntimeContext, ProducerResult
 
 
@@ -179,4 +182,41 @@ async def run_review_producer(ctx: RuntimeContext) -> ProducerResult:
         "audits_created": audits,
         "unavailable": unavailable,
         "signals_reconciled": reconciled,
+    })
+
+
+async def run_operations_low_stock_producer(ctx: RuntimeContext) -> ProducerResult:
+    """Low-stock advisory producer adapter (NARROW operations producer). Reads observed
+    stock from already-imported PULT data (ImportedProductRow) and creates one
+    operations_low_stock signal per critically-low listing via the EXISTING low-stock
+    source (services/operations/low_stock_source). Flush-only; no commit.
+
+    Advisory-only: operations_low_stock binds to no executor and is not in the
+    Decision-Outcome canonical set, so it creates operations_signal rows only — no
+    Decision, no Apply, no executor, no marketplace write. The source is idempotent
+    per insight_key, so reconciliation keeps one live signal per (marketplace, sku).
+    DB-headless. Runs ALONGSIDE the legacy _compute_insights low_stock logic, never
+    replacing it."""
+    db, uid = ctx.db, ctx.user_id
+
+    # bounded: pre-filter to the critically-low rows only (the source re-guards)
+    rows = (await db.execute(select(ImportedProductRow).where(
+        ImportedProductRow.user_id == uid,
+        ImportedProductRow.stock.isnot(None),
+        ImportedProductRow.stock >= 0,
+        ImportedProductRow.stock <= LOW_STOCK_UNITS,
+    ))).scalars().all()
+
+    seen = signals = 0
+    for row in rows:
+        seen += 1
+        sig = await build_low_stock_signal(
+            db, user_id=uid, marketplace=row.marketplace, sku=row.sku,
+            stock=row.stock, listing_id=row.product_id, now=ctx.now)
+        if sig is not None:
+            signals += 1
+
+    return ProducerResult(ok=True, stats={
+        "candidates_seen": seen,
+        "low_stock_signals": signals,
     })
