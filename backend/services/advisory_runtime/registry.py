@@ -51,14 +51,14 @@ ADVISORY_PRODUCERS: Tuple[ProducerSpec, ...] = (
     # so it can never bind an executor. Running it creates review_signal rows only —
     # no Decision, no Apply, no executor, no marketplace write.
     ProducerSpec(key="review", run=run_review_producer, cadence_seconds=86400, enabled=True),
-    # operations_low_stock: DISABLED (A15) — first canonical producer for a legacy
-    # _compute_insights signal (low_stock), built ALONGSIDE the legacy on-read logic
+    # operations_low_stock: ENABLED (A22) — first canonical producer for a legacy
+    # _compute_insights signal (low_stock), running ALONGSIDE the legacy on-read logic
     # (legacy untouched). NARROW name so future operations producers (ready_to_ship,
     # supply_risk, warehouse, orders) are each their own producer, not one bucket.
     # Advisory-only: operations_low_stock binds to no executor and is not in the
     # Decision-Outcome canonical set, so it creates operations_signal rows only — no
-    # Decision, no Apply, no executor, no marketplace write. Shipped DISABLED; runs
-    # only via run_one() until a later enable sprint after shadow validation.
+    # Decision, no EngineSignalDecisionLink, no Apply, no executor, no marketplace
+    # write. operations_signal is read by the Decision Feed (A21) → flows into Today.
     ProducerSpec(key="operations_low_stock", run=run_operations_low_stock_producer,
-                 cadence_seconds=86400, enabled=False),
+                 cadence_seconds=86400, enabled=True),
 )
