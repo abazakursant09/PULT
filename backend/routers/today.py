@@ -24,6 +24,7 @@ from dependencies import get_current_user
 from models.user import User
 
 from services.decision_feed.today import build_today, TodayAction
+from services.decision_feed.builder import build_feed
 
 router = APIRouter()
 
@@ -85,3 +86,52 @@ async def get_today(
     views = [_view(i) for i in items]
     return TodayResponse(items=views, total=len(views),
                          top_action=views[0] if views else None)
+
+
+class TodaySummaryView(BaseModel):
+    """'Состояние бизнеса сегодня' — read-only assembly of EXISTING aggregates. No new
+    analytics: money comes verbatim from get_daily_summary, loss count from
+    get_loss_products, the three feed counts are plain len() over build_feed."""
+    revenue_today: float
+    profit_today: float
+    margin_pct: Optional[float]
+    delta_revenue_pct: Optional[float]
+    critical_count: int
+    loss_products_count: int
+    growth_opportunities_count: int
+    low_stock_count: int
+    is_demo: bool
+    has_data: bool
+
+
+@router.get("/today/summary", response_model=TodaySummaryView)
+async def get_today_summary(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> TodaySummaryView:
+    """Assemble the daily business state from already-computed sources. Read-only — no
+    DB write, no new computation beyond counting ready lists. Money: get_daily_summary
+    (verbatim). Loss count: get_loss_products(days=1). Feed counts: build_feed filtered
+    by priority_level/contour."""
+    from services.finance_aggregator import get_daily_summary, get_loss_products
+
+    ds = await get_daily_summary(current_user.id)
+    loss = await get_loss_products(current_user.id, days=1, limit=10000)
+    feed = await build_feed(db, user_id=current_user.id, limit=10000)
+
+    critical = sum(1 for i in feed if i._priority_bucket == "critical")
+    growth = sum(1 for i in feed if i.contour == "growth")
+    low_stock = sum(1 for i in feed if i.contour == "operations")
+
+    return TodaySummaryView(
+        revenue_today=ds.data.revenue,
+        profit_today=ds.data.effective_profit,
+        margin_pct=ds.data.margin_pct,
+        delta_revenue_pct=ds.delta_revenue_pct,
+        critical_count=critical,
+        loss_products_count=len(loss),
+        growth_opportunities_count=growth,
+        low_stock_count=low_stock,
+        is_demo=ds.is_demo,
+        has_data=ds.has_data,
+    )
