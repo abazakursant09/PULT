@@ -39,8 +39,9 @@ class ProducerSpec:
 ADVISORY_PRODUCERS: Tuple[ProducerSpec, ...] = (
     ProducerSpec(key="growth", run=run_growth_producer, cadence_seconds=3600, enabled=False),
     ProducerSpec(key="legal", run=run_legal_producer, cadence_seconds=86400, enabled=True),
-    # review: second live-safe candidate (advisory-only; publish_review_response is
-    # PAYLOAD_NOT_DERIVABLE and negatives are MANUAL_ONLY → never executable).
-    # Shipped DISABLED — adapter/shadow only; enable flip is a separate PR (A10).
-    ProducerSpec(key="review", run=run_review_producer, cadence_seconds=86400, enabled=False),
+    # review: ENABLED (A10) — second live-safe advisory producer. Advisory-only;
+    # publish_review_response is PAYLOAD_NOT_DERIVABLE and negatives are MANUAL_ONLY,
+    # so it can never bind an executor. Running it creates review_signal rows only —
+    # no Decision, no Apply, no executor, no marketplace write.
+    ProducerSpec(key="review", run=run_review_producer, cadence_seconds=86400, enabled=True),
 )
