@@ -75,9 +75,9 @@ def test_registry_has_legal_spec():
     assert spec.run is run_legal_producer
 
 
-def test_growth_still_disabled():
+def test_growth_enabled():
     growth = next((s for s in ADVISORY_PRODUCERS if s.key == "growth"), None)
-    assert growth is not None and growth.enabled is False
+    assert growth is not None and growth.enabled is True   # A13: live
 
 
 # ── adapter contract + behavior ──────────────────────────────────────────────
@@ -179,7 +179,7 @@ def test_run_due_producers_runs_legal_advisory_only():
         runs = (await db.execute(select(AdvisoryRun))).scalars().all()
         keys = {r.producer_key for r in runs}
         assert "legal" in keys                       # scheduler picked legal
-        assert "growth" not in keys                  # growth disabled → never run
+        assert "growth" in keys                       # A13: growth now enabled too
         assert all(r.status == "ok" for r in runs if r.producer_key == "legal")
 
         # advisory-only: a legal signal exists, but NOTHING executable downstream

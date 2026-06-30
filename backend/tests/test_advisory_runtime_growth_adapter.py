@@ -62,7 +62,7 @@ async def _seed_profitable(db, uid, *, mp="ozon", sku="SKU1"):
 def test_registry_has_growth_spec():
     spec = next((s for s in ADVISORY_PRODUCERS if s.key == "growth"), None)
     assert spec is not None
-    assert spec.enabled is False
+    assert spec.enabled is True                 # A13: data-derived thresholds → live
     assert spec.cadence_seconds == 3600
     assert spec.run is run_growth_producer
 

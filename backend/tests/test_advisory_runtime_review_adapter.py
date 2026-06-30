@@ -70,7 +70,7 @@ async def _rev_sigs(db, uid):
         ReviewSignal.user_id == uid, ReviewSignal.status.in_(("active", "reopened"))))).scalars().all()
 
 
-# ── (1) registry: review enabled (A10), legal enabled, growth disabled ───────
+# ── (1) registry: review enabled (A10), legal enabled, growth enabled (A13) ──
 
 def test_registry_state():
     by_key = {s.key: s for s in ADVISORY_PRODUCERS}
@@ -78,7 +78,7 @@ def test_registry_state():
     assert by_key["review"].cadence_seconds == 86400
     assert by_key["review"].run is run_review_producer
     assert by_key["legal"].enabled is True        # unchanged
-    assert by_key["growth"].enabled is False       # unchanged
+    assert by_key["growth"].enabled is True        # A13: growth now live
 
 
 # ── (2) shadow validation via run_one ────────────────────────────────────────
@@ -150,7 +150,7 @@ def test_run_due_producers_runs_legal_and_review_advisory_only():
 
         keys = {r.producer_key for r in (await db.execute(select(AdvisoryRun))).scalars().all()}
         assert "legal" in keys and "review" in keys     # scheduler runs both
-        assert "growth" not in keys                      # growth disabled → never run
+        assert "growth" in keys                          # A13: growth now enabled too
 
         # both advisory signals produced
         assert any("legal_content_claim_risk" in (s.signal_key or "") for s in

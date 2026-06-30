@@ -132,7 +132,7 @@ def test_producer_spec_fields_exact():
 def test_registry_growth_disabled_legal_enabled():
     assert isinstance(ADVISORY_PRODUCERS, tuple)
     by_key = {s.key: s for s in ADVISORY_PRODUCERS}
-    assert by_key["growth"].enabled is False   # threshold-blocked → stays off
+    assert by_key["growth"].enabled is True    # A13: data-derived thresholds → live
     assert by_key["legal"].enabled is True      # A8: first live-safe producer
 
 

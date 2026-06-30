@@ -30,14 +30,18 @@ class ProducerSpec:
 
 
 # Registered producers.
-#  - growth: DISABLED — uses permissive default thresholds; must not auto-run before
-#    per-user threshold sourcing is decided.
+#  - growth: ENABLED (A13) — third LIVE-SAFE advisory producer. The permissive-default
+#    blocker is gone: thresholds are derived read-only from the seller's OWN observed
+#    finance (services/growth/threshold_source, A11), and the shadow run (A12) proved it
+#    advisory-only. Growth is advisory-only and not bindable — it creates growth_signal
+#    rows only (no Decision, no EngineSignalDecisionLink, no Apply, no executor, no
+#    marketplace write). Hourly cadence.
 #  - legal: ENABLED (A8) — the first LIVE-SAFE advisory producer. Advisory-only,
 #    binding AUTO_FORBIDDEN (can never bind an executor), threshold-free, DB-headless,
 #    no marketplace read. Running it on the daily cadence creates legal_signal rows
 #    only — no Decision, no Apply, no executor, no marketplace write.
 ADVISORY_PRODUCERS: Tuple[ProducerSpec, ...] = (
-    ProducerSpec(key="growth", run=run_growth_producer, cadence_seconds=3600, enabled=False),
+    ProducerSpec(key="growth", run=run_growth_producer, cadence_seconds=3600, enabled=True),
     ProducerSpec(key="legal", run=run_legal_producer, cadence_seconds=86400, enabled=True),
     # review: ENABLED (A10) — second live-safe advisory producer. Advisory-only;
     # publish_review_response is PAYLOAD_NOT_DERIVABLE and negatives are MANUAL_ONLY,

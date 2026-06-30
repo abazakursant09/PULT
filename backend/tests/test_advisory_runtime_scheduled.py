@@ -178,8 +178,8 @@ def test_runtime_imports_clean():
         assert forbidden not in blob, f"runtime must not import {forbidden}"
 
 
-# ── (8) growth stays enabled=False ───────────────────────────────────────────
+# ── (8) growth now enabled=True (A13) ────────────────────────────────────────
 
-def test_growth_still_disabled():
+def test_growth_enabled():
     growth = next((s for s in ADVISORY_PRODUCERS if s.key == "growth"), None)
-    assert growth is not None and growth.enabled is False
+    assert growth is not None and growth.enabled is True
