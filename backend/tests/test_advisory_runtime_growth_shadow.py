@@ -87,22 +87,22 @@ def test_growth_shadow_idempotent():
     _run(go())
 
 
-# ── (7) growth still disabled ────────────────────────────────────────────────
+# ── (7) growth now enabled (A13) ─────────────────────────────────────────────
 
-def test_growth_still_disabled():
+def test_growth_enabled():
     by_key = {s.key: s for s in ADVISORY_PRODUCERS}
-    assert by_key["growth"].enabled is False
+    assert by_key["growth"].enabled is True
 
 
-# ── (8) scheduler does NOT run growth (only enabled producers) ───────────────
+# ── (8) scheduler now runs growth (A13: enabled producer) ────────────────────
 
-def test_scheduler_does_not_run_growth():
+def test_scheduler_runs_growth():
     async def go():
         db = await _db(); uid = str(uuid.uuid4())
         await _seed_growth_candidate(db, uid)   # active user (finance)
         await AdvisoryRuntime().run_due_producers(db, now=NOW)   # REAL registry
         keys = {r.producer_key for r in (await db.execute(select(AdvisoryRun))).scalars().all()}
-        assert "growth" not in keys             # growth disabled → never scheduled
+        assert "growth" in keys                 # A13: growth enabled → scheduled
     _run(go())
 
 

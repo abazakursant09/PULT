@@ -132,10 +132,10 @@ def test_growth_producer_uses_derived_thresholds():
     _run(go())
 
 
-# ── (5)(6) growth still disabled; legal/review unchanged ─────────────────────
+# ── (5)(6) growth enabled (A13); legal/review unchanged ──────────────────────
 
-def test_registry_unchanged():
+def test_registry_all_enabled():
     by_key = {s.key: s for s in ADVISORY_PRODUCERS}
-    assert by_key["growth"].enabled is False
+    assert by_key["growth"].enabled is True
     assert by_key["legal"].enabled is True
     assert by_key["review"].enabled is True
