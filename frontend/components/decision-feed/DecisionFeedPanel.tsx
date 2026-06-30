@@ -5,6 +5,7 @@ import type { DecisionFeedItem } from '@/lib/api'
 import { DecisionFeedFilters } from './DecisionFeedFilters'
 import { DecisionFeedCard } from './DecisionFeedCard'
 import { DecisionFeedEmptyState } from './DecisionFeedEmptyState'
+import { groupByProduct, marketplaceLabel, recommendationsLabel } from '@/lib/feedGrouping'
 
 // "Что требует внимания сегодня" — главный видимый слой PULT. Список решений из
 // всех контуров, не отчёт и не BI. Без рейтинга, без numeric priority, без прогноза.
@@ -92,30 +93,55 @@ export function DecisionFeedPanel() {
           items.length === 0 ? (
             <DecisionFeedEmptyState />
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {groupItems(items).map((group) => (
-                group.length === 1 ? (
-                  <DecisionFeedCard key={group[0].item_key} item={group[0]} onChanged={onChanged} />
-                ) : (
-                  <div key={group[0].group_key ?? group[0].item_key} style={{
-                    border: '1px solid var(--line)', borderRadius: 12, padding: 12,
-                    background: 'var(--surface)', display: 'flex', flexDirection: 'column', gap: 8,
-                  }}>
-                    {/* one problem shown once for the whole group */}
-                    {group[0].what_happened && (
-                      <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)' }}>{group[0].what_happened}</div>
-                    )}
-                    {group[0].why_it_matters && (
-                      <div style={{ fontSize: 12, color: 'var(--text-2)' }}><b>Почему важно:</b> {group[0].why_it_matters}</div>
-                    )}
-                    <div style={{ fontSize: 11.5, color: 'var(--text-3)' }}>Варианты решения:</div>
-                    {group.map((i) => (
-                      <DecisionFeedCard key={i.item_key} item={i} onChanged={onChanged}
-                        roleLabel={roleLabel(i)} hideProblem />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {/* Product → Problems → Alternatives. Outer: group by product
+                  (normalize(marketplace)+sku); inner: existing group_key grouping. */}
+              {groupByProduct(items).map((pg) => {
+                const inner = (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {groupItems(pg.items).map((group) => (
+                      group.length === 1 ? (
+                        <DecisionFeedCard key={group[0].item_key} item={group[0]} onChanged={onChanged} />
+                      ) : (
+                        <div key={group[0].group_key ?? group[0].item_key} style={{
+                          border: '1px solid var(--line)', borderRadius: 12, padding: 12,
+                          background: 'var(--surface)', display: 'flex', flexDirection: 'column', gap: 8,
+                        }}>
+                          {/* one problem shown once for the whole group */}
+                          {group[0].what_happened && (
+                            <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)' }}>{group[0].what_happened}</div>
+                          )}
+                          {group[0].why_it_matters && (
+                            <div style={{ fontSize: 12, color: 'var(--text-2)' }}><b>Почему важно:</b> {group[0].why_it_matters}</div>
+                          )}
+                          <div style={{ fontSize: 11.5, color: 'var(--text-3)' }}>Варианты решения:</div>
+                          {group.map((i) => (
+                            <DecisionFeedCard key={i.item_key} item={i} onChanged={onChanged}
+                              roleLabel={roleLabel(i)} hideProblem />
+                          ))}
+                        </div>
+                      )
                     ))}
                   </div>
                 )
-              ))}
+                // sku-null solo groups: no product identity → render items bare (no header)
+                if (!pg.sku) return <div key={pg.key}>{inner}</div>
+                return (
+                  <div key={pg.key} style={{
+                    border: '1px solid var(--line)', borderRadius: 14, padding: 12,
+                    background: 'var(--bg, transparent)', display: 'flex', flexDirection: 'column', gap: 10,
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                      <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text)' }}>{pg.sku}</span>
+                      <span style={{ fontSize: 12, color: 'var(--text-3)' }}>· {marketplaceLabel(pg.marketplace)}</span>
+                      <span style={{ fontSize: 11.5, color: 'var(--text-3)', marginLeft: 'auto' }}>
+                        {recommendationsLabel(pg.items.length)}
+                      </span>
+                    </div>
+                    {inner}
+                  </div>
+                )
+              })}
             </div>
           )
         )}
