@@ -3,60 +3,52 @@
 import { useEffect, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { X, Zap } from 'lucide-react'
-import { api, type InsightItem } from '@/lib/api'
+import { api, type TodayItem } from '@/lib/api'
 import { getToken } from '@/lib/session'
 import { trackEvent } from '@/lib/events'
 
 // ── Module-level cache ────────────────────────────────────────────────────────
 // Survives soft navigation (module is loaded once per session).
 // Server renders with null (no window), client populates on first fetch.
+//
+// One Morning Truth (A19): Copilot reads the canonical Today service (/api/today,
+// the same source as the Dashboard feed and the Telegram top action) — NOT legacy
+// /api/insights.
 
-let _insights:  InsightItem[] | null = null   // full list — for badge count
-let _focused:   InsightItem[] | null = null   // preference-adapted curated list — for Copilot pick
+let _today:     TodayItem[] | null = null
 let _fetchedAt  = 0
 const _STALE_MS = 30_000
 const _AE_COUNT_EVENT = 'ae-count-update'
 
 function _isFresh(): boolean {
-  return _insights !== null && Date.now() - _fetchedAt < _STALE_MS
+  return _today !== null && Date.now() - _fetchedAt < _STALE_MS
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+// path segment → canonical contour(s) to prefer in that context
 const _CTX: Record<string, string[]> = {
-  'seo-cards':        ['seo_opportunity', 'rebuild'],
-  'seo-lab':          ['seo_opportunity', 'rebuild'],
-  'seo-intelligence': ['seo_opportunity', 'rebuild'],
-  'finance':          ['sales_decline', 'margin', 'ad_spend'],
+  'seo-cards':        ['seo'],
+  'seo-lab':          ['seo'],
+  'seo-intelligence': ['seo'],
+  'finance':          ['advertising', 'pricing', 'growth'],
 }
 
-function _pick(focused: InsightItem[], pathname: string): InsightItem | null {
-  // focused_insights is already: active, med/high confidence, deduped, preference-ranked.
-  // Just do context matching on this pre-filtered list.
-  const warnings = focused.filter(i => i.type === 'warning')
-  if (!warnings.length) return null
-  for (const [segment, keys] of Object.entries(_CTX)) {
+function _pick(items: TodayItem[], pathname: string): TodayItem | null {
+  // items are already canonical, live, and priority-ordered by build_feed.
+  if (!items.length) return null
+  for (const [segment, contours] of Object.entries(_CTX)) {
     if (pathname.includes(segment)) {
-      const match = warnings.find(i => keys.some(k => i.key.includes(k)))
+      const match = items.find(i => contours.includes(i.contour))
       if (match) return match
     }
   }
-  return warnings[0]
+  return items[0]   // highest-priority item (feed order preserved)
 }
 
-function _fmtLoss(ins: InsightItem): string | null {
-  if (ins.estimated_monthly_loss_rub && ins.estimated_monthly_loss_rub > 0) {
-    const k = Math.round(ins.estimated_monthly_loss_rub / 1000)
-    return k > 0 ? `−${k}k ₽/мес` : null
-  }
-  if (ins.impact?.sign === 'negative' && ins.impact.estimate) {
-    return ins.impact.estimate.replace('≈ ', '')
-  }
-  return null
-}
-
-function _syncBadge(insights: InsightItem[]) {
-  const cnt = insights.filter(i => i.status === 'active' && i.type === 'warning').length
+function _syncBadge(items: TodayItem[]) {
+  // active-like live items (the feed already excludes resolved/dismissed)
+  const cnt = items.filter(i => i.source_status !== 'acknowledged').length
   try { localStorage.setItem('ae_active_count', String(cnt)) } catch {}
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent(_AE_COUNT_EVENT, { detail: cnt }))
@@ -70,8 +62,8 @@ export function CopilotBar() {
   const pathname = usePathname()
 
   // Initialize from module cache — instant on soft-nav, null on cold load
-  const [insight, setInsight] = useState<InsightItem | null>(() =>
-    _focused ? _pick(_focused, pathname) : null
+  const [item, setItem] = useState<TodayItem | null>(() =>
+    _today ? _pick(_today, pathname) : null
   )
   const [hidden, setHidden] = useState(false)
 
@@ -79,63 +71,52 @@ export function CopilotBar() {
     if (!getToken()) return
 
     // Apply current cache pick for new pathname (no flicker on nav)
-    if (_focused) {
-      const pick = _pick(_focused, pathname)
-      setInsight(pick)
+    if (_today) {
+      const pick = _pick(_today, pathname)
+      setItem(pick)
       if (pick) {
         const dismissed = sessionStorage.getItem('copilot_dismissed')
-        if (dismissed === pick.key) { setHidden(true); return }
+        if (dismissed === pick.item_key) { setHidden(true); return }
         else setHidden(false)
       }
       if (_isFresh()) return   // skip network — cache is hot
     }
 
     // Background revalidation (silent)
-    api.actionEngine.getInsights()
+    api.today.get()
       .then(r => {
-        _insights  = r.insights
-        _focused   = r.focused_insights
+        _today     = r.items
         _fetchedAt = Date.now()
-        _syncBadge(r.insights)
+        _syncBadge(r.items)
 
-        const pick = _pick(r.focused_insights, pathname)
-        setInsight(pick)
+        const pick = _pick(r.items, pathname)
+        setItem(pick)
 
         if (pick) {
           const dismissed = sessionStorage.getItem('copilot_dismissed')
-          if (dismissed === pick.key) setHidden(true)
+          if (dismissed === pick.item_key) setHidden(true)
           else setHidden(false)
         }
       })
       .catch(() => {})
-  // pathname drives context re-pick; insight/hidden are output, not deps
+  // pathname drives context re-pick; item/hidden are output, not deps
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname])
 
-  if (!insight || hidden) return null
+  if (!item || hidden) return null
   if (pathname.includes('action-engine')) return null
 
-  const primary = insight.actions.find(a => a.type === 'primary') ?? insight.actions[0]
-  const loss    = _fmtLoss(insight)
-  const trust   = insight.confidence_level === 'high'
-    ? `${insight.confidence}% уверенность`
-    : insight.confidence_level === 'medium' ? 'данных достаточно'
-    : insight.is_demo ? 'DEMO' : null
+  const title = item.what_happened || item.title || 'Рекомендация'
+  const cta   = item.recommended_action || 'Открыть'
 
   function handleAction() {
-    if (!primary) return
-    trackEvent('copilot_cta_clicked', pathname, insight!.key, { insight_type: insight!.type, scope: insight!.key.split(':')[0] })
-    if (primary.params) {
-      const q = new URLSearchParams(primary.params as Record<string, string>)
-      router.push(`${primary.url}?${q}`)
-    } else {
-      router.push(primary.url)
-    }
+    trackEvent('copilot_cta_clicked', pathname, item!.item_key, { contour: item!.contour })
+    router.push('/dashboard')   // the canonical feed surface
   }
 
   function handleDismiss() {
-    trackEvent('copilot_dismissed', pathname, insight!.key, { insight_type: insight!.type })
-    sessionStorage.setItem('copilot_dismissed', insight!.key)
+    trackEvent('copilot_dismissed', pathname, item!.item_key, { contour: item!.contour })
+    sessionStorage.setItem('copilot_dismissed', item!.item_key)
     setHidden(true)
   }
 
@@ -149,42 +130,25 @@ export function CopilotBar() {
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
         <Zap size={11} color="var(--violet-text)" />
-        {insight.is_demo && (
-          <span style={{ fontSize: 8.5, fontWeight: 800, letterSpacing: '0.10em', color: 'var(--violet-text)', background: 'rgba(110,106,252,0.12)', padding: '1px 5px', borderRadius: 3 }}>
-            DEMO
-          </span>
-        )}
       </div>
 
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, overflow: 'hidden' }}>
         <span style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '60%' }}>
-          {insight.title}
+          {title}
         </span>
-        {insight.product_name && (
+        {item.sku && (
           <span style={{ fontSize: 11, color: 'var(--text-3)', whiteSpace: 'nowrap', flexShrink: 0 }}>
-            · {insight.product_name}
-          </span>
-        )}
-        {loss && (
-          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--danger)', whiteSpace: 'nowrap', flexShrink: 0, background: 'rgba(239,68,68,0.08)', borderRadius: 20, padding: '1px 7px' }}>
-            {loss}
-          </span>
-        )}
-        {trust && !insight.is_demo && (
-          <span style={{ fontSize: 10, color: 'var(--text-3)', whiteSpace: 'nowrap', flexShrink: 0 }}>
-            {trust}
+            · {item.sku}
           </span>
         )}
       </div>
 
-      {primary && (
-        <button
-          onClick={handleAction}
-          style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontWeight: 700, color: 'var(--violet-text)', background: 'rgba(110,106,252,0.12)', border: '1px solid rgba(110,106,252,0.25)', borderRadius: 6, padding: '5px 11px', cursor: 'pointer', whiteSpace: 'nowrap' }}
-        >
-          {primary.label} →
-        </button>
-      )}
+      <button
+        onClick={handleAction}
+        style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontWeight: 700, color: 'var(--violet-text)', background: 'rgba(110,106,252,0.12)', border: '1px solid rgba(110,106,252,0.25)', borderRadius: 6, padding: '5px 11px', cursor: 'pointer', whiteSpace: 'nowrap', maxWidth: '40%', overflow: 'hidden', textOverflow: 'ellipsis' }}
+      >
+        {cta} →
+      </button>
 
       <button
         onClick={handleDismiss}

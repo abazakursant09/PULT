@@ -1688,6 +1688,18 @@ export const api = {
       req<DecisionFeedStateResult>(`/api/decision-feed/${encodeURIComponent(itemKey)}/act`, { method: 'POST' }),
   },
 
+  // ── Today (One Morning Truth) — canonical "what to do today" over build_feed ──
+  // Read-only. Same source as the Dashboard feed and the Telegram top action.
+  today: {
+    get: (params: { contour?: string; limit?: number } = {}) => {
+      const q = new URLSearchParams()
+      if (params.contour) q.set('contour', params.contour)
+      if (params.limit != null) q.set('limit', String(params.limit))
+      const s = q.toString()
+      return req<TodayResponse>(`/api/today${s ? `?${s}` : ''}`)
+    },
+  },
+
   // ── Decision Apply (manual apply of a bound decision; preview → confirm) ─────
   // Read-only preview + explicit confirm. No auto-execution, no direct marketplace
   // call — delegates to the backend apply path.
@@ -2287,6 +2299,35 @@ export interface DecisionFeedFilters {
   include_dismissed?:  boolean
   include_resolved?:   boolean
   limit?:              number
+}
+
+// ── Today types (One Morning Truth) — canonical projection over build_feed ────
+export interface TodayItem {
+  item_key:           string
+  contour:            string
+  marketplace:        string | null
+  sku:                string | null
+  title:              string | null
+  what_happened:      string | null
+  why_it_matters:     string | null
+  meaning:            string | null
+  recommended_action: string | null
+  expected_effect:    string | null
+  source_status:      string | null
+  attention_state:    string
+  effect_status:      string | null
+  effect_band:        string | null
+  group_key:          string | null
+  action_key:         string | null
+  action_role:        string | null
+  learning_context:   string | null
+  created_at:         string | null
+  updated_at:         string | null
+}
+export interface TodayResponse {
+  items:       TodayItem[]
+  total:       number
+  top_action:  TodayItem | null
 }
 
 // ── Decision Outcome types (proven effect only; no score, no forecast, no ROI) ─
