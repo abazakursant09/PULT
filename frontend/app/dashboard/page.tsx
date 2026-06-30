@@ -6,6 +6,7 @@ import { SellerBar } from '@/components/seller/Shell'
 import { getProducts, marketplaceSummary, daysLeft, mono, rub, MP_NAME, lensDetail, type SellerProduct } from '@/lib/pultSeller'
 import DecisionFeedPanel from '@/components/decision-feed/DecisionFeedPanel'
 import TodayFocus from '@/components/decision-feed/TodayFocus'
+import BusinessToday from '@/components/dashboard/BusinessToday'
 
 const ACT: Record<string, string> = { 'Реклама': 'Снизить ставку', 'Документы': 'Загрузить', 'Отзывы': 'Ответить', 'Возвраты': 'Разобрать', 'SEO': 'Обновить SEO', 'Цена': 'Поднять цену' }
 const sevRank = { loss: 0, warn: 1, gain: 2 } as const
@@ -41,6 +42,7 @@ export default function Home() {
     <>
       <SellerBar title="Главная" sub="Среда, 4 июня · доброе утро" />
       <div className="s-canvas">
+        <BusinessToday />
         <TodayFocus />
         <DecisionFeedPanel />
         <div className="s-grid s-g4">

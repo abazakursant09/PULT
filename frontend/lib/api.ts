@@ -1698,6 +1698,7 @@ export const api = {
       const s = q.toString()
       return req<TodayResponse>(`/api/today${s ? `?${s}` : ''}`)
     },
+    getSummary: () => req<TodaySummary>('/api/today/summary'),
   },
 
   // ── Decision Apply (manual apply of a bound decision; preview → confirm) ─────
@@ -2328,6 +2329,18 @@ export interface TodayResponse {
   items:       TodayItem[]
   total:       number
   top_action:  TodayItem | null
+}
+export interface TodaySummary {
+  revenue_today:              number
+  profit_today:               number
+  margin_pct:                 number | null
+  delta_revenue_pct:          number | null
+  critical_count:             number
+  loss_products_count:        number
+  growth_opportunities_count: number
+  low_stock_count:            number
+  is_demo:                    boolean
+  has_data:                   boolean
 }
 
 // ── Decision Outcome types (proven effect only; no score, no forecast, no ROI) ─
