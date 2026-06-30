@@ -23,7 +23,7 @@ from models.product_listing import ProductListing
 from services.growth.internal_source import build_snapshot_from_internal
 from services.growth.snapshot import GrowthSnapshot, GrowthDataUnavailable
 from services.growth.audit_persist import audit_and_persist
-from services.growth.rules import GrowthThresholds
+from services.growth.threshold_source import derive_growth_thresholds
 
 from services.legal.persist import audit_and_persist as legal_audit_and_persist
 from services.legal.snapshot import LegalDataUnavailable
@@ -61,17 +61,12 @@ async def run_growth_producer(ctx: RuntimeContext) -> ProducerResult:
     (marketplace, sku) from internal PULT data and runs the EXISTING growth
     audit_and_persist (rules → persist → reconcile). Flush-only; no commit.
 
-    Thresholds are ADAPTER-owned (the Runtime never sees them). Every growth rule is
-    threshold-gated, so the adapter uses a PERMISSIVE default (no minimum filter:
-    min revenue/net_profit = 0, low_stock_units = 0). That surfaces every OBSERVED
-    case — it configures a filter, it never fabricates an observed fact. Per-user
-    threshold tuning is a later concern."""
+    Thresholds are ADAPTER-owned (the Runtime never sees them). They are derived
+    read-only from the seller's OWN observed finance (services/growth/threshold_source),
+    so only above-typical listings surface — no permissive-default overgeneration. No
+    finance data → all-None thresholds → no signals (honest)."""
     db, uid = ctx.db, ctx.user_id
-    thresholds = GrowthThresholds(
-        min_net_profit_for_growth_signal=0.0,
-        min_revenue_for_growth_signal=0.0,
-        low_stock_units=0,
-    )
+    thresholds = await derive_growth_thresholds(db, uid, now=ctx.now)
 
     seen = built = unavailable = audits = problems = reconciled = 0
     for marketplace, sku in await _candidate_pairs(db, uid):
