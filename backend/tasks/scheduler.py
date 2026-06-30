@@ -97,38 +97,38 @@ async def _log_weekly_sent(user_id: str) -> None:
         await db.commit()
 
 
-# ── Top action from Action Engine ─────────────────────────────────────────────
+# ── Top action from the canonical Today service (One Morning Truth, A18) ──────
+# Reads the SAME canonical source as the Dashboard feed (top_action over build_feed),
+# NOT legacy _compute_insights — so Telegram and the web answer "что делать сегодня"
+# identically. Honest empty state when nothing is live.
 
-async def _get_top_action(user_id: str) -> str | None:
+_NO_TOP_ACTION = "Сегодня критичных действий нет"
+
+
+def _format_top_action(a) -> str:
+    """One-line 'Главное сейчас' from a canonical TodayAction. Uses the doctrine
+    recommended_action verbatim (+ product context) — never re-derives an action."""
+    text = (a.recommended_action or a.title or "").strip()
+    if not text:
+        return "Проверить дашборд"
+    ctx = (a.sku or "").strip()
+    if ctx and ctx not in text:
+        return f"{text} — «{ctx[:30]}»"
+    return text
+
+
+async def _get_top_action(user_id: str) -> str:
+    """Telegram daily 'Главное сейчас' — canonical Today service only. Returns the
+    honest empty-state line when there is nothing live (or on any read error)."""
     try:
-        from routers.action_engine import _compute_insights
-        from models.insight import InsightRecord
+        from services.decision_feed.today import top_action
         async with AsyncSessionLocal() as db:
-            s_res = await db.execute(
-                select(InsightRecord).where(InsightRecord.user_id == user_id)
-            )
-            statuses = {r.insight_key: (r.status, r.id) for r in s_res.scalars().all()}
-            insights = await _compute_insights(user_id, db, statuses)
-
-        active = [i for i in insights
-                  if i.status not in ("resolved", "dismissed") and not i.is_demo]
-        if not active:
-            return None
-
-        active.sort(key=lambda i: i.impact_score or 0, reverse=True)
-        top  = active[0]
-        name = top.product_name or "товар"
-
-        return {
-            "seo_opportunity": f"Пересобрать карточку «{name[:30]}»",
-            "high_ad_spend":   f"Снизить ДРР для «{name[:30]}»",
-            "margin_crisis":   f"Пересмотреть цену «{name[:30]}»",
-            "low_stock":       f"Пополнить остаток «{name[:30]}»",
-            "sales_growth":    f"Масштабировать рекламу «{name[:30]}»",
-            "high_rating":     f"Пересобрать карточку с рейтингом «{name[:30]}»",
-        }.get(top.key.split(":")[0], f"Проверить дашборд — {len(active)} активных инсайтов")
+            top = await top_action(db, user_id=user_id)
+        if top is None:
+            return _NO_TOP_ACTION
+        return _format_top_action(top)
     except Exception:
-        return None
+        return _NO_TOP_ACTION
 
 
 # ── Daily report ───────────────────────────────────────────────────────────────
