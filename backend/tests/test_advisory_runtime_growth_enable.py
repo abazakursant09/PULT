@@ -91,7 +91,7 @@ def test_registry_all_enabled():
     assert by_key["growth"].enabled is True       # A13 flip
 
 
-# ── (2) scheduler runs exactly {legal, review, growth} ───────────────────────
+# ── (2) scheduler runs the enabled producers (incl. operations_low_stock, A22) ─
 
 def test_scheduler_runs_legal_review_growth():
     async def go():
@@ -100,7 +100,7 @@ def test_scheduler_runs_legal_review_growth():
         res = await AdvisoryRuntime().run_due_producers(db, now=NOW)   # REAL registry
         assert res.errors == 0
         keys = {r.producer_key for r in (await db.execute(select(AdvisoryRun))).scalars().all()}
-        assert keys == {"legal", "review", "growth"}
+        assert keys == {"legal", "review", "growth", "operations_low_stock"}
     _run(go())
 
 

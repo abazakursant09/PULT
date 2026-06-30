@@ -132,16 +132,16 @@ def test_run_one_shadow_advisory_only():
     _run(go())
 
 
-# ── (7) producer disabled ────────────────────────────────────────────────────
+# ── (7) producer enabled (A22) ───────────────────────────────────────────────
 
-def test_producer_disabled():
+def test_producer_enabled():
     by_key = {s.key: s for s in ADVISORY_PRODUCERS}
-    assert by_key["operations_low_stock"].enabled is False
+    assert by_key["operations_low_stock"].enabled is True
 
 
-# ── (8) scheduler does NOT run it (disabled → never scheduled) ───────────────
+# ── (8) scheduler runs it (A22: enabled → scheduled) ─────────────────────────
 
-def test_scheduler_does_not_run_low_stock():
+def test_scheduler_runs_low_stock():
     async def go():
         db = await _db(); uid = str(uuid.uuid4())
         await _active(db, uid)                       # active user (finance)
@@ -149,6 +149,6 @@ def test_scheduler_does_not_run_low_stock():
         await db.commit()
         await AdvisoryRuntime().run_due_producers(db, now=NOW)   # REAL registry
         keys = {r.producer_key for r in (await db.execute(select(AdvisoryRun))).scalars().all()}
-        assert "operations_low_stock" not in keys    # disabled → never scheduled
-        assert await _live(db, uid) == []            # and so no low-stock signal made
+        assert "operations_low_stock" in keys        # enabled → scheduled
+        assert len(await _live(db, uid)) >= 1        # and the low-stock signal is made
     _run(go())
