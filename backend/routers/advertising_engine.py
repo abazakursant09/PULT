@@ -26,8 +26,8 @@ from models.advertising_signal import AdvertisingSignal
 
 from services.advertising.snapshot import AdvertisingSnapshot, AdvertisingThresholds, AdvertisingDataUnavailable
 from services.advertising.internal_source import build_snapshot_from_finance
-from services.advertising.audit_persist import audit_and_persist
 from services.promotion_activation.runner import run_promotion
+from services.advisory_runtime.runtime import AdvisoryRuntime
 
 import logging
 
@@ -127,28 +127,43 @@ async def run_advertising_audit(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> AdvAuditResponse:
-    thresholds = AdvertisingThresholds(**body.thresholds.model_dump()) if body.thresholds else None
+    # Availability check (READ-only) — preserves the finance_unavailable contract.
+    # thresholds are now ADAPTER-owned (derived by the runtime producer); the request
+    # `thresholds` field is accepted for API compatibility but no longer drives the write.
     snap = await build_snapshot_from_finance(
         db, user_id=current_user.id, marketplace=body.marketplace, sku=body.sku,
-        listing_id=body.listing_id, thresholds=thresholds)
+        listing_id=body.listing_id)
     if isinstance(snap, AdvertisingDataUnavailable):
         status = "finance_unavailable" if snap.reason == "finance_missing" else snap.reason
         return AdvAuditResponse(ok=False, status=status, listing_id=body.listing_id,
                                 marketplace=body.marketplace, sku=body.sku, reason=snap.reason)
-    assert isinstance(snap, AdvertisingSnapshot)
-    res = await audit_and_persist(db, user_id=current_user.id, snapshot=snap, triggered_by="manual")
-    await db.commit()
-    # audit is persisted + committed; promotion runs as a non-blocking side-effect
+
+    # Canonical write: the Advisory Runtime is the SOLE producer of advertising_signal.
+    # "Recompute now" delegates to run_one("advertising") instead of writing directly.
+    await AdvisoryRuntime().run_one(
+        db, user_id=current_user.id, producer_key="advertising", triggered_by="manual")
+
+    # Report from the audit the producer just wrote for this (marketplace, sku). Read the
+    # scalar fields into locals NOW — the promotion hook's failure path rolls back and
+    # would expire the ORM row (lazy reload → MissingGreenlet on later attribute access).
+    audit = (await db.execute(
+        select(AdvertisingAudit)
+        .where(AdvertisingAudit.user_id == current_user.id,
+               AdvertisingAudit.marketplace == body.marketplace,
+               AdvertisingAudit.sku == body.sku)
+        .order_by(AdvertisingAudit.created_at.desc()).limit(1))).scalars().first()
+    audit_id = audit.id if audit else None
+    total_problems = audit.total_problems if audit else None
+    total_not_evaluated = audit.total_not_evaluated if audit else None
+    top_severity = audit.top_severity if audit else None
+
+    # promotion runs as a non-blocking side-effect (unchanged existing behavior)
     promotion = await _promotion_hook(db, current_user.id)
-    rec = res.reconciliation
     return AdvAuditResponse(
         ok=True, status="completed", listing_id=body.listing_id, marketplace=body.marketplace,
-        sku=body.sku, audit_id=res.audit_id, total_problems=res.total_problems,
-        total_not_evaluated=res.total_not_evaluated, top_severity=res.top_severity,
-        reconciliation=ReconciliationView(created=rec.created, updated=rec.updated,
-                                          resolved=rec.resolved, reopened=rec.reopened,
-                                          unchanged=rec.unchanged) if rec else None,
-        promotion=promotion,
+        sku=body.sku, audit_id=audit_id, total_problems=total_problems,
+        total_not_evaluated=total_not_evaluated, top_severity=top_severity,
+        reconciliation=None, promotion=promotion,
     )
 
 

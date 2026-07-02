@@ -61,11 +61,12 @@ ADVISORY_PRODUCERS: Tuple[ProducerSpec, ...] = (
     # write. operations_signal is read by the Decision Feed (A21) → flows into Today.
     ProducerSpec(key="operations_low_stock", run=run_operations_low_stock_producer,
                  cadence_seconds=86400, enabled=True),
-    # advertising: DISABLED (Phase 1.1) — thin adapter over the EXISTING advertising
-    # engine (build_snapshot_from_finance → audit_and_persist), the same path the
-    # /advertising/audit router uses. Shipped DISABLED for shadow validation: it runs
-    # only via run_one() until the router's direct write is removed (a later slice), so
-    # there is no double-write. Advisory-only — writes advertising_signal rows only.
+    # advertising: ENABLED (Phase 1.2) — the Advisory Runtime is now the SOLE producer
+    # of advertising_signal. Thin adapter over the existing advertising engine with an
+    # adapter-owned threshold source. The /advertising/audit router no longer writes
+    # directly — it delegates "recompute now" to run_one("advertising"). Advisory-only:
+    # writes advertising_signal rows only (no Decision, no link, no executor, no
+    # marketplace write).
     ProducerSpec(key="advertising", run=run_advertising_producer,
-                 cadence_seconds=86400, enabled=False),
+                 cadence_seconds=86400, enabled=True),
 )

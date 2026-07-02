@@ -157,20 +157,20 @@ def test_idempotent_reconcile():
     _run(go())
 
 
-# ── (9) registry: advertising registered + DISABLED; scheduler skips it ──────
+# ── (9) registry: advertising registered + ENABLED (Phase 1.2); scheduler runs ─
 
-def test_registry_advertising_disabled():
+def test_registry_advertising_enabled():
     by_key = {s.key: s for s in ADVISORY_PRODUCERS}
     assert "advertising" in by_key
-    assert by_key["advertising"].enabled is False
+    assert by_key["advertising"].enabled is True
 
 
-def test_scheduler_does_not_run_advertising():
+def test_scheduler_runs_advertising():
     async def go():
         db = await _db(); uid = str(uuid.uuid4())
         await _fin(db, uid, sku="LOSS", revenue=10000.0, net_profit=-500.0, ad_spend=1000.0)
         await db.commit()
         await AdvisoryRuntime().run_due_producers(db, now=NOW)   # REAL registry
         keys = {r.producer_key for r in (await db.execute(select(AdvisoryRun))).scalars().all()}
-        assert "advertising" not in keys                        # disabled → never scheduled
+        assert "advertising" in keys                            # enabled → scheduled
     _run(go())

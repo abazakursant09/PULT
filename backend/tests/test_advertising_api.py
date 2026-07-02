@@ -17,6 +17,8 @@ from sqlalchemy.pool import StaticPool
 from database import Base
 import models  # registers tables
 from models.imported_finance import ImportedFinanceRow
+from models.physical_product import PhysicalProduct
+from models.product_listing import ProductListing
 
 from routers import advertising_engine as adv
 from routers.advertising_engine import (
@@ -47,7 +49,15 @@ class _User:
 
 
 async def _seed_finance(db, uid, *, marketplace="wb", sku="SKU1",
-                        revenue=10000.0, net_profit=-500.0, ad_spend=4000.0, quantity=20):
+                        revenue=10000.0, net_profit=-500.0, ad_spend=4000.0, quantity=20,
+                        listing_id="L1"):
+    # Canonical write goes through the Advisory Runtime producer, which resolves
+    # listing_id from ProductListing — seed one so produced signals carry L1 (the id the
+    # listing-scoped read endpoints filter by). In prod this listing always exists.
+    phys = str(uuid.uuid4())
+    db.add(PhysicalProduct(id=phys, user_id=uid, title="t", cogs=10.0, cogs_source="manual"))
+    db.add(ProductListing(id=listing_id, physical_product_id=phys, user_id=uid,
+                          marketplace=marketplace, external_id=sku))
     db.add(ImportedFinanceRow(import_id="imp1", user_id=uid, marketplace=marketplace, sku=sku,
                               revenue=revenue, net_profit=net_profit, ad_spend=ad_spend,
                               quantity=quantity))
@@ -153,6 +163,32 @@ def test_audits_history():
         assert a["status"] == "completed"
         for bad in ("internal_health_index", "score", "snapshot_hash"):
             assert bad not in a
+    _run(go())
+
+
+# ── Phase 1.2: router delegates to the runtime, no direct signal write ───────
+
+def test_router_delegates_not_direct_write():
+    import inspect
+    src = inspect.getsource(adv)
+    assert "audit_and_persist" not in src        # no direct advertising_signal write
+    assert "run_one" in src                      # delegates to the Advisory Runtime
+
+
+def test_audit_invokes_run_one(monkeypatch):
+    async def go():
+        db = await _engine(); uid = str(uuid.uuid4())
+        await _seed_finance(db, uid); await db.commit()
+        from services.advisory_runtime.runtime import AdvisoryRuntime as RT
+        called = {"v": False}
+        orig = RT.run_one
+        async def flag(self, db, **kw):
+            called["v"] = True
+            return await orig(self, db, **kw)
+        monkeypatch.setattr(RT, "run_one", flag)
+        resp = await _audit(db, uid)
+        assert called["v"] is True                # recompute delegated to run_one("advertising")
+        assert resp.ok and resp.status == "completed" and resp.total_problems >= 1
     _run(go())
 
 
