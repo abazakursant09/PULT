@@ -332,6 +332,12 @@ def _engine_item(contour: str, table: str, sig) -> Optional[FeedItem]:
     if rid:
         ctx["review_id"] = rid
     what = getattr(sig, "what", None)
+    # Actionability: surface the registry's PRIMARY bound executor lever (None for
+    # advice-only signal types). Read-only from the existing Decision-Outcome registry;
+    # lets the feed show an Apply CTA on a bound-but-not-yet-promoted signal. Does NOT
+    # change ordering/filtering — additive field only.
+    entry = BY_SIGNAL_KEY.get(sig.signal_key)
+    action_key = entry.action_key if entry else None
     return FeedItem(
         item_key=key, contour=contour, source_table=table, source_id=sig.id,
         source_status=sig.status, attention_state="new",
@@ -341,6 +347,7 @@ def _engine_item(contour: str, table: str, sig) -> Optional[FeedItem]:
         meaning=getattr(sig, "meaning", None), recommended_action=getattr(sig, "what_to_do", None),
         expected_effect=getattr(sig, "expected_effect", None),
         lifecycle_reason=getattr(sig, "lifecycle_reason", None),
+        action_key=action_key,
         created_at=sig.created_at, updated_at=getattr(sig, "updated_at", None),
         source_context={k: v for k, v in ctx.items() if v is not None},
         _order_bucket=sig.status or "active",

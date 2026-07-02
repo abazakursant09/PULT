@@ -1701,6 +1701,16 @@ export const api = {
     getSummary: () => req<TodaySummary>('/api/today/summary'),
   },
 
+  // ── Promotion Activation — click-triggered promote+bridge (signal → Decision) ─
+  // Owner-scoped, idempotent. Creates no marketplace action; apply stays manual.
+  promotionActivation: {
+    run: (params: { contour?: string } = {}) =>
+      req<PromotionRunResponse>('/api/promotion-activation/run', {
+        method: 'POST',
+        body: JSON.stringify({ contour: params.contour ?? null }),
+      }),
+  },
+
   // ── Decision Apply (manual apply of a bound decision; preview → confirm) ─────
   // Read-only preview + explicit confirm. No auto-execution, no direct marketplace
   // call — delegates to the backend apply path.
@@ -2329,6 +2339,23 @@ export interface TodayResponse {
   items:       TodayItem[]
   total:       number
   top_action:  TodayItem | null
+}
+export interface PromotionRunItem {
+  phase:       string
+  contour:     string
+  outcome:     string
+  reason:      string | null
+  decision_id: string | null
+  insight_key: string | null
+}
+export interface PromotionRunResponse {
+  ok:                boolean
+  run_id:            string | null
+  candidates_seen:   number
+  links_created:     number
+  decisions_created: number
+  skipped:           number
+  items:             PromotionRunItem[]
 }
 export interface TodaySummary {
   revenue_today:              number

@@ -187,7 +187,10 @@ def test_feed_shows_both(monkeypatch):
         items = await build_feed(db, user_id=uid, include_resolved=True)
         # both ride the generic decision_outcome feed path (not _ENGINES); the origin
         # problem is carried by the canonical insight_key (group_key) + sku, not contour.
-        action_items = [it for it in items if it.action_key == ACTION]
+        # (Engine signal rows now also carry action_key from the registry, so scope to
+        # the decision_outcome effect items this assertion is about.)
+        action_items = [it for it in items
+                        if it.action_key == ACTION and it.contour == "decision_outcome"]
         groups = " ".join(it.group_key or "" for it in action_items)
         assert ADV_SIGNAL in groups and OPS_SIGNAL in groups       # both scenarios present
         assert {ADV_SKU, OPS_SKU} <= {it.sku for it in action_items}

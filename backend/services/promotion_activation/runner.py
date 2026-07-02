@@ -33,6 +33,7 @@ class PromotionRunItem:
     outcome: str
     reason: Optional[str] = None
     decision_id: Optional[str] = None
+    insight_key: Optional[str] = None   # canonical 3-part key → match to a feed item
 
 
 @dataclass
@@ -66,11 +67,13 @@ async def run_promotion(
     items: List[PromotionRunItem] = []
     for it in promo.items:
         items.append(PromotionRunItem(phase="promote", contour=it.contour,
-                                      outcome=it.outcome, reason=it.promotion_status))
+                                      outcome=it.outcome, reason=it.promotion_status,
+                                      insight_key=it.canonical_insight_key))
     for it in bridge.items:
         items.append(PromotionRunItem(phase="bridge", contour=it.contour,
                                       outcome=it.outcome, reason=it.reason,
-                                      decision_id=it.decision_id))
+                                      decision_id=it.decision_id,
+                                      insight_key=it.canonical_insight_key))
 
     # 4) append-only ledger
     run = PromotionRun(

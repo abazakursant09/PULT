@@ -90,16 +90,37 @@ export function DecisionFeedCard(
   const [busy, setBusy] = useState<Action | null>(null)
   const [apply, setApply] = useState<ApplyUI>({ kind: 'idle' })
 
-  // apply button shows ONLY for a promoted engine decision (decision_id present),
-  // never for already-measured Decision Outcome effect items.
-  const decisionId = (item.source_context?.decision_id as string | undefined) || undefined
-  const showApply = !!decisionId && item.contour !== 'decision_outcome'
+  // Apply CTA shows for an engine signal that is either already promoted (decision_id
+  // present) OR bound to an executor lever (action_key present) — never for measured
+  // Decision Outcome effect items. Advice-only signals have no action_key → no CTA.
+  const promotedId = (item.source_context?.decision_id as string | undefined) || undefined
+  // decision_id resolved on demand by click-triggered promotion (below).
+  const [resolvedId, setResolvedId] = useState<string | undefined>(undefined)
+  const decisionId = promotedId || resolvedId
+  const showApply = item.contour !== 'decision_outcome' && (!!promotedId || !!item.action_key)
+
+  // Click-triggered promotion: if there is no Decision yet but the signal is bound, run
+  // the EXISTING promote+bridge (owner-scoped, idempotent) and match this signal's
+  // decision_id by canonical insight_key. Creates no marketplace action.
+  async function ensureDecisionId(): Promise<string | undefined> {
+    if (decisionId) return decisionId
+    if (!item.action_key) return undefined
+    const res = await api.promotionActivation.run({ contour: item.contour })
+    const match = res.items.find((i) => i.insight_key === item.item_key && i.decision_id)
+    const id = match?.decision_id ?? undefined
+    if (id) setResolvedId(id)
+    return id
+  }
 
   async function onPreview() {
-    if (!decisionId) return
     setApply({ kind: 'busy' })
     try {
-      const p = await api.decisionApply.getPreview(decisionId, {
+      const id = await ensureDecisionId()
+      if (!id) {
+        setApply({ kind: 'error', msg: 'Не удалось подготовить решение к применению' })
+        return
+      }
+      const p = await api.decisionApply.getPreview(id, {
         marketplace: item.marketplace ?? '', sku: item.sku ?? undefined,
       })
       setApply({ kind: 'preview', p })
