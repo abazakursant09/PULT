@@ -25,6 +25,11 @@ from services.growth.snapshot import GrowthSnapshot, GrowthDataUnavailable
 from services.growth.audit_persist import audit_and_persist
 from services.growth.threshold_source import derive_growth_thresholds
 
+from services.advertising.internal_source import build_snapshot_from_finance as build_advertising_snapshot
+from services.advertising.snapshot import AdvertisingSnapshot, AdvertisingDataUnavailable
+from services.advertising.audit_persist import audit_and_persist as advertising_audit_and_persist
+from services.advertising.threshold_source import derive_advertising_thresholds
+
 from services.legal.persist import audit_and_persist as legal_audit_and_persist
 from services.legal.snapshot import LegalDataUnavailable
 
@@ -98,6 +103,57 @@ async def run_growth_producer(ctx: RuntimeContext) -> ProducerResult:
         "unavailable": unavailable,
         "audits_created": audits,
         "problems_detected": problems,
+        "signals_reconciled": reconciled,
+    })
+
+
+async def run_advertising_producer(ctx: RuntimeContext) -> ProducerResult:
+    """Advertising advisory producer adapter (Phase 1.1). Builds an AdvertisingSnapshot
+    per observed (marketplace, sku) from internal PULT finance data and runs the EXISTING
+    advertising audit_and_persist (evaluate → persist → reconcile) — the SAME path the
+    /advertising/audit router uses. Flush-only; no commit. DB-headless (build_snapshot_
+    from_finance reads ImportedFinanceRow only — no marketplace client).
+
+    Thresholds are ADAPTER-owned (the Runtime never sees them). Since a runtime run has
+    no request body, they are derived read-only from the seller's OWN observed finance
+    (services/advertising/threshold_source) — the same doctrine growth uses. No ad-spend
+    finance → no thresholds → the producer exits clean with NO signals (honest absence).
+
+    Advisory-only: this writes advertising_signal rows only — no Decision, no
+    EngineSignalDecisionLink, no Apply, no executor, no marketplace write. (Executable
+    binding lives downstream in the click-triggered Closed Loop, untouched.)"""
+    db, uid = ctx.db, ctx.user_id
+
+    thresholds = await derive_advertising_thresholds(db, uid, now=ctx.now)
+    if thresholds is None:
+        # honest absence — nothing to anchor to, emit nothing
+        return ProducerResult(ok=True, stats={
+            "candidates_seen": 0, "snapshots_built": 0, "unavailable": 0,
+            "audits_created": 0, "signals_reconciled": 0, "thresholds": "unavailable"})
+
+    seen = built = unavailable = audits = reconciled = 0
+    for marketplace, sku in await _candidate_pairs(db, uid):
+        seen += 1
+        listing_id = await _resolve_listing_id(db, uid, marketplace, sku)
+        snap = await build_advertising_snapshot(
+            db, user_id=uid, marketplace=marketplace, sku=sku,
+            listing_id=listing_id, thresholds=thresholds)
+        if isinstance(snap, AdvertisingDataUnavailable):
+            unavailable += 1
+            continue
+        assert isinstance(snap, AdvertisingSnapshot)
+        built += 1
+        res = await advertising_audit_and_persist(
+            db, user_id=uid, snapshot=snap, triggered_by=ctx.triggered_by, now=ctx.now)
+        audits += 1
+        if res.reconciliation is not None:
+            reconciled += res.reconciliation.created + res.reconciliation.updated
+
+    return ProducerResult(ok=True, stats={
+        "candidates_seen": seen,
+        "snapshots_built": built,
+        "unavailable": unavailable,
+        "audits_created": audits,
         "signals_reconciled": reconciled,
     })
 
