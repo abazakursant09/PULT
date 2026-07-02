@@ -7,7 +7,7 @@ export function DecisionFeedEmptyState() {
       background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 12,
       padding: '22px 18px', textAlign: 'center', color: 'var(--text-3)', fontSize: 13,
     }}>
-      На сейчас нет новых решений. PULT продолжит следить за сигналами.
+      Когда появятся новые сигналы, PULT покажет решения здесь.
     </div>
   )
 }
