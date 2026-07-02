@@ -79,14 +79,8 @@ export function BusinessToday() {
             <Metric label="Маржа" value={s.margin_pct === null ? '—' : `${s.margin_pct}%`} />
             <Metric label="Изменение к вчера" value={_delta(s.delta_revenue_pct)}
               tone={s.delta_revenue_pct === null ? 'muted' : s.delta_revenue_pct < 0 ? 'neg' : 'pos'} />
-            <Metric label="Критичных проблем" value={String(s.critical_count)}
-              tone={s.critical_count > 0 ? 'neg' : 'muted'} />
             <Metric label="Товаров с убытком" value={String(s.loss_products_count)}
               tone={s.loss_products_count > 0 ? 'neg' : 'muted'} />
-            <Metric label="Возможностей роста" value={String(s.growth_opportunities_count)}
-              tone={s.growth_opportunities_count > 0 ? 'pos' : 'muted'} />
-            <Metric label="Критичный остаток" value={String(s.low_stock_count)}
-              tone={s.low_stock_count > 0 ? 'neg' : 'muted'} />
           </div>
         )
       )}
