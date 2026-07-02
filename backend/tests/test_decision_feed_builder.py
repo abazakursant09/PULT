@@ -277,3 +277,20 @@ def test_resolved_dismissed_still_hidden():
         await db.commit()
         assert not any(i.contour == "advertising" for i in await build_feed(db, user_id=uid, now=T0))
     _run(go())
+
+
+# ── 15. PR1: action_key surfaced for bound signals, None for advice-only ──────
+
+def test_action_key_surfaced_for_bound_signals():
+    async def go():
+        db = await _engine(); uid = str(uuid.uuid4())
+        await _seed_engines(db, uid)   # adv (bound), seo/growth/legal (advice-only)
+        feed = await build_feed(db, user_id=uid)
+        by_contour = {i.contour: i for i in feed}
+        # advertising ad_destroying_profit → bound executor lever
+        assert by_contour["advertising"].action_key == "ad_set_state"
+        # advice-only contours carry no action_key → no Apply CTA
+        assert by_contour["seo"].action_key is None
+        assert by_contour["growth"].action_key is None
+        assert by_contour["legal"].action_key is None
+    _run(go())

@@ -135,6 +135,46 @@ def test_api_owner_scoped():
     _run(go())
 
 
+# ── PR1: run items carry insight_key → frontend can match the clicked signal ─
+
+def test_api_run_items_include_insight_key():
+    async def go():
+        db = await _engine(); uid = str(uuid.uuid4())
+        await _adv(db, uid)   # adv_ad_destroying_profit:wildberries:SKU1
+        r = await promotion_activation_run(RunRequest(contour="advertising"),
+                                           current_user=_User(uid), db=db)
+        promoted = [i for i in r.items if i.decision_id]
+        assert promoted, "expected a promoted item with a decision_id"
+        it = promoted[0]
+        assert it.insight_key == "adv_ad_destroying_profit:wildberries:SKU1"
+        # matches the feed item_key the frontend uses to resolve the decision_id
+        feed = await build_feed(db, user_id=uid)
+        adv = next(i for i in feed if i.contour == "advertising")
+        assert it.insight_key == adv.item_key
+        assert it.decision_id == adv.source_context.get("decision_id")
+    _run(go())
+
+
+# ── PR1: repeated run is idempotent — same decision_id, no duplicates ─────────
+
+def test_api_run_idempotent():
+    async def go():
+        db = await _engine(); uid = str(uuid.uuid4())
+        await _adv(db, uid)
+        r1 = await promotion_activation_run(RunRequest(), current_user=_User(uid), db=db)
+        first = next(i.decision_id for i in r1.items if i.decision_id)
+        r2 = await promotion_activation_run(RunRequest(), current_user=_User(uid), db=db)
+        # second run creates no new Decision/link; the same decision_id stands
+        assert r2.decisions_created == 0
+        assert await _count(db, Decision) == 1
+        assert await _count(db, EngineSignalDecisionLink) == 1
+        d = (await db.execute(select(Decision))).scalars().one()
+        assert d.id == first
+        # still no execution / measurement on re-run
+        assert await _count(db, ExecutionLog) == 0 and await _count(db, EngineEffectObservation) == 0
+    _run(go())
+
+
 # ── 11. no score/forecast/priority fields in API ─────────────────────────────
 
 def test_api_no_score_forecast_priority():

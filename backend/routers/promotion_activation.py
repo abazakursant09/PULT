@@ -33,6 +33,7 @@ class RunItemView(BaseModel):
     outcome: str
     reason: Optional[str] = None
     decision_id: Optional[str] = None
+    insight_key: Optional[str] = None
 
 
 class RunResponse(BaseModel):
@@ -51,7 +52,8 @@ def _view(r: PromotionRunResult) -> RunResponse:
         links_created=r.links_created, decisions_created=r.decisions_created,
         skipped=r.skipped,
         items=[RunItemView(phase=i.phase, contour=i.contour, outcome=i.outcome,
-                           reason=i.reason, decision_id=i.decision_id) for i in r.items])
+                           reason=i.reason, decision_id=i.decision_id,
+                           insight_key=i.insight_key) for i in r.items])
 
 
 @router.post("/promotion-activation/run", response_model=RunResponse)
