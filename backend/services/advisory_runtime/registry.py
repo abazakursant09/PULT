@@ -19,7 +19,7 @@ from typing import Awaitable, Callable, Tuple
 from .runtime import RuntimeContext, ProducerResult
 from .producers import (
     run_growth_producer, run_legal_producer, run_review_producer,
-    run_operations_low_stock_producer, run_advertising_producer,
+    run_operations_low_stock_producer, run_advertising_producer, run_pricing_producer,
 )
 
 
@@ -69,4 +69,11 @@ ADVISORY_PRODUCERS: Tuple[ProducerSpec, ...] = (
     # marketplace write).
     ProducerSpec(key="advertising", run=run_advertising_producer,
                  cadence_seconds=86400, enabled=True),
+    # pricing: DISABLED (Phase 1.3, shadow) — thin adapter over the EXISTING pricing
+    # generator (build_pricing_snapshot → rules → reconcile) with an adapter-owned
+    # threshold source. Pricing has NO existing production writer (dormant contour), so
+    # this producer will become the sole writer of pricing_signal — shipped DISABLED for
+    # shadow validation via run_one() until a later enable slice. Advisory-only.
+    ProducerSpec(key="pricing", run=run_pricing_producer,
+                 cadence_seconds=86400, enabled=False),
 )

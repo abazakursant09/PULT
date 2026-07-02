@@ -30,6 +30,9 @@ from services.advertising.snapshot import AdvertisingSnapshot, AdvertisingDataUn
 from services.advertising.audit_persist import audit_and_persist as advertising_audit_and_persist
 from services.advertising.threshold_source import derive_advertising_thresholds
 
+from services.pricing.generator import generate_pricing_signals
+from services.pricing.threshold_source import derive_pricing_thresholds
+
 from services.legal.persist import audit_and_persist as legal_audit_and_persist
 from services.legal.snapshot import LegalDataUnavailable
 
@@ -154,6 +157,46 @@ async def run_advertising_producer(ctx: RuntimeContext) -> ProducerResult:
         "snapshots_built": built,
         "unavailable": unavailable,
         "audits_created": audits,
+        "signals_reconciled": reconciled,
+    })
+
+
+async def run_pricing_producer(ctx: RuntimeContext) -> ProducerResult:
+    """Pricing advisory producer adapter (Phase 1.3, shadow). Runs the EXISTING pricing
+    generator (build_pricing_snapshot → rules → reconcile) per observed (marketplace, sku)
+    from internal PULT finance data. Flush-only; no commit. DB-headless — no marketplace
+    client.
+
+    Thresholds are ADAPTER-owned: derived read-only from the seller's OWN observed finance
+    (services/pricing/threshold_source). min_revenue is a median floor; target_margin is
+    left None (no canonical source → margin_below_target stays NOT_EVALUATED). No finance →
+    no thresholds → the producer exits clean with NO signals (honest absence).
+
+    Advisory-only: writes pricing_signal rows only — no Decision, no
+    EngineSignalDecisionLink, no Apply, no executor, no marketplace write."""
+    db, uid = ctx.db, ctx.user_id
+
+    thresholds = await derive_pricing_thresholds(db, uid, now=ctx.now)
+    if thresholds is None:
+        return ProducerResult(ok=True, stats={
+            "candidates_seen": 0, "evaluated": 0, "signals_reconciled": 0,
+            "thresholds": "unavailable"})
+
+    seen = evaluated = reconciled = 0
+    for marketplace, sku in await _candidate_pairs(db, uid):
+        seen += 1
+        listing_id = await _resolve_listing_id(db, uid, marketplace, sku)
+        res = await generate_pricing_signals(
+            db, user_id=uid, marketplace=marketplace, sku=sku,
+            thresholds=thresholds, listing_id=listing_id, now=ctx.now)
+        if res.evaluated:
+            evaluated += 1
+            if res.reconciliation is not None:
+                reconciled += res.reconciliation.created + res.reconciliation.updated
+
+    return ProducerResult(ok=True, stats={
+        "candidates_seen": seen,
+        "evaluated": evaluated,
         "signals_reconciled": reconciled,
     })
 
