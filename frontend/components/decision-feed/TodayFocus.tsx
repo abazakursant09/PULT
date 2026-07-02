@@ -57,7 +57,7 @@ export function TodayFocus() {
 
         {!loading && !error && (
           top === null ? (
-            <div style={{ fontSize: 13, color: 'var(--text-3)' }}>Сегодня критичных действий нет</div>
+            <div style={{ fontSize: 13, color: 'var(--text-3)' }}>Рекомендации появятся, когда PULT получит данные.</div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {headline && (
