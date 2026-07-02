@@ -19,7 +19,7 @@ from typing import Awaitable, Callable, Tuple
 from .runtime import RuntimeContext, ProducerResult
 from .producers import (
     run_growth_producer, run_legal_producer, run_review_producer,
-    run_operations_low_stock_producer,
+    run_operations_low_stock_producer, run_advertising_producer,
 )
 
 
@@ -61,4 +61,11 @@ ADVISORY_PRODUCERS: Tuple[ProducerSpec, ...] = (
     # write. operations_signal is read by the Decision Feed (A21) → flows into Today.
     ProducerSpec(key="operations_low_stock", run=run_operations_low_stock_producer,
                  cadence_seconds=86400, enabled=True),
+    # advertising: DISABLED (Phase 1.1) — thin adapter over the EXISTING advertising
+    # engine (build_snapshot_from_finance → audit_and_persist), the same path the
+    # /advertising/audit router uses. Shipped DISABLED for shadow validation: it runs
+    # only via run_one() until the router's direct write is removed (a later slice), so
+    # there is no double-write. Advisory-only — writes advertising_signal rows only.
+    ProducerSpec(key="advertising", run=run_advertising_producer,
+                 cadence_seconds=86400, enabled=False),
 )
