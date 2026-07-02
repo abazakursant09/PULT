@@ -16,7 +16,7 @@ export default function Home() {
       <div className="s-canvas">
         <BusinessToday />
         <TodayFocus />
-        <DecisionFeedPanel />
+        <DecisionFeedPanel skipTopAction />
       </div>
     </>
   )
