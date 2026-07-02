@@ -12,7 +12,7 @@ import { groupByProduct, marketplaceLabel, recommendationsLabel } from '@/lib/fe
 
 type Action = 'seen' | 'snooze' | 'dismiss' | 'act'
 
-export function DecisionFeedPanel() {
+export function DecisionFeedPanel({ skipTopAction = false }: { skipTopAction?: boolean } = {}) {
   const [contour, setContour] = useState<string | null>(null)
   const [items, setItems] = useState<DecisionFeedItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -72,6 +72,11 @@ export function DecisionFeedPanel() {
     })
   }
 
+  // De-dup with TodayFocus: when it already shows the top_action above, drop the feed's
+  // first live item (which IS build_feed[0] == top_action). Only in the UNFILTERED view —
+  // a contour filter changes what's first and TodayFocus is unfiltered.
+  const shown = skipTopAction && contour === null ? items.slice(1) : items
+
   return (
     <div className="s-card" style={{ marginBottom: 18 }}>
       <div style={{ marginBottom: 4 }}>
@@ -90,13 +95,13 @@ export function DecisionFeedPanel() {
         {error && <div style={{ fontSize: 12.5, color: 'var(--danger)' }}>Не удалось загрузить: {error}</div>}
 
         {!loading && !error && (
-          items.length === 0 ? (
+          shown.length === 0 ? (
             <DecisionFeedEmptyState />
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               {/* Product → Problems → Alternatives. Outer: group by product
                   (normalize(marketplace)+sku); inner: existing group_key grouping. */}
-              {groupByProduct(items).map((pg) => {
+              {groupByProduct(shown).map((pg) => {
                 const inner = (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                     {groupItems(pg.items).map((group) => (
