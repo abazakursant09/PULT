@@ -1,7 +1,14 @@
 # PULT System Doctrine
 
-> **Umbrella normative document.** This is the top-level frame for PULT's surfaces.
-> It sits **above** the more specific doctrines and does **not** replace them:
+> **Mission doctrine above this one:**
+> [`business-diagnosis-doctrine.md`](./business-diagnosis-doctrine.md) — PULT is a
+> Business Diagnosis operating system (Symptoms → Evidence → Diagnosis → Root Cause →
+> Treatment → Expected Effect → Learning). That is the *why*; this document is its
+> **structural realization** (the two surfaces through which diagnosis and treatment
+> are delivered).
+>
+> **Umbrella normative document (structural).** This is the top-level frame for PULT's
+> surfaces. It sits **above** the more specific doctrines and does **not** replace them:
 >
 > - [`canonical-surface-doctrine.md`](./canonical-surface-doctrine.md) — decides
 >   whether a use-case may be Executable (the gate).
