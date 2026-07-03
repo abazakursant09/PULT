@@ -69,11 +69,12 @@ ADVISORY_PRODUCERS: Tuple[ProducerSpec, ...] = (
     # marketplace write).
     ProducerSpec(key="advertising", run=run_advertising_producer,
                  cadence_seconds=86400, enabled=True),
-    # pricing: DISABLED (Phase 1.3, shadow) — thin adapter over the EXISTING pricing
-    # generator (build_pricing_snapshot → rules → reconcile) with an adapter-owned
-    # threshold source. Pricing has NO existing production writer (dormant contour), so
-    # this producer will become the sole writer of pricing_signal — shipped DISABLED for
-    # shadow validation via run_one() until a later enable slice. Advisory-only.
+    # pricing: ENABLED (Phase 1.5) — the Advisory Runtime is the SOLE writer of
+    # pricing_signal (pricing was a dormant contour with no prior production writer). Thin
+    # adapter over the existing pricing generator with an adapter-owned threshold source;
+    # advisory-only (no Decision / link / executor / marketplace write). NOTE: pricing_
+    # signal is NOT yet read by the Decision Feed — surfacing it there is a separate
+    # follow-up slice; this flip only starts scheduled production.
     ProducerSpec(key="pricing", run=run_pricing_producer,
-                 cadence_seconds=86400, enabled=False),
+                 cadence_seconds=86400, enabled=True),
 )
