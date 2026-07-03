@@ -45,6 +45,11 @@ class _User:
 
 async def _seed(db, uid, *, title="Крем лечит 100%", mp="wildberries", sku="SKU1"):
     db.add(ImportedProductRow(import_id="imp1", user_id=uid, marketplace=mp, sku=sku, title=title))
+    # Canonical write goes through the legal producer, which enumerates catalog Products
+    # (_legal_subjects) and reads the claim from Product.name — seed one so run_one("legal")
+    # finds the subject. In prod the catalog Product always exists.
+    from models.product import Product
+    db.add(Product(id=str(uuid.uuid4()), user_id=uid, name=title, marketplace=mp, sku=sku, price=100.0))
     await db.flush()
 
 
@@ -63,7 +68,7 @@ def test_post_audit_creates_records():
         resp = await _audit(db, uid)
         assert isinstance(resp, LegalAuditResponse)
         assert resp.ok and resp.status == "completed"
-        assert resp.total_findings >= 1 and resp.reconciliation.created >= 1
+        assert resp.total_findings >= 1
     _run(go())
 
 
@@ -200,3 +205,12 @@ def test_audits_and_findings():
         f = next(x for x in fi.items if x.requirement_type == "content_claim_risk")
         assert f.estimated_effect_type == "takedown_risk" and "matched_keywords" in (f.evidence or {})
     _run(go())
+
+
+# ── Phase 1 cleanup: router delegates to the runtime, no direct signal write ──
+
+def test_router_delegates_not_direct_write():
+    import inspect
+    src = inspect.getsource(le)
+    assert "audit_and_persist" not in src        # no direct signal write
+    assert "run_one" in src                      # delegates to the Advisory Runtime producer

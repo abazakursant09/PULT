@@ -30,7 +30,8 @@ from models.legal_finding import LegalFinding
 from models.legal_signal import LegalSignal
 
 from services.legal.snapshot import LegalDataUnavailable
-from services.legal.persist import audit_and_persist, LegalPersistResult
+from services.legal.internal_source import build_snapshot_from_internal
+from services.advisory_runtime.runtime import AdvisoryRuntime
 
 router = APIRouter()
 
@@ -167,24 +168,36 @@ async def run_legal_audit(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> LegalAuditResponse:
-    res = await audit_and_persist(
+    # Availability check (READ-only) — preserves the legal_unavailable / insufficient_data
+    # contract before delegating the write.
+    snap = await build_snapshot_from_internal(
         db, seller_id=current_user.id, marketplace=body.marketplace,
         subject_type=body.subject_type, subject_ref=body.subject_ref,
-        sku=body.sku, listing_id=body.listing_id, triggered_by="manual")
-    if isinstance(res, LegalDataUnavailable):
-        status = "legal_unavailable" if res.reason == "insufficient_data" else res.reason
+        sku=body.sku, listing_id=body.listing_id)
+    if isinstance(snap, LegalDataUnavailable):
+        status = "legal_unavailable" if snap.reason == "insufficient_data" else snap.reason
         return LegalAuditResponse(ok=False, status=status, marketplace=body.marketplace,
-                                  subject_ref=body.subject_ref, sku=body.sku, reason=res.reason)
-    assert isinstance(res, LegalPersistResult)
-    await db.commit()
-    rec = res.reconciliation
+                                  subject_ref=body.subject_ref, sku=body.sku, reason=snap.reason)
+
+    # Canonical write: the Advisory Runtime is the SOLE producer of legal_signal.
+    # "Recompute now" delegates to run_one("legal") instead of writing directly.
+    await AdvisoryRuntime().run_one(
+        db, user_id=current_user.id, producer_key="legal", triggered_by="manual")
+
+    # Report from the audit the producer just wrote for this (marketplace, sku).
+    audit = (await db.execute(
+        select(LegalAudit)
+        .where(LegalAudit.user_id == current_user.id,
+               LegalAudit.marketplace == body.marketplace,
+               LegalAudit.sku == body.sku)
+        .order_by(LegalAudit.created_at.desc()).limit(1))).scalars().first()
     return LegalAuditResponse(
         ok=True, status="completed", marketplace=body.marketplace, subject_ref=body.subject_ref,
-        sku=body.sku, audit_id=res.audit_id, total_findings=res.total_findings,
-        total_not_evaluated=res.total_not_evaluated, top_severity=res.top_severity,
-        reconciliation=ReconciliationView(created=rec.created, updated=rec.updated,
-                                          reopened=rec.reopened, resolved=rec.resolved,
-                                          unchanged=rec.unchanged) if rec else None,
+        sku=body.sku, audit_id=audit.id if audit else None,
+        total_findings=audit.total_findings if audit else None,
+        total_not_evaluated=audit.total_not_evaluated if audit else None,
+        top_severity=audit.top_severity if audit else None,
+        reconciliation=None,
     )
 
 

@@ -17,6 +17,8 @@ from sqlalchemy.pool import StaticPool
 from database import Base
 import models  # registers tables
 from models.imported_finance import ImportedFinanceRow
+from models.physical_product import PhysicalProduct
+from models.product_listing import ProductListing
 
 from routers import growth_engine as gr
 from routers.growth_engine import (
@@ -46,7 +48,15 @@ class _User:
 
 
 async def _seed_finance(db, uid, *, marketplace="wildberries", sku="SKU1",
-                        revenue=10000.0, net_profit=2000.0, ad_spend=0.0, quantity=40):
+                        revenue=10000.0, net_profit=2000.0, ad_spend=0.0, quantity=40,
+                        listing_id="L1"):
+    # Canonical write goes through the Advisory Runtime producer, which resolves
+    # listing_id from ProductListing — seed one so produced signals carry L1 (the id the
+    # listing-scoped read endpoints filter by). In prod this listing always exists.
+    phys = str(uuid.uuid4())
+    db.add(PhysicalProduct(id=phys, user_id=uid, title="t", cogs=10.0, cogs_source="manual"))
+    db.add(ProductListing(id=listing_id, physical_product_id=phys, user_id=uid,
+                          marketplace=marketplace, external_id=sku))
     db.add(ImportedFinanceRow(import_id="imp1", user_id=uid, marketplace=marketplace, sku=sku,
                               revenue=revenue, net_profit=net_profit, ad_spend=ad_spend,
                               quantity=quantity))
@@ -69,7 +79,6 @@ def test_post_audit_from_finance():
         assert isinstance(resp, GrowthAuditResponse)
         assert resp.ok and resp.status == "completed"
         assert resp.total_problems >= 1   # profitable_ad / margin_expansion trigger
-        assert resp.reconciliation.created >= 1
     _run(go())
 
 
@@ -193,3 +202,12 @@ def test_routes_mounted():
     import main
     app_paths = set(main.app.openapi()["paths"])  # OpenAPI paths: robust on FastAPI 0.136 (flat) and 0.137+ (nested mounts)
     assert "/api/growth/audit" in app_paths
+
+
+# ── Phase 1 cleanup: router delegates to the runtime, no direct signal write ──
+
+def test_router_delegates_not_direct_write():
+    import inspect
+    src = inspect.getsource(gr)
+    assert "audit_and_persist" not in src        # no direct signal write
+    assert "run_one" in src                      # delegates to the Advisory Runtime producer
