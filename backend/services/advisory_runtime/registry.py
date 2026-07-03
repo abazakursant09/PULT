@@ -78,12 +78,13 @@ ADVISORY_PRODUCERS: Tuple[ProducerSpec, ...] = (
     # follow-up slice; this flip only starts scheduled production.
     ProducerSpec(key="pricing", run=run_pricing_producer,
                  cadence_seconds=86400, enabled=True),
-    # revenue_diagnosis: DISABLED (Phase 2.1, shadow) — first Business-Diagnosis contour
-    # (WHERE revenue is disappearing). Pure diagnosis over the seller's OWN observed
-    # finance series; confirmed trajectory only (spike-rejected). Emits an evidence-backed
-    # revenue_signal ONLY — no treatment, no executor binding, no Decision. Shipped
-    # DISABLED for shadow validation via run_one() until a later enable slice; NOT yet in
-    # the Decision Feed. Advisory-only.
+    # revenue_diagnosis: ENABLED (Phase 2.3b) — first Business-Diagnosis contour (WHERE
+    # revenue is disappearing) now the canonical SCHEDULED writer of revenue_signal. Pure
+    # diagnosis over the seller's OWN observed finance series; confirmed trajectory only
+    # (spike-rejected). Emits an evidence-backed revenue_signal ONLY — no treatment, no
+    # executor binding (recommended_action_key=None), no Decision. Already read by the
+    # Decision Feed (Phase 2.3a), so the full chain is now live: Advisory Runtime →
+    # revenue_signal → Decision Feed → Today → Dashboard/Telegram/Copilot. Advisory-only.
     ProducerSpec(key="revenue_diagnosis", run=run_revenue_diagnosis_producer,
-                 cadence_seconds=86400, enabled=False),
+                 cadence_seconds=86400, enabled=True),
 )
