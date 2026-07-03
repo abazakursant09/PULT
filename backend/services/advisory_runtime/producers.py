@@ -48,6 +48,10 @@ from models.revenue_audit import RevenueAudit
 from services.revenue.diagnosis_source import build_revenue_series, classify_revenue_trajectory
 from services.revenue.persist import reconcile_revenue_signal
 
+from models.money_leak_audit import MoneyLeakAudit
+from services.money_leak.diagnosis_source import build_cost_series, classify_cost_drifts
+from services.money_leak.persist import reconcile_money_leak_signals
+
 from .runtime import RuntimeContext, ProducerResult
 
 
@@ -156,6 +160,54 @@ async def run_revenue_diagnosis_producer(ctx: RuntimeContext) -> ProducerResult:
     return ProducerResult(ok=True, stats={
         "candidates_seen": seen,
         "trajectories_confirmed": emitted,
+        "honest_absent": absent,
+        "signals_reconciled": reconciled,
+    })
+
+
+async def run_money_leak_producer(ctx: RuntimeContext) -> ProducerResult:
+    """Money Leak Detection advisory producer adapter (Phase 3.1, shadow). Answers ONLY
+    'WHY does money leak?' per observed (marketplace, sku), from the seller's OWN
+    ImportedFinanceRow — confirmed upward drift of the commission and/or logistics share of
+    revenue (services/money_leak). Flush-only; no commit. DB-headless — no marketplace client.
+
+    PURE DIAGNOSIS + INDEPENDENT: emits an evidence-backed money_leak_signal only — no
+    treatment, no recommended_action_key that binds an executor, no Decision, no
+    EngineSignalDecisionLink, no Apply, no executor, no marketplace write. It does NOT absorb
+    Pricing (price/margin state), Advertising (ad spend), Operations (stock), or Revenue
+    Diagnosis (revenue trajectory) — it owns only the silent cost-share drift. Confirmed
+    drifts only (spike-rejected, history-gated); honest absence emits nothing."""
+    db, uid = ctx.db, ctx.user_id
+
+    seen = emitted = absent = reconciled = 0
+    for marketplace, sku in await _candidate_pairs(db, uid):
+        seen += 1
+        listing_id = await _resolve_listing_id(db, uid, marketplace, sku)
+        daily = await build_cost_series(db, uid, marketplace, sku)
+        diagnoses = classify_cost_drifts(daily, marketplace=marketplace, sku=sku)
+
+        audit = MoneyLeakAudit(
+            user_id=uid, listing_id=listing_id, marketplace=marketplace, sku=sku,
+            source="finance", status="completed",
+            total_problems=len(diagnoses),
+            total_not_evaluated=0 if diagnoses else 1,
+            top_severity=diagnoses[0].priority_level if diagnoses else None,
+            triggered_by=ctx.triggered_by, created_at=ctx.now, completed_at=ctx.now)
+        db.add(audit)
+        await db.flush()
+
+        rec = await reconcile_money_leak_signals(
+            db, user_id=uid, listing_id=listing_id, audit_id=audit.id,
+            marketplace=marketplace, sku=sku, diagnoses=diagnoses, now=ctx.now)
+        if diagnoses:
+            emitted += len(diagnoses)
+        else:
+            absent += 1
+        reconciled += rec.created + rec.updated
+
+    return ProducerResult(ok=True, stats={
+        "candidates_seen": seen,
+        "drifts_confirmed": emitted,
         "honest_absent": absent,
         "signals_reconciled": reconciled,
     })
