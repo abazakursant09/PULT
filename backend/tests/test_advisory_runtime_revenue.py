@@ -176,19 +176,19 @@ def test_idempotent_reconcile():
     _run(go())
 
 
-# ── (7) registry disabled; (8) scheduler skips it ───────────────────────────
+# ── (7) registry enabled (Phase 2.3b); (8) scheduler runs it when due ────────
 
-def test_registry_revenue_disabled():
+def test_registry_revenue_enabled():
     by_key = {s.key: s for s in ADVISORY_PRODUCERS}
     assert "revenue_diagnosis" in by_key
-    assert by_key["revenue_diagnosis"].enabled is False
+    assert by_key["revenue_diagnosis"].enabled is True
 
 
-def test_scheduler_does_not_run_revenue():
+def test_scheduler_runs_revenue_when_due():
     async def go():
         db = await _db(); uid = str(uuid.uuid4())
         await _series(db, uid, [200, 200, 200, 140, 140, 140]); await db.commit()
         await AdvisoryRuntime().run_due_producers(db, now=NOW)   # REAL registry
         keys = {r.producer_key for r in (await db.execute(select(AdvisoryRun))).scalars().all()}
-        assert "revenue_diagnosis" not in keys                   # disabled → never scheduled
+        assert "revenue_diagnosis" in keys                       # enabled → scheduled
     _run(go())

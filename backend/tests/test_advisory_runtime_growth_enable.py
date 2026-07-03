@@ -100,7 +100,8 @@ def test_scheduler_runs_legal_review_growth():
         res = await AdvisoryRuntime().run_due_producers(db, now=NOW)   # REAL registry
         assert res.errors == 0
         keys = {r.producer_key for r in (await db.execute(select(AdvisoryRun))).scalars().all()}
-        assert keys == {"legal", "review", "growth", "operations_low_stock", "advertising", "pricing"}
+        assert keys == {"legal", "review", "growth", "operations_low_stock", "advertising",
+                        "pricing", "revenue_diagnosis"}
     _run(go())
 
 
