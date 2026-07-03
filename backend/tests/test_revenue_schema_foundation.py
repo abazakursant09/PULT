@@ -87,9 +87,11 @@ def test_revenue_producer_registered_but_disabled():
     assert by_key["revenue_diagnosis"].enabled is False
 
 
-def test_decision_feed_does_not_reference_revenue():
+def test_decision_feed_reads_revenue():
+    # Phase 2.3a wired the reader: revenue_signal is now a canonical feed engine. The
+    # producer stays DISABLED (see above), so nothing writes revenue_signal in prod yet.
     from services.decision_feed.builder import _ENGINES
     tables = {t for (_c, _m, t) in _ENGINES}
-    assert "revenue_signal" not in tables
+    assert "revenue_signal" in tables
     contours = {c for (c, _m, _t) in _ENGINES}
-    assert "revenue" not in contours
+    assert "revenue" in contours
