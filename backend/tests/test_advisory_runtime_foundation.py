@@ -78,7 +78,9 @@ def test_advisory_run_migration_roundtrip(monkeypatch):
     cfg = dbm._alembic_config()
 
     heads = ScriptDirectory.from_config(cfg).get_heads()
-    assert heads == [REV], f"expected single head {REV}, got {heads}"
+    # head advanced by later additive migrations (e.g. revenue diagnosis foundation);
+    # REV below stays the advisory-run revision this test round-trips.
+    assert heads == ["rev1a2b3c4d01"], f"expected single head, got {heads}"
 
     command.upgrade(cfg, REV)
     assert _current(sync_url) == REV
@@ -90,7 +92,7 @@ def test_advisory_run_migration_roundtrip(monkeypatch):
     assert TABLE not in _tables(sync_url)
 
     command.upgrade(cfg, "head")
-    assert _current(sync_url) == REV
+    assert _current(sync_url) == "rev1a2b3c4d01"   # head advanced past advisory-run
     assert TABLE in _tables(sync_url)
 
 

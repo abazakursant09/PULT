@@ -59,6 +59,10 @@ from .growth_audit import GrowthAudit
 from .growth_problem import GrowthProblem
 from .growth_rule_evaluation import GrowthRuleEvaluation
 from .growth_signal import GrowthSignal
+# Revenue Diagnosis contour data foundation (Phase 2.0) — diagnosis-only signal + audit,
+# schema mirror of Growth; NOT wired to any producer/feed yet.
+from .revenue_audit import RevenueAudit
+from .revenue_signal import RevenueSignal
 # Pricing/Margin Engine data foundation (A3-pre) — canonical pricing contour signal
 from .pricing_signal import PricingSignal
 # Operations contour data foundation (Slice 1) — canonical operations contour signal
