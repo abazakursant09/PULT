@@ -44,6 +44,10 @@ from services.review.audit_persist import audit_and_persist as review_audit_and_
 from models.imported_product import ImportedProductRow
 from services.operations.low_stock_source import build_low_stock_signal, LOW_STOCK_UNITS
 
+from models.revenue_audit import RevenueAudit
+from services.revenue.diagnosis_source import build_revenue_series, classify_revenue_trajectory
+from services.revenue.persist import reconcile_revenue_signal
+
 from .runtime import RuntimeContext, ProducerResult
 
 
@@ -106,6 +110,53 @@ async def run_growth_producer(ctx: RuntimeContext) -> ProducerResult:
         "unavailable": unavailable,
         "audits_created": audits,
         "problems_detected": problems,
+        "signals_reconciled": reconciled,
+    })
+
+
+async def run_revenue_diagnosis_producer(ctx: RuntimeContext) -> ProducerResult:
+    """Revenue Diagnosis advisory producer adapter (Phase 2.1, shadow). Answers ONLY
+    'WHERE is revenue disappearing?' per observed (marketplace, sku), from the seller's
+    OWN ImportedFinanceRow daily revenue series (services/revenue). Flush-only; no commit.
+    DB-headless — no marketplace client.
+
+    PURE DIAGNOSIS: it emits an evidence-backed symptom (revenue_signal) only — no
+    treatment, no recommended_action_key that binds an executor, no Decision, no
+    EngineSignalDecisionLink, no Apply, no executor, no marketplace write. Treatment stays
+    owned by the existing action contours. Confirmed trajectories only (spike-rejected,
+    history-gated); honest absence emits nothing."""
+    db, uid = ctx.db, ctx.user_id
+
+    seen = emitted = absent = reconciled = 0
+    for marketplace, sku in await _candidate_pairs(db, uid):
+        seen += 1
+        listing_id = await _resolve_listing_id(db, uid, marketplace, sku)
+        daily = await build_revenue_series(db, uid, marketplace, sku)
+        diag = classify_revenue_trajectory(daily, marketplace=marketplace, sku=sku)
+
+        audit = RevenueAudit(
+            user_id=uid, listing_id=listing_id, marketplace=marketplace, sku=sku,
+            source="finance", status="completed",
+            total_problems=1 if diag is not None else 0,
+            total_not_evaluated=0 if diag is not None else 1,
+            top_severity=diag.priority_level if diag is not None else None,
+            triggered_by=ctx.triggered_by, created_at=ctx.now, completed_at=ctx.now)
+        db.add(audit)
+        await db.flush()
+
+        rec = await reconcile_revenue_signal(
+            db, user_id=uid, listing_id=listing_id, audit_id=audit.id,
+            marketplace=marketplace, sku=sku, diagnosis=diag, now=ctx.now)
+        if diag is not None:
+            emitted += 1
+        else:
+            absent += 1
+        reconciled += rec.created + rec.updated
+
+    return ProducerResult(ok=True, stats={
+        "candidates_seen": seen,
+        "trajectories_confirmed": emitted,
+        "honest_absent": absent,
         "signals_reconciled": reconciled,
     })
 

@@ -20,6 +20,7 @@ from .runtime import RuntimeContext, ProducerResult
 from .producers import (
     run_growth_producer, run_legal_producer, run_review_producer,
     run_operations_low_stock_producer, run_advertising_producer, run_pricing_producer,
+    run_revenue_diagnosis_producer,
 )
 
 
@@ -77,4 +78,12 @@ ADVISORY_PRODUCERS: Tuple[ProducerSpec, ...] = (
     # follow-up slice; this flip only starts scheduled production.
     ProducerSpec(key="pricing", run=run_pricing_producer,
                  cadence_seconds=86400, enabled=True),
+    # revenue_diagnosis: DISABLED (Phase 2.1, shadow) — first Business-Diagnosis contour
+    # (WHERE revenue is disappearing). Pure diagnosis over the seller's OWN observed
+    # finance series; confirmed trajectory only (spike-rejected). Emits an evidence-backed
+    # revenue_signal ONLY — no treatment, no executor binding, no Decision. Shipped
+    # DISABLED for shadow validation via run_one() until a later enable slice; NOT yet in
+    # the Decision Feed. Advisory-only.
+    ProducerSpec(key="revenue_diagnosis", run=run_revenue_diagnosis_producer,
+                 cadence_seconds=86400, enabled=False),
 )

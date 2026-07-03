@@ -79,11 +79,12 @@ def test_schema_parity_with_growth():
 
 # ── wired to NOTHING: no producer, not in the feed ───────────────────────────
 
-def test_no_advisory_runtime_producer():
+def test_revenue_producer_registered_but_disabled():
+    # Phase 2.1 wired the shadow producer: registered but DISABLED (never scheduled).
     from services.advisory_runtime.registry import ADVISORY_PRODUCERS
-    keys = {s.key for s in ADVISORY_PRODUCERS}
-    assert "revenue_diagnosis" not in keys
-    assert "revenue" not in keys
+    by_key = {s.key: s for s in ADVISORY_PRODUCERS}
+    assert "revenue_diagnosis" in by_key
+    assert by_key["revenue_diagnosis"].enabled is False
 
 
 def test_decision_feed_does_not_reference_revenue():
