@@ -81,7 +81,6 @@ def test_post_audit_creates_audit():
         assert isinstance(resp, ReviewAuditResponse)
         assert resp.ok and resp.status == "completed" and resp.audit_id
         assert resp.total_problems >= 1            # RISK + unanswered → negative review signal
-        assert resp.reconciliation.created >= 1
     _run(go())
 
 
@@ -319,3 +318,12 @@ def test_no_data_leak_for_foreign_review():
         for leaked in ("secret", "конфиденциаль", "owner"):
             assert leaked not in blob
     _run(go())
+
+
+# ── Phase 1 cleanup: router delegates to the runtime, no direct signal write ──
+
+def test_router_delegates_not_direct_write():
+    import inspect
+    src = inspect.getsource(rv)
+    assert "audit_and_persist" not in src        # no direct signal write
+    assert "run_one" in src                      # delegates to the Advisory Runtime producer

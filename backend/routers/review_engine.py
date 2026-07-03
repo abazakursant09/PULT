@@ -30,7 +30,7 @@ from models.review_signal import ReviewSignal
 
 from services.review.snapshot import ReviewSnapshot, ReviewDataUnavailable
 from services.review.internal_source import build_snapshot_from_reviews
-from services.review.audit_persist import audit_and_persist
+from services.advisory_runtime.runtime import AdvisoryRuntime
 
 router = APIRouter()
 
@@ -86,6 +86,7 @@ async def run_review_audit(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ReviewAuditResponse:
+    # Availability check (READ-only) — preserves the review_unavailable contract.
     snap = await build_snapshot_from_reviews(
         db, review_id=body.review_id, marketplace=body.marketplace,
         owner_user_id=current_user.id)
@@ -93,16 +94,23 @@ async def run_review_audit(
         status = "review_unavailable" if snap.reason == "review_missing" else snap.reason
         return ReviewAuditResponse(ok=False, status=status, review_id=body.review_id, reason=snap.reason)
     assert isinstance(snap, ReviewSnapshot)
-    res = await audit_and_persist(db, user_id=current_user.id, snapshot=snap, triggered_by="manual")
-    await db.commit()
-    rec = res.reconciliation
+
+    # Canonical write: the Advisory Runtime is the SOLE producer of review_signal.
+    # "Recompute now" delegates to run_one("review") instead of writing directly.
+    await AdvisoryRuntime().run_one(
+        db, user_id=current_user.id, producer_key="review", triggered_by="manual")
+
+    # Report from the most recent review audit the producer just wrote for this seller.
+    audit = (await db.execute(
+        select(ReviewAudit).where(ReviewAudit.user_id == current_user.id)
+        .order_by(ReviewAudit.created_at.desc()).limit(1))).scalars().first()
     return ReviewAuditResponse(
-        ok=True, status="completed", review_id=body.review_id, audit_id=res.audit_id,
-        total_problems=res.total_problems, total_not_evaluated=res.total_not_evaluated,
-        top_severity=res.top_severity,
-        reconciliation=ReconciliationView(created=rec.created, updated=rec.updated,
-                                          resolved=rec.resolved, reopened=rec.reopened,
-                                          unchanged=rec.unchanged) if rec else None,
+        ok=True, status="completed", review_id=body.review_id,
+        audit_id=audit.id if audit else None,
+        total_problems=audit.total_problems if audit else None,
+        total_not_evaluated=audit.total_not_evaluated if audit else None,
+        top_severity=audit.top_severity if audit else None,
+        reconciliation=None,
     )
 
 

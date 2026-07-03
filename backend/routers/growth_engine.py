@@ -27,8 +27,8 @@ from models.growth_signal import GrowthSignal
 
 from services.growth.snapshot import GrowthSnapshot, GrowthDataUnavailable
 from services.growth.internal_source import build_snapshot_from_internal
-from services.growth.audit_persist import audit_and_persist
 from services.growth.rules import GrowthThresholds
+from services.advisory_runtime.runtime import AdvisoryRuntime
 
 router = APIRouter()
 
@@ -94,7 +94,9 @@ async def run_growth_audit(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> GrowthAuditResponse:
-    thresholds = GrowthThresholds(**body.thresholds.model_dump()) if body.thresholds else GrowthThresholds()
+    # Availability check (READ-only) — preserves the growth_unavailable contract.
+    # thresholds are now ADAPTER-owned (derived by the runtime producer); the request
+    # `thresholds` field is accepted for API compatibility but no longer drives the write.
     snap = await build_snapshot_from_internal(
         db, user_id=current_user.id, marketplace=body.marketplace, sku=body.sku,
         listing_id=body.listing_id)
@@ -102,18 +104,26 @@ async def run_growth_audit(
         status = "growth_unavailable" if snap.reason == "finance_missing" else snap.reason
         return GrowthAuditResponse(ok=False, status=status, listing_id=body.listing_id,
                                    marketplace=body.marketplace, sku=body.sku, reason=snap.reason)
-    assert isinstance(snap, GrowthSnapshot)
-    res = await audit_and_persist(db, user_id=current_user.id, snapshot=snap,
-                                  thresholds=thresholds, triggered_by="manual")
-    await db.commit()
-    rec = res.reconciliation
+
+    # Canonical write: the Advisory Runtime is the SOLE producer of growth_signal.
+    # "Recompute now" delegates to run_one("growth") instead of writing directly.
+    await AdvisoryRuntime().run_one(
+        db, user_id=current_user.id, producer_key="growth", triggered_by="manual")
+
+    # Report from the audit the producer just wrote for this (marketplace, sku).
+    audit = (await db.execute(
+        select(GrowthAudit)
+        .where(GrowthAudit.user_id == current_user.id,
+               GrowthAudit.marketplace == body.marketplace,
+               GrowthAudit.sku == body.sku)
+        .order_by(GrowthAudit.created_at.desc()).limit(1))).scalars().first()
     return GrowthAuditResponse(
         ok=True, status="completed", listing_id=body.listing_id, marketplace=body.marketplace,
-        sku=body.sku, audit_id=res.audit_id, total_problems=res.total_problems,
-        total_not_evaluated=res.total_not_evaluated, top_severity=res.top_severity,
-        reconciliation=ReconciliationView(created=rec.created, updated=rec.updated,
-                                          resolved=rec.resolved, reopened=rec.reopened,
-                                          unchanged=rec.unchanged) if rec else None,
+        sku=body.sku, audit_id=audit.id if audit else None,
+        total_problems=audit.total_problems if audit else None,
+        total_not_evaluated=audit.total_not_evaluated if audit else None,
+        top_severity=audit.top_severity if audit else None,
+        reconciliation=None,
     )
 
 
