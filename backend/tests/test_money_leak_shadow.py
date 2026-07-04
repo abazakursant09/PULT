@@ -241,12 +241,11 @@ def test_no_decision_link_execution_side_effects():
 
 # ── disabled → cannot leak into scheduler or feed ────────────────────────────
 
-def test_disabled_but_feed_reads_it():
-    # Producer stays DISABLED (never scheduled); Phase 3.3a wired the feed reader, so
-    # money_leak IS now a feed engine — inert until 3.3b enables the producer.
+def test_enabled_and_feed_reads_it():
+    # Phase 3.3b enabled the producer; the feed already reads it (3.3a) — full chain live.
     from services.advisory_runtime.registry import ADVISORY_PRODUCERS
     from services.decision_feed.builder import _ENGINES
     by_key = {s.key: s for s in ADVISORY_PRODUCERS}
-    assert by_key["money_leak"].enabled is False
+    assert by_key["money_leak"].enabled is True
     assert "money_leak_signal" in {t for (_c, _m, t) in _ENGINES}
     assert "money_leak" in {c for (c, _m, _t) in _ENGINES}

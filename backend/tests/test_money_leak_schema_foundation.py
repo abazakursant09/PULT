@@ -72,12 +72,12 @@ def test_schema_parity_with_growth():
     assert aud_ml == aud_growth, f"audit columns diverge: {aud_ml ^ aud_growth}"
 
 
-def test_money_leak_producer_registered_but_disabled():
-    # Phase 3.1 wired the shadow producer: registered but DISABLED (never scheduled).
+def test_money_leak_producer_registered_and_enabled():
+    # Phase 3.3b enabled the producer: registered AND enabled (canonical scheduled writer).
     from services.advisory_runtime.registry import ADVISORY_PRODUCERS
     by_key = {s.key: s for s in ADVISORY_PRODUCERS}
     assert "money_leak" in by_key
-    assert by_key["money_leak"].enabled is False
+    assert by_key["money_leak"].enabled is True
 
 
 def test_decision_feed_reads_money_leak():

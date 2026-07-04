@@ -193,19 +193,19 @@ def test_idempotent_reconcile():
     _run(go())
 
 
-# ── (7) registry disabled; (8) scheduler skips it ───────────────────────────
+# ── (7) registry enabled (Phase 3.3b); (8) scheduler runs it when due ────────
 
-def test_registry_money_leak_disabled():
+def test_registry_money_leak_enabled():
     by_key = {s.key: s for s in ADVISORY_PRODUCERS}
     assert "money_leak" in by_key
-    assert by_key["money_leak"].enabled is False
+    assert by_key["money_leak"].enabled is True
 
 
-def test_scheduler_does_not_run_money_leak():
+def test_scheduler_runs_money_leak_when_due():
     async def go():
         db = await _db(); uid = str(uuid.uuid4())
         await _series(db, uid, COMMISSION); await db.commit()
         await AdvisoryRuntime().run_due_producers(db, now=NOW)   # REAL registry
         keys = {r.producer_key for r in (await db.execute(select(AdvisoryRun))).scalars().all()}
-        assert "money_leak" not in keys                          # disabled → never scheduled
+        assert "money_leak" in keys                              # enabled → scheduled
     _run(go())

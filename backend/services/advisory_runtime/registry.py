@@ -87,13 +87,15 @@ ADVISORY_PRODUCERS: Tuple[ProducerSpec, ...] = (
     # revenue_signal → Decision Feed → Today → Dashboard/Telegram/Copilot. Advisory-only.
     ProducerSpec(key="revenue_diagnosis", run=run_revenue_diagnosis_producer,
                  cadence_seconds=86400, enabled=True),
-    # money_leak: DISABLED (Phase 3.1, shadow) — Business-Diagnosis contour (WHY money
-    # leaks: silent commission/logistics cost-share drift). Pure diagnosis over the
-    # seller's OWN observed finance; confirmed upward cost-share drift only (spike-rejected).
-    # Emits an evidence-backed money_leak_signal ONLY — no treatment, no executor binding
-    # (recommended_action_key=None), no Decision. Independent — does NOT absorb Pricing/
-    # Advertising/Operations/Revenue. Shipped DISABLED for shadow validation via run_one()
-    # until a later enable slice; NOT yet in the Decision Feed. Advisory-only.
+    # money_leak: ENABLED (Phase 3.3b) — Business-Diagnosis contour (WHY money leaks:
+    # silent commission/logistics cost-share drift) now the canonical SCHEDULED writer of
+    # money_leak_signal. Pure diagnosis over the seller's OWN observed finance; confirmed
+    # upward cost-share drift only (spike-rejected). Emits an evidence-backed
+    # money_leak_signal ONLY — no treatment, no executor binding (recommended_action_key=
+    # None), no Decision. Independent — does NOT absorb Pricing/Advertising/Operations/
+    # Revenue. Already read by the Decision Feed (Phase 3.3a), so the full chain is now
+    # live: Advisory Runtime → money_leak_signal → Decision Feed → Today →
+    # Dashboard/Telegram/Copilot. Advisory-only.
     ProducerSpec(key="money_leak", run=run_money_leak_producer,
-                 cadence_seconds=86400, enabled=False),
+                 cadence_seconds=86400, enabled=True),
 )
