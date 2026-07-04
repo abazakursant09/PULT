@@ -20,7 +20,7 @@ from .runtime import RuntimeContext, ProducerResult
 from .producers import (
     run_growth_producer, run_legal_producer, run_review_producer,
     run_operations_low_stock_producer, run_advertising_producer, run_pricing_producer,
-    run_revenue_diagnosis_producer,
+    run_revenue_diagnosis_producer, run_money_leak_producer,
 )
 
 
@@ -87,4 +87,13 @@ ADVISORY_PRODUCERS: Tuple[ProducerSpec, ...] = (
     # revenue_signal → Decision Feed → Today → Dashboard/Telegram/Copilot. Advisory-only.
     ProducerSpec(key="revenue_diagnosis", run=run_revenue_diagnosis_producer,
                  cadence_seconds=86400, enabled=True),
+    # money_leak: DISABLED (Phase 3.1, shadow) — Business-Diagnosis contour (WHY money
+    # leaks: silent commission/logistics cost-share drift). Pure diagnosis over the
+    # seller's OWN observed finance; confirmed upward cost-share drift only (spike-rejected).
+    # Emits an evidence-backed money_leak_signal ONLY — no treatment, no executor binding
+    # (recommended_action_key=None), no Decision. Independent — does NOT absorb Pricing/
+    # Advertising/Operations/Revenue. Shipped DISABLED for shadow validation via run_one()
+    # until a later enable slice; NOT yet in the Decision Feed. Advisory-only.
+    ProducerSpec(key="money_leak", run=run_money_leak_producer,
+                 cadence_seconds=86400, enabled=False),
 )
