@@ -198,17 +198,17 @@ def test_idempotent_reconcile():
 
 # ── registry disabled; scheduler skips it ────────────────────────────────────
 
-def test_registry_supply_disabled():
+def test_registry_supply_enabled():
     by_key = {s.key: s for s in ADVISORY_PRODUCERS}
     assert "supply" in by_key
-    assert by_key["supply"].enabled is False
+    assert by_key["supply"].enabled is True
 
 
-def test_scheduler_does_not_run_supply():
+def test_scheduler_runs_supply_when_due():
     async def go():
         db = await _db(); uid = str(uuid.uuid4())
         await _seed(db, uid, stock=20); await db.commit()
         await AdvisoryRuntime().run_due_producers(db, now=NOW)   # REAL registry
         keys = {r.producer_key for r in (await db.execute(select(AdvisoryRun))).scalars().all()}
-        assert "supply" not in keys                             # disabled → never scheduled
+        assert "supply" in keys                                 # enabled → scheduled
     _run(go())

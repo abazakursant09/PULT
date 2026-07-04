@@ -72,12 +72,12 @@ def test_schema_parity_with_growth():
     assert aud_sup == aud_growth, f"audit columns diverge: {aud_sup ^ aud_growth}"
 
 
-def test_supply_producer_registered_but_disabled():
-    # Phase 4.1 wired the shadow producer: registered but DISABLED (never scheduled).
+def test_supply_producer_registered_and_enabled():
+    # Phase 4.3b enabled the producer: registered AND enabled (canonical scheduled writer).
     from services.advisory_runtime.registry import ADVISORY_PRODUCERS
     by_key = {s.key: s for s in ADVISORY_PRODUCERS}
     assert "supply" in by_key
-    assert by_key["supply"].enabled is False
+    assert by_key["supply"].enabled is True
 
 
 def test_decision_feed_reads_supply():
