@@ -52,6 +52,10 @@ from models.money_leak_audit import MoneyLeakAudit
 from services.money_leak.diagnosis_source import build_cost_series, classify_cost_drifts
 from services.money_leak.persist import reconcile_money_leak_signals
 
+from models.supply_audit import SupplyAudit
+from services.supply.diagnosis_source import latest_stock, observed_velocity, classify_supply_risk
+from services.supply.persist import reconcile_supply_signal
+
 from .runtime import RuntimeContext, ProducerResult
 
 
@@ -208,6 +212,57 @@ async def run_money_leak_producer(ctx: RuntimeContext) -> ProducerResult:
     return ProducerResult(ok=True, stats={
         "candidates_seen": seen,
         "drifts_confirmed": emitted,
+        "honest_absent": absent,
+        "signals_reconciled": reconciled,
+    })
+
+
+async def run_supply_producer(ctx: RuntimeContext) -> ProducerResult:
+    """Supply / Replenishment Diagnosis advisory producer adapter (Phase 4.1, shadow).
+    Diagnoses stock-out RUNWAY per observed (marketplace, sku) — observed on-hand stock ÷
+    observed daily sell-through velocity (services/supply) — from the seller's OWN
+    ImportedProductRow.stock + ImportedFinanceRow.quantity. Flush-only; no commit.
+    DB-headless — no marketplace client. Observed present runway, not a forecast.
+
+    PURE DIAGNOSIS + INDEPENDENT: emits an evidence-backed supply_signal only — no
+    treatment, no recommended_action_key that binds an executor, no Decision, no
+    EngineSignalDecisionLink, no Apply, no executor, no marketplace write. It complements
+    (does NOT replace) the operations low_stock signal and does NOT reuse operations_signal,
+    Revenue, or Money Leak. Honest absence (no stock / no velocity / thin history / ample
+    runway) emits nothing."""
+    db, uid = ctx.db, ctx.user_id
+
+    seen = emitted = absent = reconciled = 0
+    for marketplace, sku in await _candidate_pairs(db, uid):
+        seen += 1
+        listing_id = await _resolve_listing_id(db, uid, marketplace, sku)
+        stock = await latest_stock(db, uid, marketplace, sku)
+        distinct_days, total_units = await observed_velocity(db, uid, marketplace, sku)
+        diag = classify_supply_risk(stock, distinct_days, total_units,
+                                    marketplace=marketplace, sku=sku)
+
+        audit = SupplyAudit(
+            user_id=uid, listing_id=listing_id, marketplace=marketplace, sku=sku,
+            source="finance", status="completed",
+            total_problems=1 if diag is not None else 0,
+            total_not_evaluated=0 if diag is not None else 1,
+            top_severity=diag.priority_level if diag is not None else None,
+            triggered_by=ctx.triggered_by, created_at=ctx.now, completed_at=ctx.now)
+        db.add(audit)
+        await db.flush()
+
+        rec = await reconcile_supply_signal(
+            db, user_id=uid, listing_id=listing_id, audit_id=audit.id,
+            marketplace=marketplace, sku=sku, diagnosis=diag, now=ctx.now)
+        if diag is not None:
+            emitted += 1
+        else:
+            absent += 1
+        reconciled += rec.created + rec.updated
+
+    return ProducerResult(ok=True, stats={
+        "candidates_seen": seen,
+        "risks_confirmed": emitted,
         "honest_absent": absent,
         "signals_reconciled": reconciled,
     })
