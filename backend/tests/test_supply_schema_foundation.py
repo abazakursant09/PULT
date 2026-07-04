@@ -80,9 +80,11 @@ def test_supply_producer_registered_but_disabled():
     assert by_key["supply"].enabled is False
 
 
-def test_decision_feed_does_not_reference_supply():
+def test_decision_feed_reads_supply():
+    # Phase 4.3a wired the reader: supply_signal is now a canonical feed engine. The
+    # producer stays DISABLED, so nothing writes supply_signal in prod yet.
     from services.decision_feed.builder import _ENGINES
     tables = {t for (_c, _m, t) in _ENGINES}
-    assert "supply_signal" not in tables
+    assert "supply_signal" in tables
     contours = {c for (c, _m, _t) in _ENGINES}
-    assert "supply" not in contours
+    assert "supply" in contours
