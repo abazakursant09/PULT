@@ -98,14 +98,15 @@ ADVISORY_PRODUCERS: Tuple[ProducerSpec, ...] = (
     # Dashboard/Telegram/Copilot. Advisory-only.
     ProducerSpec(key="money_leak", run=run_money_leak_producer,
                  cadence_seconds=86400, enabled=True),
-    # supply: DISABLED (Phase 4.1, shadow) — Supply/Replenishment Diagnosis (operations-
-    # breadth stock-out RUNWAY: days_to_oos = observed stock ÷ observed sell-through
-    # velocity). Pure diagnosis over the seller's OWN stock + finance; observed present
-    # runway, not a forecast. Emits an evidence-backed supply_signal ONLY — no treatment,
-    # no executor binding (recommended_action_key=None), no Decision. Independent —
-    # complements (does NOT replace) operations low_stock, does NOT reuse operations_signal.
-    # Shipped DISABLED for shadow validation via run_one() until a later enable slice; NOT
-    # yet in the Decision Feed. Advisory-only.
+    # supply: ENABLED (Phase 4.3b) — Supply/Replenishment Diagnosis (operations-breadth
+    # stock-out RUNWAY: days_to_oos = observed stock ÷ observed sell-through velocity) now
+    # the canonical SCHEDULED writer of supply_signal. Pure diagnosis over the seller's OWN
+    # stock + finance; observed present runway, not a forecast. Emits an evidence-backed
+    # supply_signal ONLY — no treatment, no executor binding (recommended_action_key=None),
+    # no Decision. Independent — complements (does NOT replace) operations low_stock, does
+    # NOT reuse operations_signal. Already read by the Decision Feed (Phase 4.3a), so the
+    # full chain is now live: Advisory Runtime → supply_signal → Decision Feed → Today →
+    # Dashboard/Telegram/Copilot. Advisory-only.
     ProducerSpec(key="supply", run=run_supply_producer,
-                 cadence_seconds=86400, enabled=False),
+                 cadence_seconds=86400, enabled=True),
 )
