@@ -67,6 +67,10 @@ from .revenue_signal import RevenueSignal
 # schema mirror of Growth; NOT wired to any producer/feed yet.
 from .money_leak_audit import MoneyLeakAudit
 from .money_leak_signal import MoneyLeakSignal
+# Supply / Replenishment Diagnosis contour data foundation (Phase 4.0) — diagnosis-only
+# signal + audit, schema mirror of Growth; NOT wired to any producer/feed yet.
+from .supply_audit import SupplyAudit
+from .supply_signal import SupplySignal
 # Pricing/Margin Engine data foundation (A3-pre) — canonical pricing contour signal
 from .pricing_signal import PricingSignal
 # Operations contour data foundation (Slice 1) — canonical operations contour signal
