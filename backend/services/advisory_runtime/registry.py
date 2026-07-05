@@ -136,8 +136,9 @@ ADVISORY_PRODUCERS: Tuple[ProducerSpec, ...] = (
     # relative to observed demand). Observed-only: latest ImportedProductRow.stock vs
     # ImportedFinanceRow.quantity velocity; no forecast, no benchmark, no competitor, no
     # discount/liquidation. Pure diagnosis — recommended_action_key=None, no executor binding, no
-    # Decision. DISTINCT from Supply — does NOT reuse supply_signal. Shipped DISABLED (Phase 7.1)
-    # for shadow validation via run_one() until a later enable slice; NOT yet in the Decision Feed.
+    # Decision. DISTINCT from Supply — does NOT reuse supply_signal. ENABLED (Phase 7.3b): the
+    # scheduler now runs it daily and it writes overstock_signal, surfacing through the Decision
+    # Feed reader wired in 7.3a. Advisory-only.
     ProducerSpec(key="overstock", run=run_overstock_producer,
-                 cadence_seconds=86400, enabled=False),
+                 cadence_seconds=86400, enabled=True),
 )

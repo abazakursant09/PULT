@@ -98,12 +98,12 @@ def test_indexes_match_pattern():
     assert aix == {"ix_overstock_audit_user_listing", "ix_overstock_audit_status"}
 
 
-def test_overstock_producer_registered_but_disabled():
-    # Phase 7.1 wired the shadow producer: registered but DISABLED (never scheduled).
+def test_overstock_producer_registered_and_enabled():
+    # Phase 7.3b enabled the producer: registered AND scheduled (writes overstock_signal).
     from services.advisory_runtime.registry import ADVISORY_PRODUCERS
     by_key = {s.key: s for s in ADVISORY_PRODUCERS}
     assert "overstock" in by_key
-    assert by_key["overstock"].enabled is False
+    assert by_key["overstock"].enabled is True
 
 
 def test_overstock_in_decision_feed():

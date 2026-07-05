@@ -1,13 +1,13 @@
 """
 Overstock / Dead Stock Diagnosis — SHADOW VALIDATION (Phase 7.1), read-only.
 
-Exercises the DISABLED overstock producer via run_one() on realistic latest-stock snapshots +
-finance quantity rows. Validation tests only — no production code touched. Covers the two
-problem types (dead_stock / excess_stock), the excess days-of-cover band matrix (90/120/180 +
-exact boundaries), honest absence (no/depleted stock, thin observed window, cover below band),
+Exercises the overstock producer via run_one() on realistic latest-stock snapshots + finance
+quantity rows. Validation tests only — no production code touched. Covers the two problem types
+(dead_stock / excess_stock), the excess days-of-cover band matrix (90/120/180 + exact
+boundaries), honest absence (no/depleted stock, thin observed window, cover below band),
 idempotence, evidence determinism, stale/lifecycle reconcile, advisory-only side-effect freedom,
-disabled→no-scheduler, not-in-feed, and INDEPENDENCE from Supply (never touches supply_signal —
-Overstock is the MIRROR of Supply, not a reuse).
+enabled→scheduler-runs (Phase 7.3b), in-feed, and INDEPENDENCE from Supply (never touches
+supply_signal — Overstock is the MIRROR of Supply, not a reuse).
 
 Observed-only: days_of_cover = stock ÷ (total_units / distinct_days). No forecast, no benchmark,
 no competitor compare, no discount/liquidation.
@@ -241,21 +241,22 @@ def test_dismissed_same_evidence_stays_dismissed():
 
 # ── disabled: registered but never scheduled ─────────────────────────────────
 
-def test_registry_overstock_disabled():
+def test_registry_overstock_enabled():
     from services.advisory_runtime.registry import ADVISORY_PRODUCERS
     by_key = {s.key: s for s in ADVISORY_PRODUCERS}
     assert "overstock" in by_key
-    assert by_key["overstock"].enabled is False
+    assert by_key["overstock"].enabled is True
 
 
-def test_scheduler_does_not_run_overstock():
+def test_scheduler_runs_overstock():
     async def go():
         db = await _db(); uid = str(uuid.uuid4())
         await _seed(db, uid, 200, _sales(3)); await db.commit()
-        await AdvisoryRuntime().run_due_producers(db, now=NOW)   # REAL registry
+        # default slot_budget (20) covers all 12 enabled producers for this active user
+        await AdvisoryRuntime().run_due_producers(db, now=NOW)   # REAL registry, default budget
         from models.advisory_run import AdvisoryRun
         keys = {r.producer_key for r in (await db.execute(select(AdvisoryRun))).scalars().all()}
-        assert "overstock" not in keys                   # disabled → never scheduled
+        assert "overstock" in keys                       # enabled → scheduled
     _run(go())
 
 
