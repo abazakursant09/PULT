@@ -25,6 +25,7 @@ from dependencies import get_current_user
 from models.import_record import ImportRecord
 from models.imported_finance import ImportedFinanceRow
 from models.imported_product import ImportedProductRow
+from models.imported_return import ImportedReturnRow
 from models.product import Product
 from models.user import User
 from services.product_resolver import build_product_index, resolve, resolution_key
@@ -322,6 +323,42 @@ async def confirm_import(
                 rating        = row.get("rating"),
                 reviews_count = row.get("reviews_count"),
                 product_id    = pid,
+            ))
+            if len(rows_to_insert) >= BATCH:
+                try:
+                    async with db.begin_nested():
+                        db.add_all(rows_to_insert)
+                        await db.flush()
+                    imported += len(rows_to_insert)
+                except SQLAlchemyError as exc:
+                    logger.warning("batch_insert_failed", extra={"rows": len(rows_to_insert), "error": str(exc)})
+                    failed += len(rows_to_insert)
+                rows_to_insert = []
+        if rows_to_insert:
+            try:
+                async with db.begin_nested():
+                    db.add_all(rows_to_insert)
+                    await db.flush()
+                imported += len(rows_to_insert)
+            except SQLAlchemyError as exc:
+                logger.warning("batch_insert_failed", extra={"rows": len(rows_to_insert), "error": str(exc)})
+                failed += len(rows_to_insert)
+
+    elif rec.import_type == "returns":
+        # Returns rows: resolve to a catalog Product only (no auto-create, like finance).
+        # A returns-only sku without a Product stays product_id=None. Ingestion only.
+        rows_to_insert = []
+        for row in result.parsed_data:
+            rows_to_insert.append(ImportedReturnRow(
+                import_id     = rec.id,
+                user_id       = str(user.id),
+                marketplace   = rec.marketplace,
+                date          = row.get("date"),
+                sku           = row.get("sku", ""),
+                returns_qty   = row.get("returns_qty", 0),
+                return_amount = row.get("return_amount", 0.0),
+                reason        = row.get("reason"),
+                product_id    = resolve(product_index, str(user.id), rec.marketplace, row.get("sku", "")),
             ))
             if len(rows_to_insert) >= BATCH:
                 try:
