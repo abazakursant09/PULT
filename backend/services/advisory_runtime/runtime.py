@@ -146,11 +146,16 @@ class AdvisoryRuntime:
 
     async def run_due_producers(
         self, db: AsyncSession, *, now: Optional[datetime] = None,
-        slot_budget: int = 10, triggered_by: str = "scheduled",
+        slot_budget: int = 20, triggered_by: str = "scheduled",
     ) -> RuntimeTickResult:
         """Run every DUE (active-user × enabled-producer) pair, capped at slot_budget.
         Shadow-safe: when no ProducerSpec is enabled it returns immediately, touching
-        no user. One producer/user failure never aborts the tick (error-isolated)."""
+        no user. One producer/user failure never aborts the tick (error-isolated).
+
+        Default slot_budget is 20 so all currently enabled producers (11 as of Review
+        Velocity, Phase 6.3b) can be considered for a single active user in one tick — the
+        old default of 10 would drop the last-registered producer. It is still a per-tick
+        throttle (the cap counts producer×user pairs globally); callers may override it."""
         from .registry import ADVISORY_PRODUCERS          # lazy: break import cycle
 
         ts = now or datetime.utcnow()
