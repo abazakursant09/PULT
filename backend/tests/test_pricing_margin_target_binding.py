@@ -90,7 +90,7 @@ def test_alembic_single_head():
     from alembic.config import Config
     from alembic.script import ScriptDirectory
     heads = ScriptDirectory.from_config(Config("alembic.ini")).get_heads()
-    assert heads == ["rsg1a2b3c4d01"], heads   # returns signal foundation (Phase R1a)
+    assert heads == ["cci1a2b3c4d01"], heads   # card content import foundation (Phase C0)
 
 
 def test_migration_additive_only():

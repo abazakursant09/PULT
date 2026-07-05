@@ -46,6 +46,22 @@ PRODUCT_COLUMNS: dict[str, list[str]] = {
     "reviews_count": ["отзывы", "количество отзывов", "reviews", "отзывов"],
 }
 
+CARD_CONTENT_COLUMNS: dict[str, list[str]] = {
+    "sku":             ["артикул wb", "wb артикул", "артикул ozon", "sku ozon", "ozon sku",
+                        "offer_id", "vendor_code", "nm_id", "barcode", "штрихкод", "артикул", "sku",
+                        "номенклатура"],
+    "title":           ["название", "наименование", "наименование товара", "title", "товар"],
+    "description":     ["описание", "текст описания", "описание товара", "description"],
+    "brand":           ["бренд", "производитель", "торговая марка", "brand"],
+    "category":        ["категория", "предмет", "тип товара", "category", "категория товара"],
+    "characteristics": ["характеристики", "атрибуты", "характеристики товара", "characteristics",
+                        "attributes"],
+    "image_count":     ["количество фото", "кол-во фото", "фото", "изображения", "картинки",
+                        "image count", "images count"],
+    "image_urls":      ["ссылки на фото", "url фото", "ссылки на изображения", "image urls",
+                        "images", "фото url"],
+}
+
 RETURNS_COLUMNS: dict[str, list[str]] = {
     "date":          ["дата", "date", "период", "дата возврата", "дата оформления возврата"],
     "sku":           ["артикул wb", "wb артикул", "артикул ozon", "sku ozon", "ozon sku",
@@ -67,6 +83,8 @@ _YM_SIGS    = {"offer_id", "яндекс маркет", "маркет", "ym ар
 _FIN_SIGS   = {"выручка", "комиссия", "прибыль", "чистая прибыль", "revenue", "оборот"}
 _PROD_SIGS  = {"остаток", "рейтинг", "отзывы", "цена продажи", "stock", "rating"}
 _RET_SIGS   = {"возврат", "возвраты", "сумма возврата", "причина возврата", "return", "возвращено"}
+_CARD_SIGS  = {"описание", "характеристики", "description", "characteristics", "атрибуты",
+               "текст описания"}
 
 
 # ── Result dataclass ──────────────────────────────────────────────────────────
@@ -118,6 +136,12 @@ def _detect_import_type(headers_lower: list[str]) -> Optional[str]:
     fin_score  = sum(1 for h in hset if any(s in h for s in _FIN_SIGS))
     prod_score = sum(1 for h in hset if any(s in h for s in _PROD_SIGS))
     ret_score  = sum(1 for h in hset if any(s in h for s in _RET_SIGS))
+    card_score = sum(1 for h in hset if any(s in h for s in _CARD_SIGS))
+    # Card-content headers carry a distinctive signature (описание + характеристики / description)
+    # that finance/products/returns never do; when present it wins so a card export is not
+    # mistaken for products.
+    if card_score > fin_score and card_score > prod_score and card_score > ret_score:
+        return "card_content"
     # Returns headers carry a distinctive signature («возврат» / return) that finance/products
     # never do; when present it wins so a returns export is not mistaken for finance.
     if ret_score > fin_score and ret_score > prod_score:  return "returns"
@@ -126,6 +150,7 @@ def _detect_import_type(headers_lower: list[str]) -> Optional[str]:
     if fin_score > 0:            return "finance"
     if prod_score > 0:           return "products"
     if ret_score > 0:            return "returns"
+    if card_score > 0:           return "card_content"
     return None
 
 
@@ -332,6 +357,66 @@ def _parse_returns_row(
     return out, warnings
 
 
+def _parse_card_content_row(
+    row: dict[str, str],
+    mapping: dict[str, str],
+    row_num: int,
+) -> tuple[Optional[dict], list[str]]:
+    import json as _json
+
+    warnings: list[str] = []
+    out: dict = {}
+
+    def get(field: str) -> str:
+        return row.get(mapping.get(field, ""), "")
+
+    sku = get("sku").strip()
+    if not sku:
+        return None, [f"Строка {row_num}: пропущена — отсутствует обязательное поле «Артикул/SKU»"]
+    out["sku"] = sku
+
+    out["title"] = get("title").strip() or None
+    out["description"] = get("description").strip() or None
+    out["brand"] = get("brand").strip() or None
+    out["category"] = get("category").strip() or None
+
+    # Characteristics: captured as a JSON string. Accept an already-JSON value, else store the raw
+    # reported text under a single key so nothing is lost or invented.
+    chars_raw = get("characteristics").strip()
+    if chars_raw:
+        try:
+            parsed = _json.loads(chars_raw)
+            out["characteristics_json"] = _json.dumps(parsed, ensure_ascii=False)
+        except (ValueError, TypeError):
+            out["characteristics_json"] = _json.dumps({"raw": chars_raw}, ensure_ascii=False)
+    else:
+        out["characteristics_json"] = None
+
+    img_raw = get("image_count").strip()
+    if img_raw:
+        img_val, warn = _parse_int(img_raw, "Количество фото", row_num)
+        if warn:
+            warnings.append(warn)
+        out["image_count"] = img_val
+    else:
+        out["image_count"] = None
+
+    urls_raw = get("image_urls").strip()
+    if urls_raw:
+        try:
+            parsed = _json.loads(urls_raw)
+            out["image_urls_json"] = _json.dumps(parsed, ensure_ascii=False)
+        except (ValueError, TypeError):
+            urls = [u.strip() for u in re.split(r"[;,\s]+", urls_raw) if u.strip()]
+            out["image_urls_json"] = _json.dumps(urls, ensure_ascii=False)
+    else:
+        out["image_urls_json"] = None
+
+    out["date"] = None
+
+    return out, warnings
+
+
 # ── Main entry point ──────────────────────────────────────────────────────────
 
 def parse_csv(
@@ -387,9 +472,10 @@ def parse_csv(
 
     # Build column mapping using lower-cased headers as keys
     col_map = {
-        "finance":  FINANCE_COLUMNS,
-        "products": PRODUCT_COLUMNS,
-        "returns":  RETURNS_COLUMNS,
+        "finance":      FINANCE_COLUMNS,
+        "products":     PRODUCT_COLUMNS,
+        "returns":      RETURNS_COLUMNS,
+        "card_content": CARD_CONTENT_COLUMNS,
     }.get(result.import_type, PRODUCT_COLUMNS)
     mapping = _build_column_mapping(headers_lower, col_map)
 
@@ -429,6 +515,8 @@ def parse_csv(
             parsed, warnings = _parse_finance_row(row_lower, mapping, row_num)
         elif result.import_type == "returns":
             parsed, warnings = _parse_returns_row(row_lower, mapping, row_num)
+        elif result.import_type == "card_content":
+            parsed, warnings = _parse_card_content_row(row_lower, mapping, row_num)
         else:
             parsed, warnings = _parse_product_row(row_lower, mapping, row_num)
 
@@ -496,6 +584,18 @@ _TEMPLATES: dict[tuple[str, str], str] = {
     ("ym", "returns"): (
         "Дата возврата,Артикул Яндекс,Количество возвратов,Сумма возврата,Причина возврата\n"
         "05.01.2025,offer-001,1,499,Передумал\n"
+    ),
+    ("wb", "card_content"): (
+        "Артикул WB,Название,Описание,Бренд,Категория,Характеристики,Количество фото,Ссылки на фото\n"
+        "12345678,Крем для рук,Увлажняющий крем 75 мл,AquaCare,Красота,\"{\"\"Объём\"\":\"\"75 мл\"\"}\",5,\"https://a.jpg;https://b.jpg\"\n"
+    ),
+    ("ozon", "card_content"): (
+        "SKU Ozon,Название,Описание,Бренд,Категория,Характеристики,Количество фото\n"
+        "987654321,Крем для рук,Питательный крем,AquaCare,Уход,\"Объём: 75 мл; Тип: крем\",4\n"
+    ),
+    ("ym", "card_content"): (
+        "Артикул Яндекс,Название,Описание,Бренд,Категория,Характеристики,Количество фото\n"
+        "offer-001,Крем для рук,Крем для сухой кожи,AquaCare,Косметика,\"Объём: 75 мл\",3\n"
     ),
 }
 
