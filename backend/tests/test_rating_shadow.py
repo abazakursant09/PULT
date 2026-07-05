@@ -7,7 +7,8 @@ Validation tests only — no production code touched. Covers the severity-band m
 exact boundaries 0.10/0.20/0.40), honest absence, dated-snapshot ordering (created_at, not
 insert order), latest-vs-baseline, multi-SKU isolation, two-marketplace independence,
 evidence_hash determinism, stale/lifecycle reconcile, advisory-only side-effect freedom,
-disabled→no-scheduler/no-feed, and REVIEW INDEPENDENCE (rating never touches review_signal).
+enabled→scheduler-runs/feed-reads (Phase 5.3b), and REVIEW INDEPENDENCE (rating never
+touches review_signal).
 
 Bands (drop = baseline − latest, `>=`): >=0.40 high, >=0.20 medium, >=0.10 low; so exactly
 0.10→low, 0.20→medium, 0.40→high.
@@ -289,13 +290,13 @@ def test_advisory_only_and_review_independent():
     _run(go())
 
 
-def test_disabled_but_feed_reads_it():
-    # Producer stays DISABLED (never scheduled); Phase 5.3a wired the feed reader, so
-    # rating IS now a feed engine — inert until 5.3b enables the producer.
+def test_enabled_and_feed_reads_it():
+    # Phase 5.3b enabled the producer (scheduled, writes rating_signal); 5.3a wired the
+    # feed reader — rating is a live feed engine now, distinct from Review.
     from services.advisory_runtime.registry import ADVISORY_PRODUCERS
     from services.decision_feed.builder import _ENGINES
     by_key = {s.key: s for s in ADVISORY_PRODUCERS}
-    assert by_key["rating"].enabled is False
+    assert by_key["rating"].enabled is True
     tables = {t for (_c, _m, t) in _ENGINES}
-    assert "rating_signal" in tables                # rating now wired (reader-only)
+    assert "rating_signal" in tables                # rating wired into the feed reader
     assert "review_signal" in tables                # Review still independent

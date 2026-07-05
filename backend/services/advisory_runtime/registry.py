@@ -115,9 +115,9 @@ ADVISORY_PRODUCERS: Tuple[ProducerSpec, ...] = (
     # Pure diagnosis; confirmed decline only (history-gated, blip-rejected). Emits an
     # evidence-backed rating_signal ONLY — no treatment, no executor binding
     # (recommended_action_key=None), no Decision. DISTINCT from the Review contour (individual
-    # review handling) — does NOT touch Review or reuse review_signal. Shipped DISABLED for
-    # shadow validation via run_one() until a later enable slice; NOT yet in the Decision
-    # Feed. Advisory-only.
+    # review handling) — does NOT touch Review or reuse review_signal. ENABLED (Phase 5.3b):
+    # the scheduler now runs it daily and it writes rating_signal, surfacing through the
+    # Decision Feed reader wired in 5.3a. Advisory-only.
     ProducerSpec(key="rating", run=run_rating_producer,
-                 cadence_seconds=86400, enabled=False),
+                 cadence_seconds=86400, enabled=True),
 )
