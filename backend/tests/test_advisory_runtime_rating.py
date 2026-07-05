@@ -1,12 +1,12 @@
 """
-Advisory Runtime Phase 5.1 — Rating / Reputation Health Diagnosis producer (DISABLED + shadow).
+Advisory Runtime Phase 5.1 — Rating / Reputation Health Diagnosis producer.
 
 Diagnoses aggregate rating DECLINE (baseline snapshot → latest) per (marketplace, sku) from
 the seller's OWN ImportedProductRow.rating across dated import snapshots. DISTINCT from the
-Review contour. Shipped DISABLED; exercised only via run_one(). Proves: confirmed decline
-emits a rating_signal with the right severity band, honest absence (thin/flat/rising/below-
-band/no-rating/unconfirmed-blip), advisory-only (0 Decision / 0 link / 0 executor),
-idempotent, registry disabled, scheduler skips it.
+Review contour. Proves: confirmed decline emits a rating_signal with the right severity band,
+honest absence (thin/flat/rising/below-band/no-rating/unconfirmed-blip), advisory-only
+(0 Decision / 0 link / 0 executor), idempotent, registry ENABLED (Phase 5.3b), scheduler
+runs it.
 """
 import asyncio
 import json
@@ -164,19 +164,19 @@ def test_idempotent_reconcile():
     _run(go())
 
 
-# ── registry disabled; scheduler skips it ────────────────────────────────────
+# ── registry enabled; scheduler runs it (Phase 5.3b) ─────────────────────────
 
-def test_registry_rating_disabled():
+def test_registry_rating_enabled():
     by_key = {s.key: s for s in ADVISORY_PRODUCERS}
     assert "rating" in by_key
-    assert by_key["rating"].enabled is False
+    assert by_key["rating"].enabled is True
 
 
-def test_scheduler_does_not_run_rating():
+def test_scheduler_runs_rating():
     async def go():
         db = await _db(); uid = str(uuid.uuid4())
         await _seed(db, uid, [4.8, 4.5, 4.3]); await db.commit()
         await AdvisoryRuntime().run_due_producers(db, now=NOW)   # REAL registry
         keys = {r.producer_key for r in (await db.execute(select(AdvisoryRun))).scalars().all()}
-        assert "rating" not in keys                             # disabled → never scheduled
+        assert "rating" in keys                                 # enabled → scheduled
     _run(go())
