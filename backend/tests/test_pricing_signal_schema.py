@@ -36,7 +36,7 @@ def test_alembic_single_head():
     from alembic.script import ScriptDirectory
     cfg = Config("alembic.ini")
     heads = ScriptDirectory.from_config(cfg).get_heads()
-    assert heads == ["rvl1a2b3c4d01"], heads         # single head (review velocity foundation rev)
+    assert heads == ["ovs1a2b3c4d01"], heads         # single head (overstock / dead stock foundation rev)
 
 
 def test_migration_is_additive_only():
