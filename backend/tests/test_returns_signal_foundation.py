@@ -93,13 +93,14 @@ def test_returns_producer_registered_but_disabled():
     assert by_key["returns"].enabled is False
 
 
-def test_returns_not_in_decision_feed():
-    # Schema wired to NOTHING: the Decision Feed reads no returns table yet.
+def test_returns_in_decision_feed():
+    # Phase R3a wired the reader: returns_signal is now a canonical feed engine. The producer
+    # stays DISABLED, so nothing writes returns_signal in prod yet (INERT until R3b enables it).
     from services.decision_feed.builder import _ENGINES
     tables = {t for (_c, _m, t) in _ENGINES}
-    assert "returns_signal" not in tables
+    assert "returns_signal" in tables
     contours = {c for (c, _m, _t) in _ENGINES}
-    assert "returns" not in contours
+    assert "returns" in contours
 
 
 def test_all_seven_live_contours_untouched():
