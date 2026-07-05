@@ -98,11 +98,12 @@ def test_indexes_match_pattern():
     assert aix == {"ix_overstock_audit_user_listing", "ix_overstock_audit_status"}
 
 
-def test_overstock_producer_not_registered():
-    # Phase 7.0 is schema-only: NO producer exists in the Advisory Runtime registry yet.
+def test_overstock_producer_registered_but_disabled():
+    # Phase 7.1 wired the shadow producer: registered but DISABLED (never scheduled).
     from services.advisory_runtime.registry import ADVISORY_PRODUCERS
     by_key = {s.key: s for s in ADVISORY_PRODUCERS}
-    assert "overstock" not in by_key
+    assert "overstock" in by_key
+    assert by_key["overstock"].enabled is False
 
 
 def test_overstock_not_in_decision_feed():

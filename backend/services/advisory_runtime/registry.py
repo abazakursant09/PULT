@@ -21,7 +21,7 @@ from .producers import (
     run_growth_producer, run_legal_producer, run_review_producer,
     run_operations_low_stock_producer, run_advertising_producer, run_pricing_producer,
     run_revenue_diagnosis_producer, run_money_leak_producer, run_supply_producer,
-    run_rating_producer, run_review_velocity_producer,
+    run_rating_producer, run_review_velocity_producer, run_overstock_producer,
 )
 
 
@@ -131,4 +131,13 @@ ADVISORY_PRODUCERS: Tuple[ProducerSpec, ...] = (
     # 6.3a. Advisory-only.
     ProducerSpec(key="review_velocity", run=run_review_velocity_producer,
                  cadence_seconds=86400, enabled=True),
+    # overstock: Overstock / Dead Stock Diagnosis — the MIRROR of Supply (Supply flags too-little
+    # runway, Overstock flags too-much: dead stock with no observed sales, or excess days-of-cover
+    # relative to observed demand). Observed-only: latest ImportedProductRow.stock vs
+    # ImportedFinanceRow.quantity velocity; no forecast, no benchmark, no competitor, no
+    # discount/liquidation. Pure diagnosis — recommended_action_key=None, no executor binding, no
+    # Decision. DISTINCT from Supply — does NOT reuse supply_signal. Shipped DISABLED (Phase 7.1)
+    # for shadow validation via run_one() until a later enable slice; NOT yet in the Decision Feed.
+    ProducerSpec(key="overstock", run=run_overstock_producer,
+                 cadence_seconds=86400, enabled=False),
 )

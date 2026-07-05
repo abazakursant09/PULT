@@ -65,6 +65,12 @@ from services.review_velocity.diagnosis_source import (
     build_review_series, observed_sales_by_date, classify_review_velocity_stall)
 from services.review_velocity.persist import reconcile_review_velocity_signal
 
+from models.overstock_audit import OverstockAudit
+from services.overstock.diagnosis_source import (
+    latest_stock as overstock_latest_stock,
+    observed_velocity as overstock_observed_velocity, classify_overstock)
+from services.overstock.persist import reconcile_overstock_signal
+
 from .runtime import RuntimeContext, ProducerResult
 
 
@@ -371,6 +377,57 @@ async def run_review_velocity_producer(ctx: RuntimeContext) -> ProducerResult:
     return ProducerResult(ok=True, stats={
         "candidates_seen": seen,
         "stalls_confirmed": emitted,
+        "honest_absent": absent,
+        "signals_reconciled": reconciled,
+    })
+
+
+async def run_overstock_producer(ctx: RuntimeContext) -> ProducerResult:
+    """Overstock / Dead Stock Diagnosis advisory producer adapter (Phase 7.1, shadow).
+    Diagnoses OVERSTOCK per observed (marketplace, sku) — latest on-hand stock
+    (ImportedProductRow) vs observed sell-through velocity (ImportedFinanceRow): dead stock
+    (stock present, zero observed sales) or excess stock (days-of-cover too high). The MIRROR
+    of Supply (services/overstock). Flush-only; no commit. DB-headless — no marketplace client.
+    Observed present overstock, not a forecast.
+
+    PURE DIAGNOSIS + INDEPENDENT: emits an evidence-backed overstock_signal only — no treatment,
+    no recommended_action_key that binds an executor, no Decision, no EngineSignalDecisionLink,
+    no Apply, no executor, no marketplace write, no discount/liquidation. DISTINCT from Supply —
+    does NOT reuse supply_signal; does not absorb Revenue/MoneyLeak/Pricing. Confirmed overstock
+    only (stock-gated, history-gated); honest absence emits nothing."""
+    db, uid = ctx.db, ctx.user_id
+
+    seen = emitted = absent = reconciled = 0
+    for marketplace, sku in await _candidate_pairs(db, uid):
+        seen += 1
+        listing_id = await _resolve_listing_id(db, uid, marketplace, sku)
+        stock = await overstock_latest_stock(db, uid, marketplace, sku)
+        distinct_days, total_units = await overstock_observed_velocity(db, uid, marketplace, sku)
+        diag = classify_overstock(stock, distinct_days, total_units,
+                                  marketplace=marketplace, sku=sku)
+
+        audit = OverstockAudit(
+            user_id=uid, listing_id=listing_id, marketplace=marketplace, sku=sku,
+            source="catalog", status="completed",
+            total_problems=1 if diag is not None else 0,
+            total_not_evaluated=0 if diag is not None else 1,
+            top_severity=diag.priority_level if diag is not None else None,
+            triggered_by=ctx.triggered_by, created_at=ctx.now, completed_at=ctx.now)
+        db.add(audit)
+        await db.flush()
+
+        rec = await reconcile_overstock_signal(
+            db, user_id=uid, listing_id=listing_id, audit_id=audit.id,
+            marketplace=marketplace, sku=sku, diagnosis=diag, now=ctx.now)
+        if diag is not None:
+            emitted += 1
+        else:
+            absent += 1
+        reconciled += rec.created + rec.updated
+
+    return ProducerResult(ok=True, stats={
+        "candidates_seen": seen,
+        "overstock_confirmed": emitted,
         "honest_absent": absent,
         "signals_reconciled": reconciled,
     })
