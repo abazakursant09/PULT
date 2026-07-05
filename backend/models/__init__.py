@@ -24,6 +24,7 @@ from .payment import Payment
 from .import_record import ImportRecord
 from .imported_finance import ImportedFinanceRow
 from .imported_product import ImportedProductRow
+from .imported_return import ImportedReturnRow
 from .seo_project import SeoProject
 from .insight import InsightRecord
 from .telegram_notification_log import TelegramNotificationLog

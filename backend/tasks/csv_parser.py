@@ -46,6 +46,17 @@ PRODUCT_COLUMNS: dict[str, list[str]] = {
     "reviews_count": ["отзывы", "количество отзывов", "reviews", "отзывов"],
 }
 
+RETURNS_COLUMNS: dict[str, list[str]] = {
+    "date":          ["дата", "date", "период", "дата возврата", "дата оформления возврата"],
+    "sku":           ["артикул wb", "wb артикул", "артикул ozon", "sku ozon", "ozon sku",
+                      "offer_id", "артикул", "sku", "номенклатура"],
+    "returns_qty":   ["количество возвратов", "кол-во возвратов", "возвраты", "возвращено",
+                      "штук возвращено", "returns", "return qty", "количество", "кол-во"],
+    "return_amount": ["сумма возврата", "сумма возвратов", "стоимость возврата",
+                      "сумма к возврату", "return amount", "возврат сумма"],
+    "reason":        ["причина возврата", "причина", "return reason", "reason"],
+}
+
 # ── Marketplace / type detection signatures ───────────────────────────────────
 
 _WB_SIGS    = {"артикул wb", "wb артикул", "wb-артикул", "вайлдберриз",
@@ -55,6 +66,7 @@ _YM_SIGS    = {"offer_id", "яндекс маркет", "маркет", "ym ар
                "яндекс", "yandex market"}
 _FIN_SIGS   = {"выручка", "комиссия", "прибыль", "чистая прибыль", "revenue", "оборот"}
 _PROD_SIGS  = {"остаток", "рейтинг", "отзывы", "цена продажи", "stock", "rating"}
+_RET_SIGS   = {"возврат", "возвраты", "сумма возврата", "причина возврата", "return", "возвращено"}
 
 
 # ── Result dataclass ──────────────────────────────────────────────────────────
@@ -105,10 +117,15 @@ def _detect_import_type(headers_lower: list[str]) -> Optional[str]:
     hset = set(headers_lower)
     fin_score  = sum(1 for h in hset if any(s in h for s in _FIN_SIGS))
     prod_score = sum(1 for h in hset if any(s in h for s in _PROD_SIGS))
+    ret_score  = sum(1 for h in hset if any(s in h for s in _RET_SIGS))
+    # Returns headers carry a distinctive signature («возврат» / return) that finance/products
+    # never do; when present it wins so a returns export is not mistaken for finance.
+    if ret_score > fin_score and ret_score > prod_score:  return "returns"
     if fin_score > prod_score:   return "finance"
     if prod_score > fin_score:   return "products"
     if fin_score > 0:            return "finance"
     if prod_score > 0:           return "products"
+    if ret_score > 0:            return "returns"
     return None
 
 
@@ -274,6 +291,47 @@ def _parse_product_row(
     return out, warnings
 
 
+def _parse_returns_row(
+    row: dict[str, str],
+    mapping: dict[str, str],
+    row_num: int,
+) -> tuple[Optional[dict], list[str]]:
+    warnings: list[str] = []
+    out: dict = {}
+
+    def get(field: str) -> str:
+        return row.get(mapping.get(field, ""), "")
+
+    sku = get("sku").strip()
+    if not sku:
+        return None, [f"Строка {row_num}: пропущена — отсутствует обязательное поле «Артикул/SKU»"]
+    out["sku"] = sku
+
+    date_raw = get("date").strip()
+    if date_raw:
+        date_val, warn = _parse_date(date_raw, "Дата", row_num)
+        if warn:
+            warnings.append(warn)
+        out["date"] = date_val
+    else:
+        out["date"] = None
+
+    qty_val, warn = _parse_int(get("returns_qty"), "Количество возвратов", row_num)
+    if warn:
+        warnings.append(warn)
+    out["returns_qty"] = qty_val
+
+    amt_val, warn = _parse_float(get("return_amount"), "Сумма возврата", row_num)
+    if warn:
+        warnings.append(warn)
+    out["return_amount"] = amt_val
+
+    reason = get("reason").strip()
+    out["reason"] = reason or None
+
+    return out, warnings
+
+
 # ── Main entry point ──────────────────────────────────────────────────────────
 
 def parse_csv(
@@ -328,7 +386,11 @@ def parse_csv(
         return result
 
     # Build column mapping using lower-cased headers as keys
-    col_map = FINANCE_COLUMNS if result.import_type == "finance" else PRODUCT_COLUMNS
+    col_map = {
+        "finance":  FINANCE_COLUMNS,
+        "products": PRODUCT_COLUMNS,
+        "returns":  RETURNS_COLUMNS,
+    }.get(result.import_type, PRODUCT_COLUMNS)
     mapping = _build_column_mapping(headers_lower, col_map)
 
     # Map back to lower header keys so row lookup works
@@ -365,6 +427,8 @@ def parse_csv(
 
         if result.import_type == "finance":
             parsed, warnings = _parse_finance_row(row_lower, mapping, row_num)
+        elif result.import_type == "returns":
+            parsed, warnings = _parse_returns_row(row_lower, mapping, row_num)
         else:
             parsed, warnings = _parse_product_row(row_lower, mapping, row_num)
 
@@ -419,6 +483,19 @@ _TEMPLATES: dict[tuple[str, str], str] = {
     ("ym", "products"): (
         "Артикул Яндекс,Название,Цена,Остаток,Рейтинг,Отзывы\n"
         "offer-001,Крем для рук,499,60,4.5,90\n"
+    ),
+    ("wb", "returns"): (
+        "Дата возврата,Артикул WB,Количество возвратов,Сумма возврата,Причина возврата\n"
+        "05.01.2025,12345678,3,1497,Не подошёл размер\n"
+        "07.01.2025,87654321,1,299,Брак\n"
+    ),
+    ("ozon", "returns"): (
+        "Дата возврата,SKU Ozon,Количество возвратов,Сумма возврата,Причина возврата\n"
+        "05.01.2025,987654321,2,998,Не подошёл товар\n"
+    ),
+    ("ym", "returns"): (
+        "Дата возврата,Артикул Яндекс,Количество возвратов,Сумма возврата,Причина возврата\n"
+        "05.01.2025,offer-001,1,499,Передумал\n"
     ),
 }
 
