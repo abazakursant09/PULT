@@ -2,13 +2,13 @@
 Review Acquisition / Social-Proof Velocity Diagnosis — SHADOW VALIDATION (Phase 6.1),
 read-only.
 
-Exercises the DISABLED review_velocity producer via run_one() on realistic dated
-reviews_count snapshots + finance quantity rows. Validation tests only — no production code
-touched. Covers the self-referential band matrix (relative_drop 0.30/0.50/0.70 + exact
-boundaries), honest absence (thin history, insufficient per-window sales, earlier_rate==0,
-flat/accelerating, sub-band, reviews-decrease bad data, unalignable windows), idempotence,
-evidence determinism, stale/lifecycle reconcile, advisory-only side-effect freedom, disabled→
-no-scheduler, and INDEPENDENCE from BOTH Rating and Review (never touches rating_signal /
+Exercises the review_velocity producer via run_one() on realistic dated reviews_count
+snapshots + finance quantity rows. Validation tests only — no production code touched. Covers
+the self-referential band matrix (relative_drop 0.30/0.50/0.70 + exact boundaries), honest
+absence (thin history, insufficient per-window sales, earlier_rate==0, flat/accelerating,
+sub-band, reviews-decrease bad data, unalignable windows), idempotence, evidence determinism,
+stale/lifecycle reconcile, advisory-only side-effect freedom, enabled→scheduler-runs (Phase
+6.3b), and INDEPENDENCE from BOTH Rating and Review (never touches rating_signal /
 review_signal).
 
 The metric is self-referential: relative_drop = (earlier_rate − recent_rate) / earlier_rate,
@@ -271,24 +271,26 @@ def test_advisory_only_and_rating_review_independent():
     _run(go())
 
 
-# ── disabled: registered but never scheduled ─────────────────────────────────
+# ── enabled: registered and scheduled (Phase 6.3b) ───────────────────────────
 
-def test_registry_review_velocity_disabled():
+def test_registry_review_velocity_enabled():
     from services.advisory_runtime.registry import ADVISORY_PRODUCERS
     by_key = {s.key: s for s in ADVISORY_PRODUCERS}
     assert "review_velocity" in by_key
-    assert by_key["review_velocity"].enabled is False
+    assert by_key["review_velocity"].enabled is True
 
 
-def test_scheduler_does_not_run_review_velocity():
+def test_scheduler_runs_review_velocity():
     async def go():
         db = await _db(); uid = str(uuid.uuid4())
         snaps, sales = _scenario(10, 10, 2, 10)
         await _seed(db, uid, snaps, sales); await db.commit()
-        await AdvisoryRuntime().run_due_producers(db, now=NOW)   # REAL registry
+        # slot_budget covers all enabled producers in one tick (11 now — default 10 would
+        # drop the last-registered producer)
+        await AdvisoryRuntime().run_due_producers(db, now=NOW, slot_budget=20)   # REAL registry
         from models.advisory_run import AdvisoryRun
         keys = {r.producer_key for r in (await db.execute(select(AdvisoryRun))).scalars().all()}
-        assert "review_velocity" not in keys         # disabled → never scheduled
+        assert "review_velocity" in keys             # enabled → scheduled
     _run(go())
 
 
