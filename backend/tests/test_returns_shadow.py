@@ -1,13 +1,13 @@
 """
 Returns Diagnosis — SHADOW VALIDATION (Phase R1b), read-only.
 
-Exercises the DISABLED returns producer via run_one() on realistic dated sales
-(ImportedFinanceRow) + returns (ImportedReturnRow) rows. Validation tests only — no production
-code touched. Covers the self-referential return-rate-rise band matrix (25%/50%/100% + exact
-boundaries), honest absence (no returns, no/thin sales, insufficient volume, earlier_rate 0,
-flat/falling, sub-band), idempotence, evidence determinism, stale/lifecycle reconcile,
-advisory-only side-effect freedom, disabled→no-scheduler, not-in-feed, and the DOUBLE-COUNT GUARD
-(evidence is return-frequency only — never net_profit / return_amount).
+Exercises the returns producer via run_one() on realistic dated sales (ImportedFinanceRow) +
+returns (ImportedReturnRow) rows. Validation tests only — no production code touched. Covers the
+self-referential return-rate-rise band matrix (25%/50%/100% + exact boundaries), honest absence
+(no returns, no/thin sales, insufficient volume, earlier_rate 0, flat/falling, sub-band),
+idempotence, evidence determinism, stale/lifecycle reconcile, advisory-only side-effect freedom,
+enabled→scheduler-runs (Phase R3b), in-feed, and the DOUBLE-COUNT GUARD (evidence is
+return-frequency only — never net_profit / return_amount).
 
 Observed-only: return_rate = returns_qty / units_sold per window; relative_rise = (recent −
 earlier) / earlier. No forecast, no benchmark, no competitor, no marketplace API.
@@ -239,20 +239,21 @@ def test_dismissed_same_evidence_stays_dismissed():
 
 # ── disabled: registered but never scheduled ─────────────────────────────────
 
-def test_registry_returns_disabled():
+def test_registry_returns_enabled():
     from services.advisory_runtime.registry import ADVISORY_PRODUCERS
     by_key = {s.key: s for s in ADVISORY_PRODUCERS}
-    assert "returns" in by_key and by_key["returns"].enabled is False
+    assert "returns" in by_key and by_key["returns"].enabled is True
 
 
-def test_scheduler_does_not_run_returns():
+def test_scheduler_runs_returns():
     async def go():
         db = await _db(); uid = str(uuid.uuid4())
         await _seed(db, uid, _sales(), [(5, 1), (15, 6)]); await db.commit()
+        # default slot_budget (20) covers all 14 enabled producers for this active user
         await AdvisoryRuntime().run_due_producers(db, now=NOW)   # REAL registry, default budget
         from models.advisory_run import AdvisoryRun
         keys = {r.producer_key for r in (await db.execute(select(AdvisoryRun))).scalars().all()}
-        assert "returns" not in keys               # disabled → never scheduled
+        assert "returns" in keys                   # enabled → scheduled
     _run(go())
 
 

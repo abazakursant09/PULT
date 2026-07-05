@@ -155,8 +155,9 @@ ADVISORY_PRODUCERS: Tuple[ProducerSpec, ...] = (
     # (returns_qty / units sold) — recent window vs this product's OWN earlier window; never an
     # absolute floor / benchmark / competitor. DOUBLE-COUNT GUARD: return FREQUENCY only, never
     # net_profit / return_amount as a money loss. Pure diagnosis — recommended_action_key=None, no
-    # executor binding, no Decision, no marketplace write. Shipped DISABLED (Phase R1b) for shadow
-    # validation via run_one() until a later enable slice; NOT yet in the Decision Feed.
+    # executor binding, no Decision, no marketplace write. ENABLED (Phase R3b): the scheduler now
+    # runs it daily and it writes returns_signal, surfacing through the Decision Feed reader wired
+    # in R3a. Advisory-only.
     ProducerSpec(key="returns", run=run_returns_producer,
-                 cadence_seconds=86400, enabled=False),
+                 cadence_seconds=86400, enabled=True),
 )

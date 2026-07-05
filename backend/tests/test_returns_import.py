@@ -143,13 +143,13 @@ def test_alembic_single_head():
 
 # ── ingestion only: no producer, not in registry, not in feed ────────────────
 
-def test_returns_diagnosis_producer_disabled():
-    # R0 ingestion adds no runtime behavior. R1b later registered a Returns Diagnosis producer,
-    # but it stays DISABLED — the ingestion table drives nothing on its own.
+def test_returns_diagnosis_producer_separate_from_ingestion():
+    # R0 ingestion adds no runtime behavior on its own. The Returns Diagnosis producer (R1b) is a
+    # SEPARATE concern; it was enabled in R3b, but it reads the diagnosis path, not this ingestion
+    # table directly. The producer's enabled state is owned by the registry, not by ingestion.
     from services.advisory_runtime.registry import ADVISORY_PRODUCERS
     by_key = {s.key: s for s in ADVISORY_PRODUCERS}
-    if "returns" in by_key:
-        assert by_key["returns"].enabled is False
+    assert "returns" in by_key and by_key["returns"].enabled is True
 
 
 def test_returns_feed_reads_signal_not_ingestion_table():
