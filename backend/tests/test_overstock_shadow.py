@@ -259,10 +259,10 @@ def test_scheduler_does_not_run_overstock():
     _run(go())
 
 
-# ── not in the Decision Feed yet (reader is Phase 7.3a) ──────────────────────
+# ── in the Decision Feed (reader wired Phase 7.3a; producer still disabled) ───
 
-def test_not_in_decision_feed():
+def test_in_decision_feed():
     from services.decision_feed.builder import _ENGINES
     tables = {t for (_c, _m, t) in _ENGINES}
-    assert "overstock_signal" not in tables
+    assert "overstock_signal" in tables                  # reader wired (7.3a); INERT until 7.3b
     assert "supply_signal" in tables                     # Supply still wired, independent

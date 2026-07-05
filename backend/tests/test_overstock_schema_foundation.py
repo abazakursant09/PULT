@@ -106,13 +106,14 @@ def test_overstock_producer_registered_but_disabled():
     assert by_key["overstock"].enabled is False
 
 
-def test_overstock_not_in_decision_feed():
-    # Schema wired to NOTHING: the Decision Feed reads no overstock table yet.
+def test_overstock_in_decision_feed():
+    # Phase 7.3a wired the reader: overstock_signal is now a canonical feed engine. The
+    # producer stays DISABLED, so nothing writes overstock_signal in prod yet.
     from services.decision_feed.builder import _ENGINES
     tables = {t for (_c, _m, t) in _ENGINES}
-    assert "overstock_signal" not in tables
+    assert "overstock_signal" in tables
     contours = {c for (c, _m, _t) in _ENGINES}
-    assert "overstock" not in contours
+    assert "overstock" in contours
 
 
 def test_supply_and_siblings_untouched():
