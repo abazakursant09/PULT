@@ -85,12 +85,12 @@ def test_indexes_match_pattern():
     assert aix == {"ix_returns_audit_user_listing", "ix_returns_audit_status"}
 
 
-def test_returns_producer_registered_but_disabled():
-    # Phase R1b wired the shadow producer: registered but DISABLED (never scheduled).
+def test_returns_producer_registered_and_enabled():
+    # Phase R3b enabled the producer: registered AND scheduled (writes returns_signal).
     from services.advisory_runtime.registry import ADVISORY_PRODUCERS
     by_key = {s.key: s for s in ADVISORY_PRODUCERS}
     assert "returns" in by_key
-    assert by_key["returns"].enabled is False
+    assert by_key["returns"].enabled is True
 
 
 def test_returns_in_decision_feed():

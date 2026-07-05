@@ -134,14 +134,15 @@ def test_resolved_dismissed_hidden():
     _run(go())
 
 
-# ── producer stays disabled; ingestion table is not a feed engine ────────────
+# ── ingestion table is never a feed engine (producer enabled in R3b) ─────────
 
-def test_producer_disabled_and_ingestion_table_not_engine():
+def test_ingestion_table_not_a_feed_engine():
     from services.advisory_runtime.registry import ADVISORY_PRODUCERS
     by_key = {s.key: s for s in ADVISORY_PRODUCERS}
-    assert by_key["returns"].enabled is False        # reader-only; producer NOT enabled in R3a
+    assert by_key["returns"].enabled is True         # producer live (R3b)
     tables = {t for (_c, _m, t) in _ENGINES}
     assert "imported_return_rows" not in tables      # ingestion table never surfaces directly
+    assert "returns_signal" in tables                # only the diagnosis signal is wired
 
 
 def test_seven_live_contours_still_independent():
