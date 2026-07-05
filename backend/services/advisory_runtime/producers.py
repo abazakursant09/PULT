@@ -75,6 +75,12 @@ from models.price_erosion_audit import PriceErosionAudit
 from services.price_erosion.diagnosis_source import build_price_series, classify_price_erosion
 from services.price_erosion.persist import reconcile_price_erosion_signal
 
+from models.returns_audit import ReturnsAudit
+from services.returns.diagnosis_source import (
+    sales_by_date as returns_sales_by_date,
+    returns_by_date as returns_returns_by_date, classify_returns_rise)
+from services.returns.persist import reconcile_returns_signal
+
 from .runtime import RuntimeContext, ProducerResult
 
 
@@ -481,6 +487,57 @@ async def run_price_erosion_producer(ctx: RuntimeContext) -> ProducerResult:
     return ProducerResult(ok=True, stats={
         "candidates_seen": seen,
         "erosions_confirmed": emitted,
+        "honest_absent": absent,
+        "signals_reconciled": reconciled,
+    })
+
+
+async def run_returns_producer(ctx: RuntimeContext) -> ProducerResult:
+    """Returns Diagnosis advisory producer adapter (Phase R1b, shadow). Diagnoses a rising return
+    RATE per observed (marketplace, sku) — returns_qty (ImportedReturnRow) / units sold
+    (ImportedFinanceRow.quantity) — comparing the recent window to this product's OWN earlier
+    window (services/returns). Flush-only; no commit. DB-headless — reads only uploaded observed
+    data, no marketplace client. Observed present rise, not a forecast.
+
+    DOUBLE-COUNT DISCIPLINE: diagnoses return FREQUENCY only. NEVER reads net_profit, NEVER uses
+    return_amount as a profit loss (net_profit may already reflect returns).
+
+    PURE DIAGNOSIS + INDEPENDENT: emits an evidence-backed returns_signal only — no treatment, no
+    recommended_action_key that binds an executor, no Decision, no EngineSignalDecisionLink, no
+    Apply, no executor, no marketplace write. Confirmed self-referential rise only (history-gated,
+    volume-gated); honest absence emits nothing."""
+    db, uid = ctx.db, ctx.user_id
+
+    seen = emitted = absent = reconciled = 0
+    for marketplace, sku in await _candidate_pairs(db, uid):
+        seen += 1
+        listing_id = await _resolve_listing_id(db, uid, marketplace, sku)
+        sales = await returns_sales_by_date(db, uid, marketplace, sku)
+        returns = await returns_returns_by_date(db, uid, marketplace, sku)
+        diag = classify_returns_rise(sales, returns, marketplace=marketplace, sku=sku)
+
+        audit = ReturnsAudit(
+            user_id=uid, listing_id=listing_id, marketplace=marketplace, sku=sku,
+            source="finance", status="completed",
+            total_problems=1 if diag is not None else 0,
+            total_not_evaluated=0 if diag is not None else 1,
+            top_severity=diag.priority_level if diag is not None else None,
+            triggered_by=ctx.triggered_by, created_at=ctx.now, completed_at=ctx.now)
+        db.add(audit)
+        await db.flush()
+
+        rec = await reconcile_returns_signal(
+            db, user_id=uid, listing_id=listing_id, audit_id=audit.id,
+            marketplace=marketplace, sku=sku, diagnosis=diag, now=ctx.now)
+        if diag is not None:
+            emitted += 1
+        else:
+            absent += 1
+        reconciled += rec.created + rec.updated
+
+    return ProducerResult(ok=True, stats={
+        "candidates_seen": seen,
+        "rises_confirmed": emitted,
         "honest_absent": absent,
         "signals_reconciled": reconciled,
     })

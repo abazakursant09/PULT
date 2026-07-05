@@ -85,11 +85,12 @@ def test_indexes_match_pattern():
     assert aix == {"ix_returns_audit_user_listing", "ix_returns_audit_status"}
 
 
-def test_returns_producer_not_registered():
-    # Phase R1a is schema-only: NO producer exists in the Advisory Runtime registry yet.
+def test_returns_producer_registered_but_disabled():
+    # Phase R1b wired the shadow producer: registered but DISABLED (never scheduled).
     from services.advisory_runtime.registry import ADVISORY_PRODUCERS
     by_key = {s.key: s for s in ADVISORY_PRODUCERS}
-    assert "returns" not in by_key
+    assert "returns" in by_key
+    assert by_key["returns"].enabled is False
 
 
 def test_returns_not_in_decision_feed():

@@ -22,7 +22,7 @@ from .producers import (
     run_operations_low_stock_producer, run_advertising_producer, run_pricing_producer,
     run_revenue_diagnosis_producer, run_money_leak_producer, run_supply_producer,
     run_rating_producer, run_review_velocity_producer, run_overstock_producer,
-    run_price_erosion_producer,
+    run_price_erosion_producer, run_returns_producer,
 )
 
 
@@ -151,4 +151,12 @@ ADVISORY_PRODUCERS: Tuple[ProducerSpec, ...] = (
     # price_erosion_signal, surfacing through the Decision Feed reader wired in 8.3a. Advisory-only.
     ProducerSpec(key="price_erosion", run=run_price_erosion_producer,
                  cadence_seconds=86400, enabled=True),
+    # returns: Returns Diagnosis. Self-referential rise in the seller's OWN observed return RATE
+    # (returns_qty / units sold) — recent window vs this product's OWN earlier window; never an
+    # absolute floor / benchmark / competitor. DOUBLE-COUNT GUARD: return FREQUENCY only, never
+    # net_profit / return_amount as a money loss. Pure diagnosis — recommended_action_key=None, no
+    # executor binding, no Decision, no marketplace write. Shipped DISABLED (Phase R1b) for shadow
+    # validation via run_one() until a later enable slice; NOT yet in the Decision Feed.
+    ProducerSpec(key="returns", run=run_returns_producer,
+                 cadence_seconds=86400, enabled=False),
 )
