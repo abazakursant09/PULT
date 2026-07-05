@@ -86,12 +86,12 @@ def test_indexes_match_pattern():
     assert aix == {"ix_price_erosion_audit_user_listing", "ix_price_erosion_audit_status"}
 
 
-def test_price_erosion_producer_registered_but_disabled():
-    # Phase 8.1 wired the shadow producer: registered but DISABLED (never scheduled).
+def test_price_erosion_producer_registered_and_enabled():
+    # Phase 8.3b enabled the producer: registered AND scheduled (writes price_erosion_signal).
     from services.advisory_runtime.registry import ADVISORY_PRODUCERS
     by_key = {s.key: s for s in ADVISORY_PRODUCERS}
     assert "price_erosion" in by_key
-    assert by_key["price_erosion"].enabled is False
+    assert by_key["price_erosion"].enabled is True
 
 
 def test_price_erosion_in_decision_feed():

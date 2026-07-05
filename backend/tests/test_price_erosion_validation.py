@@ -242,11 +242,11 @@ def test_pricing_independent_no_price_write():
 
 # ── disabled but feed reads it (reader wired 8.3a; producer still disabled) ───
 
-def test_disabled_but_feed_reads_it():
+def test_enabled_and_feed_reads_it():
     from services.advisory_runtime.registry import ADVISORY_PRODUCERS
     from services.decision_feed.builder import _ENGINES
     by_key = {s.key: s for s in ADVISORY_PRODUCERS}
-    assert by_key["price_erosion"].enabled is False          # producer still disabled
+    assert by_key["price_erosion"].enabled is True           # producer live (8.3b)
     tables = {t for (_c, _m, t) in _ENGINES}
-    assert "price_erosion_signal" in tables                  # reader wired (8.3a), INERT
+    assert "price_erosion_signal" in tables                  # reader wired (8.3a)
     assert "pricing_signal" in tables                        # executable Pricing independent

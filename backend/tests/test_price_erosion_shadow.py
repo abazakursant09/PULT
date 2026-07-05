@@ -1,12 +1,12 @@
 """
 Price Erosion / Discount Creep Diagnosis — SHADOW VALIDATION (Phase 8.1), read-only.
 
-Exercises the DISABLED price_erosion producer via run_one() on realistic dated
-ImportedProductRow.price snapshots. Validation tests only — no production code touched. Covers
-the self-referential relative-drop band matrix (5%/15%/30% + exact boundaries), honest absence
-(thin history, flat/rising, sub-band, non-positive baseline, single-dip noise), dated ordering
-(by created_at, NOT insert order), idempotence, evidence determinism, stale/lifecycle reconcile,
-advisory-only side-effect freedom (no price-write), disabled→no-scheduler, not-in-feed, and
+Exercises the price_erosion producer via run_one() on realistic dated ImportedProductRow.price
+snapshots. Validation tests only — no production code touched. Covers the self-referential
+relative-drop band matrix (5%/15%/30% + exact boundaries), honest absence (thin history,
+flat/rising, sub-band, non-positive baseline, single-dip noise), dated ordering (by created_at,
+NOT insert order), idempotence, evidence determinism, stale/lifecycle reconcile, advisory-only
+side-effect freedom (no price-write), enabled→scheduler-runs (Phase 8.3b), in-feed, and
 INDEPENDENCE from the executable Pricing contour (never touches pricing_signal).
 
 Observed-only: relative_drop = (baseline − latest) / baseline. No forecast, no benchmark, no
@@ -236,21 +236,22 @@ def test_dismissed_same_evidence_stays_dismissed():
 
 # ── disabled: registered but never scheduled ─────────────────────────────────
 
-def test_registry_price_erosion_disabled():
+def test_registry_price_erosion_enabled():
     from services.advisory_runtime.registry import ADVISORY_PRODUCERS
     by_key = {s.key: s for s in ADVISORY_PRODUCERS}
     assert "price_erosion" in by_key
-    assert by_key["price_erosion"].enabled is False
+    assert by_key["price_erosion"].enabled is True
 
 
-def test_scheduler_does_not_run_price_erosion():
+def test_scheduler_runs_price_erosion():
     async def go():
         db = await _db(); uid = str(uuid.uuid4())
         await _seed(db, uid, _seq(100, 80, 65)); await db.commit()
-        await AdvisoryRuntime().run_due_producers(db, now=NOW)   # REAL registry
+        # default slot_budget (20) covers all 13 enabled producers for this active user
+        await AdvisoryRuntime().run_due_producers(db, now=NOW)   # REAL registry, default budget
         from models.advisory_run import AdvisoryRun
         keys = {r.producer_key for r in (await db.execute(select(AdvisoryRun))).scalars().all()}
-        assert "price_erosion" not in keys               # disabled → never scheduled
+        assert "price_erosion" in keys                   # enabled → scheduled
     _run(go())
 
 

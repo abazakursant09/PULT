@@ -147,8 +147,8 @@ ADVISORY_PRODUCERS: Tuple[ProducerSpec, ...] = (
     # compression) — baseline vs latest confirmed price; never an absolute floor / benchmark /
     # competitor. Pure diagnosis — recommended_action_key=None, no executor binding, no
     # price-write, no Decision. DISTINCT from the executable Pricing contour — does NOT reuse
-    # pricing_signal. Shipped DISABLED (Phase 8.1) for shadow validation via run_one() until a
-    # later enable slice; NOT yet in the Decision Feed. Advisory-only.
+    # pricing_signal. ENABLED (Phase 8.3b): the scheduler now runs it daily and it writes
+    # price_erosion_signal, surfacing through the Decision Feed reader wired in 8.3a. Advisory-only.
     ProducerSpec(key="price_erosion", run=run_price_erosion_producer,
-                 cadence_seconds=86400, enabled=False),
+                 cadence_seconds=86400, enabled=True),
 )
