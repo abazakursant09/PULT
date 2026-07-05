@@ -72,11 +72,12 @@ def test_schema_parity_with_growth():
     assert aud_rat == aud_growth, f"audit columns diverge: {aud_rat ^ aud_growth}"
 
 
-def test_no_advisory_runtime_producer():
+def test_rating_producer_registered_but_disabled():
+    # Phase 5.1 wired the shadow producer: registered but DISABLED (never scheduled).
     from services.advisory_runtime.registry import ADVISORY_PRODUCERS
-    keys = {s.key for s in ADVISORY_PRODUCERS}
-    assert "rating" not in keys
-    assert "reputation_health" not in keys
+    by_key = {s.key: s for s in ADVISORY_PRODUCERS}
+    assert "rating" in by_key
+    assert by_key["rating"].enabled is False
 
 
 def test_decision_feed_does_not_reference_rating():
