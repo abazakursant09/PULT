@@ -126,8 +126,9 @@ ADVISORY_PRODUCERS: Tuple[ProducerSpec, ...] = (
     # earlier window; never an absolute floor / benchmark / competitor compare. Pure
     # diagnosis — recommended_action_key=None, no executor binding, no Decision. DISTINCT from
     # BOTH Rating (rating-value) and Review (individual review workflow); reuses neither
-    # rating_signal nor review_signal. Shipped DISABLED (Phase 6.1) for shadow validation via
-    # run_one() until a later enable slice; NOT yet in the Decision Feed. Advisory-only.
+    # rating_signal nor review_signal. ENABLED (Phase 6.3b): the scheduler now runs it daily
+    # and it writes review_velocity_signal, surfacing through the Decision Feed reader wired in
+    # 6.3a. Advisory-only.
     ProducerSpec(key="review_velocity", run=run_review_velocity_producer,
-                 cadence_seconds=86400, enabled=False),
+                 cadence_seconds=86400, enabled=True),
 )

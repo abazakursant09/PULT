@@ -97,11 +97,14 @@ def test_scheduler_runs_legal_review_growth():
     async def go():
         db = await _db(); uid = str(uuid.uuid4())
         await _seed_all_three(db, uid)
-        res = await AdvisoryRuntime().run_due_producers(db, now=NOW)   # REAL registry
+        # slot_budget covers all enabled producers in one tick (11 now — default 10 would
+        # drop the last-registered producer)
+        res = await AdvisoryRuntime().run_due_producers(db, now=NOW, slot_budget=20)   # REAL registry
         assert res.errors == 0
         keys = {r.producer_key for r in (await db.execute(select(AdvisoryRun))).scalars().all()}
         assert keys == {"legal", "review", "growth", "operations_low_stock", "advertising",
-                        "pricing", "revenue_diagnosis", "money_leak", "supply", "rating"}
+                        "pricing", "revenue_diagnosis", "money_leak", "supply", "rating",
+                        "review_velocity"}
     _run(go())
 
 
