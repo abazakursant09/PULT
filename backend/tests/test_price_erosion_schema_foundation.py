@@ -94,13 +94,14 @@ def test_price_erosion_producer_registered_but_disabled():
     assert by_key["price_erosion"].enabled is False
 
 
-def test_price_erosion_not_in_decision_feed():
-    # Schema wired to NOTHING: the Decision Feed reads no price_erosion table yet.
+def test_price_erosion_in_decision_feed():
+    # Phase 8.3a wired the reader: price_erosion_signal is now a canonical feed engine. The
+    # producer stays DISABLED, so nothing writes price_erosion_signal in prod yet.
     from services.decision_feed.builder import _ENGINES
     tables = {t for (_c, _m, t) in _ENGINES}
-    assert "price_erosion_signal" not in tables
+    assert "price_erosion_signal" in tables
     contours = {c for (c, _m, _t) in _ENGINES}
-    assert "price_erosion" not in contours
+    assert "price_erosion" in contours
 
 
 def test_pricing_and_live_contours_untouched():
