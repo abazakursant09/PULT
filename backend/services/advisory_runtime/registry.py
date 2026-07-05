@@ -21,6 +21,7 @@ from .producers import (
     run_growth_producer, run_legal_producer, run_review_producer,
     run_operations_low_stock_producer, run_advertising_producer, run_pricing_producer,
     run_revenue_diagnosis_producer, run_money_leak_producer, run_supply_producer,
+    run_rating_producer,
 )
 
 
@@ -109,4 +110,14 @@ ADVISORY_PRODUCERS: Tuple[ProducerSpec, ...] = (
     # Dashboard/Telegram/Copilot. Advisory-only.
     ProducerSpec(key="supply", run=run_supply_producer,
                  cadence_seconds=86400, enabled=True),
+    # rating: DISABLED (Phase 5.1, shadow) — Rating / Reputation Health Diagnosis (aggregate
+    # rating DECLINE from the seller's OWN ImportedProductRow.rating across dated snapshots).
+    # Pure diagnosis; confirmed decline only (history-gated, blip-rejected). Emits an
+    # evidence-backed rating_signal ONLY — no treatment, no executor binding
+    # (recommended_action_key=None), no Decision. DISTINCT from the Review contour (individual
+    # review handling) — does NOT touch Review or reuse review_signal. Shipped DISABLED for
+    # shadow validation via run_one() until a later enable slice; NOT yet in the Decision
+    # Feed. Advisory-only.
+    ProducerSpec(key="rating", run=run_rating_producer,
+                 cadence_seconds=86400, enabled=False),
 )
