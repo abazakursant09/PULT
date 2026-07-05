@@ -76,11 +76,12 @@ def test_schema_parity_with_growth():
     assert aud_rv == aud_growth, f"audit columns diverge: {aud_rv ^ aud_growth}"
 
 
-def test_review_velocity_producer_not_registered():
-    # Phase 6.0 is schema-only: NO producer exists in the Advisory Runtime registry yet.
+def test_review_velocity_producer_registered_but_disabled():
+    # Phase 6.1 wired the shadow producer: registered but DISABLED (never scheduled).
     from services.advisory_runtime.registry import ADVISORY_PRODUCERS
     by_key = {s.key: s for s in ADVISORY_PRODUCERS}
-    assert "review_velocity" not in by_key
+    assert "review_velocity" in by_key
+    assert by_key["review_velocity"].enabled is False
 
 
 def test_review_velocity_not_in_decision_feed():

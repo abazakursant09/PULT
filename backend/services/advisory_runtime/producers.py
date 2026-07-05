@@ -60,6 +60,11 @@ from models.rating_audit import RatingAudit
 from services.rating.diagnosis_source import build_rating_series, classify_rating_decline
 from services.rating.persist import reconcile_rating_signal
 
+from models.review_velocity_audit import ReviewVelocityAudit
+from services.review_velocity.diagnosis_source import (
+    build_review_series, observed_sales_by_date, classify_review_velocity_stall)
+from services.review_velocity.persist import reconcile_review_velocity_signal
+
 from .runtime import RuntimeContext, ProducerResult
 
 
@@ -315,6 +320,57 @@ async def run_rating_producer(ctx: RuntimeContext) -> ProducerResult:
     return ProducerResult(ok=True, stats={
         "candidates_seen": seen,
         "declines_confirmed": emitted,
+        "honest_absent": absent,
+        "signals_reconciled": reconciled,
+    })
+
+
+async def run_review_velocity_producer(ctx: RuntimeContext) -> ProducerResult:
+    """Review Acquisition / Social-Proof Velocity Diagnosis advisory producer adapter
+    (Phase 6.1, shadow). Diagnoses a self-referential STALL in the seller's OWN observed
+    reviews-per-unit-sold rate per (marketplace, sku) — reviews_count dated snapshots
+    (ImportedProductRow) vs sales quantity (ImportedFinanceRow) — comparing the recent window
+    to this product's OWN earlier window (services/review_velocity). Flush-only; no commit.
+    DB-headless — no marketplace client. Observed present slowdown, not a forecast.
+
+    PURE DIAGNOSIS + INDEPENDENT: emits an evidence-backed review_velocity_signal only — no
+    treatment, no recommended_action_key that binds an executor, no Decision, no
+    EngineSignalDecisionLink, no Apply, no executor, no marketplace write. DISTINCT from BOTH
+    the Rating contour (does NOT touch rating_signal) and the Review contour (does NOT touch
+    review_signal); does not absorb Revenue/MoneyLeak/Supply. Confirmed self-referential
+    slowdown only (history-gated, sales-gated); honest absence emits nothing."""
+    db, uid = ctx.db, ctx.user_id
+
+    seen = emitted = absent = reconciled = 0
+    for marketplace, sku in await _candidate_pairs(db, uid):
+        seen += 1
+        listing_id = await _resolve_listing_id(db, uid, marketplace, sku)
+        series = await build_review_series(db, uid, marketplace, sku)
+        sales = await observed_sales_by_date(db, uid, marketplace, sku)
+        diag = classify_review_velocity_stall(series, sales, marketplace=marketplace, sku=sku)
+
+        audit = ReviewVelocityAudit(
+            user_id=uid, listing_id=listing_id, marketplace=marketplace, sku=sku,
+            source="catalog", status="completed",
+            total_problems=1 if diag is not None else 0,
+            total_not_evaluated=0 if diag is not None else 1,
+            top_severity=diag.priority_level if diag is not None else None,
+            triggered_by=ctx.triggered_by, created_at=ctx.now, completed_at=ctx.now)
+        db.add(audit)
+        await db.flush()
+
+        rec = await reconcile_review_velocity_signal(
+            db, user_id=uid, listing_id=listing_id, audit_id=audit.id,
+            marketplace=marketplace, sku=sku, diagnosis=diag, now=ctx.now)
+        if diag is not None:
+            emitted += 1
+        else:
+            absent += 1
+        reconciled += rec.created + rec.updated
+
+    return ProducerResult(ok=True, stats={
+        "candidates_seen": seen,
+        "stalls_confirmed": emitted,
         "honest_absent": absent,
         "signals_reconciled": reconciled,
     })

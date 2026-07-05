@@ -21,7 +21,7 @@ from .producers import (
     run_growth_producer, run_legal_producer, run_review_producer,
     run_operations_low_stock_producer, run_advertising_producer, run_pricing_producer,
     run_revenue_diagnosis_producer, run_money_leak_producer, run_supply_producer,
-    run_rating_producer,
+    run_rating_producer, run_review_velocity_producer,
 )
 
 
@@ -120,4 +120,14 @@ ADVISORY_PRODUCERS: Tuple[ProducerSpec, ...] = (
     # Decision Feed reader wired in 5.3a. Advisory-only.
     ProducerSpec(key="rating", run=run_rating_producer,
                  cadence_seconds=86400, enabled=True),
+    # review_velocity: Review Acquisition / Social-Proof Velocity Diagnosis. Diagnoses a
+    # self-referential STALL in the seller's OWN observed reviews-per-unit-sold rate
+    # (reviews_count dated snapshots vs sales quantity) — recent window vs this product's OWN
+    # earlier window; never an absolute floor / benchmark / competitor compare. Pure
+    # diagnosis — recommended_action_key=None, no executor binding, no Decision. DISTINCT from
+    # BOTH Rating (rating-value) and Review (individual review workflow); reuses neither
+    # rating_signal nor review_signal. Shipped DISABLED (Phase 6.1) for shadow validation via
+    # run_one() until a later enable slice; NOT yet in the Decision Feed. Advisory-only.
+    ProducerSpec(key="review_velocity", run=run_review_velocity_producer,
+                 cadence_seconds=86400, enabled=False),
 )
