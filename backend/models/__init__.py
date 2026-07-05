@@ -79,6 +79,8 @@ from .review_velocity_audit import ReviewVelocityAudit
 from .review_velocity_signal import ReviewVelocitySignal
 from .overstock_audit import OverstockAudit
 from .overstock_signal import OverstockSignal
+from .price_erosion_audit import PriceErosionAudit
+from .price_erosion_signal import PriceErosionSignal
 # Pricing/Margin Engine data foundation (A3-pre) — canonical pricing contour signal
 from .pricing_signal import PricingSignal
 # Operations contour data foundation (Slice 1) — canonical operations contour signal
