@@ -254,10 +254,10 @@ def test_scheduler_does_not_run_price_erosion():
     _run(go())
 
 
-# ── not in the Decision Feed yet (reader is Phase 8.3a) ──────────────────────
+# ── in the Decision Feed (reader wired Phase 8.3a; producer still disabled) ───
 
-def test_not_in_decision_feed():
+def test_in_decision_feed():
     from services.decision_feed.builder import _ENGINES
     tables = {t for (_c, _m, t) in _ENGINES}
-    assert "price_erosion_signal" not in tables
+    assert "price_erosion_signal" in tables              # reader wired (8.3a); INERT until 8.3b
     assert "pricing_signal" in tables                    # executable Pricing still wired, independent
