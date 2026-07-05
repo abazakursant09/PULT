@@ -285,12 +285,12 @@ def test_scheduler_runs_review_velocity():
         db = await _db(); uid = str(uuid.uuid4())
         snaps, sales = _scenario(10, 10, 2, 10)
         await _seed(db, uid, snaps, sales); await db.commit()
-        # slot_budget covers all enabled producers in one tick (11 now — default 10 would
-        # drop the last-registered producer)
-        await AdvisoryRuntime().run_due_producers(db, now=NOW, slot_budget=20)   # REAL registry
+        # DEFAULT slot_budget (now 20) is enough that review_velocity — the last-registered
+        # of 11 enabled producers — is no longer dropped from a single tick
+        await AdvisoryRuntime().run_due_producers(db, now=NOW)   # REAL registry, default budget
         from models.advisory_run import AdvisoryRun
         keys = {r.producer_key for r in (await db.execute(select(AdvisoryRun))).scalars().all()}
-        assert "review_velocity" in keys             # enabled → scheduled
+        assert "review_velocity" in keys             # enabled → scheduled under default budget
     _run(go())
 
 

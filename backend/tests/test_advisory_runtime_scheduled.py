@@ -122,8 +122,16 @@ def test_slot_budget_caps(monkeypatch):
         for _ in range(3):
             await _active(db, str(uuid.uuid4()))
         res = await AdvisoryRuntime().run_due_producers(db, now=NOW, slot_budget=1)
-        assert res.ran == 1 and res.skipped == 2    # 3 due, budget 1
+        assert res.ran == 1 and res.skipped == 2    # 3 due, budget 1 (explicit override unchanged)
     _run(go())
+
+
+def test_default_slot_budget_is_20():
+    # Runtime-tuning: the default budget covers all currently enabled producers (11) for a
+    # single active user in one tick. Raised from 10 → 20 after Review Velocity (Phase 6.3b).
+    import inspect
+    sig = inspect.signature(AdvisoryRuntime.run_due_producers)
+    assert sig.parameters["slot_budget"].default == 20
 
 
 # ── (5) error isolation → one producer fails, other still runs ───────────────
