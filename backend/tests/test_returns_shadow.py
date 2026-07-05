@@ -256,9 +256,9 @@ def test_scheduler_does_not_run_returns():
     _run(go())
 
 
-# ── not in the Decision Feed (reader is a later slice) ───────────────────────
+# ── in the Decision Feed (reader wired Phase R3a; producer still disabled) ───
 
-def test_not_in_decision_feed():
+def test_in_decision_feed():
     from services.decision_feed.builder import _ENGINES
     tables = {t for (_c, _m, t) in _ENGINES}
-    assert "returns_signal" not in tables
+    assert "returns_signal" in tables            # reader wired (R3a); INERT until R3b

@@ -249,10 +249,10 @@ def test_double_count_guard_evidence_frequency_only():
 
 # ── disabled / not in feed (reaffirm) ────────────────────────────────────────
 
-def test_disabled_and_not_in_feed():
+def test_disabled_but_feed_reads_it():
     from services.advisory_runtime.registry import ADVISORY_PRODUCERS
     from services.decision_feed.builder import _ENGINES
     by_key = {s.key: s for s in ADVISORY_PRODUCERS}
-    assert by_key["returns"].enabled is False
+    assert by_key["returns"].enabled is False        # producer still disabled
     tables = {t for (_c, _m, t) in _ENGINES}
-    assert "returns_signal" not in tables
+    assert "returns_signal" in tables                # reader wired (R3a), INERT

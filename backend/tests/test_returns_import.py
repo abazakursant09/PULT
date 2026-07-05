@@ -152,13 +152,15 @@ def test_returns_diagnosis_producer_disabled():
         assert by_key["returns"].enabled is False
 
 
-def test_returns_not_in_decision_feed():
+def test_returns_feed_reads_signal_not_ingestion_table():
+    # The INGESTION table (imported_return_rows) is never a feed engine. The DIAGNOSIS signal
+    # (returns_signal) is wired as a reader in Phase R3a; the producer stays disabled.
     from services.decision_feed.builder import _ENGINES
     tables = {t for (_c, _m, t) in _ENGINES}
-    assert "imported_return_rows" not in tables
-    assert "returns_signal" not in tables
+    assert "imported_return_rows" not in tables      # ingestion table never surfaces directly
+    assert "returns_signal" in tables                # diagnosis signal reader wired (R3a)
     contours = {c for (c, _m, _t) in _ENGINES}
-    assert "returns" not in contours
+    assert "returns" in contours
 
 
 def test_all_seven_live_contours_still_wired():
