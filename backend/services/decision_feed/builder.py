@@ -41,6 +41,7 @@ from models.money_leak_signal import MoneyLeakSignal
 from models.supply_signal import SupplySignal
 from models.rating_signal import RatingSignal
 from models.review_velocity_signal import ReviewVelocitySignal
+from models.overstock_signal import OverstockSignal
 
 from services.decision_outcome.registry import BY_SIGNAL_KEY
 from services.decision_outcome.effect_summary import build_effect_summaries
@@ -250,6 +251,7 @@ _ENGINES = (
     ("supply", SupplySignal, "supply_signal"),
     ("rating", RatingSignal, "rating_signal"),
     ("review_velocity", ReviewVelocitySignal, "review_velocity_signal"),
+    ("overstock", OverstockSignal, "overstock_signal"),
 )
 
 # promoted_to_decision stays live: the signal has a Decision and is awaiting the
