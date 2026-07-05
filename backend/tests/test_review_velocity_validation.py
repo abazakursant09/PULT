@@ -299,13 +299,13 @@ def test_independent_when_rating_and_reviews_present():
     _run(go())
 
 
-# ── disabled / not in feed (reaffirm) ────────────────────────────────────────
+# ── disabled but feed reads it (reader wired 6.3a; producer still disabled) ───
 
-def test_disabled_and_not_in_feed():
+def test_disabled_but_feed_reads_it():
     from services.advisory_runtime.registry import ADVISORY_PRODUCERS
     from services.decision_feed.builder import _ENGINES
     by_key = {s.key: s for s in ADVISORY_PRODUCERS}
-    assert by_key["review_velocity"].enabled is False
+    assert by_key["review_velocity"].enabled is False               # producer still disabled
     tables = {t for (_c, _m, t) in _ENGINES}
-    assert "review_velocity_signal" not in tables
+    assert "review_velocity_signal" in tables                        # reader wired (6.3a), INERT
     assert "rating_signal" in tables and "review_signal" in tables    # siblings independent

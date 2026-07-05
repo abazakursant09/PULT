@@ -292,11 +292,11 @@ def test_scheduler_does_not_run_review_velocity():
     _run(go())
 
 
-# ── not in the Decision Feed yet (reader is Phase 6.3a) ──────────────────────
+# ── in the Decision Feed (reader wired Phase 6.3a; producer still disabled) ───
 
-def test_not_in_decision_feed():
+def test_in_decision_feed():
     from services.decision_feed.builder import _ENGINES
     tables = {t for (_c, _m, t) in _ENGINES}
-    assert "review_velocity_signal" not in tables
+    assert "review_velocity_signal" in tables        # reader wired (6.3a); INERT until 6.3b
     assert "rating_signal" in tables                 # Rating still wired, independent
     assert "review_signal" in tables                 # Review still wired, independent

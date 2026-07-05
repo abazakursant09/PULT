@@ -84,13 +84,14 @@ def test_review_velocity_producer_registered_but_disabled():
     assert by_key["review_velocity"].enabled is False
 
 
-def test_review_velocity_not_in_decision_feed():
-    # Schema wired to NOTHING: the Decision Feed reads no review_velocity table yet.
+def test_review_velocity_in_decision_feed():
+    # Phase 6.3a wired the reader: review_velocity_signal is now a canonical feed engine.
+    # The producer stays DISABLED, so nothing writes review_velocity_signal in prod yet.
     from services.decision_feed.builder import _ENGINES
     tables = {t for (_c, _m, t) in _ENGINES}
-    assert "review_velocity_signal" not in tables
+    assert "review_velocity_signal" in tables
     contours = {c for (c, _m, _t) in _ENGINES}
-    assert "review_velocity" not in contours
+    assert "review_velocity" in contours
 
 
 def test_rating_and_review_untouched():
