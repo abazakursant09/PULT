@@ -90,7 +90,7 @@ def test_alembic_single_head():
     from alembic.config import Config
     from alembic.script import ScriptDirectory
     heads = ScriptDirectory.from_config(Config("alembic.ini")).get_heads()
-    assert heads == ["rat1a2b3c4d01"], heads   # revenue diagnosis foundation (Phase 2.0)
+    assert heads == ["rvl1a2b3c4d01"], heads   # review velocity foundation (Phase 6.0)
 
 
 def test_migration_additive_only():
