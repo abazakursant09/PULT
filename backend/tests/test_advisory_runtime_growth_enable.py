@@ -97,14 +97,14 @@ def test_scheduler_runs_legal_review_growth():
     async def go():
         db = await _db(); uid = str(uuid.uuid4())
         await _seed_all_three(db, uid)
-        # DEFAULT slot_budget (now 20) covers all 11 enabled producers in one tick — proof
-        # the runtime-tuning default lift removed the old 10-budget drop of the last producer
+        # DEFAULT slot_budget (20) covers all 12 enabled producers in one tick — proof the
+        # runtime-tuning default lift removed the old 10-budget drop of the last producer
         res = await AdvisoryRuntime().run_due_producers(db, now=NOW)   # REAL registry, default budget
         assert res.errors == 0
         keys = {r.producer_key for r in (await db.execute(select(AdvisoryRun))).scalars().all()}
         assert keys == {"legal", "review", "growth", "operations_low_stock", "advertising",
                         "pricing", "revenue_diagnosis", "money_leak", "supply", "rating",
-                        "review_velocity"}                                  # all 11, none dropped
+                        "review_velocity", "overstock"}                     # all 12, none dropped
     _run(go())
 
 
