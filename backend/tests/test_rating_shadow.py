@@ -289,11 +289,13 @@ def test_advisory_only_and_review_independent():
     _run(go())
 
 
-def test_disabled_absent_from_scheduler_and_feed():
+def test_disabled_but_feed_reads_it():
+    # Producer stays DISABLED (never scheduled); Phase 5.3a wired the feed reader, so
+    # rating IS now a feed engine — inert until 5.3b enables the producer.
     from services.advisory_runtime.registry import ADVISORY_PRODUCERS
     from services.decision_feed.builder import _ENGINES
     by_key = {s.key: s for s in ADVISORY_PRODUCERS}
     assert by_key["rating"].enabled is False
     tables = {t for (_c, _m, t) in _ENGINES}
-    assert "rating_signal" not in tables            # rating not wired
+    assert "rating_signal" in tables                # rating now wired (reader-only)
     assert "review_signal" in tables                # Review still independent

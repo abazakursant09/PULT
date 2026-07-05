@@ -80,12 +80,14 @@ def test_rating_producer_registered_but_disabled():
     assert by_key["rating"].enabled is False
 
 
-def test_decision_feed_does_not_reference_rating():
+def test_decision_feed_reads_rating():
+    # Phase 5.3a wired the reader: rating_signal is now a canonical feed engine. The
+    # producer stays DISABLED, so nothing writes rating_signal in prod yet.
     from services.decision_feed.builder import _ENGINES
     tables = {t for (_c, _m, t) in _ENGINES}
-    assert "rating_signal" not in tables
+    assert "rating_signal" in tables
     contours = {c for (c, _m, _t) in _ENGINES}
-    assert "rating" not in contours
+    assert "rating" in contours
 
 
 def test_review_contour_untouched():
