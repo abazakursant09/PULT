@@ -77,3 +77,8 @@ class CardSnapshot:
     # (field_availability["constraints"] = False). Limits are NEVER invented.
     constraints: Optional[SeoConstraints]
     field_availability: Mapping[str, bool]   # honest map of which fields the adapter supplied
+
+    # Reference Data provenance (Reference Data Doctrine): when category_schema / constraints are
+    # sourced from GLOBAL Reference Data, the snapshot PINS the reference version it used so a
+    # diagnosis is replayable against the exact rules in effect. None when no Reference was merged.
+    reference_version: Optional[str] = None

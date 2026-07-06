@@ -31,6 +31,7 @@ from models.product_listing import ProductListing
 
 from .card_snapshot import CardSnapshot, CategorySchema, CardAttribute, CardMedia
 from .adapter import SnapshotResult, SnapshotUnavailable
+from .reference_source import build_reference_merge
 
 
 def _parse_attributes(characteristics_json: Optional[str]) -> tuple[CardAttribute, ...]:
@@ -73,12 +74,15 @@ async def _resolve_listing_id(db, user_id: str, marketplace: str, sku: str) -> O
 
 
 async def build_snapshot_from_import(
-    db, *, user_id: str, marketplace: str, sku: str,
+    db, *, user_id: str, marketplace: str, sku: str, now=None,
 ) -> SnapshotResult:
     """CardSnapshot from the latest uploaded card-content row, or honest SnapshotUnavailable.
 
-    Content fields present in the upload are marked available; category schema / constraints stay
-    unavailable (the API-Snapshot Evidence gap) so constraint-dependent rules remain not_evaluated.
+    Content fields come from the UPLOAD Evidence; category schema / expected path / constraints are
+    merged from GLOBAL Reference Data when the category resolves and the latest reference version is
+    fresh — otherwise they stay unavailable and constraint-dependent rules remain not_evaluated.
+    `now` (default utcnow) drives the reference staleness guard; the reference version used is pinned
+    on the snapshot for replay.
     """
     if db is None:
         return SnapshotUnavailable(marketplace or "unknown", "no_db_context")
@@ -104,21 +108,46 @@ async def build_snapshot_from_import(
         "category_path": bool(category_path),
         "attributes": bool(attributes),
         "media": has_media,
-        # API-Snapshot Evidence gap — never sourced from an upload, always unavailable here
+        # Reference Data fields — filled from GLOBAL Reference below when resolvable + fresh;
+        # otherwise unavailable (constraint-dependent rules stay not_evaluated, honestly).
         "expected_category_path": False,
         "category_schema": False,
         "variants": False,
         "constraints": False,
     }
 
+    # ── merge GLOBAL Reference Data at build time (Reference Data Doctrine) ──
+    # Diagnosis still receives ONE enriched CardSnapshot and stays source-agnostic. DB only — no
+    # marketplace API here. Unresolved category / stale / unsupported marketplace → left unavailable.
+    category_schema = CategorySchema()
+    expected_category_path = None
+    constraints = None
+    variants: tuple = ()
+    reference_version = None
+
+    ref = await build_reference_merge(db, marketplace=row.marketplace, card_category=category, now=now)
+    if ref is not None:
+        category_schema = ref.category_schema
+        expected_category_path = ref.expected_category_path
+        constraints = ref.constraints
+        reference_version = ref.reference_version
+        # the card's variant attribute keys present + filled (schema tells us which are variants)
+        filled_keys = {a.key for a in attributes if a.is_filled}
+        variants = tuple(k for k in ref.variant_attribute_keys if k in filled_keys)
+        availability["category_schema"] = True
+        availability["variants"] = True
+        availability["constraints"] = True
+        availability["expected_category_path"] = expected_category_path is not None
+
     return CardSnapshot(
         listing_id=listing_id, marketplace=row.marketplace, sku=row.sku,
         captured_at=row.created_at or datetime.utcnow(), source="import",
         title=title, description=description, brand=brand,
-        category_path=category_path, expected_category_path=None,
-        category_schema=CategorySchema(),
-        attributes=attributes, variants=(),
+        category_path=category_path, expected_category_path=expected_category_path,
+        category_schema=category_schema,
+        attributes=attributes, variants=variants,
         media=CardMedia(image_count=row.image_count or 0),
-        constraints=None,                        # API-Snapshot gap — never invented
+        constraints=constraints,
         field_availability=availability,
+        reference_version=reference_version,
     )
