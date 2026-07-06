@@ -41,6 +41,12 @@ from services.review.internal_source import build_snapshot_from_reviews
 from services.review.snapshot import ReviewSnapshot, ReviewDataUnavailable
 from services.review.audit_persist import audit_and_persist as review_audit_and_persist
 
+from models.imported_card_content import ImportedCardContentRow
+from services.seo.import_source import build_snapshot_from_import as build_seo_snapshot
+from services.seo.card_snapshot import CardSnapshot
+from services.seo.adapter import SnapshotUnavailable as SeoSnapshotUnavailable
+from services.seo.audit_persist import audit_and_persist as seo_audit_and_persist
+
 from models.imported_product import ImportedProductRow
 from services.operations.low_stock_source import build_low_stock_signal, LOW_STOCK_UNITS
 
@@ -751,4 +757,52 @@ async def run_operations_low_stock_producer(ctx: RuntimeContext) -> ProducerResu
     return ProducerResult(ok=True, stats={
         "candidates_seen": seen,
         "low_stock_signals": signals,
+    })
+
+
+async def _seo_cards(db: AsyncSession, user_id: str):
+    """The seller's uploaded cards — distinct (marketplace, sku) from imported_card_content_rows.
+    SEO diagnosis is Evidence-gated: only cards the seller actually uploaded are audited. Observed,
+    DB-headless."""
+    rows = (await db.execute(
+        select(ImportedCardContentRow.marketplace, ImportedCardContentRow.sku)
+        .where(ImportedCardContentRow.user_id == user_id,
+               ImportedCardContentRow.sku.isnot(None)).distinct())).all()
+    return [(mp, sku) for mp, sku in rows]
+
+
+async def run_seo_producer(ctx: RuntimeContext) -> ProducerResult:
+    """SEO advisory producer adapter (Phase C3a). Runs the EXISTING SEO pipeline
+    (build_snapshot_from_import → audit_and_persist: evaluate → persist → reconcile) per uploaded
+    card. The snapshot merges UPLOAD Evidence (card content) + GLOBAL Reference Data (category
+    schema / constraints) at build time (C0–C2d); Diagnosis stays snapshot-only and DB-only — NO
+    marketplace API, NO marketplace write, NO content generation. Flush-only; no commit.
+
+    Honest degradation: a card with no uploaded content is skipped; when Reference is absent /
+    stale / unresolved, constraint-dependent rules degrade to not_evaluated through the existing
+    engine (no fabricated constraint signals). Advisory-only: SEO signals surface through the
+    existing Decision Feed reader; content-write is a separate future sprint and is NOT enabled
+    here. Reconciliation keeps one live seo_signal per insight_key."""
+    db, uid = ctx.db, ctx.user_id
+
+    seen = audits = unavailable = reconciled = 0
+    for marketplace, sku in await _seo_cards(db, uid):
+        seen += 1
+        snap = await build_seo_snapshot(
+            db, user_id=uid, marketplace=marketplace, sku=sku, now=ctx.now)
+        if isinstance(snap, SeoSnapshotUnavailable):
+            unavailable += 1
+            continue
+        assert isinstance(snap, CardSnapshot)
+        res = await seo_audit_and_persist(
+            db, user_id=uid, snapshot=snap, triggered_by=ctx.triggered_by, now=ctx.now)
+        audits += 1
+        if res.reconciliation is not None:
+            reconciled += res.reconciliation.created + res.reconciliation.updated
+
+    return ProducerResult(ok=True, stats={
+        "cards_seen": seen,
+        "audits_created": audits,
+        "unavailable": unavailable,
+        "signals_reconciled": reconciled,
     })

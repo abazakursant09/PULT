@@ -61,6 +61,9 @@ def snapshot_hash(s: CardSnapshot) -> str:
         repr([(a.key, a.value, a.is_filled, a.is_valid_format) for a in s.attributes]),
         "|".join(s.variants), str(s.media.image_count), str(s.media.video_present),
         cons_repr,
+        # Reference Data version pin (C3a / Reference Data Doctrine): a changed reference
+        # version yields a different hash → forces a fresh audit against the new rules.
+        s.reference_version,
     ]
     canon = "\x1f".join("" if p is None else str(p) for p in parts)
     return hashlib.sha256(canon.encode("utf-8")).hexdigest()

@@ -22,7 +22,7 @@ from .producers import (
     run_operations_low_stock_producer, run_advertising_producer, run_pricing_producer,
     run_revenue_diagnosis_producer, run_money_leak_producer, run_supply_producer,
     run_rating_producer, run_review_velocity_producer, run_overstock_producer,
-    run_price_erosion_producer, run_returns_producer,
+    run_price_erosion_producer, run_returns_producer, run_seo_producer,
 )
 
 
@@ -160,4 +160,13 @@ ADVISORY_PRODUCERS: Tuple[ProducerSpec, ...] = (
     # in R3a. Advisory-only.
     ProducerSpec(key="returns", run=run_returns_producer,
                  cadence_seconds=86400, enabled=True),
+    # seo: DISABLED (Phase C3a, shadow) — wraps the EXISTING SEO A4–A6 pipeline
+    # (build_snapshot_from_import → audit_and_persist: evaluate → persist → reconcile) as a flat
+    # advisory producer, auditing the seller's UPLOADED cards (imported_card_content_rows) enriched
+    # with GLOBAL Reference Data (category schema / constraints, C0–C2d). Advisory-only: writes
+    # seo_signal rows only — no Decision, no executor binding, NO marketplace content-write, NO
+    # marketplace API at diagnosis time. seo_signal is ALREADY read by the Decision Feed. Registered
+    # DISABLED so it is shadow-only and not scheduled; the enable flip is Phase C3c.
+    ProducerSpec(key="seo", run=run_seo_producer,
+                 cadence_seconds=86400, enabled=False),
 )
