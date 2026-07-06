@@ -4,6 +4,11 @@
 > [canonical-surface doctrine](canonical-surface-doctrine.md) and the
 > [pult-system doctrine](pult-system-doctrine.md) and does **not** change the advisory-vs-execution
 > split.
+>
+> **Amended by the [Reference Data Doctrine](reference-data-doctrine.md):** the two sources below are
+> both *Evidence* (per-seller). A **third source class — Reference Data (global, marketplace-owned,
+> versioned current-state)** — is defined there. All three are peers that merge at Snapshot /
+> Aggregate Build; Diagnosis stays source-agnostic. Reference is never transformed into Evidence.
 
 ---
 
