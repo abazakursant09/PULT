@@ -172,7 +172,7 @@ def test_no_seo_producer_and_not_in_feed():
     from services.advisory_runtime.registry import ADVISORY_PRODUCERS
     from services.decision_feed.builder import _ENGINES
     keys = {s.key for s in ADVISORY_PRODUCERS}
-    assert "seo" not in keys and "card_content" not in keys
+    assert "card_content" not in keys  # (seo producer added disabled in C3a)
     tables = {t for (_c, _m, t) in _ENGINES}
     assert "imported_card_content_rows" not in tables
     for wired in ("revenue_signal", "money_leak_signal", "supply_signal", "rating_signal",

@@ -172,7 +172,7 @@ def test_alembic_single_head():
 def test_no_card_content_producer_in_registry():
     from services.advisory_runtime.registry import ADVISORY_PRODUCERS
     keys = {s.key for s in ADVISORY_PRODUCERS}
-    assert "card_content" not in keys and "seo" not in keys and "card" not in keys
+    assert "card_content" not in keys and "card" not in keys  # (seo producer added disabled in C3a)
 
 
 def test_card_content_not_in_decision_feed():

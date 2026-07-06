@@ -120,7 +120,7 @@ def test_multiple_versions_latest_wins():
 def test_no_reference_producer_in_registry():
     from services.advisory_runtime.registry import ADVISORY_PRODUCERS
     keys = {s.key for s in ADVISORY_PRODUCERS}
-    assert "marketplace_category" not in keys and "reference" not in keys and "seo" not in keys
+    assert "marketplace_category" not in keys and "reference" not in keys  # (seo added disabled in C3a)
 
 
 def test_reference_not_in_decision_feed():
