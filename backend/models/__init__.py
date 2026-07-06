@@ -26,6 +26,8 @@ from .imported_finance import ImportedFinanceRow
 from .imported_product import ImportedProductRow
 from .imported_return import ImportedReturnRow
 from .imported_card_content import ImportedCardContentRow
+from .marketplace_category import MarketplaceCategoryRow
+from .marketplace_category_attribute import MarketplaceCategoryAttributeRow
 from .returns_audit import ReturnsAudit
 from .returns_signal import ReturnsSignal
 from .seo_project import SeoProject
