@@ -47,19 +47,39 @@ def evidence_hash(evidence: Optional[dict]) -> str:
         json.dumps(evidence or {}, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
-_LABEL = {"commission_drift": "Комиссия", "logistics_drift": "Логистика"}
+_LABEL = {"commission_drift": "Комиссия", "logistics_drift": "Логистика",
+          "ad_cost_drift": "Реклама (ДРР)"}
+
+# per-problem_type copy overrides (ad is a seller-controlled lever, so its "meaning" /
+# "what_to_do" differ from the marketplace-imposed commission/logistics tariffs). Advisory
+# only — never binds an executor.
+_MEANING = {
+    "ad_cost_drift": "Тихая утечка: реклама съедает всё большую долю выручки — эффективность "
+                     "рекламы падает, маржа размывается",
+}
+_WHAT_TO_DO = {
+    "ad_cost_drift": "Проверьте эффективность рекламы по этому товару: ставки, охваты, кампании "
+                     "(диагноз, не действие)",
+}
+_EXPECTED = {
+    "ad_cost_drift": "Раннее внимание к росту ДРР может остановить размывание маржи рекламой",
+}
 
 
 def _doctrine(diag: MoneyLeakDiagnosis) -> dict:
     mp, sku, pct = diag.marketplace or "—", diag.sku or "—", diag.ratio_growth_pct
-    label = _LABEL.get(diag.problem_type, "Издержки")
+    pt = diag.problem_type
+    label = _LABEL.get(pt, "Издержки")
     return {
         "what": f"{label} съедает всё большую долю выручки {sku} ({mp})",
         "why": f"Наблюдаемый рост доли на {pct}% по {len(diag.ratio_windows)} окнам "
                f"за {diag.distinct_days} дн. (не разовый скачок)",
-        "meaning": "Тихая утечка: издержки растут как доля выручки — маржа размывается без вашего действия",
-        "what_to_do": "Проверьте условия/тариф этой статьи затрат (диагноз, не действие)",
-        "expected_effect": "Раннее внимание к дрейфу издержек может остановить размывание маржи",
+        "meaning": _MEANING.get(
+            pt, "Тихая утечка: издержки растут как доля выручки — маржа размывается без вашего действия"),
+        "what_to_do": _WHAT_TO_DO.get(
+            pt, "Проверьте условия/тариф этой статьи затрат (диагноз, не действие)"),
+        "expected_effect": _EXPECTED.get(
+            pt, "Раннее внимание к дрейфу издержек может остановить размывание маржи"),
     }
 
 
