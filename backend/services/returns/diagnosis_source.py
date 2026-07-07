@@ -25,13 +25,14 @@ relative_rise below the smallest band.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.imported_finance import ImportedFinanceRow
 from models.imported_return import ImportedReturnRow
+from .reason_taxonomy import normalize_return_reason, DIAGNOSED_BUCKETS, UNSPECIFIED
 
 # ── deterministic constants (data-sufficiency gates + self-referential bands) ──
 MIN_OBSERVED_DAYS = 3      # need ≥3 distinct observed sale days to form two windows
@@ -39,6 +40,13 @@ MIN_WINDOW_UNITS = 5       # each window needs ≥5 units sold for a stable rate
 LOW_RISE = 0.25           # recent rate up ≥25% vs earlier rate → low
 MED_RISE = 0.50           # ≥50% → medium
 SEVERE_RISE = 1.00        # ≥100% (doubled) → high
+
+# ── reason-share gates (Returns-Reason Diagnosis, counts-only) ────────────────
+MIN_RETURN_DAYS = 3            # need ≥3 distinct observed RETURN days to form two windows
+MIN_TOTAL_RETURNS_WINDOW = 5   # each window needs ≥5 total returns for a stable composition
+MIN_BUCKET_RETURNS_WINDOW = 3  # a diagnosed bucket needs ≥3 returns in BOTH windows (rare gate)
+MAX_UNSPECIFIED_SHARE = 0.5    # if >50% of returns carry no reason, composition is unreliable →
+                               # honest absence for the WHOLE sku (cannot diagnose an unreported mix)
 
 
 @dataclass(frozen=True)
@@ -188,3 +196,161 @@ def classify_returns_rise(
         earlier_window_start=first_date, earlier_window_end=mid_date,
         recent_window_start=mid_date, recent_window_end=last_date,
         distinct_days=len(sale_dates))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Returns-Reason Diagnosis (reason_share_rise_<bucket>) — observed COMPOSITION drift.
+#
+# ORTHOGONAL to return_rate_rise: that measures return FREQUENCY (returns ÷ units sold);
+# this measures the COMPOSITION of returns (bucket returns ÷ TOTAL returns). A sku can shift
+# its reason mix with a flat return rate, or raise its rate with a stable mix — different
+# numerator AND denominator, different question. Both are COUNTS-ONLY (returns_qty), so the
+# double-count discipline holds: NEVER net_profit, NEVER return_amount.
+# ══════════════════════════════════════════════════════════════════════════════
+
+@dataclass(frozen=True)
+class ReasonShareDiagnosis:
+    problem_type: str          # reason_share_rise_<bucket>
+    bucket: str
+    marketplace: Optional[str]
+    sku: Optional[str]
+    priority_level: str        # high | medium | low
+    effect_band: str           # high | medium | low
+    relative_rise: float       # (recent_share − earlier_share) / earlier_share
+    earlier_bucket_returns: int
+    recent_bucket_returns: int
+    earlier_total_returns: int
+    recent_total_returns: int
+    earlier_share: float
+    recent_share: float
+    earlier_window_start: str
+    earlier_window_end: str
+    recent_window_start: str
+    recent_window_end: str
+    distinct_return_days: int
+
+    @property
+    def signal_key(self) -> str:
+        return f"returns_{self.problem_type}"
+
+    @property
+    def insight_key(self) -> str:
+        return f"returns_{self.problem_type}:{self.marketplace or 'unknown'}:{self.sku or 'unknown'}"
+
+    @property
+    def evidence(self) -> dict:
+        # COUNTS/FREQUENCY only — NO net_profit, NO return_amount (double-count discipline)
+        return {
+            "bucket": self.bucket,
+            "earlier_bucket_returns": self.earlier_bucket_returns,
+            "recent_bucket_returns": self.recent_bucket_returns,
+            "earlier_total_returns": self.earlier_total_returns,
+            "recent_total_returns": self.recent_total_returns,
+            "earlier_share": round(self.earlier_share, 4),
+            "recent_share": round(self.recent_share, 4),
+            "relative_rise": round(self.relative_rise, 3),
+            "earlier_window_start": self.earlier_window_start,
+            "earlier_window_end": self.earlier_window_end,
+            "recent_window_start": self.recent_window_start,
+            "recent_window_end": self.recent_window_end,
+            "distinct_return_days": self.distinct_return_days,
+        }
+
+
+async def returns_by_reason_by_date(
+    db: AsyncSession, user_id: str, marketplace: str, sku: str
+) -> Dict[str, Dict[str, int]]:
+    """{date_str: {bucket: returns_qty}} for one (user, marketplace, sku). DB-headless —
+    ImportedReturnRow.returns_qty + reason ONLY. return_amount is deliberately NOT read
+    (double-count discipline). Every row's reported reason is normalized into a bucket
+    (null/empty → 'unspecified', unmatched → 'other')."""
+    rows = (await db.execute(
+        select(ImportedReturnRow.date, ImportedReturnRow.returns_qty,
+               ImportedReturnRow.reason).where(
+            ImportedReturnRow.user_id == user_id,
+            ImportedReturnRow.marketplace == marketplace,
+            ImportedReturnRow.sku == sku,
+            ImportedReturnRow.date.isnot(None)))).all()
+    by_date: Dict[str, Dict[str, int]] = {}
+    for date, qty, reason in rows:
+        bucket = normalize_return_reason(reason)
+        day = by_date.setdefault(date, {})
+        day[bucket] = day.get(bucket, 0) + int(qty or 0)
+    return by_date
+
+
+def _band(rel: float) -> str:
+    if rel >= SEVERE_RISE:
+        return "high"
+    if rel >= MED_RISE:
+        return "medium"
+    return "low"
+
+
+def _window_totals(by_date: Dict[str, Dict[str, int]], dates) -> Dict[str, int]:
+    """Sum returns per bucket across a set of dates."""
+    out: Dict[str, int] = {}
+    for d in dates:
+        for bucket, qty in by_date.get(d, {}).items():
+            out[bucket] = out.get(bucket, 0) + qty
+    return out
+
+
+def classify_reason_share_drifts(
+    by_reason: Dict[str, Dict[str, int]], *, marketplace: str, sku: str
+) -> List[ReasonShareDiagnosis]:
+    """0..N confirmed reason-share rises (one per rising DIAGNOSED bucket). Observed COMPOSITION
+    drift, self-referential. Honest absence → empty list. Counts-only.
+
+    Guards: ≥MIN_RETURN_DAYS distinct return days; each window ≥MIN_TOTAL_RETURNS_WINDOW returns;
+    unspecified share ≤MAX_UNSPECIFIED_SHARE across the observed period; each diagnosed bucket
+    needs ≥MIN_BUCKET_RETURNS_WINDOW in BOTH windows; earlier_share>0; recent_share>earlier_share;
+    relative_rise ≥LOW_RISE. 'other'/'unspecified' count in the denominator but never signal."""
+    return_dates = sorted(d for d, buckets in by_reason.items() if sum(buckets.values()) > 0)
+    if len(return_dates) < MIN_RETURN_DAYS:
+        return []
+
+    mid = len(return_dates) // 2                       # split index (>=1 since len>=3)
+    first_date, mid_date, last_date = return_dates[0], return_dates[mid], return_dates[-1]
+    if first_date >= mid_date or mid_date > last_date:
+        return []                                       # windows cannot be aligned honestly
+
+    earlier_dates = [d for d in return_dates if first_date <= d < mid_date]
+    recent_dates = [d for d in return_dates if mid_date <= d <= last_date]
+
+    earlier = _window_totals(by_reason, earlier_dates)
+    recent = _window_totals(by_reason, recent_dates)
+    total_earlier = sum(earlier.values())
+    total_recent = sum(recent.values())
+    if total_earlier < MIN_TOTAL_RETURNS_WINDOW or total_recent < MIN_TOTAL_RETURNS_WINDOW:
+        return []                                       # a window lacks meaningful return volume
+
+    # unreported-reason guard: if reasons are largely missing, composition is unreliable
+    unspecified_total = earlier.get(UNSPECIFIED, 0) + recent.get(UNSPECIFIED, 0)
+    grand_total = total_earlier + total_recent
+    if grand_total > 0 and unspecified_total / grand_total > MAX_UNSPECIFIED_SHARE:
+        return []                                       # honest absence for the whole sku
+
+    out: List[ReasonShareDiagnosis] = []
+    for bucket in DIAGNOSED_BUCKETS:                    # named buckets only — never other/unspecified
+        eb = earlier.get(bucket, 0)
+        rb = recent.get(bucket, 0)
+        if eb < MIN_BUCKET_RETURNS_WINDOW or rb < MIN_BUCKET_RETURNS_WINDOW:
+            continue                                    # rare bucket — not enough to diagnose
+        share_earlier = eb / total_earlier
+        share_recent = rb / total_recent
+        if share_earlier <= 0 or share_recent <= share_earlier:
+            continue                                    # flat / falling composition
+        rel = (share_recent - share_earlier) / share_earlier
+        if rel < LOW_RISE:
+            continue                                    # below smallest band
+        out.append(ReasonShareDiagnosis(
+            problem_type=f"reason_share_rise_{bucket}", bucket=bucket,
+            marketplace=marketplace, sku=sku, priority_level=_band(rel), effect_band=_band(rel),
+            relative_rise=rel, earlier_bucket_returns=eb, recent_bucket_returns=rb,
+            earlier_total_returns=total_earlier, recent_total_returns=total_recent,
+            earlier_share=share_earlier, recent_share=share_recent,
+            earlier_window_start=first_date, earlier_window_end=mid_date,
+            recent_window_start=mid_date, recent_window_end=last_date,
+            distinct_return_days=len(return_dates)))
+    return out
