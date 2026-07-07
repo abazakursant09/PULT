@@ -84,8 +84,10 @@ from services.price_erosion.persist import reconcile_price_erosion_signal
 from models.returns_audit import ReturnsAudit
 from services.returns.diagnosis_source import (
     sales_by_date as returns_sales_by_date,
-    returns_by_date as returns_returns_by_date, classify_returns_rise)
-from services.returns.persist import reconcile_returns_signal
+    returns_by_date as returns_returns_by_date, classify_returns_rise,
+    returns_by_reason_by_date, classify_reason_share_drifts)
+from services.returns.persist import (
+    reconcile_returns_signal, reconcile_returns_reason_signals)
 
 from .runtime import RuntimeContext, ProducerResult
 
@@ -514,7 +516,7 @@ async def run_returns_producer(ctx: RuntimeContext) -> ProducerResult:
     volume-gated); honest absence emits nothing."""
     db, uid = ctx.db, ctx.user_id
 
-    seen = emitted = absent = reconciled = 0
+    seen = emitted = absent = reconciled = reason_emitted = 0
     for marketplace, sku in await _candidate_pairs(db, uid):
         seen += 1
         listing_id = await _resolve_listing_id(db, uid, marketplace, sku)
@@ -541,9 +543,20 @@ async def run_returns_producer(ctx: RuntimeContext) -> ProducerResult:
             absent += 1
         reconciled += rec.created + rec.updated
 
+        # Returns-Reason Diagnosis (additive, independent): observed reason-SHARE drift.
+        # Counts-only, advisory-only — reuses the same audit + the existing Returns feed reader.
+        reason_by = await returns_by_reason_by_date(db, uid, marketplace, sku)
+        reason_diags = classify_reason_share_drifts(reason_by, marketplace=marketplace, sku=sku)
+        rrec = await reconcile_returns_reason_signals(
+            db, user_id=uid, listing_id=listing_id, audit_id=audit.id,
+            marketplace=marketplace, sku=sku, diagnoses=reason_diags, now=ctx.now)
+        reason_emitted += len(reason_diags)
+        reconciled += rrec.created + rrec.updated
+
     return ProducerResult(ok=True, stats={
         "candidates_seen": seen,
         "rises_confirmed": emitted,
+        "reason_share_rises": reason_emitted,
         "honest_absent": absent,
         "signals_reconciled": reconciled,
     })
