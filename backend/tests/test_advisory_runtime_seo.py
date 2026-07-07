@@ -1,11 +1,11 @@
 """
-SEO advisory producer adapter (Phase C3a) — DISABLED shadow.
+SEO advisory producer adapter (Phase C3a; ENABLED Phase C3c).
 
-Proves the SEO producer is registered but DISABLED (shadow-only, not scheduled); a manual shadow run
+Proves the SEO producer is registered and ENABLED (scheduled, 9th live contour); a run
 over a seeded uploaded card + Reference produces seo_signal through the EXISTING audit_and_persist
 path; honest skips (no card) and honest degradation (absent reference → constraint rules
 not_evaluated → no fabricated constraint signals); the reference_version pin is visible in
-snapshot_hash behavior; all 8 currently-live contours stay untouched; alembic head unchanged.
+snapshot_hash behavior; the prior live contours stay untouched; alembic head unchanged.
 """
 import asyncio
 import json
@@ -73,18 +73,18 @@ def _ctx(db, uid):
                           triggered_by="shadow")
 
 
-# ── registry: registered but DISABLED, not scheduled ─────────────────────────
+# ── registry: registered and ENABLED, scheduled (Phase C3c) ──────────────────
 
-def test_seo_registered_but_disabled():
+def test_seo_registered_and_enabled():
     by_key = {s.key: s for s in ADVISORY_PRODUCERS}
     assert "seo" in by_key                      # present
-    assert by_key["seo"].enabled is False       # DISABLED (shadow)
+    assert by_key["seo"].enabled is True        # ENABLED (Phase C3c — 9th live contour)
 
 
-def test_seo_not_in_enabled_set():
+def test_seo_in_enabled_set():
     enabled = {s.key for s in ADVISORY_PRODUCERS if s.enabled}
-    assert "seo" not in enabled
-    # the 8 live Business-Diagnosis + support contours remain enabled, untouched
+    assert "seo" in enabled                     # now scheduled
+    # the prior live Business-Diagnosis + support contours remain enabled, untouched
     for live in ("growth", "legal", "review", "advertising", "revenue_diagnosis",
                  "money_leak", "supply", "rating", "review_velocity", "overstock",
                  "price_erosion", "returns"):

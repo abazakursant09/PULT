@@ -194,10 +194,10 @@ def test_no_producer_not_in_feed_and_head_unchanged():
     from services.advisory_runtime.registry import ADVISORY_PRODUCERS
     from services.decision_feed.builder import _ENGINES
     keys = {s.key for s in ADVISORY_PRODUCERS}
-    # SEO is registered as a producer in C3a but DISABLED (shadow) — never enabled here.
+    # SEO is registered as a producer and ENABLED (Phase C3c — 9th live contour).
     assert "category_schema" not in keys
     seo_spec = next((s for s in ADVISORY_PRODUCERS if s.key == "seo"), None)
-    assert seo_spec is not None and seo_spec.enabled is False
+    assert seo_spec is not None and seo_spec.enabled is True
     tables = {t for (_c, _m, t) in _ENGINES}
     for missing in ("marketplace_category_rows", "marketplace_category_attribute_rows",
                     "imported_card_content_rows"):
