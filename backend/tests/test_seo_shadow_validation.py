@@ -1,6 +1,6 @@
 """
-SEO shadow validation (Phase C3b) — tests-only, proves the DISABLED SEO producer is advisory-safe
-and correct BEFORE the C3c enable. No production change; SEO stays enabled=False.
+SEO shadow validation (Phase C3b; SEO ENABLED in C3c) — proves the SEO producer is advisory-safe
+and correct. Advisory-only behavior holds identically whether scheduled or run directly.
 
 Runs run_seo_producer directly over seeded data (shadow) and asserts:
   1. advisory-safe — writes seo_signal ONLY; creates NO Decision / EngineSignalDecisionLink /
@@ -94,12 +94,12 @@ async def _live(db, uid):
     return [s for s in await _signals(db, uid) if s.status in ("active", "reopened")]
 
 
-# ── C3b precondition: SEO still DISABLED (no enablement in this slice) ────────
+# ── C3c: SEO ENABLED — registered, enabled, in the scheduled set ─────────────
 
-def test_seo_still_disabled():
+def test_seo_enabled():
     by_key = {s.key: s for s in ADVISORY_PRODUCERS}
-    assert by_key["seo"].enabled is False
-    assert "seo" not in {s.key for s in ADVISORY_PRODUCERS if s.enabled}
+    assert by_key["seo"].enabled is True
+    assert "seo" in {s.key for s in ADVISORY_PRODUCERS if s.enabled}
 
 
 # ── 1. advisory-safe: seo_signal ONLY, nothing executable ────────────────────

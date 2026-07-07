@@ -249,7 +249,7 @@ def test_scheduler_runs_returns():
     async def go():
         db = await _db(); uid = str(uuid.uuid4())
         await _seed(db, uid, _sales(), [(5, 1), (15, 6)]); await db.commit()
-        # default slot_budget (20) covers all 14 enabled producers for this active user
+        # default slot_budget (20) covers all 15 enabled producers for this active user
         await AdvisoryRuntime().run_due_producers(db, now=NOW)   # REAL registry, default budget
         from models.advisory_run import AdvisoryRun
         keys = {r.producer_key for r in (await db.execute(select(AdvisoryRun))).scalars().all()}
