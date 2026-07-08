@@ -42,6 +42,10 @@ class RecommendationGroup:
     items: List[FeedItem]                     # every FeedItem contributing this recommendation
     contributing_contours: Tuple[str, ...]    # distinct contours, first-appearance order
     contributing_problem_types: Tuple[str, ...]  # distinct problem_types, first-appearance order
+    # Phase P2 — highest OBSERVED severity among this group's items (critical|high|medium|low|
+    # None), read verbatim from the members' priority class. Not a score, not computed from money.
+    # Used ONLY to order the recommendation_groups list; item order inside the group is untouched.
+    group_severity: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -94,10 +98,14 @@ def _problem_type(it: FeedItem) -> Optional[str]:
 
 def _recommendation_groups(items: List[FeedItem]) -> List[RecommendationGroup]:
     """Phase P1 — dedup identical (normalized) recommendation TEXT into one group per key.
-    Deterministic: groups appear in first-appearance order of their normalized key; items keep
-    build_feed order inside a group. Items with no recommended_action join no group (they stay
-    fully present in card.items / evidence). Every item WITH a recommendation belongs to exactly
-    one group; no diagnosis merged, no recommendation fabricated."""
+    Items keep build_feed order inside a group. Items with no recommended_action join no group
+    (they stay fully present in card.items / evidence). Every item WITH a recommendation belongs
+    to exactly one group; no diagnosis merged, no recommendation fabricated.
+
+    Phase P2 — the returned groups are ordered by highest OBSERVED severity (most severe first);
+    equal-severity groups keep stable first-appearance order; None-severity groups sort last.
+    Ordering acts on the groups list ONLY — item order inside a group, and card.items /
+    recommendations / evidence order, are all untouched."""
     order: List[str] = []
     by_key: "dict[str, List[FeedItem]]" = {}
     display: "dict[str, str]" = {}
@@ -126,7 +134,11 @@ def _recommendation_groups(items: List[FeedItem]) -> List[RecommendationGroup]:
         groups.append(RecommendationGroup(
             recommendation=display[key], items=list(grp_items),
             contributing_contours=tuple(contours),
-            contributing_problem_types=tuple(ptypes)))
+            contributing_problem_types=tuple(ptypes),
+            group_severity=_highest_severity(grp_items)))
+    # Phase P2 — order groups most-severe first. Python's sort is stable, so equal-severity
+    # groups keep their first-appearance order; None maps to the last rank (sorts last).
+    groups.sort(key=lambda g: _SEVERITY_RANK.get(g.group_severity, _SEVERITY_RANK[None]))
     return groups
 
 
