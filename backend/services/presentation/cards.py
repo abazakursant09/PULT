@@ -25,6 +25,25 @@ from services.decision_feed.builder import FeedItem
 _SEVERITY_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3, None: 4}
 
 
+def _normalize_recommendation(text: str) -> str:
+    """Deterministic merge key for a recommendation: collapse internal whitespace + casefold.
+    Two items whose recommendation normalizes to the same key are the SAME seller action. No
+    fabrication — the key is derived from the verbatim recommended_action only."""
+    return " ".join(text.split()).casefold()
+
+
+@dataclass(frozen=True)
+class RecommendationGroup:
+    """One deduped seller recommendation (Phase P1) — every FeedItem whose recommendation
+    normalizes to the same key, grouped under a single seller-facing line. Full traceability:
+    the contributing items / contours / problem_types are all preserved. No diagnosis merged,
+    no evidence removed — only the recommendation TEXT is deduplicated."""
+    recommendation: str                       # seller-facing text (first occurrence, verbatim)
+    items: List[FeedItem]                     # every FeedItem contributing this recommendation
+    contributing_contours: Tuple[str, ...]    # distinct contours, first-appearance order
+    contributing_problem_types: Tuple[str, ...]  # distinct problem_types, first-appearance order
+
+
 @dataclass(frozen=True)
 class PresentationCard:
     """One seller-facing card = all live FeedItems for one (marketplace, sku). Read-only view."""
@@ -42,7 +61,11 @@ class PresentationCard:
     recommendations: List[str]
     # verbatim per-item evidence (contour + doctrine what/why), order preserved
     evidence: List[dict]
-    # Phase P3 placeholder — a synthesized cross-diagnosis explanation. Always None in P0.
+    # Phase P1 — deduped seller recommendations: identical (normalized) recommendation TEXT
+    # merged into one group, each carrying its contributing items/contours/problem_types.
+    # Default empty so P0 callers/serialization are unaffected.
+    recommendation_groups: List[RecommendationGroup] = field(default_factory=list)
+    # Phase P3 placeholder — a synthesized cross-diagnosis explanation. Always None in P0/P1.
     root_cause_narrative: Optional[str] = None
     # stable grouping key, "<marketplace>:<sku>" (or the raw None-safe pair repr)
     group_key: str = field(default="")
@@ -63,6 +86,50 @@ def _highest_severity(items: List[FeedItem]) -> Optional[str]:
     return best
 
 
+def _problem_type(it: FeedItem) -> Optional[str]:
+    """The item's problem_type, read verbatim from the FeedItem's source_context (never
+    recomputed). None for items that carry no problem_type (e.g. decision_outcome)."""
+    return it.source_context.get("problem_type") if it.source_context else None
+
+
+def _recommendation_groups(items: List[FeedItem]) -> List[RecommendationGroup]:
+    """Phase P1 — dedup identical (normalized) recommendation TEXT into one group per key.
+    Deterministic: groups appear in first-appearance order of their normalized key; items keep
+    build_feed order inside a group. Items with no recommended_action join no group (they stay
+    fully present in card.items / evidence). Every item WITH a recommendation belongs to exactly
+    one group; no diagnosis merged, no recommendation fabricated."""
+    order: List[str] = []
+    by_key: "dict[str, List[FeedItem]]" = {}
+    display: "dict[str, str]" = {}
+    for it in items:
+        rec = it.recommended_action
+        if not rec:
+            continue                                    # no recommendation → no group
+        key = _normalize_recommendation(rec)
+        if key not in by_key:
+            by_key[key] = []
+            display[key] = rec                          # first occurrence = seller-facing text
+            order.append(key)
+        by_key[key].append(it)
+
+    groups: List[RecommendationGroup] = []
+    for key in order:
+        grp_items = by_key[key]
+        contours: List[str] = []
+        ptypes: List[str] = []
+        for it in grp_items:
+            if it.contour not in contours:
+                contours.append(it.contour)
+            pt = _problem_type(it)
+            if pt is not None and pt not in ptypes:
+                ptypes.append(pt)
+        groups.append(RecommendationGroup(
+            recommendation=display[key], items=list(grp_items),
+            contributing_contours=tuple(contours),
+            contributing_problem_types=tuple(ptypes)))
+    return groups
+
+
 def _card(marketplace: Optional[str], sku: Optional[str], items: List[FeedItem]) -> PresentationCard:
     contours: List[str] = []
     recommendations: List[str] = []
@@ -71,7 +138,7 @@ def _card(marketplace: Optional[str], sku: Optional[str], items: List[FeedItem])
         if it.contour not in contours:
             contours.append(it.contour)
         if it.recommended_action:
-            recommendations.append(it.recommended_action)     # verbatim, duplicates kept (P0)
+            recommendations.append(it.recommended_action)     # verbatim, duplicates kept (raw)
         evidence.append({
             "contour": it.contour,
             "item_key": it.item_key,
@@ -84,6 +151,7 @@ def _card(marketplace: Optional[str], sku: Optional[str], items: List[FeedItem])
         highest_severity=_highest_severity(items),
         contributing_contours=tuple(contours),
         recommendations=recommendations, evidence=evidence,
+        recommendation_groups=_recommendation_groups(items),
         root_cause_narrative=None,
         group_key=_group_key(marketplace, sku),
     )
