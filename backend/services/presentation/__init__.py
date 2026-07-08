@@ -13,6 +13,6 @@ Phase P0 = the foundation: the PresentationCard DTO + a builder that GROUPS Feed
 management — those are later phases. Nothing is hidden or removed; a card is a view over
 the exact FeedItems build_feed returned, order preserved.
 """
-from .cards import PresentationCard, build_presentation_cards
+from .cards import PresentationCard, RecommendationGroup, build_presentation_cards
 
-__all__ = ["PresentationCard", "build_presentation_cards"]
+__all__ = ["PresentationCard", "RecommendationGroup", "build_presentation_cards"]
