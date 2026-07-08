@@ -1688,6 +1688,22 @@ export const api = {
       req<DecisionFeedStateResult>(`/api/decision-feed/${encodeURIComponent(itemKey)}/act`, { method: 'POST' }),
   },
 
+  // ── Presentation Intelligence (read-layer: seller-facing cards over build_feed) ─
+  // Same tenant scoping + query params as decisionFeed.getFeed; returns grouped cards.
+  // Mutations (seen/snooze/dismiss/act) still go through decisionFeed on item_key.
+  presentation: {
+    getCards: (params: DecisionFeedFilters = {}) => {
+      const q = new URLSearchParams()
+      if (params.contour) q.set('contour', params.contour)
+      if (params.include_snoozed) q.set('include_snoozed', 'true')
+      if (params.include_dismissed) q.set('include_dismissed', 'true')
+      if (params.include_resolved) q.set('include_resolved', 'true')
+      if (params.limit != null) q.set('limit', String(params.limit))
+      const s = q.toString()
+      return req<PresentationCardsResponse>(`/api/presentation/cards${s ? `?${s}` : ''}`)
+    },
+  },
+
   // ── Today (One Morning Truth) — canonical "what to do today" over build_feed ──
   // Read-only. Same source as the Dashboard feed and the Telegram top action.
   today: {
@@ -2311,6 +2327,33 @@ export interface DecisionFeedFilters {
   include_resolved?:   boolean
   limit?:              number
 }
+
+// ── Presentation Intelligence types (read-layer over the same FeedItems) ──────
+// GET /api/presentation/cards re-frames the SAME feed items (DecisionFeedItem) into
+// (marketplace, sku) cards with deduped recommendation groups (P1), severity ordering
+// (P2) and a root-cause narrative (P3). Nested items reuse DecisionFeedItem verbatim.
+export interface RecommendationGroup {
+  group_key:                   string
+  recommendation:              string
+  contributing_contours:       string[]
+  contributing_problem_types:  string[]
+  group_severity:              string | null
+  root_cause_narrative:        string | null
+  items:                       DecisionFeedItem[]
+}
+export interface PresentationCard {
+  marketplace:            string | null
+  sku:                    string | null
+  group_key:              string
+  highest_severity:       string | null
+  contributing_contours:  string[]
+  items:                  DecisionFeedItem[]
+  recommendations:        string[]
+  evidence:               Record<string, unknown>[]
+  recommendation_groups:  RecommendationGroup[]
+  root_cause_narrative:   string | null
+}
+export interface PresentationCardsResponse { cards: PresentationCard[] }
 
 // ── Today types (One Morning Truth) — canonical projection over build_feed ────
 export interface TodayItem {

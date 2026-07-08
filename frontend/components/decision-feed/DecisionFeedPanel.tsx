@@ -1,20 +1,39 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
-import type { DecisionFeedItem } from '@/lib/api'
+import type { DecisionFeedItem, PresentationCard, RecommendationGroup } from '@/lib/api'
 import { DecisionFeedFilters } from './DecisionFeedFilters'
 import { DecisionFeedCard } from './DecisionFeedCard'
 import { DecisionFeedEmptyState } from './DecisionFeedEmptyState'
-import { groupByProduct, marketplaceLabel, recommendationsLabel } from '@/lib/feedGrouping'
+import { marketplaceLabel, recommendationsLabel } from '@/lib/feedGrouping'
+import { patchItemState, removeItem, skipTopAction, ungroupedItems } from '@/lib/presentationFeed'
 
 // "Что требует внимания сегодня" — главный видимый слой PULT. Список решений из
 // всех контуров, не отчёт и не BI. Без рейтинга, без numeric priority, без прогноза.
+//
+// P5 — reads GET /api/presentation/cards (server-side grouping: product cards → deduped
+// recommendation groups → items). The old client-side grouping is gone; mutations still run
+// through api.decisionFeed on item_key (items nest verbatim).
 
 type Action = 'seen' | 'snooze' | 'dismiss' | 'act'
 
-export function DecisionFeedPanel({ skipTopAction = false }: { skipTopAction?: boolean } = {}) {
+// observed severity → conservative RU label. Not a score, verbatim class only.
+const _SEV_LABEL: Record<string, string> = {
+  critical: 'Критично', high: 'Высокий приоритет', medium: 'Средний приоритет', low: 'Низкий приоритет',
+}
+function severityLabel(s: string | null): string | null {
+  return s ? (_SEV_LABEL[s] ?? s) : null
+}
+
+function roleLabel(it: DecisionFeedItem): string | null {
+  if (it.action_role === 'primary') return 'Основной вариант'
+  if (it.action_role === 'alternative') return 'Альтернатива'
+  return null
+}
+
+export function DecisionFeedPanel({ skipTopAction: skip = false }: { skipTopAction?: boolean } = {}) {
   const [contour, setContour] = useState<string | null>(null)
-  const [items, setItems] = useState<DecisionFeedItem[]>([])
+  const [cards, setCards] = useState<PresentationCard[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -23,8 +42,8 @@ export function DecisionFeedPanel({ skipTopAction = false }: { skipTopAction?: b
     setLoading(true); setError(null)
     ;(async () => {
       try {
-        const resp = await api.decisionFeed.getFeed({ contour: contour ?? undefined, limit: 50 })
-        if (alive) setItems(resp.items)
+        const resp = await api.presentation.getCards({ contour: contour ?? undefined, limit: 50 })
+        if (alive) setCards(resp.cards)
       } catch (e) {
         if (alive) setError(e instanceof Error ? e.message : 'Ошибка загрузки')
       } finally {
@@ -34,48 +53,17 @@ export function DecisionFeedPanel({ skipTopAction = false }: { skipTopAction?: b
     return () => { alive = false }
   }, [contour])
 
-  // Group items by group_key (canonical insight_key, carries marketplace → WB/Ozon
-  // never merge). Items without a group_key stay standalone (keyed by item_key).
-  // Order is preserved by first appearance.
-  function groupItems(list: DecisionFeedItem[]): DecisionFeedItem[][] {
-    const order: string[] = []
-    const map = new Map<string, DecisionFeedItem[]>()
-    for (const it of list) {
-      const key = it.group_key ?? `solo:${it.item_key}`
-      if (!map.has(key)) { map.set(key, []); order.push(key) }
-      map.get(key)!.push(it)
-    }
-    // primary first within each group
-    return order.map((k) => {
-      const arr = map.get(k)!
-      return [...arr].sort(
-        (a: DecisionFeedItem, b: DecisionFeedItem) =>
-          (a.action_role === 'primary' ? -1 : 0) - (b.action_role === 'primary' ? -1 : 0),
-      )
-    })
-  }
-
-  function roleLabel(it: DecisionFeedItem): string | null {
-    if (it.action_role === 'primary') return 'Основной вариант'
-    if (it.action_role === 'alternative') return 'Альтернатива'
-    return null
-  }
-
-  // local update so the list reacts immediately after an action
+  // local update so the list reacts immediately after an action (operates over nested cards)
   function onChanged(itemKey: string, action: Action) {
-    setItems((prev) => {
-      if (action === 'snooze' || action === 'dismiss') {
-        return prev.filter((i) => i.item_key !== itemKey)   // hidden by default
-      }
-      const state = action === 'seen' ? 'seen' : 'acted'
-      return prev.map((i) => (i.item_key === itemKey ? { ...i, attention_state: state } : i))
+    setCards((prev) => {
+      if (action === 'snooze' || action === 'dismiss') return removeItem(prev, itemKey)
+      return patchItemState(prev, itemKey, action === 'seen' ? 'seen' : 'acted')
     })
   }
 
-  // De-dup with TodayFocus: when it already shows the top_action above, drop the feed's
-  // first live item (which IS build_feed[0] == top_action). Only in the UNFILTERED view —
-  // a contour filter changes what's first and TodayFocus is unfiltered.
-  const shown = skipTopAction && contour === null ? items.slice(1) : items
+  // De-dup with TodayFocus: it already shows the top_action (== build_feed[0]) above. Only in
+  // the UNFILTERED view — a contour filter changes what's first and TodayFocus is unfiltered.
+  const shown = skip && contour === null ? skipTopAction(cards) : cards
 
   return (
     <div className="s-card" style={{ marginBottom: 18 }}>
@@ -99,58 +87,87 @@ export function DecisionFeedPanel({ skipTopAction = false }: { skipTopAction?: b
             <DecisionFeedEmptyState />
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              {/* Product → Problems → Alternatives. Outer: group by product
-                  (normalize(marketplace)+sku); inner: existing group_key grouping. */}
-              {groupByProduct(shown).map((pg) => {
-                const inner = (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    {groupItems(pg.items).map((group) => (
-                      group.length === 1 ? (
-                        <DecisionFeedCard key={group[0].item_key} item={group[0]} onChanged={onChanged} />
-                      ) : (
-                        <div key={group[0].group_key ?? group[0].item_key} style={{
-                          border: '1px solid var(--line)', borderRadius: 12, padding: 12,
-                          background: 'var(--surface)', display: 'flex', flexDirection: 'column', gap: 8,
-                        }}>
-                          {/* one problem shown once for the whole group */}
-                          {group[0].what_happened && (
-                            <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)' }}>{group[0].what_happened}</div>
-                          )}
-                          {group[0].why_it_matters && (
-                            <div style={{ fontSize: 12, color: 'var(--text-2)' }}><b>Почему важно:</b> {group[0].why_it_matters}</div>
-                          )}
-                          <div style={{ fontSize: 11.5, color: 'var(--text-3)' }}>Варианты решения:</div>
-                          {group.map((i) => (
-                            <DecisionFeedCard key={i.item_key} item={i} onChanged={onChanged}
-                              roleLabel={roleLabel(i)} hideProblem />
-                          ))}
-                        </div>
-                      )
-                    ))}
-                  </div>
-                )
-                // sku-null solo groups: no product identity → render items bare (no header)
-                if (!pg.sku) return <div key={pg.key}>{inner}</div>
-                return (
-                  <div key={pg.key} style={{
-                    border: '1px solid var(--line)', borderRadius: 14, padding: 12,
-                    background: 'var(--bg, transparent)', display: 'flex', flexDirection: 'column', gap: 10,
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                      <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text)' }}>{pg.sku}</span>
-                      <span style={{ fontSize: 12, color: 'var(--text-3)' }}>· {marketplaceLabel(pg.marketplace)}</span>
-                      <span style={{ fontSize: 11.5, color: 'var(--text-3)', marginLeft: 'auto' }}>
-                        {recommendationsLabel(pg.items.length)}
-                      </span>
-                    </div>
-                    {inner}
-                  </div>
-                )
-              })}
+              {shown.map((card) => (
+                <PresentationCardView key={card.group_key} card={card} onChanged={onChanged} />
+              ))}
             </div>
           )
         )}
       </div>
+    </div>
+  )
+}
+
+// ── one product card: header (sku · marketplace · severity + root-cause) → groups → rest ──
+function PresentationCardView(
+  { card, onChanged }: { card: PresentationCard; onChanged: (k: string, a: Action) => void },
+) {
+  const sev = severityLabel(card.highest_severity)
+  const rest = ungroupedItems(card)
+
+  const body = (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {card.recommendation_groups.map((g) => (
+        <RecommendationGroupView key={g.group_key} group={g} onChanged={onChanged} />
+      ))}
+      {/* items with no recommendation (never dropped) render as bare cards */}
+      {rest.map((it) => (
+        <DecisionFeedCard key={it.item_key} item={it} onChanged={onChanged} />
+      ))}
+    </div>
+  )
+
+  // sku-null cards have no product identity → render items bare (no header)
+  if (!card.sku) return <div>{body}</div>
+
+  return (
+    <div style={{
+      border: '1px solid var(--line)', borderRadius: 14, padding: 12,
+      background: 'var(--bg, transparent)', display: 'flex', flexDirection: 'column', gap: 10,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text)' }}>{card.sku}</span>
+        <span style={{ fontSize: 12, color: 'var(--text-3)' }}>· {marketplaceLabel(card.marketplace)}</span>
+        {sev && (
+          <span style={{ fontSize: 11, color: 'var(--text-3)', border: '1px solid var(--line)',
+            borderRadius: 6, padding: '1px 6px' }}>{sev}</span>
+        )}
+        <span style={{ fontSize: 11.5, color: 'var(--text-3)', marginLeft: 'auto' }}>
+          {recommendationsLabel(card.items.length)}
+        </span>
+      </div>
+      {card.root_cause_narrative && (
+        <div style={{ fontSize: 12, color: 'var(--text-2)' }}>{card.root_cause_narrative}</div>
+      )}
+      {body}
+    </div>
+  )
+}
+
+// ── one deduped recommendation group ──────────────────────────────────────────
+function RecommendationGroupView(
+  { group, onChanged }: { group: RecommendationGroup; onChanged: (k: string, a: Action) => void },
+) {
+  // single item, nothing shared to hoist → render the card bare (keeps its own problem/action)
+  if (group.items.length === 1) {
+    return <DecisionFeedCard item={group.items[0]} onChanged={onChanged} />
+  }
+  const head = group.items[0]
+  return (
+    <div style={{
+      border: '1px solid var(--line)', borderRadius: 12, padding: 12,
+      background: 'var(--surface)', display: 'flex', flexDirection: 'column', gap: 8,
+    }}>
+      {head.what_happened && (
+        <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)' }}>{head.what_happened}</div>
+      )}
+      {head.why_it_matters && (
+        <div style={{ fontSize: 12, color: 'var(--text-2)' }}><b>Почему важно:</b> {head.why_it_matters}</div>
+      )}
+      <div style={{ fontSize: 11.5, color: 'var(--text-3)' }}>Варианты решения:</div>
+      {group.items.map((i) => (
+        <DecisionFeedCard key={i.item_key} item={i} onChanged={onChanged} roleLabel={roleLabel(i)} hideProblem />
+      ))}
     </div>
   )
 }
