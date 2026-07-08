@@ -125,19 +125,26 @@ function PresentationCardView(
       border: '1px solid var(--line)', borderRadius: 14, padding: 12,
       background: 'var(--bg, transparent)', display: 'flex', flexDirection: 'column', gap: 10,
     }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text)' }}>{card.sku}</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text)', lineHeight: 1.2 }}>{card.sku}</span>
         <span style={{ fontSize: 12, color: 'var(--text-3)' }}>· {marketplaceLabel(card.marketplace)}</span>
         {sev && (
-          <span style={{ fontSize: 11, color: 'var(--text-3)', border: '1px solid var(--line)',
-            borderRadius: 6, padding: '1px 6px' }}>{sev}</span>
+          <span style={{
+            fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.2,
+            color: 'var(--text-2)', background: 'var(--surface-h)', border: '1px solid var(--line)',
+            borderRadius: 5, padding: '2px 7px', lineHeight: 1.3,
+          }}>{sev}</span>
         )}
         <span style={{ fontSize: 11.5, color: 'var(--text-3)', marginLeft: 'auto' }}>
           {recommendationsLabel(card.items.length)}
         </span>
       </div>
       {card.root_cause_narrative && (
-        <div style={{ fontSize: 12, color: 'var(--text-2)' }}>{card.root_cause_narrative}</div>
+        <div style={{
+          fontSize: 12, color: 'var(--text-2)', lineHeight: 1.45,
+          padding: '8px 10px', borderRadius: 7,
+          background: 'var(--surface-h)', borderLeft: '2px solid var(--line)',
+        }}>{card.root_cause_narrative}</div>
       )}
       {body}
     </div>
@@ -153,18 +160,20 @@ function RecommendationGroupView(
     return <DecisionFeedCard item={group.items[0]} onChanged={onChanged} />
   }
   const head = group.items[0]
+  // Indented rule (not a nested solid box) — the shared problem is stated once, then the
+  // variant cards sit under a light left rule so the hierarchy reads without box-in-box.
   return (
     <div style={{
-      border: '1px solid var(--line)', borderRadius: 12, padding: 12,
-      background: 'var(--surface)', display: 'flex', flexDirection: 'column', gap: 8,
+      display: 'flex', flexDirection: 'column', gap: 8,
+      paddingLeft: 12, borderLeft: '2px solid var(--line)',
     }}>
       {head.what_happened && (
-        <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)' }}>{head.what_happened}</div>
+        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', lineHeight: 1.35 }}>{head.what_happened}</div>
       )}
       {head.why_it_matters && (
-        <div style={{ fontSize: 12, color: 'var(--text-2)' }}><b>Почему важно:</b> {head.why_it_matters}</div>
+        <div style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.4 }}><b>Почему важно:</b> {head.why_it_matters}</div>
       )}
-      <div style={{ fontSize: 11.5, color: 'var(--text-3)' }}>Варианты решения:</div>
+      <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.2, color: 'var(--text-3)' }}>Варианты решения</div>
       {group.items.map((i) => (
         <DecisionFeedCard key={i.item_key} item={i} onChanged={onChanged} roleLabel={roleLabel(i)} hideProblem />
       ))}
