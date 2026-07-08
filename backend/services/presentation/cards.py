@@ -46,6 +46,10 @@ class RecommendationGroup:
     # None), read verbatim from the members' priority class. Not a score, not computed from money.
     # Used ONLY to order the recommendation_groups list; item order inside the group is untouched.
     group_severity: Optional[str] = None
+    # Phase P3 — deterministic read-layer narrative: when ≥2 diagnoses converge on this one
+    # seller action, state that observed convergence verbatim (no invented causality, no money,
+    # no forecast). None when the group has fewer than 2 items (not enough evidence).
+    root_cause_narrative: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -69,7 +73,9 @@ class PresentationCard:
     # merged into one group, each carrying its contributing items/contours/problem_types.
     # Default empty so P0 callers/serialization are unaffected.
     recommendation_groups: List[RecommendationGroup] = field(default_factory=list)
-    # Phase P3 placeholder — a synthesized cross-diagnosis explanation. Always None in P0/P1.
+    # Phase P3 — deterministic mirror of the first (most-severe, P2-ordered) RecommendationGroup
+    # that carries a root_cause_narrative; None when no group qualifies. Read-layer only, no
+    # synthesis — the card points at the strongest observed convergence, inventing nothing.
     root_cause_narrative: Optional[str] = None
     # stable grouping key, "<marketplace>:<sku>" (or the raw None-safe pair repr)
     group_key: str = field(default="")
@@ -94,6 +100,22 @@ def _problem_type(it: FeedItem) -> Optional[str]:
     """The item's problem_type, read verbatim from the FeedItem's source_context (never
     recomputed). None for items that carry no problem_type (e.g. decision_outcome)."""
     return it.source_context.get("problem_type") if it.source_context else None
+
+
+def _root_cause_narrative(group_items: List[FeedItem], contours: List[str],
+                          problem_types: List[str], recommendation: str) -> Optional[str]:
+    """Phase P3 — deterministic root-cause line for ONE RecommendationGroup. Returns None unless
+    ≥2 FeedItems converge on this action (not enough evidence → None). The text only STATES the
+    observed convergence — the diagnoses literally share this normalized action — and invents no
+    causality, no money, no forecast. contours / problem_types are sorted-unique for stable text."""
+    if len(group_items) < 2:
+        return None
+    n = len(group_items)
+    contours_txt = ", ".join(sorted(set(contours)))
+    ptypes_txt = ", ".join(sorted(set(problem_types))) if problem_types else "—"
+    return (f"{n} диагнозов сходятся на одном действии «{recommendation}» — "
+            f"контуры: {contours_txt}; типы проблем: {ptypes_txt}. "
+            f"Общая причина — единое действие устраняет их все.")
 
 
 def _recommendation_groups(items: List[FeedItem]) -> List[RecommendationGroup]:
@@ -135,7 +157,9 @@ def _recommendation_groups(items: List[FeedItem]) -> List[RecommendationGroup]:
             recommendation=display[key], items=list(grp_items),
             contributing_contours=tuple(contours),
             contributing_problem_types=tuple(ptypes),
-            group_severity=_highest_severity(grp_items)))
+            group_severity=_highest_severity(grp_items),
+            root_cause_narrative=_root_cause_narrative(
+                grp_items, contours, ptypes, display[key])))
     # Phase P2 — order groups most-severe first. Python's sort is stable, so equal-severity
     # groups keep their first-appearance order; None maps to the last rank (sorts last).
     groups.sort(key=lambda g: _SEVERITY_RANK.get(g.group_severity, _SEVERITY_RANK[None]))
@@ -158,13 +182,17 @@ def _card(marketplace: Optional[str], sku: Optional[str], items: List[FeedItem])
             "what_happened": it.what_happened,
             "why_it_matters": it.why_it_matters,
         })
+    groups = _recommendation_groups(items)
+    # Phase P3 — deterministic mirror: surface the first (most-severe, P2-ordered) group that
+    # carries a narrative. Not new synthesis — the card just points to the strongest convergence.
+    card_narrative = next((g.root_cause_narrative for g in groups if g.root_cause_narrative), None)
     return PresentationCard(
         marketplace=marketplace, sku=sku, items=list(items),
         highest_severity=_highest_severity(items),
         contributing_contours=tuple(contours),
         recommendations=recommendations, evidence=evidence,
-        recommendation_groups=_recommendation_groups(items),
-        root_cause_narrative=None,
+        recommendation_groups=groups,
+        root_cause_narrative=card_narrative,
         group_key=_group_key(marketplace, sku),
     )
 
