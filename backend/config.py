@@ -43,6 +43,17 @@ class Settings(BaseSettings):
     # ── Nano Banana AI ────────────────────────────────────────────────────────
     nano_banana_api_key: str = ""
 
+    # ── Email (transactional: verification + password reset) ──────────────────
+    # If smtp_host is empty the email service logs the message instead of sending
+    # (development). In production set these so verification/reset links are
+    # delivered by email — tokens are NEVER returned in API responses (P7.1).
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_starttls: bool = True
+
     # ── YooKassa ──────────────────────────────────────────────────────────────
     yookassa_shop_id: str = ""
     yookassa_secret_key: str = ""

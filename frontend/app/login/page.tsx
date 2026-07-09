@@ -7,7 +7,6 @@ import { ArrowRight, Shield } from 'lucide-react'
 import { api } from '@/lib/api'
 import { setToken } from '@/lib/session'
 import { useLang } from '@/lib/lang-context'
-import { OAuthButtons } from '@/components/OAuthButtons'
 
 type Step = 'credentials' | 'mfa'
 
@@ -117,13 +116,6 @@ export default function LoginPage() {
 
         {step === 'credentials' && (
           <>
-            <OAuthButtons mode="login" />
-
-            <div className="flex items-center gap-3 my-5">
-              <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.08)' }} />
-              <span className="text-[12px]" style={{ color: '#71717A' }}>или продолжите через почту</span>
-              <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.08)' }} />
-            </div>
 
             <form onSubmit={submitCredentials} className="space-y-4">
               <div>
