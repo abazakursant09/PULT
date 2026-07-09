@@ -487,31 +487,12 @@ export default function ImportPage() {
             Данные доступны в разделах Финансы и Пульт
           </p>
 
-          {/* SEO cards CTA */}
-          {(preview?.import_type === 'products' || effectiveIType === 'products') && (
-            <div style={{
-              background: 'rgba(110,106,252,0.06)', border: '1px solid rgba(110,106,252,0.15)',
-              borderRadius: 12, padding: 16, marginBottom: 20, maxWidth: 380, margin: '0 auto 20px',
-            }}>
-              <p style={{ fontSize: 13, color: '#A78BFA', marginBottom: 10 }}>
-                ✨ Создайте SEO-карточки для импортированных товаров
-              </p>
-              <button
-                className="btn btn-primary"
-                style={{ width: '100%' }}
-                onClick={() => router.push('/dashboard/seo-cards')}
-              >
-                Открыть SEO-карточки →
-              </button>
-            </div>
-          )}
-
           <div className="flex gap-3 justify-center">
             <button
               className="btn btn-primary"
-              onClick={() => router.push(preview?.import_type === 'products' ? '/dashboard' : '/dashboard/finance')}
+              onClick={() => router.push('/dashboard')}
             >
-              {preview?.import_type === 'products' ? 'Перейти в Пульт' : 'Открыть Финансы'} <ArrowRight size={14} style={{ marginLeft: 6 }} />
+              Перейти в Пульт <ArrowRight size={14} style={{ marginLeft: 6 }} />
             </button>
             <button onClick={reset} className="btn btn-ghost">
               <RefreshCw size={14} style={{ marginRight: 6 }} /> Ещё импорт
