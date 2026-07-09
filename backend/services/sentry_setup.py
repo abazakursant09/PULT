@@ -1,17 +1,18 @@
 """
-Sentry backend setup.
-Install: pip install sentry-sdk[fastapi]
-Add to requirements.txt: sentry-sdk[fastapi]>=1.40.0
-Call init_sentry() in main.py before app creation.
+Sentry backend setup. Call init_sentry() in main.py before app creation.
+
+Graceful by design: no SENTRY_DSN → no-op; sentry-sdk missing → warn and continue.
+The application always runs whether or not error tracking is enabled.
 """
 import logging
-import os
+
+from config import settings
 
 log = logging.getLogger(__name__)
 
 
 def init_sentry() -> None:
-    dsn = os.getenv("SENTRY_DSN", "")
+    dsn = settings.sentry_dsn
     if not dsn:
         return
     try:
@@ -21,11 +22,11 @@ def init_sentry() -> None:
 
         sentry_sdk.init(
             dsn=dsn,
-            environment=os.getenv("APP_ENV", "development"),
+            environment=settings.app_env,
             traces_sample_rate=0.1,
             integrations=[FastApiIntegration(), SqlalchemyIntegration()],
             ignore_errors=[KeyboardInterrupt],
         )
-        log.info("Sentry initialized (env=%s)", os.getenv("APP_ENV"))
+        log.info("Sentry initialized (env=%s)", settings.app_env)
     except ImportError:
         log.warning("sentry-sdk not installed; error tracking disabled")
