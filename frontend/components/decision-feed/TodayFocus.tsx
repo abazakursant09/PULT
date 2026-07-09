@@ -16,16 +16,34 @@ const _MP_NAME: Record<string, string> = {
 
 export function TodayFocus() {
   const [top, setTop] = useState<TodayItem | null>(null)
+  // P6 — additive root-cause narrative for the top action's product, read from the existing
+  // Presentation API (GET /api/presentation/cards). top_action itself is UNCHANGED (still
+  // /api/today, build_feed[0]); this only enriches it. Presentation fetch failing never
+  // breaks Today — narrative stays null.
+  const [narrative, setNarrative] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let alive = true
-    setLoading(true); setError(null)
+    setLoading(true); setError(null); setNarrative(null)
     ;(async () => {
       try {
-        const resp = await api.today.get({ limit: 50 })
-        if (alive) setTop(resp.top_action)
+        // top_action from /api/today (canonical, unchanged); cards from the existing
+        // Presentation API in parallel. Cards are best-effort — a failure must not break Today.
+        const [resp, cardsResp] = await Promise.all([
+          api.today.get({ limit: 50 }),
+          api.presentation.getCards({ limit: 50 }).catch(() => null),
+        ])
+        if (!alive) return
+        setTop(resp.top_action)
+        const ta = resp.top_action
+        // match the card by the SAME raw (marketplace, sku) the top action carries — the
+        // presentation cards group on those exact values, so equality is exact.
+        const card = ta && cardsResp
+          ? cardsResp.cards.find((c) => c.marketplace === ta.marketplace && c.sku === ta.sku)
+          : undefined
+        setNarrative(card?.root_cause_narrative ?? null)
       } catch (e) {
         if (alive) setError(e instanceof Error ? e.message : 'Ошибка загрузки')
       } finally {
@@ -80,6 +98,15 @@ export function TodayFocus() {
                 <div style={{ fontSize: 12, color: 'var(--text-2)' }}>
                   <b>Что это даст:</b> {top!.expected_effect}
                 </div>
+              )}
+              {/* P6 — additive root-cause narrative (P5.1 explanation-block style). Only when
+                  the top action's product has a converging narrative; otherwise nothing extra. */}
+              {narrative && (
+                <div style={{
+                  fontSize: 12, color: 'var(--text-2)', lineHeight: 1.45,
+                  padding: '8px 10px', borderRadius: 7,
+                  background: 'var(--surface-h)', borderLeft: '2px solid var(--line)',
+                }}>{narrative}</div>
               )}
             </div>
           )
