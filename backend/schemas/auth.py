@@ -49,10 +49,10 @@ class TokenResponse(BaseModel):
 
 
 class RegisterResponse(BaseModel):
-    message:            str
-    verification_token: str
+    # P7.1 — verification link is delivered by email, never returned in the response.
+    message: str
 
 
 class ForgotPasswordResponse(BaseModel):
-    message:     str
-    reset_token: str | None = None
+    # P7.1 — reset link is delivered by email, never returned in the response.
+    message: str

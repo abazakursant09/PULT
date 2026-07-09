@@ -185,14 +185,34 @@ async def payment_history(
     ]
 
 
+async def _yk_fetch_status(yk_id: str) -> str | None:
+    """Authoritatively fetch a payment's status from YooKassa (server-to-server,
+    authenticated with the shop credentials). Returns the status string or None if
+    it cannot be confirmed. The webhook trusts THIS, never the request body."""
+    if not settings.yookassa_shop_id or not settings.yookassa_secret_key:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(f"{YOOKASSA_API}/payments/{yk_id}", auth=_yk_auth())
+    except Exception as exc:  # pragma: no cover - network guard
+        logger.error("YooKassa webhook verify error for %s: %s", yk_id, exc)
+        return None
+    if resp.status_code != 200:
+        logger.warning("YooKassa webhook verify non-200 for %s: %s", yk_id, resp.status_code)
+        return None
+    return resp.json().get("status")
+
+
 @router.post("/payments/webhook")
 async def yookassa_webhook(request: Request, db: AsyncSession = Depends(get_db)):
+    # P7.1 — do NOT trust the webhook body's event/status (unauthenticated, forgeable).
+    # Take only the payment id from the body, then re-verify the real status directly
+    # with YooKassa before changing any plan.
     try:
         data = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON")
 
-    event = data.get("event")
     obj = data.get("object", {})
     yk_id = obj.get("id")
     if not yk_id:
@@ -205,17 +225,22 @@ async def yookassa_webhook(request: Request, db: AsyncSession = Depends(get_db))
     if not payment:
         return {"ok": True}
 
-    if event == "payment.succeeded" and payment.status != "succeeded":
+    verified_status = await _yk_fetch_status(yk_id)
+    if verified_status is None:
+        # Could not confirm with YooKassa → change nothing (fail closed).
+        return {"ok": True}
+
+    if verified_status == "succeeded" and payment.status != "succeeded":
         payment.status = "succeeded"
         user_result = await db.execute(select(User).where(User.id == payment.user_id))
         user = user_result.scalar_one_or_none()
         if user:
             await _activate_plan(user, payment, db)
-
-    elif event == "payment.canceled" and payment.status == "pending":
+        await db.commit()
+    elif verified_status == "canceled" and payment.status == "pending":
         payment.status = "canceled"
+        await db.commit()
 
-    await db.commit()
     return {"ok": True}
 
 

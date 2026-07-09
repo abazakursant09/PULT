@@ -167,15 +167,5 @@ async def send_message(
     )
 
 
-@router.post("/chat/set-plan")
-async def set_plan(
-    plan: str,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Dev-only: switch plan for the current user."""
-    if plan not in ("master", "profi", "maximum"):
-        raise HTTPException(status_code=422, detail="Неверный план")
-    current_user.plan = plan
-    await db.commit()
-    return {"ok": True, "plan": plan}
+# P7.1 — the dev-only POST /chat/set-plan endpoint (any user could self-grant any
+# plan for free) has been removed. Plan changes happen only via verified payment.

@@ -18,6 +18,7 @@ from models.mfa_secret import MFASecret
 from models.referral_record import ReferralRecord
 from models.user import User
 from routers.mfa import verify_totp
+from services.email import send_verification_email, send_password_reset_email
 from schemas.auth import (
     ForgotPasswordResponse, RegisterResponse, TokenResponse,
     UserLogin, UserRegister, UserResponse,
@@ -154,9 +155,9 @@ async def register(
         await db.refresh(existing)
         log.info("account_restored: user=%s email=%s ip=%s", existing.id, data.email, ip)
         await _log(db, email=data.email, success=True, action="register_restore", ip=ip)
+        await send_verification_email(existing.email, existing.name, verification_token)
         return RegisterResponse(
-            message="Аккаунт восстановлен. Подтвердите email для входа.",
-            verification_token=verification_token,
+            message="Аккаунт восстановлен. Проверьте почту и подтвердите email для входа.",
         )
 
     # ── New registration ──────────────────────────────────────────────────────
@@ -195,10 +196,10 @@ async def register(
 
     log.info("register: user=%s email=%s ip=%s ref=%s", user.id, data.email, ip, data.ref_code)
     await _log(db, email=data.email, success=True, action="register", ip=ip)
+    await send_verification_email(user.email, user.name, verification_token)
 
     return RegisterResponse(
-        message="Аккаунт создан. Подтвердите email для входа.",
-        verification_token=verification_token,
+        message="Аккаунт создан. Проверьте почту и подтвердите email для входа.",
     )
 
 
@@ -343,8 +344,7 @@ async def forgot_password(
     if not user:
         # Don't reveal whether email is registered
         return ForgotPasswordResponse(
-            message="Если этот email зарегистрирован, ссылка будет показана.",
-            reset_token=None,
+            message="Если этот email зарегистрирован, мы отправили на него ссылку для сброса пароля.",
         )
 
     reset_token = secrets.token_urlsafe(32)
@@ -353,10 +353,10 @@ async def forgot_password(
     await db.commit()
 
     log.info("password_reset_requested: user=%s email=%s", user.id, data.email)
+    await send_password_reset_email(user.email, user.name, reset_token)
 
     return ForgotPasswordResponse(
-        message="Ссылка для сброса пароля сгенерирована.",
-        reset_token=reset_token,
+        message="Если этот email зарегистрирован, мы отправили на него ссылку для сброса пароля.",
     )
 
 

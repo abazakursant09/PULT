@@ -320,7 +320,6 @@ export interface NotificationsResponse {
 
 export interface RegisterResponse {
   message: string
-  verification_token: string
 }
 
 export interface ChatMessage {
@@ -1108,7 +1107,7 @@ export const api = {
     verifyEmail: (token: string) =>
       req<AuthResponse>(`/api/auth/verify-email?token=${encodeURIComponent(token)}`),
     forgotPassword: (email: string) =>
-      req<{ message: string; reset_token: string | null }>('/api/auth/forgot-password', {
+      req<{ message: string }>('/api/auth/forgot-password', {
         method: 'POST',
         body: JSON.stringify({ email }),
       }),
@@ -1117,11 +1116,7 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ token, password }),
       }),
-    oauthLogin: (data: { provider: string; provider_user_id: string; email?: string; name?: string }) =>
-      req<AuthResponse>('/api/auth/oauth/login', {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
+    // OAuth login removed (P7.1) — the stub was an account-takeover path.
   },
 
   products: {

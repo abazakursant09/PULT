@@ -3,19 +3,17 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { ArrowRight, MailCheck, ExternalLink, CheckCircle2 } from 'lucide-react'
+import { ArrowRight, MailCheck, CheckCircle2 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { trackEvent, stampFunnel, FUNNEL_TS } from '@/lib/events'
 import { useLang } from '@/lib/lang-context'
 import { LanguageSwitcher } from '@/components/LanguageSwitcher'
-import { OAuthButtons } from '@/components/OAuthButtons'
 import { MathCaptcha } from '@/components/MathCaptcha'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
-import { Separator } from '@/components/ui/separator'
 import { BlurFade } from '@/components/ui/blur-fade'
 
 export default function RegisterPage() {
@@ -27,7 +25,7 @@ export default function RegisterPage() {
   const [agreedTerms, setAgreedTerms] = useState(false)
   const [error,       setError]       = useState('')
   const [loading,     setLoading]     = useState(false)
-  const [verifyToken, setVerifyToken] = useState<string | null>(null)
+  const [registered,  setRegistered]  = useState(false)
   const [refCode,     setRefCode]     = useState<string | null>(null)
   const [captchaOk,   setCaptchaOk]   = useState(false)
 
@@ -69,8 +67,8 @@ export default function RegisterPage() {
     setLoading(true)
     trackEvent('registration_started', 'auth')
     try {
-      const data = await api.auth.register(form.email, form.name, form.password, refCode ?? undefined)
-      setVerifyToken(data.verification_token)
+      await api.auth.register(form.email, form.name, form.password, refCode ?? undefined)
+      setRegistered(true)
       stampFunnel(FUNNEL_TS.signup)              // anchor for time_to_first_* activation metrics
       trackEvent('registration_completed', 'auth')
       trackEvent('trial_started', 'auth', undefined, { plan: 'trial' })
@@ -94,8 +92,7 @@ export default function RegisterPage() {
     )
   }
 
-  if (verifyToken) {
-    const verifyUrl = `/verify-email?token=${encodeURIComponent(verifyToken)}`
+  if (registered) {
     return (
       <div className="min-h-screen flex items-center justify-center px-5 py-16" style={{ background: '#F6F9FC' }}>
         <BlurFade className="w-full max-w-[460px]" inView>
@@ -112,15 +109,16 @@ export default function RegisterPage() {
                   <MailCheck size={28} style={{ color: '#1A73E8' }} />
                 </div>
               </div>
-              <h2 className="text-center font-bold text-2xl mb-2" style={{ color: '#0A2540', letterSpacing: '-0.02em' }}>{t('verify.title')}</h2>
+              <h2 className="text-center font-bold text-2xl mb-2" style={{ color: '#0A2540', letterSpacing: '-0.02em' }}>Проверьте почту</h2>
               <p className="text-center text-muted-foreground mb-6" style={{ lineHeight: 1.7 }}>
-                {t('verify.body')} <strong style={{ color: '#0A2540' }}>{form.email}</strong>. {t('verify.demo')}
+                Мы отправили ссылку для подтверждения на <strong style={{ color: '#0A2540' }}>{form.email}</strong>.
+                Перейдите по ней, чтобы завершить регистрацию и войти.
               </p>
-              <a href={verifyUrl} className="btn btn-primary w-full flex items-center justify-center gap-2">
-                {t('verify.btn')} <ExternalLink size={14} />
-              </a>
+              <Link href="/login" className="btn btn-primary w-full flex items-center justify-center gap-2">
+                Перейти ко входу
+              </Link>
               <p className="text-center mt-4 text-xs text-muted-foreground">
-                {t('verify.copy')} <code className="text-primary break-all">{verifyUrl}</code>
+                Не пришло письмо? Проверьте папку «Спам» или зарегистрируйтесь ещё раз.
               </p>
             </CardContent>
           </Card>
@@ -185,13 +183,6 @@ export default function RegisterPage() {
                 {error}
               </div>
             )}
-
-            <OAuthButtons mode="register" />
-
-            <div className="relative">
-              <Separator />
-              <span className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 bg-background px-2 text-xs text-muted-foreground">или</span>
-            </div>
 
             <form onSubmit={submit} className="space-y-4">
               <div className="space-y-1.5">
