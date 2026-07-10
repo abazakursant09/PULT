@@ -36,9 +36,21 @@ services:
       SECRET_KEY: ${SECRET_KEY:?SECRET_KEY must be set (openssl rand -hex 32)}
       ALGORITHM: HS256
       ACCESS_TOKEN_EXPIRE_MINUTES: "1440"
+      # CRITICAL prod secrets — startup fails fast if these are missing.
+      CRED_ENC_KEY: ${CRED_ENC_KEY:?CRED_ENC_KEY must be set (python -c "from cryptography.fernet import Fernet;print(Fernet.generate_key().decode())")}
+      SMTP_HOST: ${SMTP_HOST:?SMTP_HOST must be set for email verification / reset}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      # Recommended in production (empty → graceful no-op).
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      # Payments (optional for Advisory MVP).
+      YOOKASSA_SHOP_ID: ${YOOKASSA_SHOP_ID:-}
+      YOOKASSA_SECRET_KEY: ${YOOKASSA_SECRET_KEY:-}
       # Shared secret for internal/cron-only control endpoints (close-due
-      # measurement trigger). Pass-through, empty default → fail-closed when
-      # unset. Set INTERNAL_API_KEY in the host env to enable the cron trigger.
+      # measurement trigger). Empty default → fail-closed when unset.
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:-}
     depends_on:
       postgres:
@@ -47,12 +59,14 @@ services:
         condition: service_started
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      # Backend API URL is baked into the client bundle at build time.
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
     restart: unless-stopped
     ports:
       - "3000:3000"
-    environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8000
     depends_on:
       - backend
 

@@ -54,6 +54,11 @@ class Settings(BaseSettings):
     smtp_from: str = ""
     smtp_starttls: bool = True
 
+    # ── Error tracking (Sentry) ───────────────────────────────────────────────
+    # If set, backend errors are reported to Sentry. If empty, tracking is a
+    # graceful no-op — the app runs normally either way.
+    sentry_dsn: str = ""
+
     # ── YooKassa ──────────────────────────────────────────────────────────────
     yookassa_shop_id: str = ""
     yookassa_secret_key: str = ""
@@ -90,13 +95,22 @@ settings = Settings()
 if not settings.yookassa_return_url:
     settings.yookassa_return_url = f"{settings.frontend_url.rstrip('/')}/payment/result"
 
-# ── Production hard-fail ──────────────────────────────────────────────────────
+# ── Production hard-fail (fail fast when a critical secret is missing) ─────────
+# Critical = the Advisory MVP cannot run safely without it:
+#   SECRET_KEY   — signs auth JWTs
+#   DATABASE_URL — must be a real (PostgreSQL) database, not SQLite
+#   CRED_ENC_KEY — encrypts stored marketplace tokens at rest (else RuntimeError)
+#   SMTP_HOST    — delivers email verification / password-reset links (P7.1)
 if settings.app_env == "production":
     errors: list[str] = []
     if settings.secret_key in _INSECURE_VALUES:
-        errors.append("SECRET_KEY is not set or uses insecure default")
+        errors.append("SECRET_KEY is not set or uses insecure default (openssl rand -hex 32)")
     if "sqlite" in settings.database_url:
         errors.append("DATABASE_URL points to SQLite — use PostgreSQL in production")
+    if not settings.cred_enc_key:
+        errors.append("CRED_ENC_KEY is not set — required to encrypt marketplace tokens at rest")
+    if not settings.smtp_host:
+        errors.append("SMTP_HOST is not set — email verification / password reset cannot be delivered")
     if errors:
         for e in errors:
             logger.critical("[ПУЛЬТ] PRODUCTION CONFIG ERROR: %s", e)
@@ -104,6 +118,13 @@ if settings.app_env == "production":
             "[ПУЛЬТ] Startup aborted. Fix production config errors:\n  - "
             + "\n  - ".join(errors)
         )
+    # Non-fatal production advisories — the app runs, but these should be set.
+    if not settings.sentry_dsn:
+        logger.warning("⚠️  SENTRY_DSN not set — error tracking disabled in production.")
+    if not settings.yookassa_secret_key:
+        logger.warning("⚠️  YOOKASSA_SECRET_KEY not set — payments will fail until configured.")
+    if "localhost" in settings.frontend_url:
+        logger.warning("⚠️  FRONTEND_URL points to localhost in production.")
 
 # ── Development / staging warnings ───────────────────────────────────────────
 if settings.secret_key in _INSECURE_VALUES:

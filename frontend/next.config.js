@@ -1,4 +1,8 @@
 /** @type {import('next').NextConfig} */
+// Backend origin the browser talks to. Baked at BUILD time from NEXT_PUBLIC_API_URL
+// (Docker build arg in production) so a deployed frontend never depends on localhost.
+const API_ORIGIN = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+
 const nextConfig = {
   reactStrictMode: true,
   async headers() {
@@ -18,7 +22,7 @@ const nextConfig = {
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: https: blob:",
               "font-src 'self' data:",
-              "connect-src 'self' http://localhost:8000 https:",
+              `connect-src 'self' ${API_ORIGIN} https:`,
               "worker-src blob:",
               "frame-ancestors 'none'",
             ].join('; '),
@@ -27,22 +31,9 @@ const nextConfig = {
       },
     ]
   },
-  // ПУЛЬТ V2 — старые роуты сворачиваются в 6 канонических вкладок.
-  // Закладки/письма не ломаются: 307 redirect на новую структуру.
-  async redirects() {
-    return [
-      { source: '/dashboard/leaks',           destination: '/dashboard/finance',  permanent: false },
-      { source: '/dashboard/data',            destination: '/dashboard/products', permanent: false },
-      { source: '/dashboard/monitor',         destination: '/dashboard/finance',  permanent: false },
-      { source: '/dashboard/action-engine',   destination: '/dashboard',          permanent: false },
-      { source: '/dashboard/seo',             destination: '/dashboard/products', permanent: false },
-      { source: '/dashboard/seo-cards',       destination: '/dashboard/products', permanent: false },
-      { source: '/dashboard/seo-intelligence',destination: '/dashboard/products', permanent: false },
-      { source: '/dashboard/seo-lab',         destination: '/dashboard/products', permanent: false },
-      { source: '/dashboard/notifications',   destination: '/dashboard/settings', permanent: false },
-      { source: '/dashboard/import',          destination: '/dashboard/settings', permanent: false },
-    ]
-  },
+  // NOTE: the former "V2 canonical tabs" redirects were removed (P7.3). They
+  // misrouted real Advisory-MVP surfaces (Monitor, Import) to now-hidden pages.
+  // Every route now resolves to its own page (real, honest Coming-Soon, or 404).
 }
 
 module.exports = nextConfig
