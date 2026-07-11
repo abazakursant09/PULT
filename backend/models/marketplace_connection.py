@@ -10,6 +10,23 @@ class MarketplaceConnection(Base):
 
     Not the cabinet's identity: that is `MarketplaceAccount`, which this row points at
     and which outlives any rotation or reconnect here (F1.1).
+
+    Two INDEPENDENT axes describe this row (F1.2a). Collapsing them is a mistake:
+
+      * `status` — the connection LIFECYCLE and the execution gate. `connected` means
+        the seller has connected this cabinet and has not revoked it; it is what the
+        executor, the measurement bridge and the WB review sync require before they
+        will touch a marketplace. It says NOTHING about whether the credentials work.
+
+      * `verification_status` — whether a real marketplace verification flow ever
+        positively confirmed these credentials. Storing ciphertext is not verifying it:
+        `POST /connections` encrypts whatever string it is given and calls no
+        marketplace at all. Until a verifier exists, the honest answer is `unverified`,
+        and this column is the only place allowed to say otherwise.
+
+    So `status = "connected"` + `verification_status = "unverified"` is the normal,
+    truthful state today: usable under the existing execution contract, never yet
+    checked against the marketplace. Do not read `status` as proof of verification.
     """
 
     __tablename__ = "marketplace_connections"
@@ -22,6 +39,13 @@ class MarketplaceConnection(Base):
     scopes         = Column(JSON, nullable=False, default=list)    # ["feedbacks","prices",...]
     ozon_client_id = Column(String(64), nullable=True)             # Ozon needs Client-Id alongside key
     last_check_at  = Column(DateTime, nullable=True)
+    # Verification axis (F1.2a). `unverified` is the ONLY value this slice can write:
+    # no marketplace probe exists yet. A later verifier owns `verified` and the failure
+    # values. Any credential write on this connection resets both columns, because the
+    # new secret has not been checked either.
+    verification_status = Column(String(32), nullable=False, default="unverified",
+                                 server_default="unverified")
+    verified_at         = Column(DateTime, nullable=True)   # stays NULL until a real verifier succeeds
     # Identity links (F1.1). NULLABLE: rows predating F1.1 whose user has no workspace
     # cannot be backfilled (user_id carries no FK, so it may not resolve at all), and a
     # NOT NULL column would make the migration destructive for them. The API path always

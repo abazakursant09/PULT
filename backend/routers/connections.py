@@ -30,6 +30,12 @@ _VALID_SCOPES = {"feedbacks", "prices", "advert", "content", "stocks", "promotio
 # differ only in provenance. Discovery, in a later slice, is what may write `verified`.
 _UNVERIFIED = "unverified"
 
+# Credential verification (F1.2a). Same word, DIFFERENT question: `_UNVERIFIED` above asks
+# "which cabinet is this?", this one asks "do these credentials work?". Both are unknown
+# here — the route calls no marketplace — but they are answered by different future slices
+# (discovery vs. a verification probe), so they are kept as separate constants.
+_UNVERIFIED_CREDENTIALS = "unverified"
+
 
 @router.get("/connections", response_model=List[ConnectionOut])
 async def list_connections(
@@ -96,6 +102,16 @@ async def create_connection(
         if body.ozon_client_id:
             conn.ozon_client_id = body.ozon_client_id
         conn.updated_at = datetime.utcnow()
+
+    # Verification (F1.2a): this route stores ciphertext and calls no marketplace, so it
+    # can never claim the credentials work. Every write here — a new connection, a fresh
+    # scope, or a replaced secret — leaves the connection unverified. The reset is
+    # unconditional and connection-level on purpose: verification_status is a property of
+    # the connection, not of one scope, so a credential the marketplace has never seen
+    # must not inherit a verification claim earned by whatever was stored before it.
+    # `status` is untouched — it is the execution gate, a different question entirely.
+    conn.verification_status = _UNVERIFIED_CREDENTIALS
+    conn.verified_at = None
 
     # Identity (F1.1): the cabinet keeps one MarketplaceAccount across every reconnect
     # and token rotation, so an account is minted only when the connection has none —
