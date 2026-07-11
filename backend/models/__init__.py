@@ -1,6 +1,9 @@
 from .user import User
 # Ownership boundary (F1.0) — workspace owns marketplace accounts and, later, evidence
 from .workspace import Workspace
+# External seller-cabinet identity (F1.1) — imported here so that the FK target of
+# marketplace_connections.marketplace_account_id is registered before that model loads
+from .marketplace_account import MarketplaceAccount
 from .product import Product
 from .competitor_analysis import CompetitorAnalysis
 from .review_response import ReviewResponse
