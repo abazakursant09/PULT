@@ -12,14 +12,24 @@ class ConnectionCreate(BaseModel):
     ozon_client_id: Optional[str] = None
 
 
+class ScopeVerificationOut(BaseModel):
+    """Verification of ONE stored credential. Per-scope because WB tokens are category-scoped."""
+    scope: str
+    verification_status: str
+    verified_at: Optional[datetime]
+
+    model_config = {"from_attributes": True}
+
+
 class ConnectionOut(BaseModel):
     id: str
     marketplace: str
     label: Optional[str]
     status: str                           # lifecycle / execution gate: connected|invalid|revoked
-    verification_status: str              # did a marketplace probe confirm the credentials? (F1.2a: always "unverified")
-    verified_at: Optional[datetime]       # NULL until a real verifier succeeds
+    verification_status: str              # rollup of the per-scope states below
+    verified_at: Optional[datetime]       # NULL unless every stored scope is verified
     scopes: list[str]
+    scopes_verification: list[ScopeVerificationOut] = []
     created_at: datetime
 
     model_config = {"from_attributes": True}

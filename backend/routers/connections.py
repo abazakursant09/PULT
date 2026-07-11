@@ -14,8 +14,9 @@ from models.user import User
 from models.marketplace_account import MarketplaceAccount
 from models.marketplace_connection import MarketplaceConnection
 from models.api_credential import ApiCredential
-from schemas.marketplace import ConnectionCreate, ConnectionOut
+from schemas.marketplace import ConnectionCreate, ConnectionOut, ScopeVerificationOut
 from services.marketplace import credential_vault
+from services.marketplace.verification import service as verification_service
 from services.workspace_resolver import WorkspaceMissing, resolve_workspace_id
 
 log = logging.getLogger(__name__)
@@ -37,6 +38,23 @@ _UNVERIFIED = "unverified"
 _UNVERIFIED_CREDENTIALS = "unverified"
 
 
+async def _to_out(db: AsyncSession, conn: MarketplaceConnection) -> ConnectionOut:
+    """Serialize a connection together with its per-scope verification state."""
+    credentials = (
+        await db.execute(
+            select(ApiCredential)
+            .where(ApiCredential.connection_id == conn.id)
+            .order_by(ApiCredential.scope)
+        )
+    ).scalars().all()
+
+    out = ConnectionOut.model_validate(conn)
+    out.scopes_verification = [
+        ScopeVerificationOut.model_validate(c) for c in credentials
+    ]
+    return out
+
+
 @router.get("/connections", response_model=List[ConnectionOut])
 async def list_connections(
     current_user: User = Depends(get_current_user),
@@ -49,7 +67,7 @@ async def list_connections(
             .order_by(MarketplaceConnection.created_at.desc())
         )
     ).scalars().all()
-    return rows
+    return [await _to_out(db, conn) for conn in rows]
 
 
 @router.post("/connections", response_model=ConnectionOut, status_code=201)
@@ -103,16 +121,6 @@ async def create_connection(
             conn.ozon_client_id = body.ozon_client_id
         conn.updated_at = datetime.utcnow()
 
-    # Verification (F1.2a): this route stores ciphertext and calls no marketplace, so it
-    # can never claim the credentials work. Every write here — a new connection, a fresh
-    # scope, or a replaced secret — leaves the connection unverified. The reset is
-    # unconditional and connection-level on purpose: verification_status is a property of
-    # the connection, not of one scope, so a credential the marketplace has never seen
-    # must not inherit a verification claim earned by whatever was stored before it.
-    # `status` is untouched — it is the execution gate, a different question entirely.
-    conn.verification_status = _UNVERIFIED_CREDENTIALS
-    conn.verified_at = None
-
     # Identity (F1.1): the cabinet keeps one MarketplaceAccount across every reconnect
     # and token rotation, so an account is minted only when the connection has none —
     # either because it is new, or because it predates F1.1 and the migration could not
@@ -144,18 +152,31 @@ async def create_connection(
         )
     ).scalars().first()
     enc = credential_vault.encrypt(body.token.strip())
+    # Storing is not verifying: this route calls no marketplace. The secret it just wrote
+    # has never been checked, so THIS scope goes back to unverified — and only this one.
+    # Verification is per-scope, so a rotated `prices` token must not erase a `feedbacks`
+    # credential that a probe genuinely confirmed.
     if existing:
         existing.secret_enc = enc
+        existing.verification_status = _UNVERIFIED_CREDENTIALS
+        existing.verified_at = None
         existing.updated_at = datetime.utcnow()
     else:
         db.add(ApiCredential(id=str(uuid.uuid4()), connection_id=conn.id,
-                             scope=body.scope, secret_enc=enc))
+                             scope=body.scope, secret_enc=enc,
+                             verification_status=_UNVERIFIED_CREDENTIALS, verified_at=None))
+
+    await db.flush()
+    # The connection's own status is a ROLLUP of the persisted per-scope states — never a
+    # value written here directly, and never derived from an attempt outcome. No attempt is
+    # recorded either: saving a credential is not an attempt to verify it.
+    await verification_service.refresh_connection_rollup(db, conn)
 
     await db.commit()
     await db.refresh(conn)
     log.info("connection saved: user=%s mp=%s scope=%s", current_user.id,
              body.marketplace, body.scope)  # token never logged
-    return conn
+    return await _to_out(db, conn)
 
 
 @router.delete("/connections/{connection_id}", status_code=204)
