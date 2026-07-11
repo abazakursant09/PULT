@@ -90,7 +90,7 @@ def test_alembic_single_head():
     from alembic.config import Config
     from alembic.script import ScriptDirectory
     heads = ScriptDirectory.from_config(Config("alembic.ini")).get_heads()
-    assert heads == ["wsp1a2b3c4d01"], heads   # marketplace category reference (Phase C2b)
+    assert heads == ["mpa1a2b3c4d01"], heads   # marketplace category reference (Phase C2b)
 
 
 def test_migration_additive_only():

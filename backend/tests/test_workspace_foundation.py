@@ -40,8 +40,8 @@ import routers.auth as auth
 from routers.auth import register
 from schemas.auth import UserRegister
 
-REV = "wsp1a2b3c4d01"
-PRIOR = "mcs1a2b3c4d01"
+REV = "mpa1a2b3c4d01"      # current alembic head (F1.1); these tests upgrade to "head"
+PRIOR = "mcs1a2b3c4d01"    # the revision before F1.0 — where `workspaces` does not exist yet
 TABLE = "workspaces"
 
 
@@ -140,8 +140,8 @@ def _patch_email(monkeypatch):
 
 # ── A. alembic head / single head ────────────────────────────────────────────
 
-def test_alembic_single_head_is_workspace_revision(monkeypatch):
-    """(12) exactly one head; (13) it is the F1.0 revision."""
+def test_alembic_single_head_is_current_revision(monkeypatch):
+    """(12) exactly one head; (13) it is the current head revision."""
     tmp = os.path.join(tempfile.mkdtemp(), "head_test.db")
     monkeypatch.setenv("ALEMBIC_DATABASE_URL", f"sqlite+aiosqlite:///{tmp}")
     import db_migrations as dbm
