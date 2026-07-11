@@ -17,6 +17,7 @@ from models.login_attempt import LoginAttempt
 from models.mfa_secret import MFASecret
 from models.referral_record import ReferralRecord
 from models.user import User
+from models.workspace import Workspace
 from routers.mfa import verify_totp
 from services.email import send_verification_email, send_password_reset_email
 from schemas.auth import (
@@ -186,6 +187,11 @@ async def register(
 
     db.add(user)
     await db.flush()   # populate user.id before creating the record
+
+    # Ownership boundary (F1.0): every user owns exactly one workspace, created in the
+    # same transaction so a failed registration cannot leave an orphan. The recovery
+    # branch above reuses the existing user row, and therefore its existing workspace.
+    db.add(Workspace(owner_user_id=user.id))
 
     if referrer and user.referred_by_id:
         from models.referral_record import ReferralRecord

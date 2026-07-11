@@ -1,4 +1,6 @@
 from .user import User
+# Ownership boundary (F1.0) — workspace owns marketplace accounts and, later, evidence
+from .workspace import Workspace
 from .product import Product
 from .competitor_analysis import CompetitorAnalysis
 from .review_response import ReviewResponse
