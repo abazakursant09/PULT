@@ -8,6 +8,9 @@ from .marketplace_account import MarketplaceAccount
 # to marketplace_connections, so the target table must be in the metadata whenever the
 # credential model is imported on its own.
 from .marketplace_connection import MarketplaceConnection
+# Append-only credential-verification trail (F1.2b-a)
+from .api_credential import ApiCredential
+from .connection_verification_attempt import ConnectionVerificationAttempt
 from .product import Product
 from .competitor_analysis import CompetitorAnalysis
 from .review_response import ReviewResponse

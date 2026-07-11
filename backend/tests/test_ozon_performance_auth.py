@@ -205,8 +205,11 @@ def test_credential_repr_hides_secret():
 
 def test_no_new_schema_reuses_apicredential():
     cols = {c.name for c in ApiCredential.__table__.columns}
-    # exact existing column set — the slice adds NONE
+    # Exact column set — the Ozon Performance slice adds NONE of its own. The two
+    # verification columns belong to the per-scope credential verification foundation
+    # (F1.2b-a) and are listed here only so this snapshot stays exact.
     assert cols == {"id", "connection_id", "scope", "secret_enc", "meta",
-                    "expires_at", "created_at", "updated_at"}
+                    "expires_at", "created_at", "updated_at",
+                    "verification_status", "verified_at"}
     # advert_performance is only a scope VALUE, not a new model
     assert PERFORMANCE_SCOPE == "advert_performance"
