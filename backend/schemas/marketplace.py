@@ -16,7 +16,9 @@ class ConnectionOut(BaseModel):
     id: str
     marketplace: str
     label: Optional[str]
-    status: str
+    status: str                           # lifecycle / execution gate: connected|invalid|revoked
+    verification_status: str              # did a marketplace probe confirm the credentials? (F1.2a: always "unverified")
+    verified_at: Optional[datetime]       # NULL until a real verifier succeeds
     scopes: list[str]
     created_at: datetime
 

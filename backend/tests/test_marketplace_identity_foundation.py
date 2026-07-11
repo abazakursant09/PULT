@@ -47,7 +47,7 @@ from schemas.marketplace import ConnectionCreate
 from services.marketplace import executor
 from services.workspace_resolver import WorkspaceMissing, resolve_workspace_id
 
-REV = "mpa1a2b3c4d01"
+REV = "cri1a2b3c4d01"
 PRIOR = "wsp1a2b3c4d01"
 TABLE = "marketplace_accounts"
 CONNS = "marketplace_connections"
@@ -196,7 +196,7 @@ def _body(**kw):
 
 # ── A. schema / model shape ──────────────────────────────────────────────────
 
-def test_alembic_single_head_is_identity_revision(monkeypatch):
+def test_alembic_single_head_is_current_revision(monkeypatch):
     tmp = os.path.join(tempfile.mkdtemp(), "head_test.db")
     monkeypatch.setenv("ALEMBIC_DATABASE_URL", f"sqlite+aiosqlite:///{tmp}")
     import db_migrations as dbm

@@ -4,6 +4,10 @@ from .workspace import Workspace
 # External seller-cabinet identity (F1.1) — imported here so that the FK target of
 # marketplace_connections.marketplace_account_id is registered before that model loads
 from .marketplace_account import MarketplaceAccount
+# Registered for the same reason (F1.2a): api_credentials.connection_id now carries an FK
+# to marketplace_connections, so the target table must be in the metadata whenever the
+# credential model is imported on its own.
+from .marketplace_connection import MarketplaceConnection
 from .product import Product
 from .competitor_analysis import CompetitorAnalysis
 from .review_response import ReviewResponse
