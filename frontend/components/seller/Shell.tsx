@@ -19,9 +19,17 @@ const NAV: { g: string; items: NavItem[] }[] = [
     // news for a seller who may act on it is not an unfinished feature, it is a lie, so the
     // page is unreachable until it reports something real. The backend is left untouched.
   ] },
-  { g: 'Развитие', items: [{ h: '/ideas', l: 'Идеи', d: 'bulb' }] },
+  // "Идеи" is NOT listed. The page renders the legacy AppShell — the old Sidebar and top bar —
+  // so one click out of this cleaned shell puts the seller in the previous cabinet: a green
+  // "МОНИТОРИНГ АКТИВЕН" beacon for a contour that was removed for inventing news, and four
+  // sections that are all "Раздел в разработке". Six other pages still render that shell, so
+  // the item is dropped from this nav rather than the shared component being rewritten.
   { g: 'Аккаунт', items: [
-    { h: '/dashboard/billing', l: 'Тариф', d: 'card' },
+    // "Тариф" is NOT listed. The tariff cards sell price monitoring, competitor analysis,
+    // AI review replies and a "Финансовый модуль" — none of which the Advisory MVP delivers —
+    // and the buy button reaches a real YooKassa payment. Until the commercial contents are
+    // approved, no seller-visible path may lead to that charge. The page and the payment
+    // backend are left untouched.
     { h: '/dashboard/settings', l: 'Настройки', d: 'gear' },
     { h: '/dashboard/account', l: 'Аккаунт', d: 'user' },
   ] },
