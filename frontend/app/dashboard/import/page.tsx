@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Upload, FileText, CheckCircle2, AlertTriangle, X,
@@ -68,6 +68,12 @@ export default function ImportPage() {
   const [dupAction, setDupAction] = useState<'overwrite' | 'skip' | 'new' | null>(null)
   const [result,    setResult]    = useState<{ imported: number; skipped: number } | null>(null)
   const [error,     setError]     = useState('')
+  // null = still loading. The Business Diagnosis is built from the FINANCIAL report: the
+  // Advisory Runtime only considers a seller who has imported finance rows, so a first upload
+  // of "Товары" produces no diagnosis at all — the dashboard would tell the seller to upload
+  // a report they had just uploaded. Rather than change the Runtime, the UI asks for the
+  // financial report first and says why. Once it exists, everything is available as before.
+  const [hasFinance, setHasFinance] = useState<boolean | null>(null)
 
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -85,13 +91,26 @@ export default function ImportPage() {
     if (f) { setFile(f); setError('') }
   }
 
+  useEffect(() => {
+    let alive = true
+    api.csvImport.history()
+      .then((rows) => {
+        if (alive) setHasFinance(rows.some(r => r.import_type === 'finance' && r.status === 'confirmed'))
+      })
+      // Fail OPEN: if we cannot read the history we must not lock a seller out of importing.
+      .catch(() => { if (alive) setHasFinance(true) })
+    return () => { alive = false }
+  }, [])
+
+  const financeFirst = hasFinance === false      // first import must be the financial report
+
   // ── Upload & parse ───────────────────────────────────────────────────────────
   async function handleUpload() {
     if (!file) return
     setUploading(true); setError('')
     trackEvent('import_started', 'import', undefined, { marketplace: mp, import_type: itype })
     try {
-      const data = await api.csvImport.upload(file, mp, itype)
+      const data = await api.csvImport.upload(file, mp, financeFirst ? 'finance' : itype)
       setPreview(data)
       setStage('preview')
     } catch (e: unknown) {
@@ -104,6 +123,13 @@ export default function ImportPage() {
   // ── Confirm ──────────────────────────────────────────────────────────────────
   async function handleConfirm() {
     if (!preview) return
+    // Belt and braces: the selector is locked, but the parser also auto-detects a type. A
+    // first import that is not the financial report would import cleanly and then produce no
+    // diagnosis whatsoever, so it is refused here rather than silently accepted.
+    if (financeFirst && preview.import_type && preview.import_type !== 'finance') {
+      setError('Первым нужно загрузить финансовый отчёт — по нему строится диагноз. Отчёт по товарам можно будет загрузить сразу после него.')
+      return
+    }
     setStage('importing')
     setSlowImport(false)
     const slowTimer = setTimeout(() => { setSlowImport(true); trackEvent('import_timeout_seen', 'import') }, 30_000)
@@ -244,19 +270,28 @@ export default function ImportPage() {
               <label className="label mb-2">ТИП ДАННЫХ</label>
               <div style={{ position: 'relative' }}>
                 <select
-                  value={itype}
+                  value={financeFirst ? 'finance' : itype}
                   onChange={e => setIType(e.target.value as IType)}
+                  disabled={financeFirst}
                   className="input"
                   style={{ width: '100%', paddingRight: 32, appearance: 'none' }}
                 >
-                  <option value="">Определить автоматически</option>
+                  {!financeFirst && <option value="">Определить автоматически</option>}
                   <option value="finance">Финансы</option>
-                  <option value="products">Товары</option>
+                  {!financeFirst && <option value="products">Товары</option>}
                 </select>
                 <ChevronDown size={14} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', color: '#8E8E93', pointerEvents: 'none' }} />
               </div>
             </div>
           </div>
+
+          {financeFirst && (
+            <div style={{ background: 'rgba(26,115,232,0.08)', border: '1px solid rgba(26,115,232,0.2)', borderRadius: 8, padding: '10px 14px', fontSize: 13, lineHeight: 1.5, color: 'var(--text-2)' }}>
+              <strong style={{ color: 'var(--text)' }}>Начните с финансового отчёта.</strong>{' '}
+              Диагноз PULT строит по вашим финансовым данным — выручке, комиссии, логистике, рекламе.
+              Отчёт по товарам можно будет загрузить сразу после него.
+            </div>
+          )}
 
           {error && (
             <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 8, padding: '10px 14px', color: '#FCA5A5', fontSize: 13 }}>
@@ -484,7 +519,7 @@ export default function ImportPage() {
             {result.skipped > 0 && `, пропущено ${result.skipped}`}
           </p>
           <p style={{ fontSize: 12, color: '#6B6B72', marginBottom: 32 }}>
-            Данные доступны в разделах Финансы и Пульт
+            Диагноз появится на главной в течение минуты
           </p>
 
           <div className="flex gap-3 justify-center">

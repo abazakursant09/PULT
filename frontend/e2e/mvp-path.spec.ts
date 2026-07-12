@@ -109,8 +109,15 @@ test('a seller registers, uploads a report, and sees a real diagnosis', async ({
 
   // ── 6-7. Choose the report and say what it is ─────────────────────────────
   await page.setInputFiles('input[type="file"]', writeCollapseReport(TMP))
-  await page.getByText('Wildberries').first().click()
-  await page.getByText(/Финансы|Финансовый/i).first().click()
+  await page.locator('select').first().selectOption('wb')
+
+  // The seller has imported nothing yet, so the type is not a choice: the Advisory Runtime
+  // only sees a seller who has finance rows, and a first upload of "Товары" would import
+  // cleanly and diagnose nothing. The page says so, and pins the type to Финансы.
+  await expect(page.getByText(/Начните с финансового отчёта/)).toBeVisible()
+  const type = page.locator('select').nth(1)
+  await expect(type).toBeDisabled()
+  await expect(type).toHaveValue('finance')
 
   // ── 8. Upload → the backend really parses the file ────────────────────────
   await page.getByRole('button', { name: /Загрузить и проверить/i }).click()
