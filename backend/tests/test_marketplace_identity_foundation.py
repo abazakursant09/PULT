@@ -643,14 +643,21 @@ def test_executor_still_resolves_a_connection_with_null_identity_links():
     _run(go())
 
 
-def test_post_still_refuses_yandex():
-    """F1.1 adds identity, not a marketplace. Yandex has no client and no discovery."""
+def test_post_refuses_an_unsupported_marketplace():
+    """A marketplace becomes connectable only once it can actually be CHECKED.
+
+    This guard was written against Yandex, which F1.1 deliberately did not enable: it had no
+    probe, so such a connection could only have been believed, never verified. Yandex was
+    later admitted on its own merits (F1.2d — the Partner API exposes a documented read-only
+    token-introspection call). The rule never changed; only Yandex's standing did. So it is
+    now asserted against a marketplace that still has no adapter.
+    """
     async def go():
         db = await _orm_session()
         user, _ws = await _user_with_workspace(db)
 
         with pytest.raises(HTTPException) as exc:
-            await create_connection(_body(marketplace="yandex"), user, db)
+            await create_connection(_body(marketplace="megamarket"), user, db)
         assert exc.value.status_code == 422
 
         assert (await db.execute(sa.select(MarketplaceAccount))).scalars().all() == []

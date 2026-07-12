@@ -16,11 +16,13 @@ from typing import Optional
 from .base import ProbeAdapter, ProbeContext, ProbeRequest, ProbeResponse
 from .ozon import OzonProbeAdapter
 from .wildberries import WildberriesProbeAdapter
+from .yandex import YandexProbeAdapter
 
 # marketplace label (as stored on MarketplaceConnection.marketplace) -> adapter
 ADAPTERS: dict[str, ProbeAdapter] = {
     "wildberries": WildberriesProbeAdapter(),
     "ozon": OzonProbeAdapter(),
+    "yandex": YandexProbeAdapter(),
 }
 
 
