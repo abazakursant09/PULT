@@ -12,7 +12,6 @@ import { LanguageSwitcher } from '@/components/LanguageSwitcher'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
-import Link from 'next/link'
 
 const DAYS = [
   { value: 'monday',    label: 'Пн' },
@@ -24,21 +23,21 @@ const DAYS = [
   { value: 'sunday',    label: 'Вс' },
 ]
 
-const EVENT_TYPES: { key: keyof TelegramSettings; label: string; desc: string; critical?: boolean }[] = [
-  { key: 'notify_bad_review',      label: 'Проблемный отзыв',              desc: 'Отзыв с юридическим риском',           critical: true },
-  { key: 'notify_offer_change',    label: 'Изменение оферты маркетплейса', desc: 'Новые условия от WB, Ozon, ЯМ',        critical: true },
-  { key: 'notify_price_drop',      label: 'Резкое падение цены конкурента',desc: 'Конкурент снизил цену > 10%',          critical: true },
-  { key: 'notify_negative_review', label: 'Новый негативный отзыв',        desc: 'Отзыв с оценкой 1–2 звезды' },
-  { key: 'notify_trial_end',       label: 'Окончание пробного периода',    desc: 'За 3 дня до конца бесплатного доступа' },
-]
+// The "Типы уведомлений" card — the same five switches Settings carried — is gone from here
+// too. No backend code reads notify_bad_review, notify_offer_change, notify_price_drop,
+// notify_negative_review or notify_trial_end; three were badged "критично" and default to ON.
+// Removing it from one page and leaving it on the other would have kept the promise alive.
 
 const INTELLIGENCE_TYPES: { key: keyof TelegramSettings; label: string; desc: string; badge?: string }[] = [
   { key: 'notify_seo_opportunity', label: 'SEO-возможности',        desc: 'Карточка снижает CTR — 1 клик до авто-пересборки', badge: 'авто' },
   { key: 'notify_sales_growth',    label: 'Рост продаж и рейтинга', desc: 'Товар растёт — масштабируйте вовремя' },
   { key: 'notify_insights',        label: 'Критические алерты',     desc: 'Кризис маржи, высокий ДРР, конец остатков',         badge: 'важно' },
-  { key: 'notify_weekly_report',   label: 'Weekly Intelligence',    desc: 'Итог недели: rebuilds, CTR, лучший стиль, потенциал' },
-  { key: 'notify_ab_results',      label: 'Победитель стиля',       desc: 'Уведомление когда стиль показал CTR >7% vs контроль' },
-  { key: 'notify_retention',       label: 'Напоминание вернуться',  desc: 'Если вы не заходили N дней — Пульт напомнит' },
+  // Only the three above survive: they are the flags the Intelligence Loop actually reads.
+  // "Weekly Intelligence" (notify_weekly_report) had no consumer at all — the weekly report is
+  // gated on weekly_summary below, so the switch changed nothing in either position. "Победитель
+  // стиля" (notify_ab_results) promised a CTR-vs-control winner from an A/B system that does not
+  // exist. "Напоминание вернуться" claimed "если вы не заходили N дней" — the loop never reads
+  // last_login; the number was a send-cooldown, so an active seller was told "Пока вас не было".
 ]
 
 type Tab = 'profile' | 'security' | 'notifications' | 'language' | 'danger'
@@ -121,8 +120,13 @@ function ProfileTab() {
         </div>
 
         <p className="mt-5 text-[13px]" style={{ color: 'var(--text-3)' }}>
-          Для изменения имени или email обратитесь в{' '}
-          <Link href="/support" style={{ color: 'var(--violet-text)', textDecoration: 'none' }}>службу поддержки</Link>.
+          {/* The old link went to /support, whose form writes the ticket to localStorage and
+              calls no API — nobody ever received it. This is the address the offer, the terms
+              and the privacy policy already give as the way to reach PULT. */}
+          Для изменения имени или email напишите на{' '}
+          <a href="mailto:hello@biznes-pult.ru" style={{ color: 'var(--violet-text)', textDecoration: 'none' }}>
+            hello@biznes-pult.ru
+          </a>.
         </p>
       </DarkCard>
     </div>
@@ -428,38 +432,6 @@ function NotificationsTab() {
         )}
       </DarkCard>
 
-      <DarkCard>
-        <div className="flex items-center gap-3 mb-5">
-          <SectionIcon icon={Bell} />
-          <p className="text-[15px] font-semibold" style={{ color: 'var(--text)' }}>2. Типы уведомлений</p>
-        </div>
-        {sLoad || !settings ? (
-          <div className="flex justify-center py-8"><div className="spinner" /></div>
-        ) : (
-          <div className="space-y-2">
-            {EVENT_TYPES.map(({ key, label, desc, critical }) => (
-              <div
-                key={key}
-                className="flex items-center justify-between gap-4 px-4 py-3 rounded-[8px]"
-                style={{ background: 'var(--bg)', border: '1px solid var(--surface)' }}
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-[13px] font-medium" style={{ color: 'var(--text)' }}>{label}</span>
-                    {critical && <span className="badge badge-danger">критично</span>}
-                  </div>
-                  <p className="text-[12px] mt-0.5" style={{ color: 'var(--text-3)' }}>{desc}</p>
-                </div>
-                <Switch
-                  checked={settings[key] as boolean}
-                  onCheckedChange={v => setField(key, v as TelegramSettings[typeof key])}
-                />
-              </div>
-            ))}
-          </div>
-        )}
-      </DarkCard>
-
       {settings && (
         <DarkCard>
           <div className="flex items-center gap-3 mb-5">
@@ -494,22 +466,6 @@ function NotificationsTab() {
               </div>
             ))}
           </div>
-
-          {settings.notify_retention && (
-            <div className="flex items-center gap-3 px-4 py-3 rounded-[8px] mb-4"
-                 style={{ background: 'var(--bg)', border: '1px solid var(--surface)' }}>
-              <span className="text-[13px]" style={{ color: 'var(--text-2)' }}>Напоминать через</span>
-              <select
-                value={settings.retention_inactive_days}
-                onChange={e => setField('retention_inactive_days', Number(e.target.value))}
-                className="h-8 rounded-[6px] px-2 text-[13px] font-medium"
-                style={{ background: 'var(--surface)', border: '1px solid var(--surface-h)', color: 'var(--text)' }}
-              >
-                {[1,2,3,5,7,14].map(d => <option key={d} value={d}>{d} {d === 1 ? 'день' : d < 5 ? 'дня' : 'дней'}</option>)}
-              </select>
-              <span className="text-[13px]" style={{ color: 'var(--text-2)' }}>бездействия</span>
-            </div>
-          )}
 
           {savedChatId && (
             <div className="flex items-center gap-3">
@@ -665,8 +621,8 @@ function DangerTab() {
           <p className="text-[15px] font-semibold" style={{ color: 'var(--danger)' }}>Удаление аккаунта</p>
         </div>
         <p className="text-[13px] mb-5" style={{ color: 'var(--text-2)', lineHeight: 1.65 }}>
-          После удаления все ваши данные будут деактивированы. Аккаунт можно восстановить,
-          зарегистрировавшись с тем же email в течение 30 дней. Реферальная история сохраняется.
+          После удаления все ваши данные будут деактивированы. Email сохраняется и может быть
+          использован для повторной регистрации с восстановлением реферальной истории.
         </p>
         {error && (
           <div className="mb-4 px-4 py-3 rounded-[8px] text-[13px]"
