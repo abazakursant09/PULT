@@ -39,6 +39,8 @@
     "sentry.client.config.ts",
     "sentry.server.config.ts",
     "tests",
-    "vitest.config.ts"
+    "vitest.config.ts",
+    "e2e",
+    "playwright.config.ts"
   ]
 }
