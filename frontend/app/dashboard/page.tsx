@@ -58,24 +58,30 @@ export default function Home() {
           </>
         )}
 
-        {/* no data yet → one honest first-run explainer instead of three empty cards */}
+        {/* No data yet → send the seller down the ONE road that exists.
+            This screen used to say "PULT подключён и ждёт данные с маркетплейса" and link to
+            /dashboard/settings — a Telegram notifications page. Nothing about that was true:
+            PULT has no marketplace connection UI, nothing synchronises on its own, and the
+            link was a dead end. A new seller was told to wait for an event that would never
+            happen. The only way into the Advisory MVP is an uploaded report, so that is what
+            this now says. */}
         {hasData === false && (
           <div className="s-card" style={{ marginBottom: 18 }}>
             <h2 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)', margin: 0 }}>
-              Данные ещё синхронизируются
+              Нет данных для анализа
             </h2>
             <div style={{ fontSize: 13, color: 'var(--text-2)', marginTop: 10, lineHeight: 1.5 }}>
-              PULT подключён и ждёт данные с маркетплейса. Первые рекомендации появятся
-              после первой синхронизации.
+              PULT ставит диагноз по вашим отчётам с маркетплейса. Загрузите отчёт —
+              и разбор появится здесь.
             </div>
             <div style={{ fontSize: 12.5, color: 'var(--text-3)', marginTop: 8 }}>
-              Дождитесь синхронизации или проверьте подключение маркетплейса.
+              Подойдёт выгрузка по продажам, товарам или возвратам в CSV или Excel.
             </div>
-            <Link href="/dashboard/settings" style={{
+            <Link href="/dashboard/import" style={{
               display: 'inline-block', marginTop: 12, fontSize: 12.5, fontWeight: 700,
               color: 'var(--violet-text, var(--ac-2))',
             }}>
-              Проверить подключение →
+              Загрузить отчёт →
             </Link>
           </div>
         )}
