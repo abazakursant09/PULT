@@ -25,7 +25,11 @@ from services.workspace_resolver import WorkspaceMissing, resolve_workspace_id
 log = logging.getLogger(__name__)
 router = APIRouter()
 
-_VALID_MP = {"wildberries", "ozon"}
+# Yandex joined once it became verifiable (F1.2d): its Partner API exposes a documented
+# read-only token-introspection call, so a Yandex connection can be checked rather than
+# merely believed. PULT executes nothing on Yandex — there is no client in the executor —
+# so this is a read connection, and that is exactly what F1 is for.
+_VALID_MP = {"wildberries", "ozon", "yandex"}
 _VALID_SCOPES = {"feedbacks", "prices", "advert", "content", "stocks", "promotions"}
 
 # Identity of a cabinet connected through this route is not yet verified: F1.1 connects

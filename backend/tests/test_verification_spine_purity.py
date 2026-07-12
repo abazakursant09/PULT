@@ -154,27 +154,33 @@ def test_adapter_selection_is_a_registry_lookup():
 
 
 def test_unknown_marketplace_has_no_adapter():
-    assert get_adapter("yandex") is None      # not a special case — just an absent entry
+    """An unregistered marketplace is not a special case — just an absent entry.
+
+    (Yandex used to be the example here. It has an adapter now, which is exactly how this
+    is supposed to go: a marketplace joins by appearing in the registry, and nothing else
+    in the spine notices.)
+    """
     assert get_adapter("megamarket") is None
+    assert get_adapter("aliexpress") is None
     assert get_adapter("") is None
 
 
 def test_registry_module_is_the_only_common_place_naming_an_adapter():
     """adapters/__init__ may name them; nothing else in the spine may."""
     src = (VERIFICATION_DIR / "adapters" / "__init__.py").read_text(encoding="utf-8").lower()
-    assert "wildberries" in src               # the registry is exactly where it belongs
-    assert "ozon" in src
+    for marketplace in ("wildberries", "ozon", "yandex"):
+        assert marketplace in src             # the registry is exactly where it belongs
 
 
 @pytest.mark.parametrize("marketplace,module", [
     ("wildberries", "wildberries.py"),
     ("ozon", "ozon.py"),
+    ("yandex", "yandex.py"),
 ])
 def test_each_marketplace_lives_in_exactly_one_adapter_module(marketplace, module):
-    """Ozon knowledge must not have leaked into the WB adapter, or vice versa.
-
-    Two adapters is where a "shared" framework usually starts sprouting cross-references.
-    Each one may only know itself.
+    """No adapter may know another. Three adapters is where a "shared" framework usually
+    starts sprouting cross-references — one marketplace borrowing another's status codes,
+    one importing another's helper. Each may only know itself.
     """
     adapters_dir = VERIFICATION_DIR / "adapters"
     for path in adapters_dir.glob("*.py"):
@@ -190,10 +196,24 @@ def test_each_marketplace_lives_in_exactly_one_adapter_module(marketplace, modul
                 )
 
 
+def test_adapters_do_not_import_one_another():
+    adapters_dir = VERIFICATION_DIR / "adapters"
+    siblings = {"wildberries", "ozon", "yandex"}
+    for path in adapters_dir.glob("*.py"):
+        if path.name == "__init__.py":        # the registry is allowed to import them all
+            continue
+        own = path.stem
+        imports = [ln for ln in path.read_text(encoding="utf-8").splitlines()
+                   if ln.startswith(("import ", "from "))]
+        for other in siblings - {own}:
+            assert not any(other in ln for ln in imports), \
+                f"{path.name} imports the {other} adapter"
+
+
 def test_marketplace_without_an_adapter_yields_verification_unsupported():
     async def go():
         db = await _orm_session()
-        user, conn = await _connection(db, "yandex")
+        user, conn = await _connection(db, "megamarket")
 
         _c, cred, result = await runner.verify_credential(
             db, user_id=user.id, connection_id=conn.id, scope="prices")
@@ -209,7 +229,7 @@ def test_marketplace_without_an_adapter_yields_verification_unsupported():
 
 
 def test_null_verifier_never_creates_verified_state():
-    result = _run(NullVerifier().verify(marketplace="yandex", scope="prices"))
+    result = _run(NullVerifier().verify(marketplace="megamarket", scope="prices"))
     assert result.outcome is VerificationOutcome.VERIFICATION_UNSUPPORTED
     assert result.outcome is not VerificationOutcome.VERIFIED
 
