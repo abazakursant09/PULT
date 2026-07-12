@@ -43,6 +43,7 @@ describe('Dashboard', () => {
 
   it('shows the first-run screen when the seller has no data yet', async () => {
     vi.spyOn(api.today, 'getSummary').mockResolvedValue(todayNoData)
+    vi.spyOn(api.presentation, 'getCards').mockResolvedValue({ cards: [] })   // nothing to show
 
     render(<Dashboard />)
 
@@ -57,6 +58,7 @@ describe('Dashboard', () => {
       // connection UI anywhere in this app, and nothing syncs on its own. So the first-run
       // screen must send the seller to /dashboard/import and must not promise a sync.
       vi.spyOn(api.today, 'getSummary').mockResolvedValue(todayNoData)
+      vi.spyOn(api.presentation, 'getCards').mockResolvedValue({ cards: [] })
 
       render(<Dashboard />)
 
