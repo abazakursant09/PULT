@@ -161,8 +161,33 @@ def test_unknown_marketplace_has_no_adapter():
 
 def test_registry_module_is_the_only_common_place_naming_an_adapter():
     """adapters/__init__ may name them; nothing else in the spine may."""
-    src = (VERIFICATION_DIR / "adapters" / "__init__.py").read_text(encoding="utf-8")
-    assert "wildberries" in src.lower()       # the registry is exactly where it belongs
+    src = (VERIFICATION_DIR / "adapters" / "__init__.py").read_text(encoding="utf-8").lower()
+    assert "wildberries" in src               # the registry is exactly where it belongs
+    assert "ozon" in src
+
+
+@pytest.mark.parametrize("marketplace,module", [
+    ("wildberries", "wildberries.py"),
+    ("ozon", "ozon.py"),
+])
+def test_each_marketplace_lives_in_exactly_one_adapter_module(marketplace, module):
+    """Ozon knowledge must not have leaked into the WB adapter, or vice versa.
+
+    Two adapters is where a "shared" framework usually starts sprouting cross-references.
+    Each one may only know itself.
+    """
+    adapters_dir = VERIFICATION_DIR / "adapters"
+    for path in adapters_dir.glob("*.py"):
+        if path.name in (module, "__init__.py"):
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        exempt = _docstring_nodes(tree)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str) \
+                    and id(node) not in exempt:
+                assert marketplace not in node.value.lower(), (
+                    f"{path.name} carries a {marketplace} literal in code"
+                )
 
 
 def test_marketplace_without_an_adapter_yields_verification_unsupported():
