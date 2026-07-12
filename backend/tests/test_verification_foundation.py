@@ -473,17 +473,29 @@ def test_rollup_clears_connection_verified_at_on_failure():
 
 # ── E. safety ────────────────────────────────────────────────────────────────
 
-def test_verification_module_imports_no_marketplace_transport():
-    """The foundation must be marketplace-independent: no client, no HTTP, no vault."""
+def test_verification_module_imports_no_marketplace_client():
+    """The spine never reaches a marketplace client, a queue, or the diagnosis contour.
+
+    HTTP and decryption each have exactly ONE sanctioned home in the spine (F1.2b-b):
+    `transport.py` owns the probe's HTTP — deliberately not `base_client`, whose retries
+    would turn a WB rate limit into a block — and `runner.py` owns the single decrypt
+    boundary. Anywhere else they would be a leak, so the exemption is pinned to those two
+    files by name rather than granted to the package.
+    """
     root = Path(__file__).resolve().parents[1] / "services" / "marketplace" / "verification"
+    exempt = {"transport.py": {"httpx"}, "runner.py": {"credential_vault"}}
+
     for path in root.glob("*.py"):
         imports = [ln for ln in path.read_text(encoding="utf-8").splitlines()
-                   if ln.startswith(("import ", "from "))]
+                   if ln.startswith(("import ", "from ")) or "import " in ln]
+        allowed = exempt.get(path.name, set())
         for forbidden in ("wb_client", "ozon_client", "base_client", "httpx", "requests",
                           "credential_vault", "advisory_runtime", "ProducerSpec",
                           "AdvisoryRun", "redis"):
+            if forbidden in allowed:
+                continue
             assert not any(forbidden in ln for ln in imports), \
-                f"{path.name} imports {forbidden} — F1.2b-a performs no marketplace call"
+                f"{path.name} imports {forbidden} — the spine must not reach it"
 
 
 def test_recording_an_attempt_never_decrypts(monkeypatch):
@@ -596,3 +608,251 @@ def test_f1_2a_unique_constraint_still_holds():
             await db.commit()
         await db.rollback()
     _run(go())
+
+
+# ── G. runner + API (F1.2b-b) ────────────────────────────────────────────────
+#
+# The runner is the spine's only decrypt boundary and its only adapter dispatch. These
+# prove the rules that keep a probe from damaging a credential it never actually tested.
+
+import ast                                                              # noqa: E402
+from pathlib import Path                                                # noqa: E402
+
+from fastapi import HTTPException                                       # noqa: E402
+from services.marketplace.verification import runner as vrunner         # noqa: E402
+from services.marketplace.verification.adapters.base import ProbeResponse   # noqa: E402
+from services.marketplace.verification.transport import ProbeTransportError  # noqa: E402, F401
+from routers.connections import verify_connection_scope                 # noqa: E402
+from schemas.marketplace import VerifyRequest                           # noqa: E402
+
+PING_OK = {"TS": "2026-07-12T11:19:05+03:00", "Status": "OK"}
+
+
+class _Transport:
+    """Scripted, offline. Records whether it was called at all."""
+
+    def __init__(self, *responses):
+        self.responses = list(responses)
+        self.calls = 0
+
+    async def request(self, req):
+        self.calls += 1
+        nxt = self.responses.pop(0)
+        if isinstance(nxt, Exception):
+            raise nxt
+        return nxt
+
+
+async def _wb_conn(db, *, scope="prices", secret="t0ken"):
+    user = User(id=str(uuid.uuid4()), email=f"{uuid.uuid4()}@b.com", name="U",
+                hashed_password="x")
+    db.add(user)
+    ws = Workspace(id=str(uuid.uuid4()), owner_user_id=user.id, created_at=datetime.utcnow())
+    db.add(ws)
+    acc = MarketplaceAccount(id=str(uuid.uuid4()), workspace_id=ws.id,
+                             marketplace="wildberries", identity_status="unverified")
+    db.add(acc)
+    conn = MarketplaceConnection(
+        id=str(uuid.uuid4()), user_id=user.id, marketplace="wildberries",
+        status="connected", scopes=[scope], workspace_id=ws.id,
+        marketplace_account_id=acc.id,
+    )
+    db.add(conn)
+    cred = ApiCredential(id=str(uuid.uuid4()), connection_id=conn.id, scope=scope,
+                         secret_enc=credential_vault.encrypt(secret))
+    db.add(cred)
+    await db.commit()
+    return user, conn, cred
+
+
+def test_runner_decrypt_failure_records_attempt_calls_nothing_and_keeps_state(monkeypatch):
+    """A changed CRED_ENC_KEY must not be reported to the seller as a bad token."""
+    async def go():
+        db = await _orm_session()
+        user, conn, cred = await _wb_conn(db)
+        cred.verification_status = "verified"
+        cred.verified_at = datetime.utcnow()
+        await db.commit()
+
+        def _boom(_blob):
+            raise ValueError("credential decryption failed (bad key or tampered)")
+        monkeypatch.setattr(credential_vault, "decrypt", _boom)
+
+        transport = _Transport()      # nothing scripted: any call would raise
+        _c, credential, result = await vrunner.verify_credential(
+            db, user_id=user.id, connection_id=conn.id, scope="prices", transport=transport)
+
+        assert result.outcome is O.DECRYPT_FAILURE
+        assert transport.calls == 0, "a decrypt failure still called the marketplace"
+
+        await db.refresh(credential)
+        assert credential.verification_status == "verified", \
+            "a decrypt failure was reported as a credential problem"
+
+        attempt = (await db.execute(
+            sa.select(ConnectionVerificationAttempt))).scalar_one()
+        assert attempt.outcome == "decrypt_failure"
+        assert attempt.error_category == "internal"
+    _run(go())
+
+
+def test_runner_verified_updates_only_the_probed_scope():
+    async def go():
+        db = await _orm_session()
+        user, conn, prices = await _wb_conn(db, scope="prices")
+        feedbacks = ApiCredential(id=str(uuid.uuid4()), connection_id=conn.id,
+                                  scope="feedbacks",
+                                  secret_enc=credential_vault.encrypt("other"))
+        db.add(feedbacks)
+        await db.commit()
+
+        transport = _Transport(ProbeResponse(status=200, headers={}, json=PING_OK))
+        await vrunner.verify_credential(db, user_id=user.id, connection_id=conn.id,
+                                        scope="prices", transport=transport)
+
+        await db.refresh(prices)
+        await db.refresh(feedbacks)
+        await db.refresh(conn)
+        assert prices.verification_status == "verified"
+        assert feedbacks.verification_status == "unverified"
+        assert conn.verification_status == "unverified"   # not every scope is proven
+    _run(go())
+
+
+def test_runner_temporary_result_preserves_credential_state():
+    async def go():
+        db = await _orm_session()
+        user, conn, cred = await _wb_conn(db)
+        cred.verification_status = "verified"
+        stamp = datetime.utcnow()
+        cred.verified_at = stamp
+        await db.commit()
+
+        transport = _Transport(
+            ProbeResponse(status=429, headers={"x-ratelimit-retry": "30"}, json=None))
+        _c, credential, result = await vrunner.verify_credential(
+            db, user_id=user.id, connection_id=conn.id, scope="prices", transport=transport)
+
+        assert result.outcome is O.RATE_LIMITED
+        await db.refresh(credential)
+        assert credential.verification_status == "verified"
+        assert credential.verified_at == stamp
+    _run(go())
+
+
+def test_runner_cannot_apply_a_stale_result_after_the_secret_was_replaced():
+    """The verdict describes a secret that no longer exists. It is recorded, not applied."""
+    async def go():
+        db = await _orm_session()
+        user, conn, cred = await _wb_conn(db)
+
+        class _ReplacingTransport:
+            calls = 0
+
+            async def request(self, req):
+                # the seller rotates the token while the probe is in flight
+                cred.secret_enc = credential_vault.encrypt("rotated")
+                cred.updated_at = datetime.utcnow() + timedelta(seconds=1)
+                await db.commit()
+                self.calls += 1
+                return ProbeResponse(status=200, headers={}, json=PING_OK)
+
+        _c, credential, result = await vrunner.verify_credential(
+            db, user_id=user.id, connection_id=conn.id, scope="prices",
+            transport=_ReplacingTransport())
+
+        assert result.outcome is O.VERIFIED          # the marketplace really did say this
+        await db.refresh(credential)
+        assert credential.verification_status == "unverified", \
+            "a verdict about the OLD secret was applied to the new one"
+        assert credential.verified_at is None
+
+        # ...but the evidence is kept, honestly attributed and with its true outcome
+        attempt = (await db.execute(
+            sa.select(ConnectionVerificationAttempt))).scalar_one()
+        assert attempt.outcome == "verified"
+        assert attempt.credential_id == credential.id
+    _run(go())
+
+
+def test_runner_rollup_recomputes_through_the_existing_projection():
+    async def go():
+        db = await _orm_session()
+        user, conn, _cred = await _wb_conn(db)
+
+        transport = _Transport(ProbeResponse(status=200, headers={}, json=PING_OK))
+        await vrunner.verify_credential(db, user_id=user.id, connection_id=conn.id,
+                                        scope="prices", transport=transport)
+
+        await db.refresh(conn)
+        creds = (await db.execute(sa.select(ApiCredential))).scalars().all()
+        assert conn.verification_status == projection.rollup_status(creds)
+        assert conn.verified_at == projection.rollup_verified_at(creds)
+    _run(go())
+
+
+def test_verify_endpoint_is_owner_scoped():
+    async def go():
+        db = await _orm_session()
+        _owner, conn, _cred = await _wb_conn(db)
+
+        stranger = User(id=str(uuid.uuid4()), email="x@b.com", name="X", hashed_password="x")
+        db.add(stranger)
+        db.add(Workspace(id=str(uuid.uuid4()), owner_user_id=stranger.id,
+                         created_at=datetime.utcnow()))
+        await db.commit()
+
+        with pytest.raises(HTTPException) as exc:
+            await verify_connection_scope(conn.id, VerifyRequest(scope="prices"),
+                                          stranger, db)
+        assert exc.value.status_code == 404      # neutral: does not reveal it exists
+    _run(go())
+
+
+def test_verify_endpoint_reads_the_token_from_storage_and_returns_neutral_fields(monkeypatch):
+    async def go():
+        db = await _orm_session()
+        user, conn, _cred = await _wb_conn(db, secret="stored-secret")
+
+        seen = {}
+
+        class _Capture:
+            async def request(self, req):
+                seen["auth"] = req.headers.get("Authorization")
+                return ProbeResponse(status=200, headers={}, json=PING_OK)
+
+        monkeypatch.setattr(vrunner, "ProbeTransport", lambda *a, **k: _Capture())
+
+        out = await verify_connection_scope(conn.id, VerifyRequest(scope="prices"), user, db)
+
+        # the token came from the vault, never from the request body
+        assert seen["auth"] == "stored-secret"
+        assert not hasattr(VerifyRequest(scope="prices"), "token")
+
+        assert out.outcome == "verified"
+        assert out.verification_status == "verified"
+        assert out.connection_verification_status == "verified"
+        assert out.marketplace == "wildberries"
+        assert out.scope == "prices"
+
+        # marketplace-neutral: no WB field, no token, no body, no identity
+        payload = out.model_dump()
+        assert set(payload) == {
+            "connection_id", "marketplace", "scope", "outcome", "verification_status",
+            "verified_at", "connection_verification_status", "connection_verified_at",
+            "retry_after_seconds",
+        }
+        assert "stored-secret" not in str(payload)
+    _run(go())
+
+
+def test_verify_router_contains_no_marketplace_branch():
+    src = (Path(__file__).resolve().parents[1] / "routers" / "connections.py").read_text(
+        encoding="utf-8")
+    tree = ast.parse(src)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Compare):
+            code = ast.unparse(node).lower()
+            if "marketplace" in code:
+                for mp in ("wildberries", "ozon", "yandex"):
+                    assert mp not in code, f"router branches on the marketplace: {code!r}"

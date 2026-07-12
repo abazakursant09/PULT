@@ -14,8 +14,11 @@ from models.user import User
 from models.marketplace_account import MarketplaceAccount
 from models.marketplace_connection import MarketplaceConnection
 from models.api_credential import ApiCredential
-from schemas.marketplace import ConnectionCreate, ConnectionOut, ScopeVerificationOut
+from schemas.marketplace import (
+    ConnectionCreate, ConnectionOut, ScopeVerificationOut, VerifyOut, VerifyRequest,
+)
 from services.marketplace import credential_vault
+from services.marketplace.verification import runner as verification_runner
 from services.marketplace.verification import service as verification_service
 from services.workspace_resolver import WorkspaceMissing, resolve_workspace_id
 
@@ -177,6 +180,46 @@ async def create_connection(
     log.info("connection saved: user=%s mp=%s scope=%s", current_user.id,
              body.marketplace, body.scope)  # token never logged
     return await _to_out(db, conn)
+
+
+@router.post("/connections/{connection_id}/verify", response_model=VerifyOut)
+async def verify_connection_scope(
+    connection_id: str,
+    body: VerifyRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Check ONE stored scope against its marketplace.
+
+    Separate from `POST /connections` on purpose: saving a credential must not depend on a
+    marketplace being reachable. WB's seller-info allows a Basic token one call per 24 h —
+    tying storage to a probe would mean a rate-limited seller could not even save. This way
+    a check can be retried without the seller re-entering the token.
+
+    The router picks no marketplace and knows no probe: the runner resolves the adapter
+    from the registry.
+    """
+    try:
+        conn, credential, result = await verification_runner.verify_credential(
+            db, user_id=current_user.id, connection_id=connection_id, scope=body.scope,
+        )
+    except verification_runner.ConnectionNotFound:
+        raise HTTPException(404, "connection not found")
+
+    log.info("verification: conn=%s mp=%s scope=%s outcome=%s",   # token never logged
+             conn.id, conn.marketplace, body.scope, result.outcome.value)
+
+    return VerifyOut(
+        connection_id=conn.id,
+        marketplace=conn.marketplace,
+        scope=body.scope,
+        outcome=result.outcome.value,
+        verification_status=(credential.verification_status if credential else "unverified"),
+        verified_at=(credential.verified_at if credential else None),
+        connection_verification_status=conn.verification_status,
+        connection_verified_at=conn.verified_at,
+        retry_after_seconds=result.retry_after_seconds,
+    )
 
 
 @router.delete("/connections/{connection_id}", status_code=204)

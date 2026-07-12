@@ -21,6 +21,24 @@ class ScopeVerificationOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class VerifyRequest(BaseModel):
+    """Verify ONE stored scope. The token is never sent — it is read from storage."""
+    scope: str
+
+
+class VerifyOut(BaseModel):
+    """Marketplace-neutral. No marketplace ever adds a field here."""
+    connection_id: str
+    marketplace: str
+    scope: str
+    outcome: str                                    # VerificationOutcome
+    verification_status: str                        # this scope, after the attempt
+    verified_at: Optional[datetime]
+    connection_verification_status: str             # rollup across all stored scopes
+    connection_verified_at: Optional[datetime]
+    retry_after_seconds: Optional[int] = None       # only when the marketplace gave one
+
+
 class ConnectionOut(BaseModel):
     id: str
     marketplace: str

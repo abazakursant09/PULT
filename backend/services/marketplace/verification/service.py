@@ -72,6 +72,7 @@ async def record_attempt(
     started_at: Optional[datetime] = None,
     finished_at: Optional[datetime] = None,
     now: Optional[datetime] = None,
+    apply_state: bool = True,
 ) -> ConnectionVerificationAttempt:
     """Append the attempt, apply its verdict if it has one, reproject the connection.
 
@@ -79,6 +80,10 @@ async def record_attempt(
     timeout, a rate limit, a marketplace outage or a decryption failure leave every stored
     value exactly as it was: none of them is evidence about the secret, and treating them
     as such would invalidate working credentials during an outage or a key rotation.
+
+    `apply_state=False` records the attempt but withholds the verdict. The runner uses it
+    when the secret was replaced while the probe was in flight: the result describes a
+    credential that no longer exists, so it is kept as evidence but never applied.
     """
     now = now or datetime.utcnow()
 
@@ -101,7 +106,7 @@ async def record_attempt(
     )
     db.add(attempt)
 
-    if credential is not None and meta(result.outcome).changes_state:
+    if credential is not None and apply_state and meta(result.outcome).changes_state:
         credential.verification_status = result.outcome.value
         credential.verified_at = now if result.outcome is VerificationOutcome.VERIFIED else None
 
