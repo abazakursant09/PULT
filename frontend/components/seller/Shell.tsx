@@ -12,7 +12,12 @@ const NAV: { g: string; items: NavItem[] }[] = [
   { g: 'Обзор', items: [{ h: '/dashboard', l: 'Главная', d: 'home' }] },
   { g: 'Данные', items: [
     { h: '/dashboard/import', l: 'Импорт данных', d: 'import' },
-    { h: '/dashboard/monitor', l: 'Мониторинг', d: 'pulse' },
+    // "Мониторинг" is NOT listed. Its "Проверить обновления" button invites the seller to
+    // "получить актуальные события с маркетплейсов", and what it returns is a random sample
+    // from a hard-coded pool of invented news — WB commission hikes, a marking bill — three
+    // of them flagged critical, stamped with fresh timestamps. Inventing market and legal
+    // news for a seller who may act on it is not an unfinished feature, it is a lie, so the
+    // page is unreachable until it reports something real. The backend is left untouched.
   ] },
   { g: 'Развитие', items: [{ h: '/ideas', l: 'Идеи', d: 'bulb' }] },
   { g: 'Аккаунт', items: [

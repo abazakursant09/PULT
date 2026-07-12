@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Bell, Check, CheckCheck, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Bell, Check, CheckCheck, ChevronLeft, ChevronRight } from 'lucide-react'
 import { api, type NotificationItem } from '@/lib/api'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -39,7 +39,6 @@ export default function NotificationsPage() {
   const [unread,  setUnread]  = useState(0)
   const [page,    setPage]    = useState(1)
   const [loading, setLoading] = useState(true)
-  const [seeding, setSeeding] = useState(false)
   const [tab,     setTab]     = useState('all')
 
   useEffect(() => { load(page) }, [page])
@@ -68,16 +67,12 @@ export default function NotificationsPage() {
     setUnread(0)
   }
 
-  async function seed() {
-    setSeeding(true)
-    try {
-      await api.notifications.seed()
-      await load(1)
-      setPage(1)
-    } catch {} finally {
-      setSeeding(false)
-    }
-  }
+  // There is no seed() any more. It called POST /api/notifications/seed, which invents
+  // notifications about events that never happened — a review left on "Умная колонка XL",
+  // a trial ending in three days. It was opt-in and labelled "демо", but once seeded those
+  // rows are indistinguishable from real ones everywhere else in the product, including the
+  // bell. A notification is a statement that something happened to THIS seller, so there is
+  // no honest way to fabricate one. The backend endpoint is left in place, simply unreachable.
 
   const totalPages = Math.ceil(total / PER_PAGE)
   const filteredItems = tab === 'unread' ? items.filter(n => !n.is_read) : items
@@ -108,10 +103,6 @@ export default function NotificationsPage() {
                   <CheckCheck size={13} /> Прочитать все
                 </Button>
               )}
-              <Button variant="ghost" size="sm" onClick={seed} disabled={seeding} className="flex items-center gap-1.5 text-xs">
-                <RefreshCw size={12} className={seeding ? 'animate-spin' : ''} />
-                Демо-данные
-              </Button>
             </div>
           </div>
         </BlurFade>
@@ -135,10 +126,7 @@ export default function NotificationsPage() {
                       <Bell size={24} style={{ color: '#1A73E8' }} />
                     </div>
                     <p className="font-semibold mb-2" style={{ color: '#0A2540' }}>Уведомлений пока нет</p>
-                    <p className="text-sm text-muted-foreground mb-5">Загрузите демо-данные, чтобы увидеть уведомления</p>
-                    <Button onClick={seed} disabled={seeding}>
-                      {seeding ? 'Загружаем...' : 'Загрузить демо-уведомления'}
-                    </Button>
+                    <p className="text-sm text-muted-foreground">Здесь появятся события по вашему бизнесу</p>
                   </CardContent>
                 </Card>
               ) : (
