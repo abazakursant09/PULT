@@ -66,15 +66,18 @@ test('a seller registers, uploads a report, and sees a real diagnosis', async ({
 
   await solveCaptcha(page)
 
-  // The consents must be ticked by clicking the TEXT, not the checkbox square.
-  //
-  // Clicking the square does nothing at all: <label> forwards a click to the <button> it
-  // wraps (a button is a labelable element), so the button's own handler and the label's
-  // handler both fire and the state toggles twice, back to false. This test found that — a
-  // real defect a unit test cannot see — and it is reported, not patched around here.
-  const consents = page.locator('label').filter({ hasText: /Я даю согласие|Я принимаю условия/ })
-  await consents.nth(0).click({ position: { x: 60, y: 6 } })
-  await consents.nth(1).click({ position: { x: 60, y: 6 } })
+  // Tick the consents through the checkbox SQUARE — the obvious target, and the one a seller
+  // reaches for first. Until this test found the bug, clicking it did nothing at all: the
+  // control was a <button> nested inside a <label>, so the browser forwarded the label's click
+  // to the button, both handlers fired, and the state toggled twice, back to false. It is a
+  // real <input type="checkbox"> now, and `check()` drives it exactly as a person does.
+  // The real input is visually hidden (it carries the semantics and the keyboard focus), so
+  // the thing a seller actually clicks is the square the label draws. Click that, and assert
+  // the checkbox behind it toggled — exactly once.
+  await page.locator('label[for="consent-privacy"] span[aria-hidden="true"]').click()
+  await page.locator('label[for="consent-terms"] span[aria-hidden="true"]').click()
+  await expect(page.locator('#consent-privacy')).toBeChecked()
+  await expect(page.locator('#consent-terms')).toBeChecked()
 
   const submit = page.locator('button[type="submit"]')
   await expect(submit).toBeEnabled()

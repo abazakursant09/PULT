@@ -16,6 +16,51 @@ import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { BlurFade } from '@/components/ui/blur-fade'
 
+/** A consent checkbox with native semantics.
+ *
+ * This used to be a <button> nested inside a <label>. A button is a labelable element, so
+ * the browser forwarded every label click to it: the button's handler fired AND the label's
+ * handler fired, the state toggled twice, and it landed back where it started. Clicking the
+ * square — the obvious target — did nothing at all, and Space did nothing either. Only
+ * clicking the text worked, which is the only reason anyone could register.
+ *
+ * Now there is one real <input type="checkbox">, visually hidden but focusable, and a label
+ * bound to it by id. The browser owns the toggle, so it can only happen once, from the
+ * square, from the text, or from the keyboard. The square is a <span> — no nested
+ * interactive element — and the look is unchanged.
+ */
+function Consent({ id, checked, onChange, children }: {
+  id: string
+  checked: boolean
+  onChange: (v: boolean) => void
+  children: React.ReactNode
+}) {
+  return (
+    <div className="flex items-start">
+      <input
+        id={id}
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="peer sr-only"
+      />
+      <label
+        htmlFor={id}
+        className="flex items-start gap-2.5 cursor-pointer rounded peer-focus-visible:ring-2 peer-focus-visible:ring-[#1A73E8] peer-focus-visible:ring-offset-2"
+      >
+        <span
+          aria-hidden="true"
+          className="flex items-center justify-center w-4 h-4 rounded shrink-0 transition-all mt-0.5"
+          style={{ background: checked ? '#1A73E8' : 'transparent', border: `1.5px solid ${checked ? '#1A73E8' : 'hsl(var(--border))'}` }}
+        >
+          {checked && <svg width="9" height="7" viewBox="0 0 11 8" fill="none"><path d="M1 4L4 7L10 1" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+        </span>
+        <span className="text-xs leading-relaxed text-muted-foreground">{children}</span>
+      </label>
+    </div>
+  )
+}
+
 export default function RegisterPage() {
   const { t } = useLang()
   const router = useRouter()
@@ -79,18 +124,6 @@ export default function RegisterPage() {
     }
   }
 
-  function CheckBox({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
-    return (
-      <button
-        type="button"
-        onClick={() => onChange(!checked)}
-        className="flex items-center justify-center w-4 h-4 rounded shrink-0 transition-all mt-0.5"
-        style={{ background: checked ? '#1A73E8' : 'transparent', border: `1.5px solid ${checked ? '#1A73E8' : 'hsl(var(--border))'}` }}
-      >
-        {checked && <svg width="9" height="7" viewBox="0 0 11 8" fill="none"><path d="M1 4L4 7L10 1" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
-      </button>
-    )
-  }
 
   if (registered) {
     return (
@@ -212,25 +245,20 @@ export default function RegisterPage() {
 
               <MathCaptcha onValid={setCaptchaOk} />
 
-              <label className="flex items-start gap-2.5 cursor-pointer" onClick={() => setAgreed(v => !v)}>
-                <CheckBox checked={agreed} onChange={setAgreed} />
-                <span className="text-xs leading-relaxed text-muted-foreground">
-                  {t('register.privacyText')}{' '}
-                  <a href="/privacy" target="_blank" rel="noopener noreferrer" className="hover:underline" style={{ color: '#1A73E8' }} onClick={e => e.stopPropagation()}>
-                    {t('register.privacy')}
-                  </a>
-                </span>
-              </label>
+              <Consent id="consent-privacy" checked={agreed} onChange={setAgreed}>
+                {t('register.privacyText')}{' '}
+                {/* the link must not toggle the consent on its way to the policy page */}
+                <a href="/privacy" target="_blank" rel="noopener noreferrer" className="hover:underline" style={{ color: '#1A73E8' }} onClick={e => e.stopPropagation()}>
+                  {t('register.privacy')}
+                </a>
+              </Consent>
 
-              <label className="flex items-start gap-2.5 cursor-pointer" onClick={() => setAgreedTerms(v => !v)}>
-                <CheckBox checked={agreedTerms} onChange={setAgreedTerms} />
-                <span className="text-xs leading-relaxed text-muted-foreground">
-                  {t('register.termsText')}{' '}
-                  <a href="/terms" target="_blank" rel="noopener noreferrer" className="hover:underline" style={{ color: '#1A73E8' }} onClick={e => e.stopPropagation()}>
-                    {t('register.terms')}
-                  </a>
-                </span>
-              </label>
+              <Consent id="consent-terms" checked={agreedTerms} onChange={setAgreedTerms}>
+                {t('register.termsText')}{' '}
+                <a href="/terms" target="_blank" rel="noopener noreferrer" className="hover:underline" style={{ color: '#1A73E8' }} onClick={e => e.stopPropagation()}>
+                  {t('register.terms')}
+                </a>
+              </Consent>
 
               <p className="text-xs text-muted-foreground">{t('register.age')}</p>
 

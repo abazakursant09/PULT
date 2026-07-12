@@ -29,20 +29,45 @@ export default function Home() {
   // Compute in an effect (client-only) so real local date/time is used without an
   // SSR/CSR hydration mismatch.
   const [sub, setSub] = useState('')
-  // First-run gate: null = unknown (loading), true = has data, false = no data yet.
-  // Read from the EXISTING /api/today/summary has_data flag. On error, fail open to the
-  // normal dashboard so an active user is never trapped behind the first-run screen.
+
+  // The first-run gate used to read ONLY /api/today/summary.has_data — which is about the
+  // most recent day's MONEY, not about whether a diagnosis exists. So a seller could upload a
+  // report, PULT could diagnose a revenue collapse, /api/presentation/cards could return that
+  // card, and the dashboard would still show "Нет данных для анализа". The same summary said
+  // critical_count: 1 in the very response that claimed there was no data.
+  //
+  // The rule is now the honest one: if there is a diagnosis, the seller sees it. `has_data`
+  // may only decide what to show when there is NOTHING to show.
+  //
+  // null = still loading. Both requests must settle before anything is drawn, so the
+  // first-run screen can never flash at a seller who does in fact have a diagnosis.
+  const [hasCards, setHasCards] = useState<boolean | null>(null)
   const [hasData, setHasData] = useState<boolean | null>(null)
 
   useEffect(() => { if (!localStorage.getItem('token')) router.push('/login') }, [router])
   useEffect(() => { setSub(_buildSub(new Date())) }, [])
   useEffect(() => {
     let alive = true
+
     api.today.getSummary()
+      // Fail OPEN, as before: a transient summary error must never trap an active seller
+      // behind the first-run screen.
       .then((r) => { if (alive) setHasData(r.has_data) })
       .catch(() => { if (alive) setHasData(true) })
+
+    api.presentation.getCards({ limit: 1 })
+      .then((r) => { if (alive) setHasCards(r.cards.length > 0) })
+      // Fail CLOSED on this one: if we cannot fetch the cards we do not know whether a
+      // diagnosis exists, and inventing one would be worse than deferring to `has_data`.
+      .catch(() => { if (alive) setHasCards(false) })
+
     return () => { alive = false }
   }, [])
+
+  const loading = hasCards === null || hasData === null
+  // A diagnosis outranks everything. Only when there is none does `has_data` get a say.
+  const showDiagnosis = !loading && (hasCards === true || hasData === true)
+  const showFirstRun = !loading && !showDiagnosis
 
   return (
     <>
@@ -50,8 +75,8 @@ export default function Home() {
       <div className="s-canvas">
         <BusinessToday />
 
-        {/* has data → normal dashboard */}
-        {hasData === true && (
+        {/* a diagnosis exists (or the seller has recent data) → the normal dashboard */}
+        {showDiagnosis && (
           <>
             <TodayFocus />
             <DecisionFeedPanel skipTopAction />
@@ -65,7 +90,7 @@ export default function Home() {
             link was a dead end. A new seller was told to wait for an event that would never
             happen. The only way into the Advisory MVP is an uploaded report, so that is what
             this now says. */}
-        {hasData === false && (
+        {showFirstRun && (
           <div className="s-card" style={{ marginBottom: 18 }}>
             <h2 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)', margin: 0 }}>
               Нет данных для анализа
@@ -86,7 +111,8 @@ export default function Home() {
           </div>
         )}
 
-        {/* hasData === null → loading; BusinessToday shows its own loading state */}
+        {/* still loading → draw neither: BusinessToday shows its own loading state, and the
+            first-run screen must never flash at a seller who does have a diagnosis. */}
       </div>
     </>
   )
