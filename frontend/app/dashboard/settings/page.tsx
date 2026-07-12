@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Send, Check, AlertTriangle, Bell, Calendar, Clock, RefreshCw, Trash2, AlertCircle, Key } from 'lucide-react'
+import { Send, Check, AlertTriangle, Calendar, Clock, RefreshCw, Trash2, AlertCircle } from 'lucide-react'
 import { api, type TelegramSettings } from '@/lib/api'
 import { clearSession } from '@/lib/session'
 import { SellerBar } from '@/components/seller/Shell'
@@ -9,7 +9,6 @@ import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
-import { Badge } from '@/components/ui/badge'
 
 const A   = 'var(--violet)'
 const ABG = 'var(--violet-dim)'
@@ -25,13 +24,12 @@ const DAYS = [
   { value: 'sunday',    label: 'Вс' },
 ]
 
-const EVENT_TYPES: { key: keyof TelegramSettings; label: string; desc: string; critical?: boolean }[] = [
-  { key: 'notify_bad_review',      label: 'Проблемный отзыв',              desc: 'Отзыв с юридическим риском',           critical: true },
-  { key: 'notify_offer_change',    label: 'Изменение оферты маркетплейса', desc: 'Новые условия от WB, Ozon, ЯМ',        critical: true },
-  { key: 'notify_price_drop',      label: 'Резкое падение цены конкурента',desc: 'Конкурент снизил цену более чем на 10%', critical: true },
-  { key: 'notify_negative_review', label: 'Новый негативный отзыв',        desc: 'Отзыв с оценкой 1–2 звезды' },
-  { key: 'notify_trial_end',       label: 'Окончание пробного периода',    desc: 'За 3 дня до конца бесплатного доступа' },
-]
+// The "Типы уведомлений" card is gone. Its five switches — problem review, marketplace offer
+// change, competitor price drop, negative review, trial ending — were read by nothing: no
+// backend code consumes notify_bad_review, notify_offer_change, notify_price_drop,
+// notify_negative_review or notify_trial_end. Three of them carried a red "критично" badge and
+// were ON by default, so a seller was promised critical alerts that could never arrive. The
+// columns and PUT /telegram/settings are untouched; only the promise is withdrawn.
 
 export default function SettingsPage() {
   const [chatId,      setChatId]      = useState('')
@@ -51,18 +49,6 @@ export default function SettingsPage() {
   const [deleting,      setDeleting]      = useState(false)
   const [deleteError,   setDeleteError]   = useState('')
 
-  const [ozonKeyDate,   setOzonKeyDate]   = useState('')
-  const [ozonKeySaved,  setOzonKeySaved]  = useState(false)
-  const [ozonKeyWarn,   setOzonKeyWarn]   = useState<number | null>(null)
-
-  function checkOzonKeyExpiry(dateStr: string) {
-    if (!dateStr) { setOzonKeyWarn(null); return }
-    const created = new Date(dateStr).getTime()
-    const expiry  = created + 180 * 24 * 60 * 60 * 1000
-    const daysLeft = Math.ceil((expiry - Date.now()) / (24 * 60 * 60 * 1000))
-    setOzonKeyWarn(daysLeft <= 7 ? daysLeft : null)
-  }
-
   useEffect(() => {
     Promise.all([api.telegram.getChatId(), api.telegram.getSettings()])
       .then(([cid, s]) => {
@@ -72,10 +58,6 @@ export default function SettingsPage() {
       })
       .catch(() => {})
       .finally(() => setSettingsLoad(false))
-
-    const saved = localStorage.getItem('ozon_api_key_date') ?? ''
-    setOzonKeyDate(saved)
-    checkOzonKeyExpiry(saved)
   }, [])
 
   async function saveChatId() {
@@ -109,13 +91,6 @@ export default function SettingsPage() {
     setSettings(s => s ? { ...s, [key]: val } : s)
   }
 
-  function saveOzonKeyDate() {
-    localStorage.setItem('ozon_api_key_date', ozonKeyDate)
-    checkOzonKeyExpiry(ozonKeyDate)
-    setOzonKeySaved(true)
-    setTimeout(() => setOzonKeySaved(false), 2500)
-  }
-
   async function deleteAccount() {
     setDeleting(true); setDeleteError('')
     try {
@@ -143,7 +118,7 @@ export default function SettingsPage() {
 
   return (
     <>
-      <SellerBar title="Настройки" sub="Telegram-уведомления · API-ключи · аккаунт" />
+      <SellerBar title="Настройки" sub="Telegram-уведомления · аккаунт" />
       <div className="s-canvas">
         <div className="max-w-2xl mx-auto space-y-8">
       <div>
@@ -205,45 +180,6 @@ export default function SettingsPage() {
         )}
       </Card>
 
-      <Card className="p-6 sm:p-8">
-        <div className="flex items-center gap-3 mb-5">
-          <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: ABG, border: `1px solid ${ABR}` }}>
-            <Bell size={16} style={{ color: A }} />
-          </div>
-          <h2 className="font-semibold" style={{ fontSize: '1rem', color: 'var(--text)' }}>
-            2. Типы уведомлений
-          </h2>
-        </div>
-
-        {settingsLoad || !settings ? (
-          <div className="flex justify-center py-8">
-            <RefreshCw size={22} className="animate-spin text-muted-foreground" />
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {EVENT_TYPES.map(({ key, label, desc, critical }) => (
-              <div
-                key={key}
-                className="flex items-center justify-between gap-4 px-4 py-3.5 rounded-xl"
-                style={{ background: 'var(--surface-h)', border: '1px solid var(--line)' }}
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-sm font-medium" style={{ color: 'var(--text)' }}>{label}</span>
-                    {critical && <Badge variant="destructive" className="text-[10px]">критично</Badge>}
-                  </div>
-                  <p className="text-xs mt-0.5" style={{ color: 'var(--text-3)' }}>{desc}</p>
-                </div>
-                <Switch
-                  checked={settings[key] as boolean}
-                  onCheckedChange={v => setField(key, v as TelegramSettings[typeof key])}
-                />
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
-
       {settings && (
         <Card className="p-6 sm:p-8">
           <div className="flex items-center gap-3 mb-5">
@@ -251,7 +187,7 @@ export default function SettingsPage() {
               <Calendar size={16} style={{ color: A }} />
             </div>
             <h2 className="font-semibold" style={{ fontSize: '1rem', color: 'var(--text)' }}>
-              3. Плановые отчёты
+              2. Плановые отчёты
             </h2>
           </div>
 
@@ -332,46 +268,6 @@ export default function SettingsPage() {
           </Button>
         </div>
       )}
-
-      {/* Ozon API key expiry */}
-      <Card className="p-6 sm:p-8">
-        <div className="flex items-center gap-3 mb-5">
-          <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: ABG, border: `1px solid ${ABR}` }}>
-            <Key size={16} style={{ color: A }} />
-          </div>
-          <h2 className="font-semibold" style={{ fontSize: '1rem', color: 'var(--text)' }}>
-            API-ключ Ozon
-          </h2>
-        </div>
-
-        {ozonKeyWarn !== null && (
-          <div className="mb-4 flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-medium"
-               style={{ background: 'rgba(220,38,38,0.08)', border: '1px solid rgba(220,38,38,0.25)', color: 'var(--danger)' }}>
-            <AlertTriangle size={14} />
-            Ключ истекает через {ozonKeyWarn} дн. Обновите ключ.
-          </div>
-        )}
-
-        <p className="text-sm mb-3" style={{ color: 'var(--text-2)' }}>
-          Дата создания API-ключа Ozon. Ключ действует 180 дней — напомним за 7 дней до истечения.
-        </p>
-        <div className="flex gap-3 flex-wrap">
-          <Input
-            type="date"
-            className="flex-1 min-w-0"
-            value={ozonKeyDate}
-            onChange={e => setOzonKeyDate(e.target.value)}
-          />
-          <Button onClick={saveOzonKeyDate} className="shrink-0">
-            {ozonKeySaved ? <><Check size={13} /> Сохранено</> : 'Сохранить'}
-          </Button>
-        </div>
-        {ozonKeyDate && (
-          <p className="mt-2 text-xs" style={{ color: 'var(--text-2)' }}>
-            Истекает: {new Date(new Date(ozonKeyDate).getTime() + 180 * 24 * 60 * 60 * 1000).toLocaleDateString('ru-RU')}
-          </p>
-        )}
-      </Card>
 
       <Card className="overflow-hidden" style={{ borderColor: 'rgba(220,38,38,0.2)' }}>
         <div style={{ height: 3, background: 'rgba(220,38,38,0.5)', borderRadius: '4px 4px 0 0' }} />
