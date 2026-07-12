@@ -6,6 +6,7 @@ import {
   Send, Check, RefreshCw, Copy, Calendar, Clock, Trash2, AlertCircle,
 } from 'lucide-react'
 import { api, type TelegramSettings } from '@/lib/api'
+import { hasActiveSubscription, planLabel } from '@/lib/plans'
 import { clearSession } from '@/lib/session'
 import { LanguageSwitcher } from '@/components/LanguageSwitcher'
 import { Input } from '@/components/ui/input'
@@ -70,16 +71,20 @@ function SectionIcon({ icon: Icon, gold }: { icon: React.ElementType; gold?: boo
 
 // ─── Profile Tab ──────────────────────────────────────────────────────────────
 function ProfileTab() {
-  const [user, setUser] = useState<{ name: string; email: string; plan?: string } | null>(null)
+  const [user, setUser] = useState<
+    { name: string; email: string; plan?: string; subscription_end_date?: string | null } | null
+  >(null)
 
   useEffect(() => {
     const s = localStorage.getItem('user')
     if (s) try { setUser(JSON.parse(s)) } catch {}
   }, [])
 
-  const planLabel: Record<string, string> = {
-    master: 'Мастер', profi: 'Профи', maximum: 'Максимальный', free: 'Бесплатный',
-  }
+  // The plan is only shown to a seller whose plan a payment actually activated. `plan` alone
+  // defaults to 'master' at registration, so showing it unconditionally told every free
+  // account it was on a paid tariff — the same fabrication as the "СТАТУС: Активен" line that
+  // used to sit beside it, and which is gone. When we do not know, we say nothing.
+  const paid = hasActiveSubscription(user)
 
   return (
     <div className="space-y-4">
@@ -94,9 +99,9 @@ function ProfileTab() {
           <div>
             <p className="text-[18px] font-bold" style={{ color: 'var(--text)' }}>{user?.name ?? '—'}</p>
             <p className="text-[13px] mt-0.5" style={{ color: 'var(--text-2)' }}>{user?.email ?? '—'}</p>
-            {user?.plan && (
+            {paid && (
               <span className="badge badge-gold mt-2 inline-block">
-                {planLabel[user.plan] ?? user.plan}
+                {planLabel(user?.plan)}
               </span>
             )}
           </div>
@@ -106,8 +111,7 @@ function ProfileTab() {
           {[
             { label: 'ИМЯ',    value: user?.name ?? '—' },
             { label: 'EMAIL',  value: user?.email ?? '—' },
-            { label: 'ТАРИФ',  value: planLabel[user?.plan ?? ''] ?? user?.plan ?? '—' },
-            { label: 'СТАТУС', value: 'Активен' },
+            ...(paid ? [{ label: 'ТАРИФ', value: planLabel(user?.plan) }] : []),
           ].map(({ label, value }) => (
             <div key={label} className="p-4 rounded-[8px]" style={{ background: 'var(--bg)', border: '1px solid var(--surface)' }}>
               <p className="label mb-1">{label}</p>

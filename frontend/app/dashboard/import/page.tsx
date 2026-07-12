@@ -179,7 +179,8 @@ export default function ImportPage() {
           Импорт данных
         </h1>
         <p style={{ fontSize: 14, color: '#8E8E93' }}>
-          Загрузите CSV из Wildberries, Ozon или Яндекс Маркета — данные появятся в Финансах и Пульте
+          Загрузите CSV из Wildberries, Ozon или Яндекс Маркета — диагноз появится на главной
+          в течение минуты после обработки отчёта
         </p>
       </div>
 

@@ -3,12 +3,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { CreditCard, Zap, Crown, Check, Clock, AlertCircle, Loader2 } from 'lucide-react'
 import { api, type User, type Payment } from '@/lib/api'
-
-const PLAN_LABELS: Record<string, string> = {
-  master:  'Старт',
-  profi:   'Мастер',
-  maximum: 'Профи',
-}
+import { PLAN_LABELS, hasActiveSubscription, planLabel } from '@/lib/plans'
 
 const TARIFFS = [
   {
@@ -26,7 +21,6 @@ const TARIFFS = [
     plan: 'profi',
     icon: Crown,
     features: ['До 50 товаров', 'Всё из Старта', 'Финансовый модуль', 'Приоритетная поддержка', 'Telegram-уведомления'],
-    popular: true,
   },
 ]
 
@@ -91,7 +85,10 @@ export default function BillingPage() {
     )
   }
 
-  const currentPlanLabel = user ? (PLAN_LABELS[user.plan] ?? user.plan) : '—'
+  // `plan` defaults to 'master' at registration, so it cannot say whether anything was bought.
+  // Only a subscription_end_date — which the backend writes when a payment activates the plan —
+  // can. Without one we show no current-plan block at all rather than call a free account active.
+  const paid = hasActiveSubscription(user)
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)', fontFamily: 'Inter, Arial, sans-serif' }}>
@@ -115,26 +112,23 @@ export default function BillingPage() {
           </div>
         )}
 
-        {/* Current plan */}
-        <div style={{ background: 'var(--surface)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 14, padding: '24px 28px', marginBottom: 28 }}>
-          <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: 'var(--text-2)', textTransform: 'uppercase', marginBottom: 12 }}>Текущий тариф</p>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-                <span style={{ fontSize: 26, fontWeight: 700, color: '#FFFFFF' }}>{currentPlanLabel}</span>
-                <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', color: 'var(--violet)', background: 'rgba(110,106,252,0.12)', border: '1px solid rgba(110,106,252,0.25)', borderRadius: 6, padding: '2px 8px' }}>
-                  АКТИВЕН
-                </span>
-              </div>
-              {user?.subscription_end_date && (
+        {/* Current plan — only for a seller whose plan a payment actually activated. */}
+        {paid && (
+          <div style={{ background: 'var(--surface)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 14, padding: '24px 28px', marginBottom: 28 }}>
+            <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: 'var(--text-2)', textTransform: 'uppercase', marginBottom: 12 }}>Текущий тариф</p>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                  <span style={{ fontSize: 26, fontWeight: 700, color: '#FFFFFF' }}>{planLabel(user?.plan)}</span>
+                </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <Clock size={13} color="var(--text-2)" />
-                  <span style={{ fontSize: 13, color: 'var(--text-2)' }}>До {fmt(user.subscription_end_date)}</span>
+                  <span style={{ fontSize: 13, color: 'var(--text-2)' }}>До {fmt(user!.subscription_end_date!)}</span>
                 </div>
-              )}
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
         {/* Tariff cards */}
         <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: 'var(--text-2)', textTransform: 'uppercase', marginBottom: 16 }}>Выбрать тариф</p>
@@ -144,15 +138,12 @@ export default function BillingPage() {
             const isCurrent = user?.plan === t.plan
             const isLoading = paying === t.id
             return (
-              <div key={t.id} style={{ background: 'var(--surface)', border: t.popular ? '1px solid rgba(110,106,252,0.35)' : '1px solid rgba(255,255,255,0.07)', borderRadius: 14, padding: '24px', position: 'relative', display: 'flex', flexDirection: 'column' }}>
-                {t.popular && (
-                  <div style={{ position: 'absolute', top: -1, right: 20, background: 'var(--violet)', fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', color: '#FFFFFF', padding: '4px 12px', borderRadius: '0 0 8px 8px' }}>
-                    ПОПУЛЯРНЫЙ
-                  </div>
-                )}
+              <div key={t.id} style={{ background: 'var(--surface)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 14, padding: '24px', position: 'relative', display: 'flex', flexDirection: 'column' }}>
+                {/* No "ПОПУЛЯРНЫЙ" badge: no popularity data exists, so it was invented social
+                    proof — and it dressed the 4990 ₽ card, the one it pushed a seller toward. */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-                  <div style={{ width: 36, height: 36, borderRadius: 10, background: t.popular ? 'rgba(110,106,252,0.12)' : 'rgba(255,255,255,0.05)', border: t.popular ? '1px solid rgba(110,106,252,0.25)' : '1px solid rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <Icon size={16} color={t.popular ? 'var(--violet)' : 'var(--text-2)'} />
+                  <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Icon size={16} color="var(--text-2)" />
                   </div>
                   <span style={{ fontSize: 16, fontWeight: 700, color: '#FFFFFF' }}>{t.name}</span>
                 </div>
@@ -177,7 +168,7 @@ export default function BillingPage() {
                     <button
                       onClick={() => handlePay(t.id)}
                       disabled={isLoading || paying !== null}
-                      style={{ width: '100%', padding: '13px', background: t.popular ? 'var(--violet)' : 'rgba(255,255,255,0.07)', color: '#FFFFFF', fontWeight: 700, fontSize: 14, border: 'none', borderRadius: 10, cursor: paying !== null ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: paying !== null && !isLoading ? 0.5 : 1, transition: 'opacity 0.2s' }}
+                      style={{ width: '100%', padding: '13px', background: 'var(--violet)', color: '#FFFFFF', fontWeight: 700, fontSize: 14, border: 'none', borderRadius: 10, cursor: paying !== null ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: paying !== null && !isLoading ? 0.5 : 1, transition: 'opacity 0.2s' }}
                     >
                       {isLoading ? <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> : null}
                       {isLoading ? 'Переход к оплате…' : 'Подключить'}
