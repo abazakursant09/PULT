@@ -5,7 +5,10 @@ import {
   User, Shield, ShieldCheck, ShieldOff, Bell, Globe, AlertTriangle,
   Send, Check, RefreshCw, Copy, Calendar, Clock, Trash2, AlertCircle,
 } from 'lucide-react'
+import { QRCodeSVG } from 'qrcode.react'
+
 import { api, type TelegramSettings } from '@/lib/api'
+import { ErrorBoundary } from '@/components/system/ErrorBoundary'
 import { hasActiveSubscription, planLabel } from '@/lib/plans'
 import { clearSession } from '@/lib/session'
 import { LanguageSwitcher } from '@/components/LanguageSwitcher'
@@ -253,11 +256,30 @@ function SecurityTab() {
         {phase === 'setup' && (
           <div className="mt-6 space-y-4 pt-6" style={{ borderTop: '1px solid var(--surface)' }}>
             <p className="text-[13px] font-medium" style={{ color: 'var(--text)' }}>1. Отсканируйте QR-код в Google Authenticator или Aegis</p>
+
+            {/* The QR is drawn in the browser, from the otpauth URI, as an inline <svg> of
+                <path> elements. It used to be an <img> pointed at api.qrserver.com — which put
+                the seller's raw TOTP secret in a URL on a host we do not control and whose logs
+                we cannot see. Anyone holding that log could mint valid codes, so the second
+                factor was not a second factor. Nothing about this QR touches the network.
+
+                It is wrapped in an ErrorBoundary because the manual key below is the fallback
+                path: if the QR ever fails to render, the seller must still be able to set up
+                their authenticator by typing the key. */}
             <div className="p-3 rounded-[8px] inline-block" style={{ background: 'var(--text)', border: '1px solid var(--surface)' }}>
-              <img
-                src={`https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(otpauth)}&size=180x180&margin=4`}
-                alt="QR-код 2FA" width={180} height={180} style={{ borderRadius: 4, display: 'block' }}
-              />
+              <ErrorBoundary fallback={
+                <p className="text-[12px]" style={{ color: '#111', maxWidth: 180 }}>
+                  QR-код не отрисовался — введите ключ вручную.
+                </p>
+              }>
+                <QRCodeSVG
+                  value={otpauth}
+                  size={180}
+                  role="img"
+                  aria-label="QR-код для подключения приложения-аутентификатора"
+                  style={{ borderRadius: 4, display: 'block' }}
+                />
+              </ErrorBoundary>
             </div>
             <div>
               <p className="text-[13px] mb-2" style={{ color: 'var(--text-2)' }}>Или введите ключ вручную:</p>

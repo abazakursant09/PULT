@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
-  Shield, ShieldCheck, ShieldOff, Copy, Check, RefreshCw, AlertTriangle, ExternalLink, ArrowLeft,
+  Shield, ShieldCheck, ShieldOff, Copy, Check, RefreshCw, AlertTriangle, ArrowLeft,
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { Card } from '@/components/ui/card'
@@ -198,12 +198,11 @@ export default function SecurityPage() {
               </div>
             </div>
 
-            <div className="mb-8">
-              <a href={otpauth} className="inline-flex items-center gap-2 text-sm font-medium" style={{ color: 'var(--violet)' }}>
-                <ExternalLink size={13} />
-                Открыть в приложении аутентификатора
-              </a>
-            </div>
+            {/* The "открыть в приложении" deep link is gone. An otpauth:// href is handed to
+                the OS and never touches the network, so it leaked nothing — but it put the raw
+                TOTP secret into a DOM attribute, and a rule that says "the secret is never in a
+                src or an href" is one we can actually enforce and test. The key above is copyable
+                and is the supported way in. */}
 
             <div className="mb-8 rounded-xl px-5 py-4 space-y-2" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
               {[
