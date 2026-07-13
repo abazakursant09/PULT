@@ -79,7 +79,7 @@ describe('CSV upload flow (the only way data enters PULT)', () => {
       .find((b) => /импорт|подтверд/i.test(b.textContent ?? ''))!
     await userEvent.click(confirmBtn)
 
-    await waitFor(() => expect(confirm).toHaveBeenCalledWith('imp-1'))
+    await waitFor(() => expect(confirm).toHaveBeenCalledWith('imp-1', 'new'))
     expect(await screen.findByText('Импорт завершён')).toBeInTheDocument()
 
     // 4. the seller is handed straight to the diagnosis — the point of the whole upload

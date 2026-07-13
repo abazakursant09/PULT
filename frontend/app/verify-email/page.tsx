@@ -8,6 +8,44 @@ import { api } from '@/lib/api'
 import { setToken } from '@/lib/session'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+
+function ResendVerification() {
+  const [email, setEmail] = useState('')
+  const [state, setState] = useState<'idle' | 'sending' | 'sent'>('idle')
+  const [note, setNote] = useState('')
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!email.trim() || state === 'sending') return
+    setState('sending')
+    try {
+      const r = await api.auth.resendVerification(email.trim())
+      setNote(r.message)   // neutral message — reveals nothing about the account
+    } catch {
+      // The endpoint answers neutrally even on error; keep the same reassuring message.
+      setNote('Если аккаунт с таким email существует и не подтверждён, мы отправили новое письмо.')
+    } finally {
+      setState('sent')
+    }
+  }
+
+  if (state === 'sent') {
+    return <p style={{ color: '#5F6368', fontSize: '0.875rem', marginBottom: 12 }}>{note}</p>
+  }
+  return (
+    <form onSubmit={submit} className="w-full mb-2">
+      <Input
+        type="email" required placeholder="Ваш email"
+        value={email} onChange={e => setEmail(e.target.value)}
+        className="mb-2"
+      />
+      <Button type="submit" size="lg" className="w-full" loading={state === 'sending'}>
+        {state !== 'sending' && 'Отправить письмо ещё раз'}
+      </Button>
+    </form>
+  )
+}
 
 function VerifyEmailContent() {
   const router = useRouter()
@@ -96,11 +134,16 @@ function VerifyEmailContent() {
               <h2 className="font-semibold mb-2" style={{ fontSize: '1.25rem', color: '#202124' }}>
                 Не удалось подтвердить
               </h2>
-              <p style={{ color: '#5F6368', fontSize: '0.9375rem', marginBottom: 24 }}>
-                {message}
+              <p style={{ color: '#5F6368', fontSize: '0.9375rem', marginBottom: 20 }}>
+                {message} Ссылка могла устареть или уже быть использована — если вы уже
+                подтвердили email, просто войдите.
               </p>
-              <Button size="lg" className="w-full" asChild>
-                <Link href="/register">Зарегистрироваться заново</Link>
+              {/* Recovery, not a dead-end: the old screen offered only "Зарегистрироваться
+                  заново", which 400s for an account that already exists. A seller whose link
+                  failed can request a fresh one here; an already-verified one can just log in. */}
+              <ResendVerification />
+              <Button size="lg" variant="outline" className="w-full mt-2" asChild>
+                <Link href="/login">Войти</Link>
               </Button>
             </>
           )}
