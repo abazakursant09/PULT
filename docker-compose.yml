@@ -33,11 +33,27 @@ services:
   backend:
     build: ./backend
     restart: unless-stopped
+    # Loopback only. "8000:8000" binds to every interface the host has, so the API was reachable
+    # directly — over plain HTTP, past whatever TLS and rate limiting sit in front of it. Note
+    # that a host firewall is not a reliable answer here: Docker writes its own iptables rules
+    # (DOCKER chain, applied before the filter rules ufw manages), so a published port can stay
+    # open even when the firewall is told to deny it. Binding to 127.0.0.1 is enforced by Docker
+    # itself and needs no firewall to be correct.
+    #
+    # REQUIRED as a consequence: an HTTPS-terminating reverse proxy (Caddy, nginx, Traefik) in
+    # front of these two services. There is none in this file, by design — it is host-specific.
+    # Without it, nothing is publicly reachable at all.
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       APP_ENV: production
       DATABASE_URL: postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@postgres:5432/business_pult
+      # Used in exactly one place: the CSP connect-src header this backend puts on its own
+      # responses (main.py:40). Unset, it fell back to http://localhost:8000 (config.py:30), so
+      # production responses advertised a localhost origin. Nothing a seller can observe changes
+      # — the pages they load are served by Next.js with its own CSP — but the header should not
+      # claim localhost in production.
+      API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
       SECRET_KEY: ${SECRET_KEY:?SECRET_KEY must be set (openssl rand -hex 32)}
       ALGORITHM: HS256
       ACCESS_TOKEN_EXPIRE_MINUTES: "1440"
@@ -75,8 +91,11 @@ services:
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
     restart: unless-stopped
+    # Loopback only, for the same reason as the backend: the reverse proxy terminating HTTPS is
+    # the one public entry point. Published on 0.0.0.0, this served the app over plain HTTP to
+    # anyone who found the host by IP.
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     depends_on:
       - backend
 
