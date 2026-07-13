@@ -1,15 +1,33 @@
+import hmac
 from typing import Optional
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
+from config import settings
 from database import get_db
 from models.promo_code import PromoCode, PromoCodeActivation
 from models.user import User
 from dependencies import get_current_user
 
 router = APIRouter()
+
+
+def _require_internal_key(x_internal_key: str | None = Header(default=None)) -> None:
+    """Gate for the /admin/promo* endpoints. These create and toggle GLOBAL discount
+    codes and read marketing analytics — system operations, not seller actions. They used
+    to be gated by get_current_user alone, so any authenticated seller could mint a
+    100%-off code against live payments. There is no admin-role system in this codebase,
+    so the safest existing boundary is the same machine-to-machine secret decisions.py
+    uses for its cron endpoint: fail-closed when INTERNAL_API_KEY is unset (every caller
+    rejected), otherwise a constant-time match on the X-Internal-Key header. This is NOT
+    user auth — an ordinary session can never satisfy it.
+    """
+    expected = settings.internal_api_key
+    if not expected or not x_internal_key or not hmac.compare_digest(x_internal_key, expected):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="internal access required")
 
 PLAN_PRICES = {
     "master":  990.0,
@@ -194,7 +212,7 @@ async def apply_promo(
 @router.get("/admin/promo", response_model=list[PromoOut])
 async def admin_list_promos(
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),   # any auth required; real apps check admin role
+    _: None = Depends(_require_internal_key),
 ):
     result = await db.execute(select(PromoCode).order_by(PromoCode.created_at.desc()))
     return result.scalars().all()
@@ -204,7 +222,7 @@ async def admin_list_promos(
 async def admin_create_promo(
     body: PromoCreate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    _: None = Depends(_require_internal_key),
 ):
     existing = await db.execute(
         select(PromoCode).where(PromoCode.code == body.code.upper().strip())
@@ -232,7 +250,7 @@ async def admin_create_promo(
 async def admin_toggle_promo(
     promo_id: str,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    _: None = Depends(_require_internal_key),
 ):
     promo = await db.get(PromoCode, promo_id)
     if not promo:
@@ -246,7 +264,7 @@ async def admin_toggle_promo(
 @router.get("/admin/promo/stats")
 async def admin_promo_stats(
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    _: None = Depends(_require_internal_key),
 ):
     promos_result = await db.execute(select(PromoCode).order_by(PromoCode.created_at.desc()))
     promos = promos_result.scalars().all()
