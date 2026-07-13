@@ -80,6 +80,14 @@ services:
       # Shared secret for internal/cron-only control endpoints (close-due
       # measurement trigger). Empty default → fail-closed when unset.
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:-}
+      # Number of trusted reverse proxies in front of the app. The rate limiters and the
+      # registration IP cap read the client IP this many hops from the right of
+      # X-Forwarded-For (the entries our own proxies appended, which a client cannot forge).
+      # Default 0 means "no trusted proxy" — X-Forwarded-For is ignored and the direct peer is
+      # used, which behind a proxy is the PROXY's IP, so every client shares one bucket and the
+      # 3-accounts-per-IP-per-24h cap becomes global. Behind one Caddy/nginx set
+      # TRUSTED_PROXY_COUNT=1 in .env so limits are per real client. Never hardcode it here.
+      TRUSTED_PROXY_COUNT: ${TRUSTED_PROXY_COUNT:-0}
     depends_on:
       postgres:
         condition: service_healthy
