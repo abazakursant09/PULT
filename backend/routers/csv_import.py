@@ -123,6 +123,7 @@ def _month_label(period: str) -> str:
 
 @router.post("/import/upload", response_model=PreviewResponse)
 async def upload_csv(
+    request:      Request,
     file:         UploadFile = File(...),
     marketplace:  str        = Form(""),
     import_type:  str        = Form(""),
@@ -140,9 +141,21 @@ async def upload_csv(
     ):
         raise HTTPException(400, f"Неожиданный тип файла: {file.content_type}")
 
-    raw = await file.read()
+    # Cheap early reject on the declared body size. The header can lie or be absent, so it
+    # is not the guarantee — just a way to refuse an obviously oversized upload before
+    # touching the body.
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > _MAX_FILE_BYTES:
+        raise HTTPException(400, "Файл слишком большой. Максимум 10 МБ.")
+
+    # The guarantee: read AT MOST _MAX_FILE_BYTES + 1 into memory. `await file.read()` with no
+    # bound loaded the whole upload first and checked the size after — a 2 GB file became 2 GB
+    # of RAM before it was rejected, enough to OOM the single-worker backend. A bounded read
+    # caps memory regardless of the real body size or a spoofed Content-Length: if we get more
+    # than the limit back, the file is too big, full stop.
+    raw = await file.read(_MAX_FILE_BYTES + 1)
     if len(raw) > _MAX_FILE_BYTES:
-        raise HTTPException(400, f"Файл слишком большой. Максимум 10 МБ.")
+        raise HTTPException(400, "Файл слишком большой. Максимум 10 МБ.")
     if not raw.strip():
         raise HTTPException(400, "Файл пустой.")
 
