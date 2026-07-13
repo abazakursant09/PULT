@@ -10,7 +10,40 @@ import asyncio
 from collections import defaultdict
 from fastapi import Request, HTTPException
 
+from config import settings
+
 _NO_IP = "unknown"
+
+
+def client_ip(request: Request) -> str:
+    """The client IP used for every rate-limit identity.
+
+    X-Forwarded-For is a chain: `client, proxy1, ..., proxyN`, where each proxy APPENDS
+    the address it saw. The leftmost entries are whatever the client sent — fully
+    spoofable — so reading `[0]` (as the old code did) let an attacker rotate the header
+    and get a fresh rate-limit bucket per request, defeating the login/import limiters and
+    the registration IP cap.
+
+    We instead trust only the entries OUR OWN infrastructure appended, counting from the
+    right. With `trusted_proxy_count = N`, the real client is the Nth value from the end;
+    everything to its left is untrusted and ignored. With N = 0 (the default) there is no
+    trusted proxy, so X-Forwarded-For is ignored entirely and the direct peer is used —
+    fail-safe: a forged header buys nothing until an operator states how many proxies are
+    real (behind one Caddy/nginx, TRUSTED_PROXY_COUNT=1).
+    """
+    direct = (request.client.host if request.client else None) or _NO_IP
+    n = settings.trusted_proxy_count
+    if n <= 0:
+        return direct
+    fwd = request.headers.get("X-Forwarded-For")
+    if not fwd:
+        return direct
+    parts = [p.strip() for p in fwd.split(",") if p.strip()]
+    # Header shorter than the declared proxy depth → it did not pass through the expected
+    # chain, so it cannot be trusted. Fall back to the direct peer.
+    if len(parts) < n:
+        return direct
+    return parts[-n]
 
 
 class _SlidingWindow:
@@ -33,10 +66,7 @@ _limiter = _SlidingWindow()
 
 
 def _ip(request: Request) -> str:
-    fwd = request.headers.get("X-Forwarded-For")
-    if fwd:
-        return fwd.split(",")[0].strip()
-    return (request.client.host if request.client else None) or _NO_IP
+    return client_ip(request)
 
 
 def _uid(request: Request) -> str:
@@ -73,3 +103,17 @@ async def limit_rebuild(request: Request) -> None:
 async def limit_import(request: Request) -> None:
     """5 req / 600 s per user — CSV import."""
     await _limiter.hit(f"import:{_uid(request)}", limit=5, window_s=600)
+
+
+async def limit_mfa(subject: str, request: Request) -> None:
+    """5 attempts / 300 s per MFA subject (+ client IP) — TOTP verification.
+
+    /login/mfa had no limiter, so an attacker holding a valid password (already past
+    /login) could spray unlimited 6-digit codes at a 5-min mfa_token and brute-force the
+    second factor. The key is the MFA subject, not just the IP, so the throttle follows
+    the account being attacked even across IPs; the IP is appended so one victim account
+    cannot be locked out globally by an attacker from a single address. 5 tries per 5 min
+    leaves TOTP's 10^6 space effectively unbrute-forceable while a real user's fat-finger
+    retries still go through.
+    """
+    await _limiter.hit(f"mfa:{subject}:{client_ip(request)}", limit=5, window_s=300)

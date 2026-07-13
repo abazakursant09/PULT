@@ -86,6 +86,15 @@ class Settings(BaseSettings):
     # fail-closed (reject every caller) until an operator sets INTERNAL_API_KEY.
     internal_api_key: str = ""
 
+    # Number of trusted reverse proxies in front of the app. The client IP used by
+    # every rate limiter and the registration IP cap is read this many hops from the
+    # RIGHT of X-Forwarded-For — the entries our own proxies appended, which a client
+    # cannot forge. 0 (the default) means "no trusted proxy": X-Forwarded-For is
+    # ignored entirely and the direct peer address is used. This fails safe — an
+    # attacker who sets X-Forwarded-For gains nothing until an operator declares how
+    # many real proxies exist (behind one Caddy/nginx, set TRUSTED_PROXY_COUNT=1).
+    trusted_proxy_count: int = 0
+
     model_config = {"env_file": ".env"}
 
 

@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from database import get_db
-from rate_limit import limit_auth
+from rate_limit import limit_auth, limit_mfa, client_ip
 from models.login_attempt import LoginAttempt
 from models.mfa_secret import MFASecret
 from models.referral_record import ReferralRecord
@@ -65,12 +65,13 @@ def create_mfa_pending_token(user_id: str) -> str:
 
 
 def _client_ip(request: Optional[Request]) -> Optional[str]:
+    # Single source of truth for the client IP — the trusted-proxy-aware resolver in
+    # rate_limit. The old first-of-X-Forwarded-For read let a client spoof the value and
+    # slip the registration IP cap; the shared helper only trusts hops our own proxies
+    # appended.
     if request is None:
         return None
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else None
+    return client_ip(request)
 
 
 async def _log(
@@ -319,6 +320,10 @@ async def login_mfa(
 
     if not mfa_record or not mfa_record.enabled:
         raise HTTPException(status_code=400, detail="MFA не настроена")
+
+    # Throttle TOTP guesses per account (+IP). Every code submission counts, so an attacker
+    # holding the password cannot spray the 6-digit space; a real user's few retries pass.
+    await limit_mfa(str(user_id), request)
 
     if not verify_totp(mfa_record.secret, data.code):
         await _log(db, email=user.email, success=False, action="mfa_verify",
