@@ -101,7 +101,11 @@ _DEV_ORIGINS = [
     "http://127.0.0.1:3000",
     "http://127.0.0.1:3001",
 ]
-_allowed_origins = list(_DEV_ORIGINS)
+# In production the allow-list is ONLY the configured frontend origin. The localhost origins
+# were included unconditionally, and with allow_credentials=True that let a page a victim opened
+# on their own localhost:3000 make credentialed cross-origin calls to the prod API. Outside
+# production they stay, so the local dev workflow is unchanged.
+_allowed_origins: list[str] = [] if settings.app_env == "production" else list(_DEV_ORIGINS)
 if settings.frontend_url and settings.frontend_url not in _allowed_origins:
     _allowed_origins.append(settings.frontend_url)
 

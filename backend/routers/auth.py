@@ -15,6 +15,7 @@ from database import get_db
 from rate_limit import limit_auth, limit_mfa, client_ip
 from models.login_attempt import LoginAttempt
 from models.mfa_secret import MFASecret
+from services.mfa_crypto import load_secret
 from models.referral_record import ReferralRecord
 from models.user import User
 from models.workspace import Workspace
@@ -325,7 +326,7 @@ async def login_mfa(
     # holding the password cannot spray the 6-digit space; a real user's few retries pass.
     await limit_mfa(str(user_id), request)
 
-    if not verify_totp(mfa_record.secret, data.code):
+    if not verify_totp(load_secret(mfa_record.secret), data.code):
         await _log(db, email=user.email, success=False, action="mfa_verify",
                    reason="Неверный TOTP-код", ip=ip)
         raise HTTPException(status_code=401, detail="Неверный код аутентификатора")
