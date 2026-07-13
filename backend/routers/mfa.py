@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_db
 from dependencies import get_current_user
 from models.mfa_secret import MFASecret
+from services.mfa_crypto import store_secret, load_secret
 from models.user import User
 
 router = APIRouter()
@@ -96,12 +97,13 @@ async def mfa_setup(
         raise HTTPException(status_code=400, detail="MFA уже включена. Сначала отключите её.")
 
     secret = _generate_secret()
+    stored = store_secret(secret)
 
     if record:
-        record.secret  = secret
+        record.secret  = stored
         record.enabled = False
     else:
-        record = MFASecret(user_id=current_user.id, secret=secret, enabled=False)
+        record = MFASecret(user_id=current_user.id, secret=stored, enabled=False)
         db.add(record)
 
     await db.commit()
@@ -132,7 +134,7 @@ async def mfa_verify(
         raise HTTPException(status_code=400, detail="Сначала запустите настройку MFA (/setup)")
     if record.enabled:
         raise HTTPException(status_code=400, detail="MFA уже активирована")
-    if not verify_totp(record.secret, body.code):
+    if not verify_totp(load_secret(record.secret), body.code):
         raise HTTPException(status_code=400, detail="Неверный код — проверьте приложение аутентификатора")
 
     record.enabled = True
@@ -154,7 +156,7 @@ async def mfa_disable(
 
     if not record or not record.enabled:
         raise HTTPException(status_code=400, detail="MFA не включена")
-    if not verify_totp(record.secret, body.code):
+    if not verify_totp(load_secret(record.secret), body.code):
         raise HTTPException(status_code=400, detail="Неверный код")
 
     record.enabled = False
