@@ -19,6 +19,7 @@ from schemas.review import ReviewResponseOut, ReviewResponseUpdate
 from services.marketplace import executor, credential_vault
 from services.marketplace.wb_client import wb_client
 from services.marketplace.reviews import get_review_provider
+from services.review.draft import classify_review, build_draft
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -110,6 +111,9 @@ async def sync_reviews(
     imported = 0
     skipped = 0
     for r in reviews:
+        # Classify at ingestion (AR2): pure, marketplace-neutral safety policy. Additive — sets
+        # two fields on the row being inserted; ownership/dedup are untouched.
+        safety_category, manual_reason = classify_review(r.rating, r.text)
         try:
             async with db.begin_nested():
                 db.add(ReviewResponse(
@@ -117,6 +121,8 @@ async def sync_reviews(
                     review_text=r.text, author=r.author, rating=r.rating,
                     status="pending", external_review_id=r.external_review_id,
                     marketplace=r.marketplace, review_created_at=r.review_created_at,
+                    safety_category=safety_category,
+                    manual_required_reason=(manual_reason or None),
                 ))
             imported += 1
         except IntegrityError:
@@ -161,6 +167,74 @@ async def update_review_response(
             raise HTTPException(422, f"недопустимый статус черновика: {data.status}")
         review.status = data.status
 
+    await db.commit()
+    await db.refresh(review)
+    return review
+
+
+async def _owned_review_or_404(product_id: str, review_id: str, user_id: str, db: AsyncSession):
+    """Return (review, product) with ownership enforced via product → user. The product is
+    returned explicitly so callers never lazy-load review.product in the async session."""
+    product = await _get_product_or_404(product_id, user_id, db)
+    review = (await db.execute(
+        select(ReviewResponse).where(
+            ReviewResponse.id == review_id,
+            ReviewResponse.product_id == product_id,
+        )
+    )).scalar_one_or_none()
+    if not review:
+        raise HTTPException(status_code=404, detail="Отзыв не найден")
+    return review, product
+
+
+@router.post("/reviews/{product_id}/{review_id}/draft", response_model=ReviewResponseOut)
+async def draft_review_response(
+    product_id: str,
+    review_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Generate a safe, deterministic draft reply for a real synced review (AR2).
+
+    RISK reviews (negatives / complaints) never get a sendable draft — build_draft returns None
+    and the row stays manual, with its manual_required_reason intact for the human. Nothing is
+    published here; the draft only fills response_text and moves the row to 'drafted'.
+    """
+    review, product = await _owned_review_or_404(product_id, review_id, current_user.id, db)
+    if review.status == "published":
+        raise HTTPException(409, "Отзыв уже опубликован")
+
+    draft = build_draft(review.rating, review.review_text, product.name if product else None)
+    if draft is None:
+        # RISK: no auto-draft. Leave response_text empty and keep the manual reason.
+        raise HTTPException(
+            422,
+            review.manual_required_reason or "Этот отзыв отвечается вручную — автоматический черновик не создаётся.",
+        )
+
+    review.response_text = draft
+    review.status = "drafted"
+    await db.commit()
+    await db.refresh(review)
+    return review
+
+
+@router.post("/reviews/{product_id}/{review_id}/approve", response_model=ReviewResponseOut)
+async def approve_review_response(
+    product_id: str,
+    review_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Human approval of a draft (AR2). Marks the row 'approved' — it does NOT publish. Real
+    publication remains the separate /publish action. A row with no reply text cannot be approved.
+    """
+    review, _product = await _owned_review_or_404(product_id, review_id, current_user.id, db)
+    if not (review.response_text or "").strip():
+        raise HTTPException(422, "Нельзя одобрить пустой ответ — сначала создайте или напишите черновик.")
+    if review.status == "published":
+        raise HTTPException(409, "Отзыв уже опубликован")
+    review.status = "approved"
     await db.commit()
     await db.refresh(review)
     return review
