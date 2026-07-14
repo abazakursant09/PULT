@@ -15,11 +15,14 @@ from models.product import Product
 from models.review_response import ReviewResponse
 from models.marketplace_connection import MarketplaceConnection
 from models.api_credential import ApiCredential
-from schemas.review import ReviewResponseOut, ReviewResponseUpdate
+from schemas.review import (ReviewResponseOut, ReviewResponseUpdate,
+    ReviewQueueResponse, ReviewHistoryEntry, ReviewHistoryResponse)
+from services.review.state import derive_state
 from services.marketplace import executor, credential_vault
 from services.marketplace.wb_client import wb_client
 from services.marketplace.reviews import get_review_provider
 from services.review.draft import classify_review, build_draft
+from models.execution_log import ExecutionLog
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -38,6 +41,42 @@ async def _get_product_or_404(product_id: str, user_id: str, db: AsyncSession) -
     return product
 
 
+@router.get("/reviews/queue", response_model=ReviewQueueResponse)
+async def review_queue(
+    state: str | None = None,
+    marketplace: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Seller-wide review queue across ALL the seller's products (AR3).
+
+    Owner-scoped via product -> user. `marketplace` filters at the DB; `state` is a derived value
+    (status + safety + failure) so it is filtered after derivation. No marketplace branching —
+    the marketplace is only ever a filter value, never a code path.
+    """
+    limit = max(1, min(limit, 200))
+    offset = max(0, offset)
+
+    stmt = (
+        select(ReviewResponse)
+        .join(Product, Product.id == ReviewResponse.product_id)
+        .where(Product.user_id == current_user.id)
+    )
+    if marketplace:
+        stmt = stmt.where(ReviewResponse.marketplace == marketplace)
+    stmt = stmt.order_by(ReviewResponse.created_at.desc())
+    rows = (await db.execute(stmt)).scalars().all()
+
+    items = [ReviewResponseOut.of(r) for r in rows]
+    if state:
+        items = [it for it in items if it.state == state]
+    total = len(items)
+    page = items[offset:offset + limit]
+    return ReviewQueueResponse(items=page, total=total, limit=limit, offset=offset)
+
+
 @router.get("/reviews/{product_id}", response_model=List[ReviewResponseOut])
 async def list_reviews(
     product_id: str,
@@ -50,7 +89,7 @@ async def list_reviews(
         .where(ReviewResponse.product_id == product_id)
         .order_by(ReviewResponse.created_at.desc())
     )
-    return result.scalars().all()
+    return [ReviewResponseOut.of(r) for r in result.scalars().all()]
 
 
 # NOTE: POST /reviews/{product_id}/generate was removed in AR0 (Auto Reviews). It ran
@@ -169,7 +208,7 @@ async def update_review_response(
 
     await db.commit()
     await db.refresh(review)
-    return review
+    return ReviewResponseOut.of(review)
 
 
 async def _owned_review_or_404(product_id: str, review_id: str, user_id: str, db: AsyncSession):
@@ -216,7 +255,7 @@ async def draft_review_response(
     review.status = "drafted"
     await db.commit()
     await db.refresh(review)
-    return review
+    return ReviewResponseOut.of(review)
 
 
 @router.post("/reviews/{product_id}/{review_id}/approve", response_model=ReviewResponseOut)
@@ -237,7 +276,7 @@ async def approve_review_response(
     review.status = "approved"
     await db.commit()
     await db.refresh(review)
-    return review
+    return ReviewResponseOut.of(review)
 
 
 @router.post("/reviews/{product_id}/{review_id}/publish", response_model=ReviewResponseOut)
@@ -287,6 +326,12 @@ async def publish_review_response(
     )
 
     if not res.ok:
+        # Failure visibility (AR3): record the reason on the row and count the attempt, so the
+        # workspace can show a real "Failed" state. Only this already-failing branch is touched —
+        # the successful path below is unchanged, and the executor / idempotency are not involved.
+        review.failure_reason = (str(res.error) if res.error else "publish failed")[:255]
+        review.publication_attempts = (review.publication_attempts or 0) + 1
+        await db.commit()
         raise HTTPException(
             status_code=502,
             detail={"message": "Публикация не удалась", "error": res.error, "log_id": res.log_id},
@@ -299,4 +344,33 @@ async def publish_review_response(
     await db.refresh(review)
     log.info("review published for real: user=%s review=%s log=%s",
              current_user.id, review_id, res.log_id)
-    return review
+    return ReviewResponseOut.of(review)
+
+
+@router.get("/reviews/{product_id}/{review_id}/history", response_model=ReviewHistoryResponse)
+async def review_history(
+    product_id: str,
+    review_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Publish-attempt history for one review (AR3), read from the append-only ExecutionLog.
+
+    Owner-scoped: the product ownership check runs first, and the log query is filtered by
+    user_id and this review's idempotency key. Read-only; touches no marketplace.
+    """
+    review, _product = await _owned_review_or_404(product_id, review_id, current_user.id, db)
+    logs = (await db.execute(
+        select(ExecutionLog).where(
+            ExecutionLog.user_id == current_user.id,
+            ExecutionLog.action_type == "publish_review_response",
+            ExecutionLog.idempotency_key == f"review:{review.id}",
+        ).order_by(ExecutionLog.created_at.desc())
+    )).scalars().all()
+    return ReviewHistoryResponse(
+        review_id=review.id,
+        entries=[ReviewHistoryEntry(
+            timestamp=(lg.finished_at or lg.created_at),
+            mode=lg.mode, status=lg.status, error_code=lg.error_code,
+        ) for lg in logs],
+    )

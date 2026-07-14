@@ -12,6 +12,7 @@ const NAV: { g: string; items: NavItem[] }[] = [
   { g: 'Обзор', items: [{ h: '/dashboard', l: 'Главная', d: 'home' }] },
   { g: 'Данные', items: [
     { h: '/dashboard/import', l: 'Импорт данных', d: 'import' },
+    { h: '/dashboard/reviews', l: 'Отзывы', d: 'chat' },
     // "Мониторинг" is NOT listed. Its "Проверить обновления" button invites the seller to
     // "получить актуальные события с маркетплейсов", and what it returns is a random sample
     // from a hard-coded pool of invented news — WB commission hikes, a marking bill — three
@@ -40,6 +41,7 @@ const ICON: Record<string, React.ReactNode> = {
   pulse: <><path d="M3 12h4l3 8 4-16 3 8h4"/></>,
   bulb: <><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1h6c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2z"/></>,
   card: <><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></>,
+  chat: <><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></>,
   user: <><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></>,
   gear: <><circle cx="12" cy="12" r="3"/><path d="M19.4 13a1.7 1.7 0 0 0 .3 1.9 2 2 0 1 1-2.8 2.8 1.7 1.7 0 0 0-2.9 1.2 2 2 0 1 1-4 0 1.7 1.7 0 0 0-2.9-1.2 2 2 0 1 1-2.8-2.8A1.7 1.7 0 0 0 4.6 13a2 2 0 1 1 0-4 1.7 1.7 0 0 0 1.2-2.9 2 2 0 1 1 2.8-2.8A1.7 1.7 0 0 0 11.5 4.6a2 2 0 1 1 4 0 1.7 1.7 0 0 0 2.9 1.2 2 2 0 1 1 2.8 2.8A1.7 1.7 0 0 0 19.4 11"/></>,
 }

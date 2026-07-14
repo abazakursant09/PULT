@@ -384,16 +384,47 @@ export interface CompetitorReport {
   generated_at: string
 }
 
+export type ReviewState =
+  'New' | 'Processing' | 'Drafted' | 'NeedsAttention' | 'Approved' | 'Published' | 'Failed'
+
 export interface ReviewResponse {
   id: string
   product_id: string
-  review_text: string
+  review_text: string | null
   author: string | null
   rating: number | null
   response_text: string | null
-  status: 'pending' | 'approved' | 'published' | 'skipped'
+  status: string
+  marketplace: string | null
+  external_review_id: string | null
+  review_created_at: string | null
+  safety_category: 'SAFE' | 'ATTENTION' | 'RISK' | null
+  manual_required_reason: string | null
+  published_at: string | null
+  failure_reason: string | null
+  publication_attempts: number
   created_at: string
   updated_at: string
+  state: ReviewState
+}
+
+export interface ReviewQueueResponse {
+  items: ReviewResponse[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface ReviewHistoryEntry {
+  timestamp: string | null
+  mode: string
+  status: string
+  error_code: string | null
+}
+
+export interface ReviewHistoryResponse {
+  review_id: string
+  entries: ReviewHistoryEntry[]
 }
 
 export interface PricingRule {
@@ -1140,11 +1171,29 @@ export const api = {
   reviews: {
     list: (productId: string) =>
       req<ReviewResponse[]>(`/api/reviews/${productId}`),
+    queue: (params: { state?: string; marketplace?: string; limit?: number; offset?: number } = {}) => {
+      const q = new URLSearchParams()
+      if (params.state) q.set('state', params.state)
+      if (params.marketplace) q.set('marketplace', params.marketplace)
+      if (params.limit != null) q.set('limit', String(params.limit))
+      if (params.offset != null) q.set('offset', String(params.offset))
+      const s = q.toString()
+      return req<ReviewQueueResponse>(`/api/reviews/queue${s ? `?${s}` : ''}`)
+    },
+    sync: (productId: string) =>
+      req<{ synced: number; imported: number; skipped: number }>(`/api/reviews/${productId}/sync`, { method: 'POST' }),
     update: (productId: string, reviewId: string, data: { response_text?: string; status?: string }) =>
       req<ReviewResponse>(`/api/reviews/${productId}/${reviewId}`, {
-        method: 'PATCH',
-        body: JSON.stringify(data),
+        method: 'PATCH', body: JSON.stringify(data),
       }),
+    draft: (productId: string, reviewId: string) =>
+      req<ReviewResponse>(`/api/reviews/${productId}/${reviewId}/draft`, { method: 'POST' }),
+    approve: (productId: string, reviewId: string) =>
+      req<ReviewResponse>(`/api/reviews/${productId}/${reviewId}/approve`, { method: 'POST' }),
+    publish: (productId: string, reviewId: string) =>
+      req<ReviewResponse>(`/api/reviews/${productId}/${reviewId}/publish`, { method: 'POST' }),
+    history: (productId: string, reviewId: string) =>
+      req<ReviewHistoryResponse>(`/api/reviews/${productId}/${reviewId}/history`),
   },
 
   pricing: {
