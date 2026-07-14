@@ -30,28 +30,75 @@
   --ring:                   263 70% 50%;
   --radius:                 0.5rem;
 
-  /* ── Raw design tokens ─────────────────────────────────── */
-  /* ── КОМФОРТ-ПАЛИТРА (default = тёмная-комфорт) ──────────────────────────────
-     Глаза не устают за 6-8ч: НЕ чистый чёрный (#15171C), НЕ чистый белый текст
-     (#E3E5EA), приглушённые сигналы. Акцент --violet канон, только на действиях.
-     Светлая тема — ниже в [data-theme="light"]. */
-  --bg:          #15171C;
-  --surface:     #1C1F26;
-  --surface-h:   #232730;
-  --line:        #2C313B;
-  --text:        #E3E5EA;
-  --text-2:      #9AA1AD;
-  --text-3:      #6C7480;
+  /* ══ PULT unified design tokens (P0) ════════════════════════════════════════
+     ONE source of truth. Both vocabularies — the component names (--surface/--text)
+     and the seller-shell names (--panel/--tx) — are defined here and resolve to the
+     same values, so a page and the shell can never diverge. Direction: Linear
+     precision + Stripe clarity — one violet accent, a calm neutral dark ramp, a
+     strong number hierarchy. seller.css no longer redefines any of this; it inherits.
+     ════════════════════════════════════════════════════════════════════════════ */
+
+  /* Neutral surface ramp (near-black base, calm greys) */
+  --bg:          #0A0B0D;   /* app background */
+  --surface:     #101216;   /* card */
+  --elevated:    #161922;   /* raised surface / popover */
+  --surface-h:   #1C212C;   /* hover / inset */
+  --line:        rgba(255,255,255,0.08);   /* hairline border */
+
+  /* Text ramp */
+  --text:        #F4F5F7;   /* primary */
+  --text-2:      #A2A8B4;   /* secondary */
+  --text-3:      #646B78;   /* muted */
+
+  /* Single accent */
   --violet:      #7C3AED;
   --violet-h:    #8B5CF6;
   --violet-text: #B6A4FA;
   --violet-dim:  rgba(124,58,237,0.16);
-  --danger:      #E5614E;
-  --success:     #46B07D;
-  --warning:     #E0A33A;
-  --danger-dim:  rgba(229,97,78,0.14);
-  --success-dim: rgba(70,176,125,0.14);
-  --warning-dim: rgba(224,163,58,0.14);
+
+  /* Semantic (one value each, used sparingly) */
+  --success:     #54BE8C;
+  --danger:      #EC6F58;
+  --warning:     #E0A93F;
+  --danger-dim:  rgba(236,111,88,0.14);
+  --success-dim: rgba(84,190,140,0.14);
+  --warning-dim: rgba(224,169,63,0.14);
+
+  /* Radius scale */
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+
+  /* Motion */
+  --dur-fast: 120ms;
+  --dur:      200ms;
+  --ease:     cubic-bezier(.2,.6,.2,1);
+
+  /* Type scale (numbers use the mono stack for aligned figures) */
+  --fs-display: 28px;
+  --fs-heading: 18px;
+  --fs-body:    13px;
+  --fs-caption: 11px;
+  --font-mono:  "JetBrains Mono","SF Mono",ui-monospace,monospace;
+
+  /* ── Seller-shell name aliases → the same tokens (so .s-* classes keep working) ── */
+  --panel:   var(--surface);
+  --panel-2: var(--elevated);
+  --panel-3: var(--surface-h);
+  --hair:    var(--line);
+  --hair-2:  rgba(255,255,255,0.11);
+  --tx:      var(--text);
+  --tx-2:    var(--text-2);
+  --tx-3:    var(--text-3);
+  --loss:    var(--danger);
+  --gain:    var(--success);
+  --warn:    var(--warning);
+  --r:       var(--r-lg);
+  --r2:      var(--r-md);
+  /* Metallic logo + marketplace brand dots stay literal — they are specific, not palette. */
+  --ac:      #AEB4BE; --ac-2: #C4C9D2; --ac-soft: rgba(255,255,255,0.06);
+  --metal-1: #E4E7EC; --metal-2: #9CA3AE;
+  --wb:      #9B5DE5; --ozon: #3C7BFF; --ym: #FF5A4D;
 }
 
 /* ── СВЕТЛАЯ-КОМФОРТ (по кнопке) — мягкий серый фон, не чисто-белый ──────────── */
