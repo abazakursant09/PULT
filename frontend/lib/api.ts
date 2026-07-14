@@ -1140,8 +1140,6 @@ export const api = {
   reviews: {
     list: (productId: string) =>
       req<ReviewResponse[]>(`/api/reviews/${productId}`),
-    generate: (productId: string) =>
-      req<{ message: string }>(`/api/reviews/${productId}/generate`, { method: 'POST' }),
     update: (productId: string, reviewId: string, data: { response_text?: string; status?: string }) =>
       req<ReviewResponse>(`/api/reviews/${productId}/${reviewId}`, {
         method: 'PATCH',

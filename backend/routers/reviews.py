@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -15,7 +15,6 @@ from models.review_response import ReviewResponse
 from models.marketplace_connection import MarketplaceConnection
 from models.api_credential import ApiCredential
 from schemas.review import ReviewResponseOut, ReviewResponseUpdate
-from tasks.generate_review_responses import generate_review_responses
 from services.marketplace import executor, credential_vault
 from services.marketplace.wb_client import wb_client
 
@@ -51,17 +50,10 @@ async def list_reviews(
     return result.scalars().all()
 
 
-@router.post("/reviews/{product_id}/generate", status_code=202)
-async def generate_reviews(
-    product_id: str,
-    background_tasks: BackgroundTasks,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Generate DRAFT answers (L2). Publishing them is a separate real action."""
-    await _get_product_or_404(product_id, current_user.id, db)
-    background_tasks.add_task(generate_review_responses, product_id)
-    return {"message": "Генерация черновиков запущена", "product_id": product_id}
+# NOTE: POST /reviews/{product_id}/generate was removed in AR0 (Auto Reviews). It ran
+# tasks/generate_review_responses, which DELETED a product's real review rows and inserted
+# fabricated reviews/answers — a "No fake data" violation. Draft generation for real synced
+# reviews is a later Auto Reviews phase and will operate on real ingested data only.
 
 
 @router.post("/reviews/{product_id}/sync", status_code=200)
