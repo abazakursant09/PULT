@@ -45,6 +45,19 @@ async def check(
         if not rule or not rule.get("enabled"):
             raise ExecutionError.guard("NO_ACTIVE_RULE", "L4 requires an enabled AutomationRule")
 
+    # ── Hard rule (AR4): auto-publish ONLY a SAFE review ──────────────────────
+    # Rating alone is not enough — a 5★ review whose text carries a complaint marker is classified
+    # RISK by the safety policy, and must never auto-publish. This is a second, independent belt to
+    # the candidate-query filter, keyed on the persisted safety_category, not on the rating. Placed
+    # after the NO_ACTIVE_RULE check so a rule-less call is rejected as NO_ACTIVE_RULE first; either
+    # way a non-SAFE review can never proceed.
+    if action_type == "publish_review_response" and mode == "automated_l4":
+        if payload.get("safety_category") != "SAFE":
+            raise ExecutionError.guard(
+                "UNSAFE_NEVER_AUTO",
+                "only SAFE reviews are auto-published; ATTENTION/RISK are manual",
+            )
+
     rule_guard = (rule or {}).get("guard", {}) if rule else {}
 
     # ── Daily cap (any action_type that sets one) ─────────────────────────────
@@ -61,6 +74,23 @@ async def check(
         )
         if (count or 0) >= int(daily_cap):
             raise ExecutionError.guard("DAILY_CAP", f"daily cap {daily_cap} reached")
+
+    # ── Per-window burst cap (AR4) ────────────────────────────────────────────
+    max_per_window = rule_guard.get("max_per_window")
+    window_seconds = rule_guard.get("window_seconds")
+    if max_per_window is not None and window_seconds:
+        wsince = datetime.utcnow() - timedelta(seconds=int(window_seconds))
+        wcount = await db.scalar(
+            select(func.count(ExecutionLog.id)).where(
+                ExecutionLog.user_id == user_id,
+                ExecutionLog.action_type == action_type,
+                ExecutionLog.status == "success",
+                ExecutionLog.created_at >= wsince,
+            )
+        )
+        if (wcount or 0) >= int(max_per_window):
+            raise ExecutionError.guard(
+                "WINDOW_CAP", f"per-window cap {max_per_window}/{window_seconds}s reached")
 
     # ── Money/ads limits (used by ME-3/ME-4; harmless here) ───────────────────
     max_step = rule_guard.get("max_step_pct")
