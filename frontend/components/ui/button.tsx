@@ -5,15 +5,14 @@ type Variant = 'default' | 'destructive' | 'outline' | 'secondary' | 'ghost' | '
 type Size    = 'default' | 'sm' | 'lg' | 'icon'
 
 /* Only 2 real visual types:
-   primary  = gold fill  (default, destructive mapped separately)
-   secondary = transparent + border (#1A1A1A) */
+   All colours resolve to the unified tokens (globals.css :root) — no raw hex. */
 const variants: Record<Variant, string> = {
-  default:     'bg-[#7C3AED] text-white font-semibold hover:bg-[#8B5CF6]',
-  destructive: 'bg-[#EF4444] text-white font-semibold hover:bg-[#DC2626]',
-  outline:     'bg-transparent border border-[#1A1A1A] text-white hover:border-[#A78BFA] hover:text-[#A78BFA]',
-  secondary:   'bg-transparent border border-[#1A1A1A] text-white hover:border-[#A78BFA] hover:text-[#A78BFA]',
-  ghost:       'bg-transparent border border-[#1A1A1A] text-white hover:border-[#A78BFA] hover:text-[#A78BFA]',
-  link:        'bg-transparent text-[#A78BFA] hover:text-[#8B5CF6] underline-offset-4 hover:underline',
+  default:     'bg-[var(--violet)] text-white font-semibold hover:bg-[var(--violet-h)]',
+  destructive: 'bg-[var(--danger)] text-white font-semibold hover:opacity-90',
+  outline:     'bg-transparent border border-[var(--line)] text-[var(--text)] hover:border-[var(--violet-text)] hover:text-[var(--violet-text)]',
+  secondary:   'bg-transparent border border-[var(--line)] text-[var(--text)] hover:border-[var(--violet-text)] hover:text-[var(--violet-text)]',
+  ghost:       'bg-transparent border border-[var(--line)] text-[var(--text)] hover:border-[var(--violet-text)] hover:text-[var(--violet-text)]',
+  link:        'bg-transparent text-[var(--violet-text)] hover:text-[var(--violet-h)] underline-offset-4 hover:underline',
 }
 
 const sizes: Record<Size, string> = {
@@ -38,7 +37,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       className={cn(
         'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-[8px]',
         'transition-all duration-200',
-        'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#A78BFA]',
+        'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--violet-text)]',
         'disabled:pointer-events-none disabled:opacity-40',
         variants[variant],
         sizes[size],
