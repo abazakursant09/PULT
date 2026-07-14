@@ -21,6 +21,12 @@ class ExecutionError(Exception):
 
     _RETRYABLE = {RATE_LIMIT, MARKETPLACE_5XX, TIMEOUT}
 
+    # Ambiguous: the request may have reached the marketplace and committed, but no clean response
+    # came back (a lost response, not a rejection). Such a write must NEVER be auto-repeated — a
+    # retry could double-post. RATE_LIMIT is deliberately NOT here: a 429 means the request was
+    # refused before processing, so it is a clean, safely-retryable failure.
+    _AMBIGUOUS = {TIMEOUT, MARKETPLACE_5XX}
+
     def __init__(self, code: str, detail: str = "", *, retryable: bool | None = None):
         self.code = code
         self.detail = detail
@@ -32,6 +38,11 @@ class ExecutionError(Exception):
     @staticmethod
     def guard(reason: str, detail: str = "") -> "ExecutionError":
         return ExecutionError(f"GUARD_{reason}", detail, retryable=False)
+
+    @classmethod
+    def is_ambiguous_error(cls, code: str | None) -> bool:
+        """A dispatch failure whose delivery is unknown — must not be auto-repeated."""
+        return code in cls._AMBIGUOUS
 
     def to_dict(self) -> dict:
         return {"code": self.code, "detail": self.detail, "retryable": self.retryable}

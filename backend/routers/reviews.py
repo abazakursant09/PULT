@@ -325,6 +325,20 @@ async def publish_review_response(
         idempotency_key=f"review:{review.id}",
     )
 
+    if res.status in ("ambiguous", "needs_reconcile"):
+        # AR5: the write may have committed on the marketplace but no clean response came back.
+        # Never present this as a failure the seller should simply retry — a second click hits the
+        # executor idempotency (which returns needs_reconcile) and does NOT re-call the API. Record
+        # it and ask the seller to verify the cabinet.
+        review.failure_reason = "публикация не подтверждена — проверьте кабинет маркетплейса"
+        review.publication_attempts = (review.publication_attempts or 0) + 1
+        await db.commit()
+        raise HTTPException(
+            status_code=409,
+            detail={"message": "Публикация не подтверждена — проверьте кабинет маркетплейса перед повторной попыткой",
+                    "error": res.error, "log_id": res.log_id},
+        )
+
     if not res.ok:
         # Failure visibility (AR3): record the reason on the row and count the attempt, so the
         # workspace can show a real "Failed" state. Only this already-failing branch is touched —

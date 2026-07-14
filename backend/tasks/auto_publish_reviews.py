@@ -140,6 +140,14 @@ async def run_auto_publish_reviews() -> dict:
                     review.execution_log_id = res.log_id
                     review.published_at = datetime.utcnow()
                     published += 1
+                elif res.status in ("ambiguous", "needs_reconcile"):
+                    # AR5: the write may have committed on the marketplace — NEVER auto-retry.
+                    # Mark terminal and tell the seller to verify the cabinet by hand.
+                    review.publication_attempts = (review.publication_attempts or 0) + 1
+                    review.failure_reason = "публикация не подтверждена — проверьте кабинет маркетплейса"
+                    review.status = "failed"
+                    review.retry_next_at = None
+                    terminal += 1
                 else:
                     review.publication_attempts = (review.publication_attempts or 0) + 1
                     review.failure_reason = (str(res.error) if res.error else "auto-publish failed")[:255]

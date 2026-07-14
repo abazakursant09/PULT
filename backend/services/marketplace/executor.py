@@ -184,7 +184,9 @@ async def execute(
     ctx = {"marketplace": conn.marketplace, "ozon_client_id": conn.ozon_client_id,
            "db": db, "connection_id": conn.id}
 
-    # 5) idempotency: return prior success instead of re-calling the API
+    # 5) idempotency: never re-dispatch a key that already succeeded OR whose delivery is unknown.
+    # A prior "ambiguous" (TIMEOUT/5XX after the request left) may have committed on the
+    # marketplace, so re-calling could double-post — return needs_reconcile instead (AR5).
     if idempotency_key:
         prior = (
             await db.execute(
@@ -192,14 +194,20 @@ async def execute(
                     ExecutionLog.user_id == user_id,
                     ExecutionLog.action_type == action_type,
                     ExecutionLog.idempotency_key == idempotency_key,
-                    ExecutionLog.status == "success",
-                )
+                    ExecutionLog.status.in_(("success", "ambiguous")),
+                ).order_by(ExecutionLog.created_at.desc())
             )
         ).scalars().first()
-        if prior:
+        if prior is not None and prior.status == "success":
             return ExecutionResult(prior.id, "success", action_type, target_mp,
                                    api_request_id=prior.api_request_id,
                                    result=prior.result or {}, reversible=spec.reversible)
+        if prior is not None and prior.status == "ambiguous":
+            return ExecutionResult(prior.id, "needs_reconcile", action_type, target_mp,
+                                   error={"code": "AMBIGUOUS_PRIOR",
+                                          "detail": "предыдущая попытка не подтверждена — проверьте кабинет",
+                                          "retryable": False},
+                                   reversible=spec.reversible)
 
     # 6) write pending log BEFORE dispatch (crash visibility)
     rec = _new_log(user_id, action_type, target_mp, mode, payload,
@@ -216,12 +224,18 @@ async def execute(
         token = None if ozon_perf else await _resolve_token(db, conn.id, spec.required_scope)
         result = await spec.dispatch(token, payload, ctx)
     except ExecutionError as e:
-        rec.status = "failed"
+        # AR5: a TIMEOUT / 5XX after the request left is AMBIGUOUS — the write may have committed,
+        # so it is recorded distinctly and never auto-repeated (idempotency step above returns
+        # needs_reconcile for it). Every other error is a clean "failed", safe to retry.
+        ambiguous = ExecutionError.is_ambiguous_error(e.code)
+        rec.status = "ambiguous" if ambiguous else "failed"
         rec.error_code = e.code
         rec.finished_at = datetime.utcnow()
         await db.commit()
-        log.warning("execution failed: user=%s action=%s code=%s", user_id, action_type, e.code)
-        return ExecutionResult(rec.id, "failed", action_type, target_mp, error=e.to_dict())
+        log.warning("execution %s: user=%s action=%s code=%s",
+                    rec.status, user_id, action_type, e.code)
+        return ExecutionResult(rec.id, "ambiguous" if ambiguous else "failed",
+                               action_type, target_mp, error=e.to_dict())
     except Exception:  # noqa: BLE001 — a dispatcher bug must never become a 500
         rec.status = "failed"
         rec.error_code = "DISPATCH_ERROR"
