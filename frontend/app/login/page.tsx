@@ -111,6 +111,22 @@ export default function LoginPage() {
           <div className="mb-5 px-4 py-3 rounded-[8px] text-[13px]"
                style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: '#FCA5A5' }}>
             {error}
+            {/* Login is blocked until email is verified. Rather than dead-end the seller, offer
+                a resend right here, using the email they just typed. */}
+            {/Подтвердите email/i.test(error) && (
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!form.email.trim()) return
+                  try { await api.auth.resendVerification(form.email.trim()) } catch {}
+                  setError(''); setInfo('Мы отправили письмо для подтверждения ещё раз. Проверьте почту.')
+                }}
+                className="block mt-2 underline"
+                style={{ color: '#FCA5A5', fontSize: '12.5px' }}
+              >
+                Отправить письмо для подтверждения ещё раз
+              </button>
+            )}
           </div>
         )}
 

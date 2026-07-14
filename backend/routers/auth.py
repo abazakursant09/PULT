@@ -337,6 +337,50 @@ async def login_mfa(
     return MFALoginOut(access_token=token, user=UserResponse.model_validate(user))
 
 
+# ── Resend verification ───────────────────────────────────────────────────────
+
+class ResendVerificationIn(BaseModel):
+    email: EmailStr
+
+
+class ResendVerificationResponse(BaseModel):
+    message: str
+
+
+_NEUTRAL_RESEND = "Если аккаунт с таким email существует и не подтверждён, мы отправили новое письмо."
+
+
+@router.post("/resend-verification", response_model=ResendVerificationResponse)
+async def resend_verification(
+    data: ResendVerificationIn,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _rl: None = Depends(limit_auth),
+):
+    """Re-send the email-verification link.
+
+    Registration swallows a mail delivery failure and returns 201, and the verification token is
+    delivered only by email — so a seller whose first mail never arrives had no way back in and no
+    resend path. This closes that dead-end. It mints a FRESH token (invalidating the old one, in
+    line with the single-token design) and re-sends it. The response is identical whether or not
+    the email exists or is already verified, so it reveals nothing and enumerates no accounts. The
+    token is never returned. Rate-limited like the other unauthenticated auth endpoints.
+    """
+    result = await db.execute(select(User).where(User.email == data.email))
+    user = result.scalar_one_or_none()
+
+    # Only an existing, non-deleted, still-unverified account gets a mail. Everything else falls
+    # through to the same neutral message with no observable difference.
+    if user and not user.deleted_at and not user.is_verified:
+        token = secrets.token_urlsafe(32)
+        user.verification_token = token
+        await db.commit()
+        log.info("resend_verification: user=%s email=%s", user.id, data.email)
+        await send_verification_email(user.email, user.name, token)
+
+    return ResendVerificationResponse(message=_NEUTRAL_RESEND)
+
+
 # ── Forgot password ───────────────────────────────────────────────────────────
 
 class ForgotPasswordIn(BaseModel):

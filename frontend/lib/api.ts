@@ -1106,6 +1106,10 @@ export const api = {
       }),
     verifyEmail: (token: string) =>
       req<AuthResponse>(`/api/auth/verify-email?token=${encodeURIComponent(token)}`),
+    resendVerification: (email: string) =>
+      req<{ message: string }>('/api/auth/resend-verification', {
+        method: 'POST', body: JSON.stringify({ email }),
+      }),
     forgotPassword: (email: string) =>
       req<{ message: string }>('/api/auth/forgot-password', {
         method: 'POST',
@@ -1501,8 +1505,10 @@ export const api = {
       if (importType)  form.append('import_type', importType)
       return reqForm<ImportPreviewResponse>('/api/import/upload', form)
     },
-    confirm: (importId: string) =>
-      req<ImportConfirmResponse>(`/api/import/${importId}/confirm`, { method: 'POST' }),
+    confirm: (importId: string, mode: 'new' | 'overwrite' = 'new') =>
+      req<ImportConfirmResponse>(`/api/import/${importId}/confirm`, {
+        method: 'POST', body: JSON.stringify({ mode }),
+      }),
     history: () => req<ImportHistoryItem[]>('/api/import/history'),
     templateUrl: (marketplace: string, importType: string) =>
       `${API}/api/import/templates/${marketplace}/${importType}`,

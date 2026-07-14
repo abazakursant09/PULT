@@ -12,11 +12,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from typing import Literal
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from rate_limit import limit_import
 from fastapi.responses import PlainTextResponse, Response
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -58,6 +59,23 @@ class PreviewResponse(BaseModel):
     file_hash:          str
     duplicate_import_id: Optional[str]   # if same file was imported before
     duplicate_date:      Optional[str]
+
+
+class ConfirmRequest(BaseModel):
+    # "new" appends (the original behaviour). "overwrite" first drops the rows of any prior
+    # confirmed import of the SAME file (same user + file_hash), so re-uploading a report
+    # replaces the old copy instead of double-counting it. The UI offered "Перезаписать" for
+    # a long time while the backend only ever appended — this makes the label true.
+    mode: Literal["new", "overwrite"] = "new"
+
+
+# import_type → the table its rows live in, for scope-correct overwrite deletes.
+_ROW_MODEL = {
+    "finance":      ImportedFinanceRow,
+    "products":     ImportedProductRow,
+    "returns":      ImportedReturnRow,
+    "card_content": ImportedCardContentRow,
+}
 
 
 class ConfirmResponse(BaseModel):
@@ -228,6 +246,7 @@ async def upload_csv(
 @router.post("/import/{import_id}/confirm", response_model=ConfirmResponse)
 async def confirm_import(
     import_id: str,
+    body: ConfirmRequest = ConfirmRequest(),
     db:   AsyncSession = Depends(get_db),
     user: User         = Depends(get_current_user),
 ):
@@ -254,6 +273,31 @@ async def confirm_import(
 
     if result.errors:
         raise HTTPException(422, f"Ошибки при повторном разборе: {'; '.join(result.errors)}")
+
+    # Overwrite: replace the previous copy of THIS file rather than appending a second one.
+    # Scope is exactly the rows of prior CONFIRMED imports with the same (user_id, file_hash),
+    # in the table for this import_type. Strictly this user's own data — the delete is filtered
+    # by user_id, so no other seller's rows can ever be touched. Done only after a clean re-parse
+    # so a bad new file never wipes good existing data. New rows are inserted below as usual.
+    if body.mode == "overwrite":
+        row_model = _ROW_MODEL.get(rec.import_type)
+        if row_model is not None:
+            prior_q = await db.execute(
+                select(ImportRecord.id).where(
+                    ImportRecord.user_id   == str(user.id),
+                    ImportRecord.file_hash == rec.file_hash,
+                    ImportRecord.status    == "confirmed",
+                    ImportRecord.id        != rec.id,
+                )
+            )
+            prior_ids = [r for (r,) in prior_q.all()]
+            if prior_ids:
+                await db.execute(
+                    delete(row_model).where(
+                        row_model.user_id   == str(user.id),
+                        row_model.import_id.in_(prior_ids),
+                    )
+                )
 
     # Batch insert
     imported = 0

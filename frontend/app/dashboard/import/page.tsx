@@ -134,7 +134,10 @@ export default function ImportPage() {
     setSlowImport(false)
     const slowTimer = setTimeout(() => { setSlowImport(true); trackEvent('import_timeout_seen', 'import') }, 30_000)
     try {
-      const data = await api.csvImport.confirm(preview.import_id)
+      // "overwrite" replaces the prior copy of this same file server-side; "new" (and the
+      // no-duplicate case) appends. Anything else means no duplicate was flagged → append.
+      const data = await api.csvImport.confirm(
+        preview.import_id, dupAction === 'overwrite' ? 'overwrite' : 'new')
       setResult({ imported: data.imported_count, skipped: data.skipped_count })
       setStage('done')
       stampFunnel(FUNNEL_TS.firstImport)
