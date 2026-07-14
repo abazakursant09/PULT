@@ -6,6 +6,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from database import get_db
 from dependencies import get_current_user
@@ -17,6 +18,7 @@ from models.api_credential import ApiCredential
 from schemas.review import ReviewResponseOut, ReviewResponseUpdate
 from services.marketplace import executor, credential_vault
 from services.marketplace.wb_client import wb_client
+from services.marketplace.reviews import get_review_provider
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -68,20 +70,24 @@ async def sync_reviews(
     marketplace side (no execution authority needed).
     """
     product = await _get_product_or_404(product_id, current_user.id, db)
-    if product.marketplace != "wildberries":
-        raise HTTPException(422, "sync currently supports Wildberries only (ME-2)")
+
+    # Marketplace neutrality: the router asks the registry, it never knows a marketplace by name.
+    # An absent provider is an honest "unsupported" — no DB write, no external call.
+    provider = get_review_provider(product.marketplace)
+    if provider is None or not provider.supports_reviews():
+        raise HTTPException(422, f"приём отзывов для «{product.marketplace}» пока не поддерживается")
 
     conn = (
         await db.execute(
             select(MarketplaceConnection).where(
                 MarketplaceConnection.user_id == current_user.id,
-                MarketplaceConnection.marketplace == "wildberries",
+                MarketplaceConnection.marketplace == product.marketplace,
                 MarketplaceConnection.status == "connected",
             )
         )
     ).scalars().first()
     if conn is None:
-        raise HTTPException(409, "no connected Wildberries cabinet — add one in connections")
+        raise HTTPException(409, "нет подключённого кабинета маркетплейса — добавьте его в connections")
 
     cred = (
         await db.execute(
@@ -91,35 +97,32 @@ async def sync_reviews(
         )
     ).scalars().first()
     if cred is None:
-        raise HTTPException(409, "Wildberries connection lacks 'feedbacks' scope")
+        raise HTTPException(409, "у подключения нет области доступа «feedbacks»")
 
     token = credential_vault.decrypt(cred.secret_enc)
-    feedbacks = await wb_client.list_unanswered_feedbacks(token=token, nm_id=product.sku)
+    reviews = await provider.fetch_reviews(token, product.sku)
 
+    # Dedup is enforced by the AR0 partial-unique index (product_id, external_review_id,
+    # marketplace). Each insert runs in its own savepoint: a duplicate (a concurrent sync of the
+    # same review, or a re-sync) raises IntegrityError, we roll that savepoint back and count it
+    # as skipped, and the rest of the batch still commits. Two concurrent syncs of one review can
+    # therefore only ever leave one row — the guarantee is the database, not an app-level check.
     imported = 0
-    for fb in feedbacks:
-        ext_id = str(fb.get("id") or "")
-        if not ext_id:
-            continue
-        exists = (
-            await db.execute(
-                select(ReviewResponse).where(
-                    ReviewResponse.product_id == product_id,
-                    ReviewResponse.external_review_id == ext_id,
-                )
-            )
-        ).scalars().first()
-        if exists:
-            continue
-        db.add(ReviewResponse(
-            id=str(uuid.uuid4()), product_id=product_id,
-            review_text=fb.get("text"), author=(fb.get("userName") or None),
-            rating=fb.get("productValuation"), status="pending",
-            external_review_id=ext_id, marketplace="wildberries",
-        ))
-        imported += 1
+    skipped = 0
+    for r in reviews:
+        try:
+            async with db.begin_nested():
+                db.add(ReviewResponse(
+                    id=str(uuid.uuid4()), product_id=product_id,
+                    review_text=r.text, author=r.author, rating=r.rating,
+                    status="pending", external_review_id=r.external_review_id,
+                    marketplace=r.marketplace, review_created_at=r.review_created_at,
+                ))
+            imported += 1
+        except IntegrityError:
+            skipped += 1
     await db.commit()
-    return {"synced": len(feedbacks), "imported": imported, "product_id": product_id}
+    return {"synced": len(reviews), "imported": imported, "skipped": skipped, "product_id": product_id}
 
 
 @router.patch("/reviews/{product_id}/{review_id}", response_model=ReviewResponseOut)
