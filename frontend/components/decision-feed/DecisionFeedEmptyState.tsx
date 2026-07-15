@@ -1,14 +1,14 @@
 'use client'
+import { EmptyState } from '@/components/ui/EmptyState'
 
-// Honest empty state — never "всё хорошо" / "проблем нет" / "бизнес в порядке".
+// Honest empty state — never "всё хорошо" / "проблем нет" / "бизнес в порядке". Says only that
+// there is nothing to show yet, and why. Rendered through the canonical P1 EmptyState.
 export function DecisionFeedEmptyState() {
   return (
-    <div style={{
-      background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 12,
-      padding: '22px 18px', textAlign: 'center', color: 'var(--text-3)', fontSize: 13,
-    }}>
-      Когда появятся новые сигналы, PULT покажет решения здесь.
-    </div>
+    <EmptyState
+      title="Пока нет решений"
+      description="Когда появятся новые сигналы, PULT покажет решения здесь."
+    />
   )
 }
 

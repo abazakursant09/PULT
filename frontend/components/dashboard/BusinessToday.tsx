@@ -2,11 +2,17 @@
 import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
 import type { TodaySummary } from '@/lib/api'
+import { Card } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Skeleton } from '@/components/ui/skeleton'
 
-// "Состояние бизнеса сегодня" — the first thing a seller sees, above Today Focus.
-// Read-only assembly of EXISTING aggregates from GET /api/today/summary. No charts,
-// no BI, no client computation, no fabricated numbers — every value is rendered
-// verbatim from the response.
+// "Состояние бизнеса сегодня" — the business-state strip under the diagnosis hero.
+// Read-only assembly of EXISTING aggregates from GET /api/today/summary. No charts, no BI,
+// no client computation, no fabricated numbers — every value is rendered verbatim.
+//
+// P2 hierarchy: profit is the dominant figure (it answers "am I making money"); revenue,
+// margin, delta and loss-count are the secondary ring. Figures use the mono stack for aligned
+// tabular digits so the numbers read as a set, not a jumble.
 
 function _rub(n: number): string {
   return `${Math.round(n).toLocaleString('ru-RU')} ₽`
@@ -17,14 +23,30 @@ function _delta(pct: number | null): string {
   return `${s}${pct}%`
 }
 
-function Metric({ label, value, tone }: { label: string; value: string; tone?: 'pos' | 'neg' | 'muted' }) {
-  const color = tone === 'pos' ? 'var(--gain, #16a34a)'
-    : tone === 'neg' ? 'var(--danger, #ef4444)'
-    : 'var(--text)'
+// The hero figure — bigger, mono, coloured by sign.
+function HeroMetric({ label, value, tone }: { label: string; value: string; tone: 'pos' | 'neg' }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-      <span style={{ fontSize: 11, color: 'var(--text-3)', whiteSpace: 'nowrap' }}>{label}</span>
-      <span style={{ fontSize: 15, fontWeight: 700, color }}>{value}</span>
+    <div className="flex flex-col gap-1 min-w-0">
+      <span className="text-[11px] uppercase tracking-wide text-[var(--text-3)]">{label}</span>
+      <span
+        className="text-[28px] font-bold leading-none [font-variant-numeric:tabular-nums]"
+        style={{ color: tone === 'neg' ? 'var(--danger)' : 'var(--success)', fontFamily: 'var(--font-mono)' }}
+      >
+        {value}
+      </span>
+    </div>
+  )
+}
+
+// Secondary figures — smaller, quieter, still tabular.
+function Metric({ label, value, tone }: { label: string; value: string; tone?: 'pos' | 'neg' | 'muted' }) {
+  const color = tone === 'pos' ? 'var(--success)' : tone === 'neg' ? 'var(--danger)' : 'var(--text)'
+  return (
+    <div className="flex flex-col gap-0.5 min-w-0">
+      <span className="text-[11px] text-[var(--text-3)] whitespace-nowrap">{label}</span>
+      <span className="text-[15px] font-semibold [font-variant-numeric:tabular-nums]" style={{ color, fontFamily: 'var(--font-mono)' }}>
+        {value}
+      </span>
     </div>
   )
 }
@@ -51,31 +73,31 @@ export function BusinessToday() {
   }, [])
 
   return (
-    <div className="s-card" style={{ marginBottom: 18 }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 12 }}>
-        <h2 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)', margin: 0 }}>
-          Состояние бизнеса сегодня
-        </h2>
-        {s?.is_demo && (
-          <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: '0.08em', color: 'var(--violet-text, var(--text-3))',
-            background: 'rgba(110,106,252,0.12)', padding: '1px 6px', borderRadius: 3 }}>
-            ДЕМО
-          </span>
-        )}
+    <Card variant="surface" className="mb-[18px] p-[18px]">
+      <div className="flex items-baseline gap-2 mb-3">
+        <h2 className="text-[16px] font-bold text-[var(--text)] m-0">Состояние бизнеса сегодня</h2>
+        {s?.is_demo && <Badge variant="neutral" className="text-[9px] tracking-[0.08em] uppercase">ДЕМО</Badge>}
       </div>
 
-      {loading && <div style={{ fontSize: 12.5, color: 'var(--text-3)' }}>Загрузка…</div>}
+      {loading && (
+        <div className="flex flex-wrap gap-x-7 gap-y-3.5" aria-label="Загрузка">
+          <Skeleton className="h-[34px] w-[160px]" />
+          <Skeleton className="h-[34px] w-[90px]" />
+          <Skeleton className="h-[34px] w-[90px]" />
+          <Skeleton className="h-[34px] w-[120px]" />
+        </div>
+      )}
       {error && !loading && (
-        <div style={{ fontSize: 12.5, color: 'var(--danger)' }}>Не удалось загрузить: {error}</div>
+        <div className="text-[12.5px] text-[var(--danger)]">Не удалось загрузить: {error}</div>
       )}
 
       {!loading && !error && s && (
         !s.has_data ? (
-          <div style={{ fontSize: 13, color: 'var(--text-3)' }}>Недостаточно данных за сегодня</div>
+          <div className="text-[13px] text-[var(--text-3)]">Недостаточно данных за сегодня</div>
         ) : (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '14px 28px' }}>
+          <div className="flex flex-wrap items-end gap-x-8 gap-y-4">
+            <HeroMetric label="Прибыль сегодня" value={_rub(s.profit_today)} tone={s.profit_today < 0 ? 'neg' : 'pos'} />
             <Metric label="Выручка" value={_rub(s.revenue_today)} />
-            <Metric label="Прибыль" value={_rub(s.profit_today)} tone={s.profit_today < 0 ? 'neg' : 'pos'} />
             <Metric label="Маржа" value={s.margin_pct === null ? '—' : `${s.margin_pct}%`} />
             <Metric label="Изменение к вчера" value={_delta(s.delta_revenue_pct)}
               tone={s.delta_revenue_pct === null ? 'muted' : s.delta_revenue_pct < 0 ? 'neg' : 'pos'} />
@@ -84,7 +106,7 @@ export function BusinessToday() {
           </div>
         )
       )}
-    </div>
+    </Card>
   )
 }
 

@@ -2,6 +2,9 @@
 import { useState } from 'react'
 import { api } from '@/lib/api'
 import type { DecisionFeedItem, DecisionApplyPreview, DecisionApplyConfirmResult } from '@/lib/api'
+import { Card } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 
 // One feed item = one decision the seller can act on. No rating, no priority
 // number, no prediction — cautious, observed/advisory text only.
@@ -161,24 +164,15 @@ export function DecisionFeedCard(
     .filter(Boolean).join(' · ')
 
   return (
-    <div style={{
-      background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 12, padding: 14,
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
-        <span style={{
-          fontSize: 9.5, fontWeight: 700, textTransform: 'uppercase', padding: '3px 8px',
-          borderRadius: 5, background: 'var(--surface-h)', color: 'var(--text-2)', border: '1px solid var(--line)',
-        }}>{ctx}</span>
+    <Card variant="surface" className="rounded-[12px] p-3.5">
+      <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+        <Badge variant="neutral" className="text-[9.5px] uppercase rounded-[5px]">{ctx}</Badge>
         {roleLabel && (
-          <span style={{
-            fontSize: 9.5, fontWeight: 700, textTransform: 'uppercase', padding: '3px 8px',
-            borderRadius: 5,
-            background: item.action_role === 'primary' ? 'var(--accent-soft, var(--surface-h))' : 'var(--surface-h)',
-            color: item.action_role === 'primary' ? 'var(--text)' : 'var(--text-2)',
-            border: '1px solid var(--line)',
-          }}>{roleLabel}</span>
+          <Badge variant={item.action_role === 'primary' ? 'default' : 'neutral'} className="text-[9.5px] uppercase rounded-[5px]">
+            {roleLabel}
+          </Badge>
         )}
-        <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{ATTENTION_RU[item.attention_state] ?? item.attention_state}</span>
+        <span className="text-[11px] text-[var(--text-3)]">{ATTENTION_RU[item.attention_state] ?? item.attention_state}</span>
       </div>
 
       {!hideProblem && item.title && <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)' }}>{item.title}</div>}
@@ -259,91 +253,76 @@ export function DecisionFeedCard(
         <div style={{ fontSize: 10.5, color: 'var(--text-3)', marginTop: 6 }}>Статус: {item.lifecycle_reason}</div>
       )}
 
-      <div style={{
-        display: 'flex', gap: 6, marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--line)', flexWrap: 'wrap',
-      }}>
+      <div className="flex gap-1.5 mt-2.5 pt-2 border-t border-[var(--line)] flex-wrap">
         {([
           ['seen', 'Отметить просмотренным'],
           ['snooze', 'Отложить'],
           ['dismiss', 'Скрыть'],
           ['act', 'Отметить выполненным'],
         ] as [Action, string][]).map(([a, label]) => (
-          <button key={a} onClick={() => run(a)} disabled={busy != null} style={{
-            fontSize: 11.5, padding: '5px 10px', borderRadius: 7,
-            cursor: busy ? 'default' : 'pointer', border: '1px solid var(--line)',
-            background: 'var(--surface)', color: 'var(--text-2)', opacity: busy ? 0.5 : 1,
-          }}>{label}</button>
+          <Button key={a} variant="ghost" size="sm" onClick={() => run(a)} disabled={busy != null}
+            className="text-[11.5px] text-[var(--text-2)]">
+            {label}
+          </Button>
         ))}
       </div>
 
       {showApply && (
-        <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--line)' }}>
+        <div className="mt-2.5 pt-2 border-t border-[var(--line)]">
           {apply.kind === 'idle' && (
-            <button onClick={onPreview} style={{
-              fontSize: 12, fontWeight: 600, padding: '6px 12px', borderRadius: 7, cursor: 'pointer',
-              border: '1px solid var(--line)', background: 'var(--surface-h)', color: 'var(--text)',
-            }}>Применить решение</button>
+            // The one high-value action on the card — the only primary Button in the feed.
+            <Button variant="primary" size="sm" onClick={onPreview}>Применить решение</Button>
           )}
           {apply.kind === 'busy' && (
-            <div style={{ fontSize: 12, color: 'var(--text-3)' }}>Проверяем…</div>
+            <div className="text-[12px] text-[var(--text-3)]">Проверяем…</div>
           )}
 
           {apply.kind === 'preview' && !apply.p.applyable && (
-            <div style={{ fontSize: 12, color: 'var(--text-3)' }}>
-              <b style={{ color: 'var(--text-2)' }}>Решение пока нельзя применить.</b>
-              <div style={{ marginTop: 4 }}>{applyReason(apply.p.reason)}</div>
+            <div className="text-[12px] text-[var(--text-3)]">
+              <b className="text-[var(--text-2)]">Решение пока нельзя применить.</b>
+              <div className="mt-1">{applyReason(apply.p.reason)}</div>
             </div>
           )}
 
           {apply.kind === 'preview' && apply.p.applyable && (
-            <div style={{
-              background: 'var(--surface-h)', border: '1px solid var(--line)', borderRadius: 8,
-              padding: 12, fontSize: 12, color: 'var(--text-2)',
-            }}>
-              <div style={{ color: 'var(--text)', fontWeight: 600 }}>Можно применить · требуется подтверждение</div>
-              <div style={{ marginTop: 6 }}>Будет отправлено действие: <b>{apply.p.action_key}</b></div>
+            <div className="bg-[var(--surface-h)] border border-[var(--line)] rounded-[8px] p-3 text-[12px] text-[var(--text-2)]">
+              <div className="text-[var(--text)] font-semibold">Можно применить · требуется подтверждение</div>
+              <div className="mt-1.5">Будет отправлено действие: <b>{apply.p.action_key}</b></div>
               <div>Маркетплейс: {apply.p.marketplace} · SKU: {apply.p.sku}</div>
               {apply.p.payload && (
-                <pre style={{
-                  fontSize: 10.5, color: 'var(--text-3)', marginTop: 6, marginBottom: 0,
-                  whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'inherit',
-                }}>{JSON.stringify(apply.p.payload, null, 0)}</pre>
+                <pre className="text-[10.5px] text-[var(--text-3)] mt-1.5 mb-0 whitespace-pre-wrap break-words font-[inherit]">
+                  {JSON.stringify(apply.p.payload, null, 0)}
+                </pre>
               )}
-              <div style={{ marginTop: 6, color: 'var(--text-3)' }}>
+              <div className="mt-1.5 text-[var(--text-3)]">
                 Действие будет применено только после подтверждения.
               </div>
-              <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-                <button onClick={onConfirm} style={{
-                  fontSize: 12, fontWeight: 600, padding: '6px 12px', borderRadius: 7, cursor: 'pointer',
-                  border: '1px solid var(--line)', background: 'var(--surface)', color: 'var(--text)',
-                }}>Подтвердить применение</button>
-                <button onClick={() => setApply({ kind: 'idle' })} style={{
-                  fontSize: 12, padding: '6px 12px', borderRadius: 7, cursor: 'pointer',
-                  border: '1px solid var(--line)', background: 'var(--surface)', color: 'var(--text-3)',
-                }}>Отмена</button>
+              <div className="flex gap-1.5 mt-2 flex-wrap">
+                <Button variant="primary" size="sm" onClick={onConfirm}>Подтвердить применение</Button>
+                <Button variant="ghost" size="sm" onClick={() => setApply({ kind: 'idle' })} className="text-[var(--text-3)]">Отмена</Button>
               </div>
             </div>
           )}
 
           {apply.kind === 'done' && apply.r.ok && (
-            <div style={{ fontSize: 12, color: 'var(--text-2)' }}>
+            <div className="text-[12px] text-[var(--text-2)]">
               Решение отправлено на применение. Статус: {apply.r.status}.
               {apply.r.measurement_opened && (
-                <div style={{ marginTop: 4, color: 'var(--text-3)' }}>PULT начнёт измерять эффект.</div>
+                <div className="mt-1 text-[var(--text-3)]">PULT начнёт измерять эффект.</div>
               )}
             </div>
           )}
           {apply.kind === 'done' && !apply.r.ok && (
-            <div style={{ fontSize: 12, color: 'var(--text-3)' }}>
+            <div className="text-[12px] text-[var(--text-3)]">
               Решение не применено: {applyReason(apply.r.reason)}.
             </div>
           )}
           {apply.kind === 'error' && (
-            <div style={{ fontSize: 12, color: 'var(--text-3)' }}>Не удалось выполнить: {apply.msg}</div>
+            <div className="text-[12px] text-[var(--text-3)]">Не удалось выполнить: {apply.msg}</div>
           )}
         </div>
       )}
-    </div>
+    </Card>
   )
 }
 
