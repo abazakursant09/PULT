@@ -2,12 +2,14 @@
 import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
 import type { TodayItem } from '@/lib/api'
+import { Card } from '@/components/ui/card'
+import { Skeleton } from '@/components/ui/skeleton'
 
 // "Сегодня начни с этого" — the single #1 thing to do today, from the canonical Today
-// source (/api/today → build_today → build_feed). Same source as the Telegram top
-// action and Copilot. Shows ONLY response.top_action — no client sort, no client
-// computation, no fabricated numbers, no mock data. The full list lives in
-// DecisionFeedPanel; this is the "start here" hero above it.
+// source (/api/today → build_today → build_feed). Same source as the Telegram top action and
+// Copilot. Shows ONLY response.top_action — no client sort, no client computation, no
+// fabricated numbers. The full list lives in DecisionFeedPanel; this is the diagnosis HERO
+// above it: what happened (money) → why → what to do → expected effect.
 
 const _MP_NAME: Record<string, string> = {
   wb: 'Wildberries', wildberries: 'Wildberries', ozon: 'Ozon',
@@ -17,9 +19,7 @@ const _MP_NAME: Record<string, string> = {
 export function TodayFocus() {
   const [top, setTop] = useState<TodayItem | null>(null)
   // P6 — additive root-cause narrative for the top action's product, read from the existing
-  // Presentation API (GET /api/presentation/cards). top_action itself is UNCHANGED (still
-  // /api/today, build_feed[0]); this only enriches it. Presentation fetch failing never
-  // breaks Today — narrative stays null.
+  // Presentation API. top_action itself is UNCHANGED; this only enriches it.
   const [narrative, setNarrative] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -29,8 +29,6 @@ export function TodayFocus() {
     setLoading(true); setError(null); setNarrative(null)
     ;(async () => {
       try {
-        // top_action from /api/today (canonical, unchanged); cards from the existing
-        // Presentation API in parallel. Cards are best-effort — a failure must not break Today.
         const [resp, cardsResp] = await Promise.all([
           api.today.get({ limit: 50 }),
           api.presentation.getCards({ limit: 50 }).catch(() => null),
@@ -38,8 +36,6 @@ export function TodayFocus() {
         if (!alive) return
         setTop(resp.top_action)
         const ta = resp.top_action
-        // match the card by the SAME raw (marketplace, sku) the top action carries — the
-        // presentation cards group on those exact values, so equality is exact.
         const card = ta && cardsResp
           ? cardsResp.cards.find((c) => c.marketplace === ta.marketplace && c.sku === ta.sku)
           : undefined
@@ -60,59 +56,71 @@ export function TodayFocus() {
     : ''
 
   return (
-    <div className="s-card" style={{ marginBottom: 18, borderLeft: '3px solid var(--violet, #6e6afc)' }}>
-      <div style={{ marginBottom: 4 }}>
-        <h2 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)', margin: 0 }}>
+    // The hero: an elevated surface with a thick violet spine, set apart from the quieter
+    // panels below so the eye lands here first.
+    <Card
+      variant="elevated"
+      className="mb-[18px] p-[18px] relative overflow-hidden"
+      style={{ borderLeft: '3px solid var(--violet)' }}
+    >
+      <div className="flex items-center gap-2 mb-1">
+        <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--violet-text)]">
           Сегодня начни с этого
-        </h2>
+        </span>
       </div>
 
-      <div style={{ marginTop: 12 }}>
-        {loading && <div style={{ fontSize: 12.5, color: 'var(--text-3)' }}>Загрузка…</div>}
+      <div className="mt-3">
+        {loading && (
+          <div className="flex flex-col gap-2.5" aria-label="Загрузка">
+            <Skeleton className="h-5 w-2/3" />
+            <Skeleton className="h-3.5 w-1/3" />
+            <Skeleton className="h-4 w-1/2" />
+          </div>
+        )}
         {error && !loading && (
-          <div style={{ fontSize: 12.5, color: 'var(--danger)' }}>Не удалось загрузить: {error}</div>
+          <div className="text-[12.5px] text-[var(--danger)]">Не удалось загрузить: {error}</div>
         )}
 
         {!loading && !error && (
           top === null ? (
-            <div style={{ fontSize: 13, color: 'var(--text-3)' }}>Рекомендации появятся, когда PULT получит данные.</div>
+            <div className="text-[13px] text-[var(--text-3)]">Рекомендации появятся, когда PULT получит данные.</div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div className="flex flex-col gap-2">
+              {/* what happened — the diagnosis headline, the biggest text on the panel */}
               {headline && (
-                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>{headline}</div>
+                <div className="text-[18px] font-bold leading-snug text-[var(--text)]">{headline}</div>
               )}
-              {context && (
-                <div style={{ fontSize: 12, color: 'var(--text-3)' }}>{context}</div>
-              )}
+              {context && <div className="text-[12px] text-[var(--text-3)]">{context}</div>}
+
+              {/* what to do — the obvious action, rendered as the hero's primary call */}
               {top!.recommended_action && (
-                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--violet-text, var(--text))' }}>
-                  {top!.recommended_action}
+                <div className="mt-1 inline-flex items-start gap-2 rounded-[var(--r-sm)] border border-[var(--violet)] bg-[var(--violet-dim)] px-3 py-2 self-start">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-[var(--violet-text)] mt-0.5 shrink-0">Что сделать</span>
+                  <span className="text-[13px] font-semibold text-[var(--text)]">{top!.recommended_action}</span>
                 </div>
               )}
+
               {top!.why_it_matters && (
-                <div style={{ fontSize: 12, color: 'var(--text-2)' }}>
+                <div className="text-[12px] text-[var(--text-2)] mt-1">
                   <b>Почему важно:</b> {top!.why_it_matters}
                 </div>
               )}
               {top!.expected_effect && (
-                <div style={{ fontSize: 12, color: 'var(--text-2)' }}>
+                <div className="text-[12px] text-[var(--text-2)]">
                   <b>Что это даст:</b> {top!.expected_effect}
                 </div>
               )}
-              {/* P6 — additive root-cause narrative (P5.1 explanation-block style). Only when
-                  the top action's product has a converging narrative; otherwise nothing extra. */}
+              {/* P6 — additive root-cause narrative. Only when the product has a converging one. */}
               {narrative && (
-                <div style={{
-                  fontSize: 12, color: 'var(--text-2)', lineHeight: 1.45,
-                  padding: '8px 10px', borderRadius: 7,
-                  background: 'var(--surface-h)', borderLeft: '2px solid var(--line)',
-                }}>{narrative}</div>
+                <div className="text-[12px] leading-relaxed text-[var(--text-2)] rounded-[7px] px-2.5 py-2 bg-[var(--surface-h)] border-l-2 border-[var(--line)]">
+                  {narrative}
+                </div>
               )}
             </div>
           )
         )}
       </div>
-    </div>
+    </Card>
   )
 }
 

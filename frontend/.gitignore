@@ -1,3 +1,7 @@
 e2e/.tmp/
 test-results/
 playwright-report/
+
+# P2 visual-validation artifacts (throwaway data, not source)
+e2e-screens/
+test-results/

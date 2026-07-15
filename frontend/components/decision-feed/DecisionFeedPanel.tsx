@@ -7,6 +7,10 @@ import { DecisionFeedCard } from './DecisionFeedCard'
 import { DecisionFeedEmptyState } from './DecisionFeedEmptyState'
 import { marketplaceLabel, recommendationsLabel } from '@/lib/feedGrouping'
 import { patchItemState, removeItem, skipTopAction, ungroupedItems } from '@/lib/presentationFeed'
+import { severityLabel, severityBadgeVariant } from '@/lib/severity'
+import { Card } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Skeleton } from '@/components/ui/skeleton'
 
 // "Что требует внимания сегодня" — главный видимый слой PULT. Список решений из
 // всех контуров, не отчёт и не BI. Без рейтинга, без numeric priority, без прогноза.
@@ -16,14 +20,6 @@ import { patchItemState, removeItem, skipTopAction, ungroupedItems } from '@/lib
 // through api.decisionFeed on item_key (items nest verbatim).
 
 type Action = 'seen' | 'snooze' | 'dismiss' | 'act'
-
-// observed severity → conservative RU label. Not a score, verbatim class only.
-const _SEV_LABEL: Record<string, string> = {
-  critical: 'Критично', high: 'Высокий приоритет', medium: 'Средний приоритет', low: 'Низкий приоритет',
-}
-function severityLabel(s: string | null): string | null {
-  return s ? (_SEV_LABEL[s] ?? s) : null
-}
 
 function roleLabel(it: DecisionFeedItem): string | null {
   if (it.action_role === 'primary') return 'Основной вариант'
@@ -66,27 +62,35 @@ export function DecisionFeedPanel({ skipTopAction: skip = false }: { skipTopActi
   const shown = skip && contour === null ? skipTopAction(cards) : cards
 
   return (
-    <div className="s-card" style={{ marginBottom: 18 }}>
-      <div style={{ marginBottom: 4 }}>
-        <h2 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)', margin: 0 }}>
-          Что требует внимания сегодня
-        </h2>
-        <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 4 }}>
+    <Card variant="surface" className="mb-[18px] p-[18px]">
+      <div className="mb-1">
+        <h2 className="text-[16px] font-bold text-[var(--text)] m-0">Что требует внимания сегодня</h2>
+        <div className="text-[12px] text-[var(--text-3)] mt-1">
           Собрано из SEO, рекламы, отзывов, роста, юридических рисков и доказанных эффектов решений.
         </div>
       </div>
 
-      <div style={{ marginTop: 12 }}>
+      <div className="mt-3">
         <DecisionFeedFilters value={contour} onChange={setContour} />
 
-        {loading && <div style={{ fontSize: 12.5, color: 'var(--text-3)' }}>Загрузка…</div>}
-        {error && <div style={{ fontSize: 12.5, color: 'var(--danger)' }}>Не удалось загрузить: {error}</div>}
+        {loading && (
+          <div className="flex flex-col gap-3.5" aria-label="Загрузка">
+            {[0, 1].map((i) => (
+              <div key={i} className="rounded-[14px] border border-[var(--line)] p-3 flex flex-col gap-2.5">
+                <Skeleton className="h-4 w-1/2" />
+                <Skeleton className="h-3.5 w-3/4" />
+                <Skeleton className="h-8 w-full" />
+              </div>
+            ))}
+          </div>
+        )}
+        {error && <div className="text-[12.5px] text-[var(--danger)]">Не удалось загрузить: {error}</div>}
 
         {!loading && !error && (
           shown.length === 0 ? (
             <DecisionFeedEmptyState />
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div className="flex flex-col gap-3.5">
               {shown.map((card) => (
                 <PresentationCardView key={card.group_key} card={card} onChanged={onChanged} />
               ))}
@@ -94,7 +98,7 @@ export function DecisionFeedPanel({ skipTopAction: skip = false }: { skipTopActi
           )
         )}
       </div>
-    </div>
+    </Card>
   )
 }
 
@@ -121,33 +125,26 @@ function PresentationCardView(
   if (!card.sku) return <div>{body}</div>
 
   return (
-    <div style={{
-      border: '1px solid var(--line)', borderRadius: 14, padding: 12,
-      background: 'var(--bg, transparent)', display: 'flex', flexDirection: 'column', gap: 10,
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text)', lineHeight: 1.2 }}>{card.sku}</span>
-        <span style={{ fontSize: 12, color: 'var(--text-3)' }}>· {marketplaceLabel(card.marketplace)}</span>
+    <Card variant="bordered" className="rounded-[14px] p-3 flex flex-col gap-2.5">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-[13.5px] font-bold text-[var(--text)] leading-tight [font-variant-numeric:tabular-nums]">{card.sku}</span>
+        <span className="text-[12px] text-[var(--text-3)]">· {marketplaceLabel(card.marketplace)}</span>
         {sev && (
-          <span style={{
-            fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.2,
-            color: 'var(--text-2)', background: 'var(--surface-h)', border: '1px solid var(--line)',
-            borderRadius: 5, padding: '2px 7px', lineHeight: 1.3,
-          }}>{sev}</span>
+          <Badge variant={severityBadgeVariant(card.highest_severity)} className="text-[10px] uppercase tracking-[0.2px] rounded-[5px]">
+            {sev}
+          </Badge>
         )}
-        <span style={{ fontSize: 11.5, color: 'var(--text-3)', marginLeft: 'auto' }}>
+        <span className="text-[11.5px] text-[var(--text-3)] ml-auto">
           {recommendationsLabel(card.items.length)}
         </span>
       </div>
       {card.root_cause_narrative && (
-        <div style={{
-          fontSize: 12, color: 'var(--text-2)', lineHeight: 1.45,
-          padding: '8px 10px', borderRadius: 7,
-          background: 'var(--surface-h)', borderLeft: '2px solid var(--line)',
-        }}>{card.root_cause_narrative}</div>
+        <div className="text-[12px] leading-relaxed text-[var(--text-2)] px-2.5 py-2 rounded-[7px] bg-[var(--surface-h)] border-l-2 border-[var(--line)]">
+          {card.root_cause_narrative}
+        </div>
       )}
       {body}
-    </div>
+    </Card>
   )
 }
 

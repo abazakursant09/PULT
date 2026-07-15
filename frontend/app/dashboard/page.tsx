@@ -6,6 +6,8 @@ import { SellerBar } from '@/components/seller/Shell'
 import DecisionFeedPanel from '@/components/decision-feed/DecisionFeedPanel'
 import TodayFocus from '@/components/decision-feed/TodayFocus'
 import BusinessToday from '@/components/dashboard/BusinessToday'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
 
 const _WEEKDAYS = ['Воскресенье', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота']
@@ -91,24 +93,16 @@ export default function Home() {
             happen. The only way into the Advisory MVP is an uploaded report, so that is what
             this now says. */}
         {showFirstRun && (
-          <div className="s-card" style={{ marginBottom: 18 }}>
-            <h2 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)', margin: 0 }}>
-              Нет данных для анализа
-            </h2>
-            <div style={{ fontSize: 13, color: 'var(--text-2)', marginTop: 10, lineHeight: 1.5 }}>
-              PULT ставит диагноз по вашим отчётам с маркетплейса. Загрузите отчёт —
-              и разбор появится здесь.
-            </div>
-            <div style={{ fontSize: 12.5, color: 'var(--text-3)', marginTop: 8 }}>
-              Подойдёт выгрузка по продажам, товарам или возвратам в CSV или Excel.
-            </div>
-            <Link href="/dashboard/import" style={{
-              display: 'inline-block', marginTop: 12, fontSize: 12.5, fontWeight: 700,
-              color: 'var(--violet-text, var(--ac-2))',
-            }}>
-              Загрузить отчёт →
-            </Link>
-          </div>
+          <EmptyState
+            className="mb-[18px]"
+            title="Нет данных для анализа"
+            description="PULT ставит диагноз по вашим отчётам с маркетплейса. Подойдёт выгрузка по продажам, товарам или возвратам в CSV или Excel — загрузите отчёт, и разбор появится здесь."
+            action={
+              <Link href="/dashboard/import">
+                <Button variant="primary" size="sm">Загрузить отчёт →</Button>
+              </Link>
+            }
+          />
         )}
 
         {/* still loading → draw neither: BusinessToday shows its own loading state, and the
