@@ -105,11 +105,35 @@ class OzonClient:
             self._performance_client = BaseMarketplaceClient(settings.ozon_performance_base)
         return self._performance_client
 
-    # ── deferred ──────────────────────────────────────────────────────────────
-    async def publish_feedback_answer(self, **_):  # premium Reviews API
-        raise ExecutionError(
-            ExecutionError.UNKNOWN_ACTION,
-            "ozon.publish_feedback_answer not implemented (premium Reviews API)",
+    # ── Reviews (premium Reviews API, R-OZ1) ──────────────────────────────────
+    # Ozon Reviews live on the Seller API base with Api-Key auth + Client-Id header (same shape as
+    # prices). They require the seller's premium_plus tariff; a non-premium account is rejected by
+    # the marketplace and surfaces here as a MARKETPLACE_4XX via base_client — never a local no-op.
+    # base_client maps transport/HTTP failures onto the ExecutionError taxonomy (TIMEOUT /
+    # MARKETPLACE_5XX / AUTH / RATE_LIMIT / 4XX), so AR5 ambiguous-execution handling works unchanged.
+    async def list_reviews(self, *, token: str, client_id: str | None,
+                           product_ref: str | None = None, limit: int = 100) -> list[dict]:
+        """Read unanswered Ozon reviews. POST /v1/review/list. Returns the raw review dicts;
+        normalization to NormalizedReview is the provider's job."""
+        body: dict = {"limit": int(limit), "sort_dir": "ASC", "status": "UNPROCESSED"}
+        if product_ref:
+            body["product_id"] = str(product_ref)
+        data = await self._seller.request(
+            "POST", "/v1/review/list", token=token, auth_header="Api-Key",
+            extra_headers=self._headers(client_id), json=body,
+        )
+        if isinstance(data, dict):
+            rows = data.get("reviews") or data.get("result") or []
+            return rows if isinstance(rows, list) else []
+        return data if isinstance(data, list) else []
+
+    async def publish_feedback_answer(self, *, token: str, client_id: str | None,
+                                      review_id: str, text: str) -> dict:
+        """Publish an answer to an Ozon review. POST /v1/review/comment/create."""
+        return await self._seller.request(
+            "POST", "/v1/review/comment/create", token=token, auth_header="Api-Key",
+            extra_headers=self._headers(client_id),
+            json={"review_id": str(review_id), "text": text, "mark_review_as_processed": False},
         )
 
     async def set_bid(self, **_):  # Performance API, separate OAuth (ME-4b)
