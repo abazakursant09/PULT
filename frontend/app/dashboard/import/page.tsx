@@ -8,8 +8,17 @@ import {
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { trackEvent, stampFunnel, elapsedSince, firstTimeOnly, FUNNEL_TS } from '@/lib/events'
-import { T } from '@/lib/tokens'
+import { SellerBar } from '@/components/seller/Shell'
+import { Card } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Skeleton } from '@/components/ui/skeleton'
 import { ErrorState } from '@/components/system/ErrorState'
+
+// Import experience (P4 premium redesign). Presentation only — the same api.csvImport calls, the
+// same funnel events, the same CSV / duplicate / finance-first behaviour. All colour is on P0
+// tokens, all surfaces are P1 components; no legacy `T` tokens, no raw hex, no old-violet accent,
+// no `.btn`/`.input`/`.badge` classes, no bespoke spinner.
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type MP   = 'wb' | 'ozon' | 'ym' | ''
@@ -40,10 +49,17 @@ const MP_LABELS: Record<string, string> = {
 const TYPE_LABELS: Record<string, string> = {
   finance: 'Финансы', products: 'Товары',
 }
-const MP_COLORS: Record<string, string> = {
-  wb:   '#CB11AB',
-  ozon: '#005BFF',
-  ym:   '#FFCC01',
+
+// Minimal progress signal — the four committed stages, so the seller sees where they are.
+const STEPS: { key: Stage; label: string }[] = [
+  { key: 'upload', label: 'Загрузка' },
+  { key: 'preview', label: 'Проверка' },
+  { key: 'importing', label: 'Импорт' },
+  { key: 'done', label: 'Готово' },
+]
+function stepIndex(s: Stage): number {
+  const i = STEPS.findIndex(x => x.key === s)
+  return i === -1 ? 0 : i   // 'error' maps to 0 (it renders its own panel)
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -52,6 +68,10 @@ function fmtBytes(b: number) {
   if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} КБ`
   return `${(b / 1024 / 1024).toFixed(1)} МБ`
 }
+
+const SELECT_CLASS =
+  'w-full appearance-none rounded-[var(--r-sm)] border border-[var(--line)] bg-[var(--bg)] text-[var(--text)] text-[14px] h-[44px] pl-3 pr-8 cursor-pointer transition-[border-color] duration-[var(--dur)] focus-visible:outline-none focus-visible:border-[var(--violet-text)] disabled:opacity-40 disabled:cursor-not-allowed'
+const FIELD_LABEL = 'block text-[11px] font-semibold uppercase tracking-wide text-[var(--text-3)] mb-2'
 
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function ImportPage() {
@@ -68,11 +88,10 @@ export default function ImportPage() {
   const [dupAction, setDupAction] = useState<'overwrite' | 'skip' | 'new' | null>(null)
   const [result,    setResult]    = useState<{ imported: number; skipped: number } | null>(null)
   const [error,     setError]     = useState('')
-  // null = still loading. The Business Diagnosis is built from the FINANCIAL report: the
-  // Advisory Runtime only considers a seller who has imported finance rows, so a first upload
-  // of "Товары" produces no diagnosis at all — the dashboard would tell the seller to upload
-  // a report they had just uploaded. Rather than change the Runtime, the UI asks for the
-  // financial report first and says why. Once it exists, everything is available as before.
+  // null = still loading. The Business Diagnosis is built from the FINANCIAL report: the Advisory
+  // Runtime only considers a seller who has imported finance rows, so a first upload of "Товары"
+  // produces no diagnosis. Rather than change the Runtime, the UI asks for the financial report
+  // first and says why. Behaviour unchanged from before — only restyled.
   const [hasFinance, setHasFinance] = useState<boolean | null>(null)
 
   const fileRef = useRef<HTMLInputElement>(null)
@@ -123,9 +142,9 @@ export default function ImportPage() {
   // ── Confirm ──────────────────────────────────────────────────────────────────
   async function handleConfirm() {
     if (!preview) return
-    // Belt and braces: the selector is locked, but the parser also auto-detects a type. A
-    // first import that is not the financial report would import cleanly and then produce no
-    // diagnosis whatsoever, so it is refused here rather than silently accepted.
+    // Belt and braces: the selector is locked, but the parser also auto-detects a type. A first
+    // import that is not the financial report would import cleanly and then produce no diagnosis,
+    // so it is refused here rather than silently accepted.
     if (financeFirst && preview.import_type && preview.import_type !== 'finance') {
       setError('Первым нужно загрузить финансовый отчёт — по нему строится диагноз. Отчёт по товарам можно будет загрузить сразу после него.')
       return
@@ -172,383 +191,326 @@ export default function ImportPage() {
   const effectiveIType = (preview?.import_type ?? itype) as string
   const hasErrors      = (preview?.errors?.length ?? 0) > 0
   const hasDup         = Boolean(preview?.duplicate_import_id)
+  const curStep        = stepIndex(stage)
 
   // ── Render ───────────────────────────────────────────────────────────────────
   return (
-    <div style={{ padding: T.layout.padding, maxWidth: T.layout.maxWidth, margin: '0 auto' }}>
-      {/* Header */}
-      <div style={{ marginBottom: 28 }}>
-        <h1 style={{ fontSize: T.sz.pageTitle, fontWeight: 700, color: T.text, letterSpacing: '-0.02em', lineHeight: 1, marginBottom: 6 }}>
-          Импорт данных
-        </h1>
-        <p style={{ fontSize: 14, color: '#8E8E93' }}>
-          Загрузите CSV из Wildberries, Ozon или Яндекс Маркета — диагноз появится на главной
-          в течение минуты после обработки отчёта
-        </p>
-      </div>
+    <>
+      <SellerBar title="Импорт данных" sub="Загрузите CSV — диагноз появится на главной в течение минуты" />
+      <div className="s-canvas" style={{ maxWidth: 960 }}>
 
-      {/* Template downloads */}
-      <div className="flex flex-wrap gap-2 mb-6">
-        {(['wb','ozon','ym'] as const).map(m => (
-          ['finance','products'].map(t => (
-            <a
-              key={`${m}-${t}`}
-              href={`${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/api/import/templates/${m}/${t}`}
-              download
+        {/* Progress signal — where the seller is in the flow */}
+        {stage !== 'error' && (
+          <div className="flex items-center gap-2 mb-6">
+            {STEPS.map((s, i) => (
+              <div key={s.key} className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5">
+                  <span
+                    className="h-1.5 w-1.5 rounded-full transition-colors duration-[var(--dur)]"
+                    style={{ background: i <= curStep ? 'var(--violet)' : 'var(--line)' }}
+                  />
+                  <span className="text-[11px]" style={{ color: i <= curStep ? 'var(--text-2)' : 'var(--text-3)' }}>{s.label}</span>
+                </div>
+                {i < STEPS.length - 1 && <span className="h-px w-4" style={{ background: 'var(--line)' }} />}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Template downloads */}
+        <div className="flex flex-wrap gap-2 mb-6">
+          {(['wb','ozon','ym'] as const).map(m => (
+            ['finance','products'].map(t => (
+              <a
+                key={`${m}-${t}`}
+                href={`${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/api/import/templates/${m}/${t}`}
+                download
+                className="flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-[var(--r-sm)] border border-[var(--line)] bg-[var(--surface)] text-[var(--text-3)] no-underline transition-colors duration-[var(--dur)] hover:text-[var(--text-2)] hover:border-[var(--violet-text)]"
+              >
+                <Download size={10} />
+                {MP_LABELS[m]} / {TYPE_LABELS[t]}
+              </a>
+            ))
+          ))}
+        </div>
+
+        {/* ── STAGE: UPLOAD ── */}
+        {stage === 'upload' && (
+          <div className="flex flex-col gap-4">
+            {/* Drop zone */}
+            <div
+              onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}
+              onClick={() => fileRef.current?.click()}
+              className="rounded-[var(--r-md)] px-6 py-10 text-center cursor-pointer transition-[background-color,border-color] duration-150"
               style={{
-                fontSize: 11, padding: '4px 10px',
-                background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
-                borderRadius: 6, color: '#8E8E93', textDecoration: 'none',
-                display: 'flex', alignItems: 'center', gap: 4,
+                border: `2px dashed ${dragging ? 'var(--violet)' : 'var(--line)'}`,
+                background: dragging ? 'var(--violet-dim)' : 'var(--surface)',
               }}
             >
-              <Download size={10} />
-              {MP_LABELS[m]} / {TYPE_LABELS[t]}
-            </a>
-          ))
-        ))}
-      </div>
-
-      {/* ── STAGE: UPLOAD ── */}
-      {stage === 'upload' && (
-        <div className="space-y-4">
-          {/* Drop zone */}
-          <div
-            onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}
-            onClick={() => fileRef.current?.click()}
-            style={{
-              border: `2px dashed ${dragging ? '#6E6AFC' : 'rgba(255,255,255,0.12)'}`,
-              borderRadius: 12, padding: '40px 24px',
-              background: dragging ? 'rgba(110,106,252,0.06)' : 'rgba(255,255,255,0.02)',
-              cursor: 'pointer', textAlign: 'center',
-              transition: 'all 0.15s ease',
-            }}
-          >
-            <input ref={fileRef} type="file" accept=".csv" hidden onChange={onFileChange} />
-            <div style={{
-              width: 48, height: 48, borderRadius: 12,
-              background: 'rgba(110,106,252,0.10)', border: '1px solid rgba(110,106,252,0.20)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              margin: '0 auto 16px',
-            }}>
-              <Upload size={20} style={{ color: '#6E6AFC' }} />
-            </div>
-            {file ? (
-              <div>
-                <p style={{ fontSize: 15, fontWeight: 600, color: '#EDEDF0', marginBottom: 4 }}>
-                  <FileText size={14} style={{ display: 'inline', marginRight: 6, color: '#6E6AFC' }} />
-                  {file.name}
-                </p>
-                <p style={{ fontSize: 12, color: '#8E8E93' }}>{fmtBytes(file.size)}</p>
+              <input ref={fileRef} type="file" accept=".csv" hidden onChange={onFileChange} />
+              <div
+                className="w-12 h-12 rounded-[var(--r-md)] flex items-center justify-center mx-auto mb-4"
+                style={{ background: 'var(--violet-dim)', border: '1px solid var(--violet)' }}
+              >
+                <Upload size={20} style={{ color: 'var(--violet-text)' }} />
               </div>
-            ) : (
-              <div>
-                <p style={{ fontSize: 15, fontWeight: 500, color: '#EDEDF0', marginBottom: 6 }}>
-                  Перетащите CSV сюда или нажмите для выбора
-                </p>
-                <p style={{ fontSize: 12, color: '#6B6B72' }}>Только .csv, максимум 10 МБ</p>
-              </div>
-            )}
-          </div>
-
-          {/* Selectors */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="label mb-2">МАРКЕТПЛЕЙС</label>
-              <div style={{ position: 'relative' }}>
-                <select
-                  value={mp}
-                  onChange={e => setMp(e.target.value as MP)}
-                  className="input"
-                  style={{ width: '100%', paddingRight: 32, appearance: 'none' }}
-                >
-                  <option value="">Определить автоматически</option>
-                  <option value="wb">Wildberries</option>
-                  <option value="ozon">Ozon</option>
-                  <option value="ym">Яндекс Маркет</option>
-                </select>
-                <ChevronDown size={14} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', color: '#8E8E93', pointerEvents: 'none' }} />
-              </div>
-            </div>
-            <div>
-              <label className="label mb-2">ТИП ДАННЫХ</label>
-              <div style={{ position: 'relative' }}>
-                <select
-                  value={financeFirst ? 'finance' : itype}
-                  onChange={e => setIType(e.target.value as IType)}
-                  disabled={financeFirst}
-                  className="input"
-                  style={{ width: '100%', paddingRight: 32, appearance: 'none' }}
-                >
-                  {!financeFirst && <option value="">Определить автоматически</option>}
-                  <option value="finance">Финансы</option>
-                  {!financeFirst && <option value="products">Товары</option>}
-                </select>
-                <ChevronDown size={14} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', color: '#8E8E93', pointerEvents: 'none' }} />
-              </div>
-            </div>
-          </div>
-
-          {financeFirst && (
-            <div style={{ background: 'rgba(26,115,232,0.08)', border: '1px solid rgba(26,115,232,0.2)', borderRadius: 8, padding: '10px 14px', fontSize: 13, lineHeight: 1.5, color: 'var(--text-2)' }}>
-              <strong style={{ color: 'var(--text)' }}>Начните с финансового отчёта.</strong>{' '}
-              Диагноз PULT строит по вашим финансовым данным — выручке, комиссии, логистике, рекламе.
-              Отчёт по товарам можно будет загрузить сразу после него.
-            </div>
-          )}
-
-          {error && (
-            <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 8, padding: '10px 14px', color: '#FCA5A5', fontSize: 13 }}>
-              {error}
-            </div>
-          )}
-
-          <button
-            className="btn btn-primary"
-            style={{ width: '100%' }}
-            disabled={!file || uploading}
-            onClick={handleUpload}
-          >
-            {uploading
-              ? <><span className="spinner" style={{ marginRight: 8 }} /> Анализируем файл...</>
-              : <><Upload size={15} style={{ marginRight: 8 }} /> Загрузить и проверить</>}
-          </button>
-        </div>
-      )}
-
-      {/* ── STAGE: PREVIEW ── */}
-      {stage === 'preview' && preview && (
-        <div className="space-y-4 animate-fade-in">
-          {/* Detection summary */}
-          <div style={{ background: '#242428', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 12, padding: 20 }}>
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3">
-                {effectiveMp && (
-                  <span style={{
-                    fontSize: 11, fontWeight: 700, padding: '3px 10px',
-                    borderRadius: 20, background: MP_COLORS[effectiveMp] + '20',
-                    color: MP_COLORS[effectiveMp], border: `1px solid ${MP_COLORS[effectiveMp]}40`,
-                    textTransform: 'uppercase' as const,
-                  }}>
-                    {MP_LABELS[effectiveMp] ?? effectiveMp}
-                  </span>
-                )}
-                {effectiveIType && (
-                  <span className="badge" style={{ background: 'rgba(110,106,252,0.10)', color: '#A78BFA' }}>
-                    {TYPE_LABELS[effectiveIType] ?? effectiveIType}
-                  </span>
-                )}
-              </div>
-              <button onClick={reset} style={{ color: '#8E8E93', cursor: 'pointer', background: 'none', border: 'none' }}>
-                <X size={16} />
-              </button>
-            </div>
-
-            <div className="grid grid-cols-3 gap-3">
-              {[
-                { label: 'СТРОК ВСЕГО', value: preview.total_rows },
-                { label: 'КОРРЕКТНЫХ', value: preview.valid_rows, ok: true },
-                { label: 'ПРОПУЩЕНО', value: preview.skipped_rows, warn: preview.skipped_rows > 0 },
-              ].map(({ label, value, ok, warn }) => (
-                <div key={label} style={{ textAlign: 'center', padding: '12px 8px', background: 'rgba(255,255,255,0.03)', borderRadius: 8 }}>
-                  <div style={{ fontSize: 24, fontWeight: 700, color: ok ? '#22C55E' : warn ? '#F59E0B' : '#EDEDF0' }}>
-                    {value}
-                  </div>
-                  <div className="label" style={{ marginTop: 4 }}>{label}</div>
+              {file ? (
+                <div>
+                  <p className="text-[15px] font-semibold text-[var(--text)] mb-1 flex items-center justify-center gap-1.5">
+                    <FileText size={14} style={{ color: 'var(--violet-text)' }} />
+                    {file.name}
+                  </p>
+                  <p className="text-[12px] text-[var(--text-3)]">{fmtBytes(file.size)}</p>
                 </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Duplicate warning */}
-          {hasDup && !dupAction && (
-            <div style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: 10, padding: 16 }}>
-              <p style={{ fontSize: 13, color: '#FCD34D', marginBottom: 12 }}>
-                ⚠️ Этот файл уже импортировался {preview.duplicate_date}. Что делать?
-              </p>
-              <div className="flex gap-2 flex-wrap">
-                {[
-                  { key: 'overwrite', label: 'Перезаписать' },
-                  { key: 'new',       label: 'Импортировать как новый' },
-                  { key: 'skip',      label: 'Пропустить' },
-                ].map(({ key, label }) => (
-                  <button
-                    key={key}
-                    onClick={() => {
-                      if (key === 'skip') { reset(); return }
-                      setDupAction(key as NonNullable<typeof dupAction>)
-                    }}
-                    style={{
-                      fontSize: 12, padding: '6px 14px', borderRadius: 6,
-                      background: key === 'skip' ? 'transparent' : 'rgba(245,158,11,0.15)',
-                      border: '1px solid rgba(245,158,11,0.25)',
-                      color: '#FCD34D', cursor: 'pointer',
-                    }}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Blocking errors */}
-          {hasErrors && (
-            <div style={{ background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 10, padding: 16 }}>
-              <p style={{ fontSize: 13, fontWeight: 600, color: '#FCA5A5', marginBottom: 8 }}>Блокирующие ошибки:</p>
-              {preview.errors.map((e, i) => (
-                <p key={i} style={{ fontSize: 12, color: '#FCA5A5', marginBottom: 4 }}>• {e}</p>
-              ))}
-            </div>
-          )}
-
-          {/* Warnings (non-blocking) */}
-          {preview.warnings.length > 0 && !hasErrors && (
-            <div style={{ background: 'rgba(245,158,11,0.05)', border: '1px solid rgba(245,158,11,0.15)', borderRadius: 10, padding: 14 }}>
-              <p style={{ fontSize: 12, fontWeight: 600, color: '#FCD34D', marginBottom: 6 }}>
-                <AlertTriangle size={12} style={{ display: 'inline', marginRight: 5 }} />
-                Предупреждения ({preview.warnings.length}):
-              </p>
-              {preview.warnings.slice(0, 5).map((w, i) => (
-                <p key={i} style={{ fontSize: 11.5, color: '#FCD34D', opacity: 0.8, marginBottom: 3 }}>• {w}</p>
-              ))}
-              {preview.warnings.length > 5 && (
-                <p style={{ fontSize: 11, color: '#6B6B72', marginTop: 4 }}>и ещё {preview.warnings.length - 5} предупреждений...</p>
+              ) : (
+                <div>
+                  <p className="text-[15px] font-medium text-[var(--text)] mb-1.5">Перетащите CSV сюда или нажмите для выбора</p>
+                  <p className="text-[12px] text-[var(--text-3)]">Только .csv, максимум 10 МБ</p>
+                </div>
               )}
             </div>
-          )}
 
-          {/* Column mapping */}
-          {Object.keys(preview.mapped_columns).length > 0 && (
-            <div style={{ background: '#242428', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: 16 }}>
-              <p className="label mb-3">СОПОСТАВЛЕНИЕ КОЛОНОК</p>
-              <div className="space-y-1.5">
-                {Object.entries(preview.mapped_columns).map(([field, col]) => (
-                  <div key={field} className="flex items-center gap-2" style={{ fontSize: 12 }}>
-                    <span style={{ color: '#8E8E93', width: 100, flexShrink: 0 }}>{field}</span>
-                    <ArrowRight size={10} style={{ color: '#6B6B72', flexShrink: 0 }} />
-                    <span style={{ color: col ? '#A78BFA' : '#EF4444' }}>
-                      {col || '— не найдено'}
-                    </span>
-                    {col ? <CheckCircle2 size={11} style={{ color: '#22C55E' }} /> : <X size={11} style={{ color: '#EF4444' }} />}
+            {/* Selectors */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={FIELD_LABEL}>Маркетплейс</label>
+                <div className="relative">
+                  <select value={mp} onChange={e => setMp(e.target.value as MP)} className={SELECT_CLASS}>
+                    <option value="">Определить автоматически</option>
+                    <option value="wb">Wildberries</option>
+                    <option value="ozon">Ozon</option>
+                    <option value="ym">Яндекс Маркет</option>
+                  </select>
+                  <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--text-3)' }} />
+                </div>
+              </div>
+              <div>
+                <label className={FIELD_LABEL}>Тип данных</label>
+                <div className="relative">
+                  <select
+                    value={financeFirst ? 'finance' : itype}
+                    onChange={e => setIType(e.target.value as IType)}
+                    disabled={financeFirst}
+                    className={SELECT_CLASS}
+                  >
+                    {!financeFirst && <option value="">Определить автоматически</option>}
+                    <option value="finance">Финансы</option>
+                    {!financeFirst && <option value="products">Товары</option>}
+                  </select>
+                  <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--text-3)' }} />
+                </div>
+              </div>
+            </div>
+
+            {financeFirst && (
+              <Card variant="surface" className="p-3.5 text-[13px] leading-relaxed text-[var(--text-2)]"
+                style={{ borderColor: 'var(--violet)', background: 'var(--violet-dim)' }}>
+                <strong className="text-[var(--text)]">Начните с финансового отчёта.</strong>{' '}
+                Диагноз PULT строит по вашим финансовым данным — выручке, комиссии, логистике, рекламе.
+                Отчёт по товарам можно будет загрузить сразу после него.
+              </Card>
+            )}
+
+            {error && (
+              <div className="text-[13px] rounded-[var(--r-sm)] px-3.5 py-2.5 bg-[var(--danger-dim)] text-[var(--danger)]">
+                {error}
+              </div>
+            )}
+
+            <Button variant="primary" className="w-full" disabled={!file || uploading} loading={uploading} onClick={handleUpload}>
+              {uploading ? 'Анализируем файл...' : <><Upload size={15} /> Загрузить и проверить</>}
+            </Button>
+          </div>
+        )}
+
+        {/* ── STAGE: PREVIEW ── */}
+        {stage === 'preview' && preview && (
+          <div className="flex flex-col gap-4">
+            {/* Detection summary */}
+            <Card variant="elevated" className="p-5">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  {effectiveMp && <Badge variant="default" className="uppercase">{MP_LABELS[effectiveMp] ?? effectiveMp}</Badge>}
+                  {effectiveIType && <Badge variant="neutral">{TYPE_LABELS[effectiveIType] ?? effectiveIType}</Badge>}
+                </div>
+                <button onClick={reset} className="text-[var(--text-3)] hover:text-[var(--text)] bg-transparent border-0 cursor-pointer transition-colors" aria-label="Отменить">
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                {[
+                  { label: 'СТРОК ВСЕГО', value: preview.total_rows, color: 'var(--text)' },
+                  { label: 'КОРРЕКТНЫХ', value: preview.valid_rows, color: 'var(--success)' },
+                  { label: 'ПРОПУЩЕНО', value: preview.skipped_rows, color: preview.skipped_rows > 0 ? 'var(--warning)' : 'var(--text)' },
+                ].map(({ label, value, color }) => (
+                  <div key={label} className="text-center py-3 px-2 rounded-[var(--r-sm)] bg-[var(--surface-h)]">
+                    <div className="text-[24px] font-bold [font-variant-numeric:tabular-nums]" style={{ color, fontFamily: 'var(--font-mono)' }}>{value}</div>
+                    <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--text-3)] mt-1">{label}</div>
                   </div>
                 ))}
               </div>
-            </div>
-          )}
+            </Card>
 
-          {/* Preview table */}
-          {preview.preview_rows.length > 0 && (
-            <div style={{ background: '#242428', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, overflow: 'hidden' }}>
-              <div style={{ padding: '12px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-                <p className="label">ПРЕДПРОСМОТР (первые 5 строк)</p>
-              </div>
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                  <thead>
-                    <tr>
-                      {Object.keys(preview.preview_rows[0]).map(k => (
-                        <th key={k} style={{ padding: '8px 12px', textAlign: 'left', color: '#6B6B72', fontWeight: 500, borderBottom: '1px solid rgba(255,255,255,0.06)', whiteSpace: 'nowrap' }}>
-                          {k}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {preview.preview_rows.map((row, i) => (
-                      <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                        {Object.values(row).map((v, j) => (
-                          <td key={j} style={{ padding: '7px 12px', color: '#EDEDF0', whiteSpace: 'nowrap' }}>
-                            {String(v ?? '—')}
-                          </td>
+            {/* Duplicate warning */}
+            {hasDup && !dupAction && (
+              <Card variant="surface" className="p-4" style={{ borderColor: 'var(--warning)', background: 'var(--warning-dim)' }}>
+                <p className="text-[13px] text-[var(--warning)] mb-3">
+                  Этот файл уже импортировался {preview.duplicate_date}. Что делать?
+                </p>
+                <div className="flex gap-2 flex-wrap">
+                  {[
+                    { key: 'overwrite', label: 'Перезаписать' },
+                    { key: 'new',       label: 'Импортировать как новый' },
+                    { key: 'skip',      label: 'Пропустить' },
+                  ].map(({ key, label }) => (
+                    <Button key={key} variant={key === 'skip' ? 'ghost' : 'secondary'} size="sm"
+                      onClick={() => {
+                        if (key === 'skip') { reset(); return }
+                        setDupAction(key as NonNullable<typeof dupAction>)
+                      }}>
+                      {label}
+                    </Button>
+                  ))}
+                </div>
+              </Card>
+            )}
+
+            {/* Blocking errors */}
+            {hasErrors && (
+              <Card variant="surface" className="p-4" style={{ borderColor: 'var(--danger)', background: 'var(--danger-dim)' }}>
+                <p className="text-[13px] font-semibold text-[var(--danger)] mb-2">Блокирующие ошибки:</p>
+                {preview.errors.map((e, i) => (
+                  <p key={i} className="text-[12px] text-[var(--danger)] mb-1">• {e}</p>
+                ))}
+              </Card>
+            )}
+
+            {/* Warnings (non-blocking) */}
+            {preview.warnings.length > 0 && !hasErrors && (
+              <Card variant="surface" className="p-3.5" style={{ borderColor: 'var(--warning)', background: 'var(--warning-dim)' }}>
+                <p className="text-[12px] font-semibold text-[var(--warning)] mb-1.5 flex items-center gap-1.5">
+                  <AlertTriangle size={12} /> Предупреждения ({preview.warnings.length}):
+                </p>
+                {preview.warnings.slice(0, 5).map((w, i) => (
+                  <p key={i} className="text-[11.5px] text-[var(--warning)] opacity-80 mb-0.5">• {w}</p>
+                ))}
+                {preview.warnings.length > 5 && (
+                  <p className="text-[11px] text-[var(--text-3)] mt-1">и ещё {preview.warnings.length - 5} предупреждений...</p>
+                )}
+              </Card>
+            )}
+
+            {/* Column mapping */}
+            {Object.keys(preview.mapped_columns).length > 0 && (
+              <Card variant="elevated" className="p-4">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--text-3)] mb-3">Сопоставление колонок</p>
+                <div className="flex flex-col gap-1.5">
+                  {Object.entries(preview.mapped_columns).map(([field, col]) => (
+                    <div key={field} className="flex items-center gap-2 text-[12px]">
+                      <span className="text-[var(--text-3)] w-[100px] shrink-0">{field}</span>
+                      <ArrowRight size={10} style={{ color: 'var(--text-3)' }} className="shrink-0" />
+                      <span style={{ color: col ? 'var(--violet-text)' : 'var(--danger)' }}>{col || '— не найдено'}</span>
+                      {col
+                        ? <CheckCircle2 size={11} style={{ color: 'var(--success)' }} />
+                        : <X size={11} style={{ color: 'var(--danger)' }} />}
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            )}
+
+            {/* Preview table */}
+            {preview.preview_rows.length > 0 && (
+              <Card variant="elevated" className="overflow-hidden p-0">
+                <div className="px-4 py-3 border-b border-[var(--line)]">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--text-3)]">Предпросмотр (первые 5 строк)</p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse text-[12px]">
+                    <thead>
+                      <tr>
+                        {Object.keys(preview.preview_rows[0]).map(k => (
+                          <th key={k} className="px-3 py-2 text-left font-medium text-[var(--text-3)] border-b border-[var(--line)] whitespace-nowrap">{k}</th>
                         ))}
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody>
+                      {preview.preview_rows.map((row, i) => (
+                        <tr key={i} className="border-b border-[var(--line)]">
+                          {Object.values(row).map((v, j) => (
+                            <td key={j} className="px-3 py-1.5 text-[var(--text)] whitespace-nowrap [font-variant-numeric:tabular-nums]">{String(v ?? '—')}</td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            )}
+
+            {/* Action buttons */}
+            <div className="flex gap-3">
+              <Button variant="ghost" onClick={reset} className="shrink-0">← Назад</Button>
+              <Button variant="primary" className="flex-1" disabled={hasErrors || (hasDup && !dupAction)} onClick={handleConfirm}>
+                Импортировать {preview.valid_rows} строк <ArrowRight size={14} />
+              </Button>
             </div>
-          )}
-
-          {/* Action buttons */}
-          <div className="flex gap-3">
-            <button onClick={reset} className="btn btn-ghost" style={{ flex: '0 0 auto' }}>
-              ← Назад
-            </button>
-            <button
-              className="btn btn-primary"
-              style={{ flex: 1 }}
-              disabled={hasErrors || (hasDup && !dupAction)}
-              onClick={handleConfirm}
-            >
-              Импортировать {preview.valid_rows} строк <ArrowRight size={14} style={{ marginLeft: 6 }} />
-            </button>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* ── STAGE: IMPORTING ── */}
-      {stage === 'importing' && (
-        <div style={{ textAlign: 'center', padding: '60px 0' }}>
-          <div style={{
-            width: 56, height: 56, borderRadius: '50%',
-            border: '3px solid rgba(110,106,252,0.2)',
-            borderTopColor: '#6E6AFC',
-            animation: 'spin 0.8s linear infinite',
-            margin: '0 auto 20px',
-          }} />
-          <p style={{ fontSize: 16, fontWeight: 600, color: '#EDEDF0', marginBottom: 6 }}>Импортируем данные...</p>
-          <p style={{ fontSize: 13, color: '#8E8E93' }}>
-            {slowImport ? 'Обработка займёт до 90 секунд…' : 'Это займёт несколько секунд'}
-          </p>
-          <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
-        </div>
-      )}
+        {/* ── STAGE: IMPORTING ── */}
+        {stage === 'importing' && (
+          <Card variant="surface" className="p-6">
+            <p className="text-[16px] font-semibold text-[var(--text)] mb-1">Импортируем данные…</p>
+            <p className="text-[13px] text-[var(--text-3)] mb-5">
+              {slowImport ? 'Обработка займёт до 90 секунд…' : 'Это займёт несколько секунд'}
+            </p>
+            {/* Calm skeleton stand-in for the rows being written — no bespoke spinner */}
+            <div className="flex flex-col gap-2.5" aria-label="Импорт идёт">
+              <Skeleton className="h-4 w-3/4" />
+              <Skeleton className="h-4 w-1/2" />
+              <Skeleton className="h-4 w-2/3" />
+              <Skeleton className="h-4 w-2/5" />
+            </div>
+          </Card>
+        )}
 
-      {/* ── STAGE: DONE ── */}
-      {stage === 'done' && result && (
-        <div style={{ textAlign: 'center', padding: '40px 20px' }} className="animate-fade-in">
-          <div style={{
-            width: 64, height: 64, borderRadius: '50%',
-            background: 'rgba(34,197,94,0.10)', border: '1px solid rgba(34,197,94,0.25)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px',
-          }}>
-            <CheckCircle2 size={28} style={{ color: '#22C55E' }} />
-          </div>
-          <p style={{ fontSize: 20, fontWeight: 700, color: '#EDEDF0', marginBottom: 8 }}>
-            Импорт завершён
-          </p>
-          <p style={{ fontSize: 14, color: '#8E8E93', marginBottom: 4 }}>
-            Импортировано <strong style={{ color: '#22C55E' }}>{result.imported}</strong> строк
-            {result.skipped > 0 && `, пропущено ${result.skipped}`}
-          </p>
-          <p style={{ fontSize: 12, color: '#6B6B72', marginBottom: 32 }}>
-            Диагноз появится на главной в течение минуты
-          </p>
+        {/* ── STAGE: DONE ── */}
+        {stage === 'done' && result && (
+          <Card variant="surface" className="p-8 text-center">
+            <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-5"
+              style={{ background: 'var(--success-dim)', border: '1px solid var(--success)' }}>
+              <CheckCircle2 size={28} style={{ color: 'var(--success)' }} />
+            </div>
+            <p className="text-[20px] font-bold text-[var(--text)] mb-2">Импорт завершён</p>
+            <p className="text-[14px] text-[var(--text-2)] mb-1">
+              Импортировано <strong style={{ color: 'var(--success)' }}>{result.imported}</strong> строк
+              {result.skipped > 0 && `, пропущено ${result.skipped}`}
+            </p>
+            <p className="text-[12px] text-[var(--text-3)] mb-8">Диагноз появится на главной в течение минуты</p>
 
-          <div className="flex gap-3 justify-center">
-            <button
-              className="btn btn-primary"
-              onClick={() => router.push('/dashboard')}
-            >
-              Перейти в Пульт <ArrowRight size={14} style={{ marginLeft: 6 }} />
-            </button>
-            <button onClick={reset} className="btn btn-ghost">
-              <RefreshCw size={14} style={{ marginRight: 6 }} /> Ещё импорт
-            </button>
-          </div>
-        </div>
-      )}
+            <div className="flex gap-3 justify-center">
+              <Button variant="primary" onClick={() => router.push('/dashboard')}>
+                Перейти в Пульт <ArrowRight size={14} />
+              </Button>
+              <Button variant="ghost" onClick={reset}>
+                <RefreshCw size={14} /> Ещё импорт
+              </Button>
+            </div>
+          </Card>
+        )}
 
-      {/* ── STAGE: ERROR ── */}
-      {stage === 'error' && (
-        <ErrorState
-          message={error || 'Не удалось выполнить импорт'}
-          onRetry={reset}
-          retryLabel="Загрузить снова"
-          paddingTop={48}
-        />
-      )}
-    </div>
+        {/* ── STAGE: ERROR ── */}
+        {stage === 'error' && (
+          <ErrorState
+            message={error || 'Не удалось выполнить импорт'}
+            onRetry={reset}
+            retryLabel="Загрузить снова"
+            paddingTop={48}
+          />
+        )}
+      </div>
+    </>
   )
 }
