@@ -16,31 +16,61 @@
 
 /* rail */
 .s-rail{border-right:1px solid var(--hair);padding:18px 14px;display:flex;flex-direction:column;position:sticky;top:0;height:100vh;overflow:auto}
+.s-rail-top{display:flex;align-items:center;justify-content:space-between}
 .s-logo{display:flex;align-items:center;gap:10px;padding:6px 8px 14px}
 .s-logo .mk{width:28px;height:28px;border-radius:8px;background:linear-gradient(140deg,var(--metal-1),var(--metal-2));box-shadow:inset 0 1px 0 rgba(255,255,255,.45),0 2px 6px rgba(0,0,0,.35);display:grid;place-items:center}
 .s-logo b{font-size:15px;font-weight:650;letter-spacing:-.02em}
 .s-glabel{font-size:10.5px;font-weight:650;letter-spacing:.09em;text-transform:uppercase;color:var(--tx-3);padding:15px 9px 6px}
-.s-nav{display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:10px;color:var(--tx-2);font-size:13.5px;font-weight:450;transition:.12s;cursor:pointer}
+.s-nav{display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:10px;color:var(--tx-2);font-size:13.5px;font-weight:450;cursor:pointer;
+  transition:background-color var(--dur) var(--ease),color var(--dur) var(--ease)}
 .s-nav:hover{background:var(--panel);color:var(--tx)}
-.s-nav.on{background:var(--panel-2);color:var(--tx);font-weight:550}
-.s-nav svg{width:17px;height:17px;stroke-width:1.7;flex:0 0 auto;opacity:.85}
-.s-nav.on svg{color:var(--ac);opacity:1}
-.s-nav .c{margin-left:auto;font-size:11px;font-weight:600;border-radius:20px;padding:1px 8px}
-.s-nav .c.red{background:rgba(236,111,88,.16);color:var(--loss)}
-.s-nav .c.mut{background:var(--panel-2);color:var(--tx-3)}
+.s-nav.on{background:var(--violet-dim);color:var(--text);font-weight:550}
+.s-nav:focus-visible{outline:none;box-shadow:0 0 0 1px var(--violet-text)}
+.s-nav-ic{display:inline-flex;flex:0 0 auto;opacity:.85}
+.s-nav-ic svg{width:17px;height:17px;stroke-width:1.7}
+.s-nav.on .s-nav-ic{color:var(--violet-text);opacity:1}
 .s-foot{margin-top:auto;display:flex;align-items:center;gap:9px;padding:12px 8px 4px;border-top:1px solid var(--hair)}
 .s-foot .av{width:30px;height:30px;border-radius:50%;background:var(--panel-2);border:1px solid var(--hair-2);display:grid;place-items:center;font-size:12px;font-weight:600;color:var(--tx-2)}
 .s-foot .nm{font-size:12.5px;font-weight:550}.s-foot .pl{font-size:11px;color:var(--tx-3)}
+
+/* off-canvas controls — hidden on desktop, revealed at ≤1024px */
+.s-burger,.s-drawer-x{display:none;align-items:center;justify-content:center;background:transparent;border:0;color:var(--tx-2);border-radius:var(--r-sm);cursor:pointer;
+  transition:background-color var(--dur) var(--ease),color var(--dur) var(--ease)}
+.s-burger{width:40px;height:40px;margin-left:-6px}
+.s-drawer-x{width:36px;height:36px}
+.s-burger:hover,.s-drawer-x:hover{color:var(--tx)}
+.s-burger:focus-visible,.s-drawer-x:focus-visible{outline:none;box-shadow:0 0 0 1px var(--violet-text)}
+.s-scrim{display:none;position:fixed;inset:0;z-index:55;border:0;background:rgba(0,0,0,.5);opacity:0;pointer-events:none;
+  transition:opacity var(--dur) var(--ease)}
 
 /* main + bar */
 .s-main{min-width:0;overflow-x:hidden}
 .s-bar{height:60px;border-bottom:1px solid var(--hair);display:flex;align-items:center;gap:16px;padding:0 clamp(16px,3vw,34px);position:sticky;top:0;background:rgba(10,11,13,.82);backdrop-filter:blur(14px);z-index:10}
 .s-bar .ttl{font-size:15px;font-weight:600}.s-bar .sub{font-size:12.5px;color:var(--tx-3)}
 .s-bar .sp{flex:1}
-.s-search{display:flex;align-items:center;gap:9px;color:var(--tx-3);border:1px solid var(--hair);border-radius:10px;padding:8px 13px;width:min(300px,30vw);background:var(--panel)}
-.s-search input{border:0;background:none;outline:0;color:var(--tx);font-size:13px;width:100%}
-.s-search input::placeholder{color:var(--tx-3)}
-.s-daypill{font-size:12px;color:var(--tx-2);border:1px solid var(--hair);border-radius:9px;padding:7px 12px;background:var(--panel);white-space:nowrap}
+
+/* ── Off-canvas navigation (≤1024px) ─────────────────────────────────────────
+   Desktop keeps the 258px sticky rail untouched. Below the breakpoint the grid collapses to a
+   single column and the rail becomes a fixed drawer that slides in over a backdrop. Motion is
+   scoped to transform/opacity with the iOS drawer curve; reduced-motion drops the slide. */
+@media (max-width:1024px){
+  .s-app{grid-template-columns:1fr}
+  .s-rail{position:fixed;left:0;top:0;height:100dvh;width:min(84vw,300px);z-index:60;
+    background:var(--surface);
+    transform:translateX(-100%);
+    transition:transform var(--dur) var(--ease-drawer)}
+  .s-app.nav-open .s-rail{transform:translateX(0)}
+  .s-scrim{display:block}
+  .s-app.nav-open .s-scrim{opacity:1;pointer-events:auto}
+  .s-burger{display:inline-flex}
+  .s-drawer-x{display:inline-flex}
+  /* comfortable touch targets in the drawer */
+  .s-nav{min-height:44px;padding:11px 12px}
+  .s-foot{min-height:44px}
+}
+@media (prefers-reduced-motion: reduce){
+  .s-rail,.s-scrim{transition:none}
+}
 
 .s-canvas{padding:26px clamp(16px,3vw,34px) 80px;max-width:1480px;width:100%}
 .s-muted{color:var(--tx-3)}
