@@ -101,7 +101,7 @@ export default function SecurityPage() {
 
   return (
     <div className="min-h-screen" style={{ background: 'var(--bg)', position: 'relative' }}>
-      <div aria-hidden style={{ position: 'fixed', top: '8%', right: '-5%', width: 360, height: 360, background: 'radial-gradient(circle, rgba(110,106,252,0.06) 0%, transparent 65%)', filter: 'blur(44px)', pointerEvents: 'none', zIndex: 0 }} />
+      <div aria-hidden style={{ position: 'fixed', top: '8%', right: '-5%', width: 360, height: 360, background: 'radial-gradient(circle, rgba(124,58,237,0.06) 0%, transparent 65%)', filter: 'blur(44px)', pointerEvents: 'none', zIndex: 0 }} />
       <main className="max-w-[720px] mx-auto px-5 sm:px-8 py-10 sm:py-14 animate-fade-in" style={{ position: 'relative', zIndex: 1 }}>
 
         <div className="mb-10">
@@ -121,7 +121,7 @@ export default function SecurityPage() {
 
         {success && (
           <div className="mb-6 px-4 py-3 rounded-xl flex items-center gap-3 animate-slide-up"
-               style={{ background: 'rgba(110,106,252,0.10)', border: '1px solid rgba(110,106,252,0.25)', color: 'var(--violet)' }}>
+               style={{ background: 'rgba(124,58,237,0.10)', border: '1px solid rgba(124,58,237,0.25)', color: 'var(--violet)' }}>
             <Check size={16} /> {success}
           </div>
         )}
@@ -136,7 +136,7 @@ export default function SecurityPage() {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
             <div className="flex items-center gap-4">
               <div className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0"
-                   style={{ background: mfaEnabled ? 'rgba(110,106,252,0.12)' : 'rgba(110,106,252,0.08)', border: `1px solid ${mfaEnabled ? 'rgba(110,106,252,0.28)' : 'rgba(110,106,252,0.16)'}` }}>
+                   style={{ background: mfaEnabled ? 'rgba(124,58,237,0.12)' : 'rgba(124,58,237,0.08)', border: `1px solid ${mfaEnabled ? 'rgba(124,58,237,0.28)' : 'rgba(124,58,237,0.16)'}` }}>
                 {mfaEnabled
                   ? <ShieldCheck size={22} style={{ color: 'var(--violet)' }} />
                   : <Shield      size={22} style={{ color: 'var(--violet)' }} />
@@ -154,7 +154,7 @@ export default function SecurityPage() {
 
             <div className="flex items-center gap-3 shrink-0">
               <Badge variant={mfaEnabled ? 'outline' : 'secondary'}
-                     style={mfaEnabled ? { background: 'rgba(110,106,252,0.12)', color: 'var(--violet)', borderColor: 'rgba(110,106,252,0.28)' } : {}}>
+                     style={mfaEnabled ? { background: 'rgba(124,58,237,0.12)', color: 'var(--violet)', borderColor: 'rgba(124,58,237,0.28)' } : {}}>
                 {mfaEnabled ? '✓ Включено' : 'Выключено'}
               </Badge>
 
@@ -188,7 +188,7 @@ export default function SecurityPage() {
             <div className="mb-5">
               <Label className="mb-2 block" style={{ color: 'var(--text-3)' }}>Секретный ключ (ввести вручную)</Label>
               <div className="flex items-center gap-3 px-4 py-3 rounded-xl"
-                   style={{ background: 'rgba(110,106,252,0.06)', border: '1px solid rgba(110,106,252,0.18)' }}>
+                   style={{ background: 'rgba(124,58,237,0.06)', border: '1px solid rgba(124,58,237,0.18)' }}>
                 <code className="flex-1 text-sm font-semibold tracking-widest break-all font-mono" style={{ color: 'var(--violet)' }}>
                   {secret}
                 </code>
@@ -213,7 +213,7 @@ export default function SecurityPage() {
               ].map((s, i) => (
                 <div key={i} className="flex items-start gap-3">
                   <span className="w-5 h-5 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0 mt-0.5"
-                        style={{ background: 'rgba(110,106,252,0.15)', color: 'var(--violet)' }}>
+                        style={{ background: 'rgba(124,58,237,0.15)', color: 'var(--violet)' }}>
                     {i + 1}
                   </span>
                   <p className="text-sm" style={{ color: 'var(--text-3)' }}>{s}</p>
@@ -288,7 +288,7 @@ export default function SecurityPage() {
         )}
 
         {phase === 'idle' && (
-          <div className="rounded-2xl px-6 py-5 mt-4" style={{ background: 'rgba(110,106,252,0.06)', border: '1px solid rgba(110,106,252,0.14)' }}>
+          <div className="rounded-2xl px-6 py-5 mt-4" style={{ background: 'rgba(124,58,237,0.06)', border: '1px solid rgba(124,58,237,0.14)' }}>
             <h3 className="text-sm font-semibold mb-3" style={{ color: '#FFFFFF' }}>
               Зачем нужна двухфакторная аутентификация?
             </h3>
