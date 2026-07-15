@@ -54,16 +54,19 @@
       "label": "Отзывы (текст/оценка/дата)",
       "wb": {
         "verdict": "api",
-        "endpoint": "/api/v1/feedbacks"
+        "endpoint": "/api/v1/feedbacks",
+        "pult_supported": true
       },
       "ozon": {
         "verdict": "api",
         "endpoint": "/v1/review/list",
-        "tariff": "premium_plus"
+        "tariff": "premium_plus",
+        "pult_supported": false
       },
       "yandex": {
         "verdict": "api",
-        "endpoint": "getGoodsFeedbacks"
+        "endpoint": "getGoodsFeedbacks",
+        "pult_supported": false
       },
       "pult_verdict": "api"
     },
@@ -414,16 +417,19 @@
       "label": "Публикация ответа",
       "wb": {
         "verdict": "api",
-        "endpoint": "/api/v1/feedbacks/answer"
+        "endpoint": "/api/v1/feedbacks/answer",
+        "pult_supported": true
       },
       "ozon": {
         "verdict": "api",
         "endpoint": "/v1/review/comment/create",
-        "tariff": "premium_plus"
+        "tariff": "premium_plus",
+        "pult_supported": false
       },
       "yandex": {
         "verdict": "api",
-        "endpoint": "updateGoodsFeedbackComment"
+        "endpoint": "updateGoodsFeedbackComment",
+        "pult_supported": false
       },
       "pult_verdict": "api",
       "note": "Автоответ = свой планировщик. §9.1: 5★ авто, 4★ suggest, 1-3★ manual. Ответ на безтекстовую оценку — проверить выполнимость endpoint."
