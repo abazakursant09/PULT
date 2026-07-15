@@ -97,7 +97,7 @@ export default function BillingPage() {
         {/* Header */}
         <div style={{ marginBottom: 36 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-            <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(110,106,252,0.12)', border: '1px solid rgba(110,106,252,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(124,58,237,0.12)', border: '1px solid rgba(124,58,237,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <CreditCard size={16} color="var(--violet)" />
             </div>
             <h1 style={{ fontSize: 22, fontWeight: 700, color: '#FFFFFF', margin: 0 }}>Подписка и оплата</h1>
@@ -161,7 +161,7 @@ export default function BillingPage() {
                 </ul>
                 <div style={{ marginTop: 'auto' }}>
                   {isCurrent ? (
-                    <div style={{ textAlign: 'center', fontSize: 13, fontWeight: 600, color: 'var(--violet)', padding: '12px', background: 'rgba(110,106,252,0.08)', borderRadius: 10, border: '1px solid rgba(110,106,252,0.18)' }}>
+                    <div style={{ textAlign: 'center', fontSize: 13, fontWeight: 600, color: 'var(--violet)', padding: '12px', background: 'rgba(124,58,237,0.08)', borderRadius: 10, border: '1px solid rgba(124,58,237,0.18)' }}>
                       Текущий тариф
                     </div>
                   ) : (

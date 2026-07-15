@@ -14,6 +14,7 @@ import { clearSession } from '@/lib/session'
 import { LanguageSwitcher } from '@/components/LanguageSwitcher'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 
 const DAYS = [
@@ -102,9 +103,9 @@ function ProfileTab() {
             <p className="text-[18px] font-bold" style={{ color: 'var(--text)' }}>{user?.name ?? '—'}</p>
             <p className="text-[13px] mt-0.5" style={{ color: 'var(--text-2)' }}>{user?.email ?? '—'}</p>
             {paid && (
-              <span className="badge badge-gold mt-2 inline-block">
+              <Badge variant="default" className="mt-2">
                 {planLabel(user?.plan)}
-              </span>
+              </Badge>
             )}
           </div>
         </div>
@@ -116,7 +117,7 @@ function ProfileTab() {
             ...(paid ? [{ label: 'ТАРИФ', value: planLabel(user?.plan) }] : []),
           ].map(({ label, value }) => (
             <div key={label} className="p-4 rounded-[8px]" style={{ background: 'var(--bg)', border: '1px solid var(--surface)' }}>
-              <p className="label mb-1">{label}</p>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-3)] mb-1">{label}</p>
               <p className="text-[14px] font-medium" style={{ color: 'var(--text)' }}>{value}</p>
             </div>
           ))}
@@ -233,12 +234,9 @@ function SecurityTab() {
             </div>
           </div>
           <div className="flex items-center gap-3 shrink-0">
-            <span className="badge" style={mfaEnabled
-              ? { background: 'rgba(124,58,237,0.10)', color: 'var(--violet-text)', borderColor: 'rgba(124,58,237,0.25)' }
-              : { background: 'rgba(255,255,255,0.04)', color: 'var(--text-2)', borderColor: 'var(--surface)' }
-            }>
+            <Badge variant={mfaEnabled ? 'default' : 'neutral'}>
               {mfaEnabled ? '✓ Включено' : 'Выключено'}
-            </span>
+            </Badge>
             {phase === 'idle' && (
               mfaEnabled ? (
                 <Button variant="ghost" size="sm" onClick={() => { setPhase('disable'); setCode(''); setError('') }}>
@@ -474,10 +472,9 @@ function NotificationsTab() {
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-[13px] font-medium" style={{ color: 'var(--text)' }}>{label}</span>
                     {badge === 'авто' && (
-                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold"
-                            style={{ background: 'rgba(110,106,252,0.15)', color: 'var(--violet)' }}>авто</span>
+                      <Badge variant="default" className="text-[10px]">авто</Badge>
                     )}
-                    {badge === 'важно' && <span className="badge badge-danger">важно</span>}
+                    {badge === 'важно' && <Badge variant="danger" className="text-[10px]">важно</Badge>}
                   </div>
                   <p className="text-[12px] mt-0.5" style={{ color: 'var(--text-3)' }}>{desc}</p>
                 </div>
@@ -653,15 +650,13 @@ function DangerTab() {
           </div>
         )}
         {!confirm ? (
-          <button
+          <Button
+            variant="ghost"
             onClick={() => setConfirm(true)}
-            className="btn btn-ghost"
-            style={{ color: 'var(--danger)', borderColor: 'rgba(239,68,68,0.3)' }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--danger)' }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(239,68,68,0.3)' }}
+            className="text-[var(--danger)] border border-[var(--danger-dim)] hover:border-[var(--danger)]"
           >
             <Trash2 size={14} /> Удалить аккаунт
-          </button>
+          </Button>
         ) : (
           <div className="space-y-3">
             <div className="p-4 rounded-[8px]" style={{ background: 'rgba(239,68,68,0.04)', border: '1px solid rgba(239,68,68,0.15)' }}>
@@ -705,7 +700,7 @@ export default function AccountPage() {
     <div className="p-8" style={{ background: 'var(--bg)', minHeight: '100%' }}>
       {/* Page header */}
       <div className="mb-8">
-        <p className="label mb-2">АККАУНТ</p>
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-3)] mb-2">АККАУНТ</p>
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-[8px] flex items-center justify-center shrink-0"
                style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.18)' }}>
