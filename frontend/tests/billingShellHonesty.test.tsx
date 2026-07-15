@@ -102,6 +102,9 @@ describe('the import page promises no section that does not exist', () => {
     const src = read('app', 'dashboard', 'import', 'page.tsx')
 
     expect(src).not.toMatch(/в Финансах/)
-    expect(src).toMatch(/Диагноз появится на главной|диагноз появится на главной/)
+    // The import page tells the seller the result lands on the dashboard — no fake "Финансы"
+    // section. L1.1 dropped the fixed "в течение минуты" promise; the honest copy still points
+    // to the главная / рекомендации, which is what this guard protects.
+    expect(src).toMatch(/на главной/)
   })
 })

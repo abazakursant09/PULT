@@ -196,7 +196,7 @@ export default function ImportPage() {
   // ── Render ───────────────────────────────────────────────────────────────────
   return (
     <>
-      <SellerBar title="Импорт данных" sub="Загрузите CSV — диагноз появится на главной в течение минуты" />
+      <SellerBar title="Импорт данных" sub="Загрузите CSV — PULT проанализирует данные и покажет рекомендации на главной" />
       <div className="s-canvas" style={{ maxWidth: 960 }}>
 
         {/* Progress signal — where the seller is in the flow */}
@@ -488,7 +488,7 @@ export default function ImportPage() {
               Импортировано <strong style={{ color: 'var(--success)' }}>{result.imported}</strong> строк
               {result.skipped > 0 && `, пропущено ${result.skipped}`}
             </p>
-            <p className="text-[12px] text-[var(--text-3)] mb-8">Диагноз появится на главной в течение минуты</p>
+            <p className="text-[12px] text-[var(--text-3)] mb-8">Данные загружены. PULT анализирует их — рекомендации появятся на главной автоматически.</p>
 
             <div className="flex gap-3 justify-center">
               <Button variant="primary" onClick={() => router.push('/dashboard')}>
