@@ -83,7 +83,7 @@ export function TodayFocus() {
 
         {!loading && !error && (
           top === null ? (
-            <div className="text-[13px] text-[var(--text-3)]">Рекомендации появятся, когда PULT получит данные.</div>
+            <div className="text-[13px] text-[var(--text-3)]">Данные получены. PULT анализирует ваш бизнес. Первые рекомендации появятся автоматически.</div>
           ) : (
             <div className="flex flex-col gap-2">
               {/* what happened — the diagnosis headline, the biggest text on the panel */}
