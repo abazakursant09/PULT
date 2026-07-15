@@ -1,35 +1,22 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { CreditCard, Zap, Crown, Check, Clock, AlertCircle, Loader2 } from 'lucide-react'
+import { CreditCard, Clock, AlertCircle, Loader2 } from 'lucide-react'
 import { api, type User, type Payment } from '@/lib/api'
 import { PLAN_LABELS, hasActiveSubscription, planLabel } from '@/lib/plans'
 
-const TARIFFS = [
-  {
-    id: 'basic' as const,
-    name: 'Старт',
-    price: 990,
-    plan: 'master',
-    icon: Zap,
-    features: ['До 5 товаров', 'Мониторинг цен', 'Анализ конкурентов', 'ИИ-ответы на отзывы'],
-  },
-  {
-    id: 'pro' as const,
-    name: 'Мастер',
-    price: 4990,
-    plan: 'profi',
-    icon: Crown,
-    features: ['До 50 товаров', 'Всё из Старта', 'Финансовый модуль', 'Приоритетная поддержка', 'Telegram-уведомления'],
-  },
-]
+// L0.1 — honest FREE Advisory-MVP billing surface. The tariff cards + "Подключить" buy button
+// (which reached a real YooKassa charge for modules the MVP does not ship) are removed. This page
+// now states plainly that paid plans are not available yet, and shows only real, honest data:
+// a current-plan block that appears solely for a seller whose plan a payment actually activated,
+// and the real payment history. No selling, no fake status, no claims about unshipped modules.
+// The api.payments backend is untouched and simply no longer called from here.
 
 const STATUS_LABELS: Record<string, string> = {
   pending:   'Ожидает',
   succeeded: 'Оплачен',
   canceled:  'Отменён',
 }
-
 const STATUS_COLORS: Record<string, string> = {
   pending:   'var(--warning)',
   succeeded: 'var(--success)',
@@ -45,7 +32,6 @@ export default function BillingPage() {
   const [user, setUser] = useState<User | null>(null)
   const [history, setHistory] = useState<Payment[]>([])
   const [loading, setLoading] = useState(true)
-  const [paying, setPaying] = useState<'basic' | 'pro' | null>(null)
   const [error, setError] = useState('')
 
   const load = useCallback(async () => {
@@ -65,18 +51,6 @@ export default function BillingPage() {
 
   useEffect(() => { load() }, [load])
 
-  async function handlePay(tariff: 'basic' | 'pro') {
-    setError('')
-    setPaying(tariff)
-    try {
-      const res = await api.payments.create(tariff)
-      window.location.href = res.confirmation_url
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Ошибка при создании платежа')
-      setPaying(null)
-    }
-  }
-
   if (loading) {
     return (
       <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -86,8 +60,7 @@ export default function BillingPage() {
   }
 
   // `plan` defaults to 'master' at registration, so it cannot say whether anything was bought.
-  // Only a subscription_end_date — which the backend writes when a payment activates the plan —
-  // can. Without one we show no current-plan block at all rather than call a free account active.
+  // Only a subscription_end_date — written by the backend when a payment activates a plan — can.
   const paid = hasActiveSubscription(user)
 
   return (
@@ -100,13 +73,13 @@ export default function BillingPage() {
             <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(124,58,237,0.12)', border: '1px solid rgba(124,58,237,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <CreditCard size={16} color="var(--violet)" />
             </div>
-            <h1 style={{ fontSize: 22, fontWeight: 700, color: '#FFFFFF', margin: 0 }}>Подписка и оплата</h1>
+            <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text)', margin: 0 }}>Подписка и оплата</h1>
           </div>
-          <p style={{ fontSize: 14, color: 'var(--text-2)', margin: 0 }}>Управление тарифом и история платежей</p>
+          <p style={{ fontSize: 14, color: 'var(--text-2)', margin: 0 }}>История платежей</p>
         </div>
 
         {error && (
-          <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 10, padding: '12px 16px', marginBottom: 24, display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ background: 'var(--danger-dim)', border: '1px solid var(--danger)', borderRadius: 10, padding: '12px 16px', marginBottom: 24, display: 'flex', alignItems: 'center', gap: 10 }}>
             <AlertCircle size={16} color="var(--danger)" />
             <span style={{ fontSize: 14, color: 'var(--danger)' }}>{error}</span>
           </div>
@@ -114,75 +87,31 @@ export default function BillingPage() {
 
         {/* Current plan — only for a seller whose plan a payment actually activated. */}
         {paid && (
-          <div style={{ background: 'var(--surface)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 14, padding: '24px 28px', marginBottom: 28 }}>
+          <div style={{ background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 14, padding: '24px 28px', marginBottom: 28 }}>
             <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: 'var(--text-2)', textTransform: 'uppercase', marginBottom: 12 }}>Текущий тариф</p>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-                  <span style={{ fontSize: 26, fontWeight: 700, color: '#FFFFFF' }}>{planLabel(user?.plan)}</span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <Clock size={13} color="var(--text-2)" />
-                  <span style={{ fontSize: 13, color: 'var(--text-2)' }}>До {fmt(user!.subscription_end_date!)}</span>
-                </div>
-              </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+              <span style={{ fontSize: 26, fontWeight: 700, color: 'var(--text)' }}>{planLabel(user?.plan)}</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Clock size={13} color="var(--text-2)" />
+              <span style={{ fontSize: 13, color: 'var(--text-2)' }}>До {fmt(user!.subscription_end_date!)}</span>
             </div>
           </div>
         )}
 
-        {/* Tariff cards */}
-        <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: 'var(--text-2)', textTransform: 'uppercase', marginBottom: 16 }}>Выбрать тариф</p>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16, marginBottom: 40 }}>
-          {TARIFFS.map(t => {
-            const Icon = t.icon
-            const isCurrent = user?.plan === t.plan
-            const isLoading = paying === t.id
-            return (
-              <div key={t.id} style={{ background: 'var(--surface)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 14, padding: '24px', position: 'relative', display: 'flex', flexDirection: 'column' }}>
-                {/* No "ПОПУЛЯРНЫЙ" badge: no popularity data exists, so it was invented social
-                    proof — and it dressed the 4990 ₽ card, the one it pushed a seller toward. */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-                  <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <Icon size={16} color="var(--text-2)" />
-                  </div>
-                  <span style={{ fontSize: 16, fontWeight: 700, color: '#FFFFFF' }}>{t.name}</span>
-                </div>
-                <div style={{ marginBottom: 20 }}>
-                  <span style={{ fontSize: 32, fontWeight: 700, color: '#FFFFFF' }}>{t.price.toLocaleString('ru-RU')} ₽</span>
-                  <span style={{ fontSize: 14, color: 'var(--text-2)' }}> / мес</span>
-                </div>
-                <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 24px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {t.features.map(f => (
-                    <li key={f} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <Check size={14} color="var(--success)" />
-                      <span style={{ fontSize: 13, color: 'var(--line)' }}>{f}</span>
-                    </li>
-                  ))}
-                </ul>
-                <div style={{ marginTop: 'auto' }}>
-                  {isCurrent ? (
-                    <div style={{ textAlign: 'center', fontSize: 13, fontWeight: 600, color: 'var(--violet)', padding: '12px', background: 'rgba(124,58,237,0.08)', borderRadius: 10, border: '1px solid rgba(124,58,237,0.18)' }}>
-                      Текущий тариф
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => handlePay(t.id)}
-                      disabled={isLoading || paying !== null}
-                      style={{ width: '100%', padding: '13px', background: 'var(--violet)', color: '#FFFFFF', fontWeight: 700, fontSize: 14, border: 'none', borderRadius: 10, cursor: paying !== null ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: paying !== null && !isLoading ? 0.5 : 1, transition: 'opacity 0.2s' }}
-                    >
-                      {isLoading ? <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> : null}
-                      {isLoading ? 'Переход к оплате…' : 'Подключить'}
-                    </button>
-                  )}
-                </div>
-              </div>
-            )
-          })}
+        {/* Honest unavailable-monetization state — no tariff cards, no buy button, no charge. */}
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 14, padding: '24px 28px', marginBottom: 28 }}>
+          <p style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)', margin: '0 0 8px' }}>
+            Платные тарифы пока недоступны
+          </p>
+          <p style={{ fontSize: 13.5, color: 'var(--text-2)', lineHeight: 1.6, margin: 0 }}>
+            PULT сейчас работает в режиме Advisory MVP. Платные тарифы будут доступны позже.
+          </p>
         </div>
 
-        {/* Payment history */}
-        <div style={{ background: 'var(--surface)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 14, overflow: 'hidden' }}>
-          <div style={{ padding: '20px 24px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+        {/* Payment history — real records only */}
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 14, overflow: 'hidden' }}>
+          <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--line)' }}>
             <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: 'var(--text-2)', textTransform: 'uppercase', margin: 0 }}>История платежей</p>
           </div>
           {history.length === 0 ? (
@@ -192,15 +121,15 @@ export default function BillingPage() {
           ) : (
             <div>
               {history.map((p, i) => (
-                <div key={p.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 24px', borderBottom: i < history.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none', flexWrap: 'wrap', gap: 8 }}>
+                <div key={p.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 24px', borderBottom: i < history.length - 1 ? '1px solid var(--line)' : 'none', flexWrap: 'wrap', gap: 8 }}>
                   <div>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: '#FFFFFF', marginBottom: 2 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', marginBottom: 2 }}>
                       Тариф {PLAN_LABELS[p.plan] ?? p.plan}
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--text-2)' }}>{fmt(p.created_at)}</div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                    <span style={{ fontSize: 15, fontWeight: 700, color: '#FFFFFF' }}>
+                    <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>
                       {Number(p.amount).toLocaleString('ru-RU')} ₽
                     </span>
                     <span style={{ fontSize: 12, fontWeight: 600, color: STATUS_COLORS[p.status] ?? 'var(--text-2)', background: `${STATUS_COLORS[p.status] ?? 'var(--text-2)'}14`, borderRadius: 6, padding: '3px 10px', border: `1px solid ${STATUS_COLORS[p.status] ?? 'var(--text-2)'}30` }}>

@@ -18,6 +18,7 @@ _VALID_PROD = {
     "DATABASE_URL": "postgresql+asyncpg://u:p@db:5432/pult",
     "CRED_ENC_KEY": "unit-test-fernet-key-placeholder-value",
     "SMTP_HOST": "smtp.example.com",
+    "FRONTEND_URL": "https://app.pult.ru",                     # real host — links must resolve
 }
 
 
@@ -60,6 +61,22 @@ def test_missing_smtp_host_fails():
     r = _import_config({"SMTP_HOST": ""})
     assert r.returncode != 0
     assert "SMTP_HOST" in (r.stdout + r.stderr)
+
+
+# ── L0.2 — FRONTEND_URL must be a real host in production ─────────────────────
+# A localhost FRONTEND_URL makes every verification / password-reset link a dead 404, so no
+# seller can complete signup. It is a launch showstopper and must fail startup, not just warn.
+
+def test_localhost_frontend_url_fails():
+    r = _import_config({"FRONTEND_URL": "http://localhost:3000"})
+    assert r.returncode != 0
+    assert "FRONTEND_URL" in (r.stdout + r.stderr)
+
+
+def test_loopback_ip_frontend_url_fails():
+    r = _import_config({"FRONTEND_URL": "http://127.0.0.1:3000"})
+    assert r.returncode != 0
+    assert "FRONTEND_URL" in (r.stdout + r.stderr)
 
 
 # ── 3. development stays permissive (defaults, no hard-fail) ──────────────────

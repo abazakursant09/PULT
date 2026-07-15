@@ -96,9 +96,12 @@ export default function PaymentResultPage() {
               <ArrowRight size={16} />
             </Link>
           )}
+          {/* L0.1 — no "Попробовать снова" loop back into a billing/checkout charge. In the
+              Advisory-MVP (free) mode there is nothing to retry, so a cancelled/failed payment
+              simply returns the seller to the dashboard. */}
           {(status === 'canceled' || status === 'error') && (
-            <Link href="/dashboard/billing" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: '#7C3AED', color: '#FFFFFF', fontWeight: 700, fontSize: 15, padding: '14px 24px', borderRadius: 12, textDecoration: 'none' }}>
-              Попробовать снова
+            <Link href="/dashboard" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: '#7C3AED', color: '#FFFFFF', fontWeight: 700, fontSize: 15, padding: '14px 24px', borderRadius: 12, textDecoration: 'none' }}>
+              В личный кабинет
               <ArrowRight size={16} />
             </Link>
           )}

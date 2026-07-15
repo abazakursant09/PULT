@@ -120,6 +120,10 @@ if settings.app_env == "production":
         errors.append("CRED_ENC_KEY is not set — required to encrypt marketplace tokens at rest")
     if not settings.smtp_host:
         errors.append("SMTP_HOST is not set — email verification / password reset cannot be delivered")
+    if "localhost" in settings.frontend_url or "127.0.0.1" in settings.frontend_url:
+        # A localhost FRONTEND_URL makes every verification / password-reset link a dead 404,
+        # so no seller can complete signup. This is a launch showstopper, not an advisory — fail loud.
+        errors.append("FRONTEND_URL points to localhost — verification / reset links would 404 for every seller")
     if errors:
         for e in errors:
             logger.critical("[ПУЛЬТ] PRODUCTION CONFIG ERROR: %s", e)
@@ -132,8 +136,6 @@ if settings.app_env == "production":
         logger.warning("⚠️  SENTRY_DSN not set — error tracking disabled in production.")
     if not settings.yookassa_secret_key:
         logger.warning("⚠️  YOOKASSA_SECRET_KEY not set — payments will fail until configured.")
-    if "localhost" in settings.frontend_url:
-        logger.warning("⚠️  FRONTEND_URL points to localhost in production.")
 
 # ── Development / staging warnings ───────────────────────────────────────────
 if settings.secret_key in _INSECURE_VALUES:
