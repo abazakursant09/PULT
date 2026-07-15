@@ -3,33 +3,59 @@
 import { useEffect, useState, useCallback } from 'react'
 import { SellerBar } from '@/components/seller/Shell'
 import { api, type ReviewResponse, type ReviewState, type ReviewHistoryEntry } from '@/lib/api'
+import { Card } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { STATE_LABEL, STATE_BADGE_VARIANT } from '@/lib/reviewState'
 
-// The seller's first review workspace (AR3). Uses the current design system — this is NOT the
-// premium redesign. It shows only real synced reviews; a seller with none sees an honest empty
-// state, never demo data.
+// The seller's review workspace (AR3), P3 premium redesign. Presentation only — it shows the same
+// real synced reviews from the same review APIs, with the same actions. No new functionality: a
+// seller with no reviews sees an honest empty state, never demo data. All colour is on P0 tokens;
+// status is communicated by a coloured P1 Badge, loading by a Skeleton, actions by P1 Buttons.
 
-const STATE_LABEL: Record<ReviewState, string> = {
-  New: 'Новый', Processing: 'Обработка', Drafted: 'Черновик',
-  NeedsAttention: 'Требует внимания', Approved: 'Одобрен', Published: 'Опубликован', Failed: 'Ошибка',
-}
-const STATE_COLOR: Record<ReviewState, string> = {
-  New: '#8E8E93', Processing: '#8E8E93', Drafted: '#6E6AFC', NeedsAttention: '#F59E0B',
-  Approved: '#22C55E', Published: '#16A34A', Failed: '#EF4444',
-}
 const FILTERS: (ReviewState | '')[] = ['', 'New', 'NeedsAttention', 'Drafted', 'Approved', 'Published', 'Failed']
 
+const _MP_NAME: Record<string, string> = {
+  wb: 'Wildberries', wildberries: 'Wildberries', ozon: 'Ozon',
+  yandex: 'Яндекс Маркет', yandex_market: 'Яндекс Маркет', megamarket: 'Megamarket',
+}
+function mp(m: string | null): string {
+  return m ? (_MP_NAME[m] || m) : '—'
+}
+
 function StateBadge({ s }: { s: ReviewState }) {
-  return (
-    <span style={{
-      fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 6,
-      color: STATE_COLOR[s], background: `${STATE_COLOR[s]}1A`, border: `1px solid ${STATE_COLOR[s]}40`,
-    }}>{STATE_LABEL[s]}</span>
-  )
+  return <Badge variant={STATE_BADGE_VARIANT[s]} className="text-[11px] rounded-[6px]">{STATE_LABEL[s]}</Badge>
 }
 
 function Stars({ n }: { n: number | null }) {
   if (n == null) return null
-  return <span style={{ color: '#F59E0B', fontSize: 12 }}>{'★'.repeat(n)}{'☆'.repeat(Math.max(0, 5 - n))}</span>
+  return (
+    <span className="text-[12px] leading-none [font-variant-numeric:tabular-nums]" style={{ color: 'var(--warning)' }}
+      aria-label={`Оценка ${n} из 5`}>
+      {'★'.repeat(n)}<span className="text-[var(--text-3)]">{'☆'.repeat(Math.max(0, 5 - n))}</span>
+    </span>
+  )
+}
+
+// Safety is a trust decision — show it plainly for every review, not only when it blocks. A SAFE
+// review gets a calm, positive confirmation; anything else gets the honest reason it needs a human.
+function SafetyLine({ r }: { r: ReviewResponse }) {
+  const safe = r.safety_category === 'SAFE'
+  if (safe) {
+    return (
+      <div className="text-[12px] rounded-[7px] px-2.5 py-2 mb-2.5 flex items-center gap-2 bg-[var(--success-dim)] text-[var(--success)]">
+        <span aria-hidden>✓</span>
+        <span>Безопасно для автоответа</span>
+      </div>
+    )
+  }
+  return (
+    <div className="text-[12px] rounded-[7px] px-2.5 py-2 mb-2.5 bg-[var(--warning-dim)] text-[var(--warning)]">
+      {r.manual_required_reason || 'Требует ручной проверки'}
+    </div>
+  )
 }
 
 export default function ReviewsPage() {
@@ -71,106 +97,124 @@ export default function ReviewsPage() {
     <>
       <SellerBar title="Отзывы" sub="Ответы на отзывы маркетплейсов" />
       <div className="s-canvas">
-        <div className="flex gap-2 flex-wrap" style={{ marginBottom: 16 }}>
+        {/* Filters — the accent one marks the active state */}
+        <div className="flex gap-2 flex-wrap mb-4">
           {FILTERS.map(f => (
-            <button key={f || 'all'} onClick={() => setFilter(f)}
-              style={{
-                fontSize: 12, padding: '5px 12px', borderRadius: 7, cursor: 'pointer',
-                border: '1px solid var(--line)',
-                background: filter === f ? 'var(--violet)' : 'var(--surface)',
-                color: filter === f ? '#fff' : 'var(--text-2)',
-              }}>{f ? STATE_LABEL[f] : 'Все'}</button>
+            <Button key={f || 'all'} onClick={() => setFilter(f)}
+              variant={filter === f ? 'primary' : 'secondary'} size="sm">
+              {f ? STATE_LABEL[f] : 'Все'}
+            </Button>
           ))}
         </div>
 
-        {error && <div className="s-card" style={{ color: 'var(--danger)', marginBottom: 12 }}>{error}</div>}
+        {error && (
+          <Card variant="surface" className="mb-3 p-3.5 text-[13px] text-[var(--danger)]">{error}</Card>
+        )}
 
         {items === null ? (
-          <div className="s-card" style={{ color: 'var(--text-3)' }}>Загрузка…</div>
-        ) : items.length === 0 ? (
-          <div className="s-card">
-            <h2 style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>Отзывов пока нет</h2>
-            <p style={{ fontSize: 13, color: 'var(--text-2)', marginTop: 8 }}>
-              Здесь появятся реальные отзывы после синхронизации с подключённым кабинетом
-              маркетплейса. Демо-данные не показываются.
-            </p>
-          </div>
-        ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.1fr)', gap: 16 }}>
-            {/* Queue */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {items.map(r => (
-                <button key={r.id} onClick={() => open(r)} className="s-card" style={{
-                  textAlign: 'left', cursor: 'pointer',
-                  border: sel?.id === r.id ? '1px solid var(--violet)' : '1px solid var(--line)',
-                }}>
-                  <div className="flex items-center justify-between" style={{ marginBottom: 6 }}>
-                    <StateBadge s={r.state} />
-                    <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{r.marketplace ?? '—'}</span>
-                  </div>
-                  <Stars n={r.rating} />
-                  <div style={{ fontSize: 13, color: 'var(--text)', marginTop: 4, overflow: 'hidden',
-                    textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {r.review_text || <span style={{ color: 'var(--text-3)' }}>без текста</span>}
-                  </div>
-                </button>
+          // Loading — skeleton queue, no raw text, no layout shift
+          <div className="grid gap-4" style={{ gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.1fr)' }}>
+            <div className="flex flex-col gap-2" aria-label="Загрузка">
+              {[0, 1, 2].map(i => (
+                <Card key={i} variant="surface" className="p-3.5 flex flex-col gap-2">
+                  <Skeleton className="h-4 w-24" />
+                  <Skeleton className="h-3.5 w-16" />
+                  <Skeleton className="h-3.5 w-full" />
+                </Card>
               ))}
+            </div>
+            <Card variant="surface" className="p-4"><Skeleton className="h-40 w-full" /></Card>
+          </div>
+        ) : items.length === 0 ? (
+          <EmptyState
+            title="Отзывов пока нет"
+            description="Здесь появятся реальные отзывы после синхронизации с подключённым кабинетом маркетплейса. Демо-данные не показываются."
+          />
+        ) : (
+          <div className="grid gap-4" style={{ gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.1fr)' }}>
+            {/* Queue */}
+            <div className="flex flex-col gap-2">
+              {items.map(r => {
+                const active = sel?.id === r.id
+                return (
+                  <button key={r.id} onClick={() => open(r)} className="text-left group">
+                    <Card
+                      variant={active ? 'elevated' : 'surface'}
+                      className="p-3.5 transition-[border-color,background-color] duration-150 group-hover:bg-[var(--surface-h)]"
+                      style={active ? { borderColor: 'var(--violet)' } : undefined}
+                    >
+                      <div className="flex items-center justify-between mb-1.5">
+                        <StateBadge s={r.state} />
+                        <span className="text-[11px] text-[var(--text-3)]">{mp(r.marketplace)}</span>
+                      </div>
+                      <Stars n={r.rating} />
+                      <div className="text-[13px] text-[var(--text)] mt-1 overflow-hidden text-ellipsis whitespace-nowrap">
+                        {r.review_text || <span className="text-[var(--text-3)]">без текста</span>}
+                      </div>
+                    </Card>
+                  </button>
+                )
+              })}
             </div>
 
             {/* Detail */}
-            <div className="s-card" style={{ position: 'sticky', top: 16, alignSelf: 'start' }}>
+            <Card variant="surface" className="p-4 sticky top-4 self-start">
               {!sel ? (
-                <p style={{ fontSize: 13, color: 'var(--text-3)' }}>Выберите отзыв слева.</p>
+                <p className="text-[13px] text-[var(--text-3)]">Выберите отзыв слева.</p>
               ) : (
                 <>
-                  <div className="flex items-center justify-between" style={{ marginBottom: 10 }}>
-                    <StateBadge s={sel.state} />
+                  <div className="flex items-center justify-between mb-2.5">
+                    <div className="flex items-center gap-2">
+                      <StateBadge s={sel.state} />
+                      <span className="text-[11px] text-[var(--text-3)]">{mp(sel.marketplace)}</span>
+                    </div>
                     <Stars n={sel.rating} />
                   </div>
-                  <p style={{ fontSize: 13, color: 'var(--text)', marginBottom: 10 }}>{sel.review_text || '—'}</p>
+                  <p className="text-[13px] text-[var(--text)] mb-2.5">{sel.review_text || '—'}</p>
 
-                  {sel.safety_category && sel.safety_category !== 'SAFE' && (
-                    <div style={{ fontSize: 12, color: '#F59E0B', background: '#F59E0B14',
-                      border: '1px solid #F59E0B40', borderRadius: 7, padding: '8px 10px', marginBottom: 10 }}>
-                      {sel.manual_required_reason || 'Требует ручной проверки'}
-                    </div>
-                  )}
+                  <SafetyLine r={sel} />
 
                   {sel.state === 'Failed' && sel.failure_reason && (
-                    <div style={{ fontSize: 12, color: 'var(--danger)', background: '#EF444414',
-                      border: '1px solid #EF444440', borderRadius: 7, padding: '8px 10px', marginBottom: 10 }}>
+                    <div className="text-[12px] rounded-[7px] px-2.5 py-2 mb-2.5 bg-[var(--danger-dim)] text-[var(--danger)]">
                       Ошибка публикации: {sel.failure_reason} (попыток: {sel.publication_attempts})
                     </div>
                   )}
 
+                  <label className="block text-[11px] font-semibold uppercase tracking-wide text-[var(--text-3)] mb-1.5">
+                    Ответ на отзыв
+                  </label>
                   <textarea value={editText} onChange={e => setEditText(e.target.value)}
-                    placeholder="Текст ответа" rows={4} className="input"
-                    style={{ width: '100%', marginBottom: 10 }} disabled={sel.state === 'Published'} />
+                    placeholder="Текст ответа" rows={4}
+                    disabled={sel.state === 'Published'}
+                    className="w-full mb-3 rounded-[var(--r-sm)] border border-[var(--line)] bg-[var(--bg)] text-[var(--text)] placeholder:text-[var(--text-3)] text-[14px] px-3 py-2.5 transition-[border-color] duration-[var(--dur)] focus-visible:outline-none focus-visible:border-[var(--violet-text)] disabled:opacity-40 disabled:cursor-not-allowed" />
 
+                  {/* Actions grouped by lifecycle: prepare (draft/save) → approve → publish (primary) */}
                   <div className="flex gap-2 flex-wrap">
-                    <button disabled={busy} onClick={() => act(() => api.reviews.draft(sel.product_id, sel.id))}
-                      className="s-btn gho">Создать черновик</button>
-                    <button disabled={busy} onClick={() => act(() =>
-                      api.reviews.update(sel.product_id, sel.id, { response_text: editText }))}
-                      className="s-btn gho">Сохранить</button>
-                    <button disabled={busy} onClick={() => act(() => api.reviews.approve(sel.product_id, sel.id))}
-                      className="s-btn gho">Одобрить</button>
-                    <button disabled={busy} onClick={() => act(() => api.reviews.publish(sel.product_id, sel.id))}
-                      className="s-btn pri">Опубликовать</button>
+                    <Button variant="ghost" size="sm" disabled={busy}
+                      onClick={() => act(() => api.reviews.draft(sel.product_id, sel.id))}>Создать черновик</Button>
+                    <Button variant="ghost" size="sm" disabled={busy}
+                      onClick={() => act(() => api.reviews.update(sel.product_id, sel.id, { response_text: editText }))}>Сохранить</Button>
+                    <Button variant="secondary" size="sm" disabled={busy}
+                      onClick={() => act(() => api.reviews.approve(sel.product_id, sel.id))}>Одобрить</Button>
+                    <Button variant="primary" size="sm" disabled={busy}
+                      onClick={() => act(() => api.reviews.publish(sel.product_id, sel.id))}>Опубликовать</Button>
                   </div>
 
-                  <div style={{ marginTop: 16, borderTop: '1px solid var(--line)', paddingTop: 12 }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase' }}>
+                  <div className="mt-4 border-t border-[var(--line)] pt-3">
+                    <div className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-3)]">
                       История публикаций
                     </div>
                     {history === null ? (
-                      <p style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 6 }}>Загрузка…</p>
+                      <div className="mt-2 flex flex-col gap-1.5" aria-label="Загрузка">
+                        <Skeleton className="h-3.5 w-3/4" />
+                        <Skeleton className="h-3.5 w-1/2" />
+                      </div>
                     ) : history.length === 0 ? (
-                      <p style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 6 }}>Публикаций ещё не было.</p>
+                      <p className="text-[12px] text-[var(--text-3)] mt-1.5">Публикаций ещё не было.</p>
                     ) : (
-                      <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <div className="mt-1.5 flex flex-col gap-1">
                         {history.map((h, i) => (
-                          <div key={i} style={{ fontSize: 12, color: 'var(--text-2)' }}>
+                          <div key={i} className="text-[12px] text-[var(--text-2)] [font-variant-numeric:tabular-nums]">
                             {h.timestamp?.slice(0, 19).replace('T', ' ')} · {h.mode} · {h.status}
                             {h.error_code ? ` · ${h.error_code}` : ''}
                           </div>
@@ -180,7 +224,7 @@ export default function ReviewsPage() {
                   </div>
                 </>
               )}
-            </div>
+            </Card>
           </div>
         )}
       </div>
