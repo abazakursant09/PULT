@@ -74,6 +74,7 @@
   --dur:      200ms;
   --ease:     cubic-bezier(.2,.6,.2,1);
   --ease-out: cubic-bezier(0.23,1,0.32,1);   /* stronger ease-out for ent:/press feedback (emil) */
+  --ease-drawer: cubic-bezier(0.32,0.72,0,1);/* iOS drawer curve (Ionic) — off-canvas nav slide */
 
   /* Type scale (numbers use the mono stack for aligned figures) */
   --fs-display: 28px;
