@@ -73,6 +73,7 @@
   --dur-fast: 120ms;
   --dur:      200ms;
   --ease:     cubic-bezier(.2,.6,.2,1);
+  --ease-out: cubic-bezier(0.23,1,0.32,1);   /* stronger ease-out for ent:/press feedback (emil) */
 
   /* Type scale (numbers use the mono stack for aligned figures) */
   --fs-display: 28px;
@@ -153,6 +154,25 @@ body[data-focus="1"] [data-smart-assistant] { display: none !important; }
    COMPONENTS
    ════════════════════════════════════════════════════════════ */
 @layer components {
+
+  /* ── SKELETON (P1) — calm shimmer, no layout shift ─────────
+     The caller reserves the box (width/height), so content never reflows when it swaps in.
+     A slow gradient sweep on the surface ramp — quiet, not a flashing pulse. */
+  .pult-skeleton {
+    position: relative;
+    overflow: hidden;
+    background: var(--surface-h);
+    border-radius: var(--r-sm);
+  }
+  .pult-skeleton::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.05), transparent);
+    transform: translateX(-100%);
+    animation: pultSkeletonSweep 1.4s var(--ease) infinite;
+  }
+  @keyframes pultSkeletonSweep { 100% { transform: translateX(100%); } }
 
   /* ── CARD ──────────────────────────────────────────────── */
   .card {
@@ -418,4 +438,11 @@ body[data-focus="1"] [data-smart-assistant] { display: none !important; }
   .btn { min-height: 44px; }
   .section { padding: 60px 20px; }
   .section-sm { padding: 48px 20px; }
+}
+
+/* ── Reduced motion (P1, emil) — keep opacity/colour, drop transform-based movement ─── */
+@media (prefers-reduced-motion: reduce) {
+  .pult-skeleton::after { animation: none; }
+  .pult-btn:active { transform: none !important; }
+  *, *::before, *::after { scroll-behavior: auto !important; }
 }
