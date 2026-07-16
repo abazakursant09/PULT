@@ -143,5 +143,6 @@ def test_unmapped_action_skips_gate(monkeypatch):
 def test_executor_consults_capability_registry_on_write():
     import inspect
     src = inspect.getsource(executor.execute)
-    assert "capability_registry.verdict(" in src
+    # R-OZ2: the write gate now consults availability() (honours pult_supported), not raw verdict().
+    assert "capability_registry.availability(" in src
     assert "capability_for_action(" in src

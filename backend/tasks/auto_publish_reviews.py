@@ -125,6 +125,7 @@ async def run_auto_publish_reviews() -> dict:
                     db=db, user_id=rule.user_id,
                     action_type="publish_review_response",
                     payload={
+                        "marketplace": review.marketplace,   # R-OZ2: routes to the review's provider
                         "feedback_id": review.external_review_id,
                         "text": review.response_text,
                         "rating": review.rating,

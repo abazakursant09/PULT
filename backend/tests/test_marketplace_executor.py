@@ -66,7 +66,7 @@ def test_l3_publish_success():
         wb_client.publish_feedback_answer = _mock_publish(counter)
         res = await executor.execute(
             db=db, user_id=uid, action_type="publish_review_response",
-            payload={"feedback_id": "fb1", "text": "Спасибо за отзыв!", "rating": 5},
+            payload={"marketplace": "wildberries", "feedback_id": "fb1", "text": "Спасибо за отзыв!", "rating": 5},
         )
         assert res.status == "success", res.error
         assert res.api_request_id == "req-123"
@@ -82,7 +82,7 @@ def test_guard_blocks_negative_auto_publish():
         wb_client.publish_feedback_answer = _mock_publish({"calls": 0})
         res = await executor.execute(
             db=db, user_id=uid, action_type="publish_review_response",
-            payload={"feedback_id": "fb1", "text": "ответ", "rating": 2},
+            payload={"marketplace": "wildberries", "feedback_id": "fb1", "text": "ответ", "rating": 2},
             mode="automated_l4",
             rule={"enabled": True, "guard": {}},
         )
@@ -97,7 +97,7 @@ def test_l4_requires_rule():
         db, uid = await _setup()
         res = await executor.execute(
             db=db, user_id=uid, action_type="publish_review_response",
-            payload={"feedback_id": "fb1", "text": "ответ", "rating": 5},
+            payload={"marketplace": "wildberries", "feedback_id": "fb1", "text": "ответ", "rating": 5},
             mode="automated_l4", rule=None,
         )
         assert res.status == "rejected"
@@ -111,7 +111,7 @@ def test_missing_scope_rejected():
         db, uid = await _setup(scope="prices")  # no feedbacks scope
         res = await executor.execute(
             db=db, user_id=uid, action_type="publish_review_response",
-            payload={"feedback_id": "fb1", "text": "ответ", "rating": 5},
+            payload={"marketplace": "wildberries", "feedback_id": "fb1", "text": "ответ", "rating": 5},
         )
         assert res.status == "rejected"
         assert res.error["code"] == "MISSING_SCOPE"
@@ -124,7 +124,7 @@ def test_validation_missing_text():
         db, uid = await _setup()
         res = await executor.execute(
             db=db, user_id=uid, action_type="publish_review_response",
-            payload={"feedback_id": "fb1", "rating": 5},
+            payload={"marketplace": "wildberries", "feedback_id": "fb1", "rating": 5},
         )
         assert res.status == "rejected"
         assert res.error["code"] == "VALIDATION"
@@ -139,7 +139,7 @@ def test_idempotency_dedupes():
         wb_client.publish_feedback_answer = _mock_publish(counter)
         kw = dict(
             db=db, user_id=uid, action_type="publish_review_response",
-            payload={"feedback_id": "fb1", "text": "ответ", "rating": 5},
+            payload={"marketplace": "wildberries", "feedback_id": "fb1", "text": "ответ", "rating": 5},
             idempotency_key="review:abc",
         )
         r1 = await executor.execute(**kw)
@@ -157,7 +157,7 @@ def test_dry_run_no_side_effects():
         wb_client.publish_feedback_answer = _mock_publish(counter)
         res = await executor.execute(
             db=db, user_id=uid, action_type="publish_review_response",
-            payload={"feedback_id": "fb1", "text": "ответ", "rating": 5},
+            payload={"marketplace": "wildberries", "feedback_id": "fb1", "text": "ответ", "rating": 5},
             dry_run=True,
         )
         assert res.status == "dry_run_ok"

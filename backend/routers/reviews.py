@@ -316,6 +316,7 @@ async def publish_review_response(
         user_id=current_user.id,
         action_type="publish_review_response",
         payload={
+            "marketplace": review.marketplace,   # R-OZ2: routes to the review's marketplace provider
             "feedback_id": review.external_review_id,
             "text": review.response_text,
             "rating": review.rating,

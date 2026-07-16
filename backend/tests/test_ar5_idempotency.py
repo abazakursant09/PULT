@@ -60,7 +60,7 @@ def _ok(counter):
 def _publish(db, uid, key="review:x"):
     return executor.execute(
         db=db, user_id=uid, action_type="publish_review_response",
-        payload={"feedback_id": "fb1", "text": "Спасибо!", "rating": 5},
+        payload={"marketplace": "wildberries", "feedback_id": "fb1", "text": "Спасибо!", "rating": 5},
         idempotency_key=key,
     )
 
