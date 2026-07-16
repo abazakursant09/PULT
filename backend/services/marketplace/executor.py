@@ -154,11 +154,15 @@ async def execute(
         # Unmapped actions (set_price, update_card) skip the gate (legacy behavior).
         cap_key = capability_for_action(action_type)
         if cap_key is not None:
-            v = capability_registry.verdict(cap_key, _canon_mp(target_mp))
-            if v is None or v == "impossible":
+            # R-OZ2: gate on availability().available, not the raw marketplace verdict — so a
+            # capability the marketplace exposes but PULT has not built (pult_supported=false, e.g.
+            # Ozon/Yandex review reply) fails closed here, before any write. availability defaults
+            # pult_supported True, so every already-shipped action is unaffected.
+            avail = capability_registry.availability(cap_key, _canon_mp(target_mp))
+            if not avail.get("available"):
                 raise ExecutionError(
                     ExecutionError.CAPABILITY_NOT_SUPPORTED,
-                    f"{action_type} not supported on {target_mp} (capability {cap_key})",
+                    f"{action_type} not supported on {target_mp} (capability {cap_key}, {avail.get('status')})",
                 )
         # 4) guard (before any network)
         await guard.check(
