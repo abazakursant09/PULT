@@ -116,8 +116,14 @@ def test_unsupported_marketplace_is_honest(monkeypatch):
 
 
 def test_registry_has_no_fake_providers():
-    assert set(REVIEW_PROVIDERS) == {"wildberries"}
-    for mp in ("ozon", "yandex", "megamarket"):
+    # WB is live. Ozon has a REAL fetch/publish provider (R-OZ1) but it is honestly gated —
+    # supports_reviews() stays False until R-OZ3 wires the publish dispatcher + flips
+    # capability_registry pult_supported, so the /sync router still answers unsupported for Ozon.
+    # No FAKE/stub provider is registered for anyone.
+    assert set(REVIEW_PROVIDERS) == {"wildberries", "ozon"}
+    assert get_review_provider("wildberries").supports_reviews() is True
+    assert get_review_provider("ozon").supports_reviews() is False
+    for mp in ("yandex", "megamarket"):
         assert get_review_provider(mp) is None
 
 

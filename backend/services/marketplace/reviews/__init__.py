@@ -14,12 +14,16 @@ from typing import Optional
 
 from .base import NormalizedReview, ReviewProvider
 from .wildberries import WildberriesReviewProvider
+from .ozon import OzonReviewProvider
 
 # marketplace label (as stored on Product.marketplace / MarketplaceConnection.marketplace) -> provider
 REVIEW_PROVIDERS: dict[str, ReviewProvider] = {
     "wildberries": WildberriesReviewProvider(),
-    # ozon / yandex / megamarket: no provider yet — get_review_provider returns None (honest
-    # unsupported). They are added here only when a real client exists, never as a stub.
+    # Ozon has a REAL fetch/publish client (R-OZ1), but its provider.supports_reviews() stays False
+    # until R-OZ3 wires the publish dispatcher and flips capability_registry pult_supported — so the
+    # /sync router still answers honest-unsupported for Ozon today. Registered, not yet enabled.
+    "ozon": OzonReviewProvider(),
+    # yandex / megamarket: no provider yet — get_review_provider returns None (honest unsupported).
 }
 
 
