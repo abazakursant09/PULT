@@ -13,7 +13,7 @@ from .errors import ExecutionError
 from .wb_client import wb_client
 from .ozon_client import ozon_client
 from . import ozon_performance_auth
-from .reviews import get_review_provider
+from .reviews import get_review_provider, review_credential
 
 # ad_set_state action vocabulary (start|pause) → Ozon Performance verbs.
 _OZON_STATE_VERB = {"start": "activate", "pause": "deactivate"}
@@ -53,18 +53,6 @@ def _validate_set_price(payload: dict) -> None:
 
 
 # ── dispatchers (normalize marketplace response) ───────────────────────────────
-# Per-marketplace review credential shaping — a DICT, never an if/elif. WB uses the scoped token
-# as-is; Ozon's provider expects the composite "<client_id>:<api_key>". A new marketplace adds a key
-# here (or falls through to the identity default), never a branch in the dispatch flow.
-_REVIEW_CREDENTIAL = {
-    "ozon": lambda token, ctx: f"{ctx.get('ozon_client_id')}:{token}",
-}
-
-
-def _review_credential(marketplace: str, token: str, ctx: dict) -> str:
-    return _REVIEW_CREDENTIAL.get(marketplace, lambda t, _c: t)(token, ctx)
-
-
 async def _dispatch_publish_review(token: str, payload: dict, ctx: dict) -> dict:
     # R-OZ2: route by the review's marketplace through the provider registry — no if/elif on the
     # marketplace name. The executor's capability gate (availability/pult_supported) has already
@@ -77,7 +65,7 @@ async def _dispatch_publish_review(token: str, payload: dict, ctx: dict) -> dict
             ExecutionError.CAPABILITY_NOT_SUPPORTED,
             f"review publish not supported on {marketplace}",
         )
-    cred = _review_credential(marketplace, token, ctx)
+    cred = review_credential(marketplace, token, ctx)
     resp = await provider.publish_answer(cred, payload["feedback_id"], payload["text"])
     return {
         "api_request_id": (resp or {}).get("requestId") if isinstance(resp, dict) else None,

@@ -61,7 +61,7 @@
         "verdict": "api",
         "endpoint": "/v1/review/list",
         "tariff": "premium_plus",
-        "pult_supported": false
+        "pult_supported": true
       },
       "yandex": {
         "verdict": "api",
@@ -424,7 +424,7 @@
         "verdict": "api",
         "endpoint": "/v1/review/comment/create",
         "tariff": "premium_plus",
-        "pult_supported": false
+        "pult_supported": true
       },
       "yandex": {
         "verdict": "api",

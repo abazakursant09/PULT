@@ -20,7 +20,7 @@ from schemas.review import (ReviewResponseOut, ReviewResponseUpdate,
 from services.review.state import derive_state
 from services.marketplace import executor, credential_vault
 from services.marketplace.wb_client import wb_client
-from services.marketplace.reviews import get_review_provider
+from services.marketplace.reviews import get_review_provider, review_credential
 from services.review.draft import classify_review, build_draft
 from models.execution_log import ExecutionLog
 
@@ -140,7 +140,10 @@ async def sync_reviews(
         raise HTTPException(409, "у подключения нет области доступа «feedbacks»")
 
     token = credential_vault.decrypt(cred.secret_enc)
-    reviews = await provider.fetch_reviews(token, product.sku)
+    # Shape the token into what this marketplace's provider expects (e.g. Ozon's composite
+    # "<client_id>:<api_key>") — same helper the publish dispatcher uses, so sync and publish agree.
+    cred_token = review_credential(product.marketplace, token, {"ozon_client_id": conn.ozon_client_id})
+    reviews = await provider.fetch_reviews(cred_token, product.sku)
 
     # Dedup is enforced by the AR0 partial-unique index (product_id, external_review_id,
     # marketplace). Each insert runs in its own savepoint: a duplicate (a concurrent sync of the

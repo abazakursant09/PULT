@@ -21,15 +21,16 @@ def test_review_reply_wildberries_available():
     assert a["pult_supported"] is True
 
 
-def test_review_reply_ozon_not_available():
-    # Ozon has the API (marketplace_api True) but PULT has no integration → not available.
-    # (Ozon also carries a premium_plus tariff gate; with the tariff satisfied the block is
-    # unambiguously the PULT-support gate.)
-    a = cap.availability("review_reply", "ozon", tariffs={"premium_plus"})
-    assert a["available"] is False
-    assert a["marketplace_api"] is True
-    assert a["pult_supported"] is False
-    assert a["status"] == "pult"
+def test_review_reply_ozon_available_for_premium_only():
+    # R-OZ3: Ozon review reply is now PULT-supported, but the marketplace gates it behind the
+    # seller's premium_plus tariff. Available only when the seller holds that tariff.
+    ok = cap.availability("review_reply", "ozon", tariffs={"premium_plus"})
+    assert ok["available"] is True
+    assert ok["marketplace_api"] is True and ok["pult_supported"] is True
+    # a non-premium seller is blocked by the marketplace tariff, not by PULT support
+    blocked = cap.availability("review_reply", "ozon")           # no tariffs
+    assert blocked["available"] is False
+    assert blocked["status"] == "tariff" and blocked["pult_supported"] is True
 
 
 def test_review_reply_yandex_market_not_available():
@@ -44,7 +45,9 @@ def test_review_reply_yandex_market_not_available():
 
 def test_review_sync_support_matches_reply():
     assert cap.availability("reviews", "wildberries")["available"] is True
-    assert cap.availability("reviews", "ozon", tariffs={"premium_plus"})["available"] is False
+    # R-OZ3: Ozon sync PULT-supported; available for a premium_plus seller, tariff-blocked otherwise.
+    assert cap.availability("reviews", "ozon", tariffs={"premium_plus"})["available"] is True
+    assert cap.availability("reviews", "ozon")["available"] is False        # no tariff
     assert cap.availability("reviews", "yandex_market")["available"] is False
 
 
