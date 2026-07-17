@@ -38,10 +38,10 @@ def test_yandex_still_unsupported():
     assert get_review_provider("megamarket") is None
 
 
-def test_ozon_not_yet_enabled_so_sync_stays_closed():
-    # supports_reviews() False → the /sync router answers honest-unsupported for Ozon (mirrors
-    # capability_registry pult_supported=false). No premature enablement.
-    assert get_review_provider("ozon").supports_reviews() is False
+def test_ozon_enabled_r_oz3():
+    # R-OZ3 enabled Ozon: supports_reviews() True, in lockstep with capability_registry
+    # pult_supported=true. The /sync router now accepts Ozon (given a connection).
+    assert get_review_provider("ozon").supports_reviews() is True
 
 
 # ── fetch mapping ────────────────────────────────────────────────────────────

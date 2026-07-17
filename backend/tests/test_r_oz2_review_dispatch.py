@@ -31,8 +31,9 @@ def _run(coro):
 # ── unit: credential shaping is a dict, not a branch ─────────────────────────
 
 def test_review_credential_shaping():
-    assert ac._review_credential("wildberries", "TOK", {}) == "TOK"          # identity default
-    assert ac._review_credential("ozon", "APIKEY", {"ozon_client_id": "CID"}) == "CID:APIKEY"
+    from services.marketplace.reviews import review_credential
+    assert review_credential("wildberries", "TOK", {}) == "TOK"          # identity default
+    assert review_credential("ozon", "APIKEY", {"ozon_client_id": "CID"}) == "CID:APIKEY"
 
 
 def test_dispatcher_has_no_marketplace_branch():
@@ -104,21 +105,43 @@ async def _setup(marketplace="wildberries", scope="feedbacks"):
     return db, uid
 
 
-def test_ozon_publish_fails_closed_capability(monkeypatch):
-    # Ozon review_reply pult_supported=false → availability().available is False → rejected before
-    # any dispatch, even though a real OzonReviewProvider exists.
+def test_ozon_publish_routes_and_succeeds(monkeypatch):
+    # R-OZ3: Ozon review reply is PULT-supported. The executor gate passes (marketplace_api +
+    # pult_supported), the dispatcher routes to the Ozon provider, and the composite credential
+    # "<client_id>:<api_key>" reaches ozon_client. WB client is never touched.
+    from services.marketplace import ozon_client as ozon_mod
     async def go():
-        db, uid = await _setup(marketplace="ozon")
-        called = {"n": 0}
-        async def fake_wb(*a, **k): called["n"] += 1; return {}
+        db, uid = await _setup(marketplace="ozon")   # connection carries ozon_client_id="CID"
+        seen = {}
+        async def fake_ozon(*, token, client_id, review_id, text):
+            seen.update(token=token, client_id=client_id, review_id=review_id, text=text)
+            return {"requestId": "req-oz"}
+        monkeypatch.setattr(ozon_mod.ozon_client, "publish_feedback_answer", fake_ozon)
+        wb_called = {"n": 0}
+        async def fake_wb(*a, **k): wb_called["n"] += 1; return {}
         monkeypatch.setattr(wb_client, "publish_feedback_answer", fake_wb)
+
         res = await executor.execute(
             db=db, user_id=uid, action_type="publish_review_response",
-            payload={"marketplace": "ozon", "feedback_id": "fb1", "text": "hi", "rating": 5},
+            payload={"marketplace": "ozon", "feedback_id": "fb1", "text": "Спасибо!", "rating": 5},
             idempotency_key="review:oz")
+        assert res.status == "success"
+        # composite credential split correctly: client_id from the connection, api_key from the vault
+        assert seen == {"token": "tok", "client_id": "CID", "review_id": "fb1", "text": "Спасибо!"}
+        assert wb_called["n"] == 0                    # WB client never touched
+    _run(go())
+
+
+def test_yandex_publish_still_fails_closed(monkeypatch):
+    # Yandex has no provider + pult_supported false → still CAPABILITY_NOT_SUPPORTED, no dispatch.
+    async def go():
+        db, uid = await _setup(marketplace="yandex")
+        res = await executor.execute(
+            db=db, user_id=uid, action_type="publish_review_response",
+            payload={"marketplace": "yandex", "feedback_id": "fb1", "text": "hi", "rating": 5},
+            idempotency_key="review:ym")
         assert res.status == "rejected"
         assert res.error["code"] == ExecutionError.CAPABILITY_NOT_SUPPORTED
-        assert called["n"] == 0                      # no dispatch of any kind
     _run(go())
 
 

@@ -26,8 +26,10 @@ from .base import NormalizedReview
 
 _MARKETPLACE = "ozon"
 
-# Flip to True in R-OZ3, together with capability_registry pult_supported=true for ozon.
-_ENABLED = False
+# R-OZ3: Ozon reviews enabled, together with capability_registry pult_supported=true for ozon.
+# The registry flag and this flag move as a pair so the executor gate (reads the registry) and the
+# /sync router + dispatcher belt (read supports_reviews()) can never disagree.
+_ENABLED = True
 
 # Ozon review payload keys, tried defensively — we do not assume Ozon's exact field name.
 _ID_KEYS = ("id", "review_id", "uuid")

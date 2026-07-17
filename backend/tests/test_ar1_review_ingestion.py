@@ -105,7 +105,8 @@ def test_unsupported_marketplace_is_honest(monkeypatch):
 
     db = _run(_new_db())
     uid = str(uuid.uuid4())
-    prod = _run(_seed(db, uid, marketplace="ozon"))
+    # Yandex has no provider (Ozon is supported as of R-OZ3) → the router answers honest-unsupported.
+    prod = _run(_seed(db, uid, marketplace="yandex"))
     r = _client(db, uid).post(f"/api/reviews/{prod.id}/sync")
 
     assert r.status_code == 422
@@ -116,13 +117,12 @@ def test_unsupported_marketplace_is_honest(monkeypatch):
 
 
 def test_registry_has_no_fake_providers():
-    # WB is live. Ozon has a REAL fetch/publish provider (R-OZ1) but it is honestly gated —
-    # supports_reviews() stays False until R-OZ3 wires the publish dispatcher + flips
-    # capability_registry pult_supported, so the /sync router still answers unsupported for Ozon.
-    # No FAKE/stub provider is registered for anyone.
+    # WB and Ozon are live (R-OZ3 enabled Ozon: real provider + supports_reviews True +
+    # capability_registry pult_supported true). Yandex/Megamarket have no provider — honest
+    # unsupported, not a fake stub.
     assert set(REVIEW_PROVIDERS) == {"wildberries", "ozon"}
     assert get_review_provider("wildberries").supports_reviews() is True
-    assert get_review_provider("ozon").supports_reviews() is False
+    assert get_review_provider("ozon").supports_reviews() is True
     for mp in ("yandex", "megamarket"):
         assert get_review_provider(mp) is None
 

@@ -32,4 +32,20 @@ def get_review_provider(marketplace: str) -> Optional[ReviewProvider]:
     return REVIEW_PROVIDERS.get(marketplace)
 
 
-__all__ = ["NormalizedReview", "ReviewProvider", "REVIEW_PROVIDERS", "get_review_provider"]
+# Per-marketplace credential shaping — a DICT, never an if/elif. The ReviewProvider contract passes
+# a single `token`, but some marketplaces need more than a bearer: Ozon's provider expects the
+# composite "<client_id>:<api_key>". Both the /sync router and the publish dispatcher shape the
+# credential here so the two paths can never diverge, and a new marketplace adds a key (or uses the
+# identity default), never a branch.
+_REVIEW_CREDENTIAL = {
+    "ozon": lambda token, ctx: f"{(ctx or {}).get('ozon_client_id')}:{token}",
+}
+
+
+def review_credential(marketplace: str, token: str, ctx: Optional[dict] = None) -> str:
+    """Shape the raw scoped token into what this marketplace's provider expects."""
+    return _REVIEW_CREDENTIAL.get(marketplace, lambda t, _c: t)(token, ctx)
+
+
+__all__ = ["NormalizedReview", "ReviewProvider", "REVIEW_PROVIDERS",
+           "get_review_provider", "review_credential"]
