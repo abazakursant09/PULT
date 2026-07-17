@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useRef } from 'react'
+import { Suspense, useEffect, useState, useRef } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { CheckCircle2, XCircle, Clock, Loader2, ArrowRight } from 'lucide-react'
 import { api } from '@/lib/api'
@@ -23,7 +23,7 @@ const ICONS: Record<Status, React.ReactNode> = {
   error:     <XCircle size={48} color="#EF4444" />,
 }
 
-export default function PaymentResultPage() {
+function PaymentResultContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const [status, setStatus] = useState<Status>('loading')
@@ -121,5 +121,18 @@ export default function PaymentResultPage() {
       </div>
       <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>
+  )
+}
+
+export default function PaymentResultPage() {
+  return (
+    <Suspense fallback={
+      <div style={{ minHeight: '100vh', background: '#0A0A0A', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Loader2 size={48} color="#7C3AED" style={{ animation: 'spin 1s linear infinite' }} />
+        <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+      </div>
+    }>
+      <PaymentResultContent />
+    </Suspense>
   )
 }
