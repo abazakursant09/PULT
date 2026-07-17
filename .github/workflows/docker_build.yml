@@ -1,0 +1,66 @@
+name: Docker Build
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - backend/Dockerfile
+      - backend/requirements.txt
+      - frontend/Dockerfile
+      - frontend/package-lock.json
+      - docker-compose.yml
+      - .github/workflows/docker_build.yml
+  push:
+    branches:
+      - master
+    paths:
+      - backend/Dockerfile
+      - backend/requirements.txt
+      - frontend/Dockerfile
+      - frontend/package-lock.json
+      - docker-compose.yml
+      - .github/workflows/docker_build.yml
+
+jobs:
+  docker-build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate Compose
+        env:
+          POSTGRES_PASSWORD: ci-placeholder
+          SECRET_KEY: ci-placeholder
+          CRED_ENC_KEY: ci-placeholder
+          SMTP_HOST: smtp.example.com
+          TELEGRAM_BOT_TOKEN: test:token
+          NEXT_PUBLIC_API_URL: https://api.example.com
+        run: docker compose config --quiet
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: false
+          load: false
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,scope=backend,mode=max
+
+      - name: Build frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: false
+          load: false
+          build-args: |
+            NEXT_PUBLIC_API_URL=https://api.example.com
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,scope=frontend,mode=max
