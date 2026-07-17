@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { Suspense, useEffect, useState, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import {
   User, Shield, ShieldCheck, ShieldOff, Bell, Globe, AlertTriangle,
@@ -677,7 +677,7 @@ function DangerTab() {
 }
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
-export default function AccountPage() {
+function AccountContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [tab, setTab] = useState<Tab>('profile')
@@ -753,5 +753,17 @@ export default function AccountPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+export default function AccountPage() {
+  return (
+    <Suspense fallback={
+      <div className="p-8 flex items-center justify-center" style={{ background: 'var(--bg)', minHeight: '100%' }}>
+        <RefreshCw size={20} className="animate-spin" style={{ color: 'var(--text-3)' }} />
+      </div>
+    }>
+      <AccountContent />
+    </Suspense>
   )
 }
