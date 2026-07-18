@@ -49,6 +49,15 @@ class ConnectionOut(BaseModel):
     scopes: list[str]
     scopes_verification: list[ScopeVerificationOut] = []
     created_at: datetime
+    # AR-VIS-1: review-sync cadence, read-only. Written only by the scheduler
+    # (tasks/auto_review_pipeline.py) and surfaced so the seller can see that review fetching is alive
+    # and when it looks again. Both are plain columns of this already owner-scoped row, so
+    # `from_attributes` fills them and the router needs no change. NAIVE UTC (datetime.utcnow) — the
+    # JSON carries no timezone suffix, so a client MUST read it as UTC, not local. The internal
+    # keyset `review_sync_cursor` is deliberately NOT exposed: it means nothing to a seller.
+    # Defaults keep rows written before migration arf1a2b3c4d01 valid.
+    review_sync_next_at: Optional[datetime] = None   # when the next batch may run; NULL = never ran
+    review_sync_fail_count: int = 0                  # consecutive connection-level failures; 0 = healthy
 
     model_config = {"from_attributes": True}
 

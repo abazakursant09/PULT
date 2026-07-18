@@ -1132,6 +1132,11 @@ export interface MarketplaceConnectionOut {
   verification_status: string
   scopes: string[]
   created_at: string
+  // AR-VIS-1 review-sync cadence (read-only). Optional: a cached or older response may omit them,
+  // and the UI treats missing the same as null — "no schedule known yet", never an invented one.
+  // The timestamp is UTC but the backend sends it WITHOUT a timezone suffix — parse it as UTC.
+  review_sync_next_at?: string | null
+  review_sync_fail_count?: number
 }
 
 export interface AutomationRuleOut {
