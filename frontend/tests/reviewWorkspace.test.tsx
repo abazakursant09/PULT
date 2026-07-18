@@ -72,6 +72,9 @@ describe('review workspace', () => {
     const user = userEvent.setup()
     render(<ReviewsPage />)
     await user.click(await screen.findByText('отличный товар'))
-    expect(screen.getByText(/Ошибка публикации: TIMEOUT/)).toBeInTheDocument()
+    // AR-VIS-2: the failure is surfaced, but the stored failure_reason is NOT — it carries internal
+    // codes and the marketplace's raw response body. A safe, translated cause is AR-VIS-3.
+    expect(screen.getByText('Опубликовать не удалось. Попыток: 2')).toBeInTheDocument()
+    expect(document.body.textContent || '').not.toMatch(/TIMEOUT/)
   })
 })

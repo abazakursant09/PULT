@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { api, type MarketplaceConnectionOut, type AutomationRuleOut } from '@/lib/api'
+import { parseUtc, formatSmart } from '@/lib/datetime'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -44,33 +45,12 @@ function _hasConsent(r: AutomationRuleOut | null | undefined): boolean {
 }
 
 // ── AR-VIS-1: review-sync state ─────────────────────────────────────────────────────────────────
-// The seller should not sit in silence wondering whether review fetching is alive. These helpers
-// turn the two cadence fields the scheduler writes into one honest line. What they must NEVER do is
-// name a CAUSE: the sync error code is only written to the server log, never to the database, so
+// The seller should not sit in silence wondering whether review fetching is alive. This turns the
+// two cadence fields the scheduler writes into one honest line. What it must NEVER do is name a
+// CAUSE: the sync error code is only written to the server log, never to the database, so
 // "marketplace unavailable" would be a guess. We say the schedule, not the reason.
-
-const _TZ_SUFFIX = /(?:Z|[+-]\d{2}:?\d{2})$/i
-
-/** Parse a backend timestamp as UTC. The API sends naive UTC (`2026-07-18T15:40:00`, no suffix) and
- *  `new Date` would read that as LOCAL time — off by the browser's offset. Append the missing Z
- *  instead of doing any offset arithmetic ourselves. Returns null for anything unparseable. */
-function _parseUtc(raw: string): Date | null {
-  const s = String(raw).trim()
-  if (!s) return null
-  const d = new Date(_TZ_SUFFIX.test(s) ? s : `${s}Z`)
-  return Number.isNaN(d.getTime()) ? null : d
-}
-
-/** Local wall-clock for the seller. Includes the date when it is not today, because a long backoff
- *  can land past midnight and a bare "04:00" would read as "in a few minutes". */
-function _localTime(d: Date): string {
-  const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
-  const now = new Date()
-  const sameDay = d.getFullYear() === now.getFullYear()
-    && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()
-  if (sameDay) return time
-  return `${d.toLocaleDateString(undefined, { day: '2-digit', month: '2-digit' })} ${time}`
-}
+// Timestamp handling lives in lib/datetime (AR-VIS-2) — shared with the reviews page so the
+// naive-UTC rule cannot drift between the two surfaces.
 
 function _syncStatus(conn: MarketplaceConnectionOut, enabled: boolean): { text: string; detail?: string } {
   // Consent is checked by the caller — this line only ever renders for a consented rule, so it can
@@ -80,18 +60,18 @@ function _syncStatus(conn: MarketplaceConnectionOut, enabled: boolean): { text: 
   const raw = conn.review_sync_next_at
   if (!raw) return { text: 'Ожидается первая синхронизация' }   // nothing has run yet — do not imply it has
 
-  const at = _parseUtc(raw)
+  const at = parseUtc(raw)
   if (!at) return { text: 'Время следующей проверки уточняется' }
   if (at.getTime() <= Date.now()) return { text: 'Проверка отзывов ожидается в ближайшее время' }
 
   const fails = conn.review_sync_fail_count ?? 0
   if (fails > 0) {
     return {
-      text: `Синхронизация временно приостановлена. Следующая попытка — ${_localTime(at)}`,
+      text: `Синхронизация временно приостановлена. Следующая попытка — ${formatSmart(at)}`,
       detail: `Сбоев подряд: ${fails}`,
     }
   }
-  return { text: `Следующая проверка отзывов — ${_localTime(at)}` }
+  return { text: `Следующая проверка отзывов — ${formatSmart(at)}` }
 }
 
 function SyncStatusLine({ conn, enabled }: { conn: MarketplaceConnectionOut; enabled: boolean }) {
