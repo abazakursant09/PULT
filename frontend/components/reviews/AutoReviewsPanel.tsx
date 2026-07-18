@@ -43,6 +43,66 @@ function _hasConsent(r: AutomationRuleOut | null | undefined): boolean {
   return !!(r && r.consent_at && !r.consent_revoked_at)
 }
 
+// ── AR-VIS-1: review-sync state ─────────────────────────────────────────────────────────────────
+// The seller should not sit in silence wondering whether review fetching is alive. These helpers
+// turn the two cadence fields the scheduler writes into one honest line. What they must NEVER do is
+// name a CAUSE: the sync error code is only written to the server log, never to the database, so
+// "marketplace unavailable" would be a guess. We say the schedule, not the reason.
+
+const _TZ_SUFFIX = /(?:Z|[+-]\d{2}:?\d{2})$/i
+
+/** Parse a backend timestamp as UTC. The API sends naive UTC (`2026-07-18T15:40:00`, no suffix) and
+ *  `new Date` would read that as LOCAL time — off by the browser's offset. Append the missing Z
+ *  instead of doing any offset arithmetic ourselves. Returns null for anything unparseable. */
+function _parseUtc(raw: string): Date | null {
+  const s = String(raw).trim()
+  if (!s) return null
+  const d = new Date(_TZ_SUFFIX.test(s) ? s : `${s}Z`)
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
+/** Local wall-clock for the seller. Includes the date when it is not today, because a long backoff
+ *  can land past midnight and a bare "04:00" would read as "in a few minutes". */
+function _localTime(d: Date): string {
+  const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+  const now = new Date()
+  const sameDay = d.getFullYear() === now.getFullYear()
+    && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()
+  if (sameDay) return time
+  return `${d.toLocaleDateString(undefined, { day: '2-digit', month: '2-digit' })} ${time}`
+}
+
+function _syncStatus(conn: MarketplaceConnectionOut, enabled: boolean): { text: string; detail?: string } {
+  // Consent is checked by the caller — this line only ever renders for a consented rule, so it can
+  // never present a schedule as active for a seller who has not agreed.
+  if (!enabled) return { text: 'Автоматизация отзывов выключена' }
+
+  const raw = conn.review_sync_next_at
+  if (!raw) return { text: 'Ожидается первая синхронизация' }   // nothing has run yet — do not imply it has
+
+  const at = _parseUtc(raw)
+  if (!at) return { text: 'Время следующей проверки уточняется' }
+  if (at.getTime() <= Date.now()) return { text: 'Проверка отзывов ожидается в ближайшее время' }
+
+  const fails = conn.review_sync_fail_count ?? 0
+  if (fails > 0) {
+    return {
+      text: `Синхронизация временно приостановлена. Следующая попытка — ${_localTime(at)}`,
+      detail: `Сбоев подряд: ${fails}`,
+    }
+  }
+  return { text: `Следующая проверка отзывов — ${_localTime(at)}` }
+}
+
+function SyncStatusLine({ conn, enabled }: { conn: MarketplaceConnectionOut; enabled: boolean }) {
+  const { text, detail } = _syncStatus(conn, enabled)
+  return (
+    <p className="text-[12px] mb-3" style={{ color: 'var(--text-3)' }}>
+      {text}{detail ? ` ${detail}` : ''}
+    </p>
+  )
+}
+
 function ConnectionAutoCard({ conn, sysEnabled }: { conn: MarketplaceConnectionOut; sysEnabled: boolean }) {
   const supported = AR_SUPPORTED.has(conn.marketplace)
   const connected = conn.status === 'connected'
@@ -147,6 +207,9 @@ function ConnectionAutoCard({ conn, sysEnabled }: { conn: MarketplaceConnectionO
             </Badge>
             <span className="text-[12px]" style={{ color: 'var(--text-3)' }}>Согласие получено</span>
           </div>
+
+          {/* AR-VIS-1: is review fetching alive, and when does it look again? */}
+          <SyncStatusLine conn={conn} enabled={enabled} />
 
           {/* Kill switch honesty: when the system has automation off, auto cannot run — say so and
               block choosing/enabling auto, so the seller never sees a false "on". */}
