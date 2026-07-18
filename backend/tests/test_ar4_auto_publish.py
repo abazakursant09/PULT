@@ -21,10 +21,12 @@ from sqlalchemy.pool import StaticPool
 from database import Base
 import models  # register tables
 from models.automation_rule import AutomationRule
+from models.marketplace_connection import MarketplaceConnection
 from models.review_response import ReviewResponse
 from models.product import Product
 from models.user import User
 from models.execution_log import ExecutionLog
+from services.marketplace.review_automation_gate import CONSENT_VERSION
 from config import settings
 import tasks.auto_publish_reviews as ap
 from services.marketplace import guard as guard_mod
@@ -82,8 +84,12 @@ def _install(monkeypatch, db, *, ok=True, error="TIMEOUT"):
     return calls
 
 
-async def _seed(db, *, marketplace="wildberries", rating=5, safety="SAFE", text="Спасибо!",
-                deleted=False, guard=None):
+async def _seed(db, *, marketplace="wildberries", connection_marketplace=None, rating=5,
+                safety="SAFE", text="Спасибо!", deleted=False, guard=None, consent=True):
+    # AR-CONTROL: an auto rule is now bound to a connection and requires consent. Default seed gives
+    # a connected, feedbacks-scoped connection on the review's marketplace + granted consent, so the
+    # SAFE-publish path still exercises. `connection_marketplace` lets a test bind the rule to a
+    # DIFFERENT marketplace than the review (per-connection scoping).
     uid = str(uuid.uuid4())
     db.add(User(id=uid, email=f"{uid}@e.com", name="S", hashed_password="x", is_verified=True,
                 deleted_at=(datetime.utcnow() if deleted else None)))
@@ -93,9 +99,15 @@ async def _seed(db, *, marketplace="wildberries", rating=5, safety="SAFE", text=
                        external_review_id=str(uuid.uuid4()), rating=rating, safety_category=safety,
                        response_text=text, status="approved")
     db.add(r)
+    conn = MarketplaceConnection(id=str(uuid.uuid4()), user_id=uid,
+                                 marketplace=(connection_marketplace or marketplace),
+                                 status="connected", scopes=["feedbacks"])
+    db.add(conn)
     db.add(AutomationRule(id=str(uuid.uuid4()), user_id=uid, contour="reputation",
                           action_type="publish_review_response", mode="auto", enabled=True,
-                          guard=guard or {}))
+                          guard=guard or {}, connection_id=conn.id,
+                          consent_at=(datetime.utcnow() if consent else None),
+                          consent_version=(CONSENT_VERSION if consent else None)))
     await db.commit()
     return uid, r
 
@@ -142,11 +154,13 @@ def test_safe_review_publishes_when_enabled(monkeypatch):
 # ── Policy (G4/G6 + min_rating) ──────────────────────────────────────────────
 
 def test_marketplace_scope(monkeypatch):
+    # Rule bound to an OZON connection, review is on WB → the rule's marketplace (from its
+    # connection) excludes the WB review, so nothing publishes.
     db = _run(_new_db())
-    _run(_seed(db, marketplace="wildberries", guard={"marketplaces": ["ozon"]}))
+    _run(_seed(db, marketplace="wildberries", connection_marketplace="ozon"))
     _install(monkeypatch, db)
     out = _run(ap.run_auto_publish_reviews())
-    assert out["published"] == 0                          # WB review, rule scoped to ozon
+    assert out["published"] == 0                          # WB review, rule bound to ozon connection
 
 
 def test_min_rating(monkeypatch):

@@ -118,6 +118,11 @@ class AutomationRuleCreate(BaseModel):
     guard: dict = {}
     mode: str = "confirm"                 # confirm (L3) | auto (L4)
     enabled: bool = False
+    connection_id: Optional[str] = None   # required for publish_review_response (per-connection)
+
+
+class AutomationRuleModeUpdate(BaseModel):
+    mode: str                             # confirm | auto
 
 
 class AutomationRuleOut(BaseModel):
@@ -128,5 +133,9 @@ class AutomationRuleOut(BaseModel):
     guard: dict
     mode: str
     enabled: bool
+    connection_id: Optional[str] = None
+    consent_at: Optional[datetime] = None
+    consent_version: Optional[str] = None
+    consent_revoked_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}

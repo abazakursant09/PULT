@@ -175,8 +175,17 @@ def test_auto_publish_marks_ambiguous_terminal(monkeypatch):
                            external_review_id="WB-1", rating=5, safety_category="SAFE",
                            response_text="Спасибо!", status="approved")
         db.add(r)
+        # AR-CONTROL: an auto rule must be bound to a connection and carry consent. _setup created a
+        # connected, feedbacks-scoped WB connection for this seller — bind to it + grant consent.
+        from sqlalchemy import select as _select
+        from services.marketplace.review_automation_gate import CONSENT_VERSION
+        conn = (await db.execute(
+            _select(MarketplaceConnection).where(MarketplaceConnection.user_id == uid)
+        )).scalars().first()
         db.add(AutomationRule(id=str(uuid.uuid4()), user_id=uid, contour="reputation",
-                              action_type="publish_review_response", mode="auto", enabled=True, guard={}))
+                              action_type="publish_review_response", mode="auto", enabled=True,
+                              guard={}, connection_id=conn.id,
+                              consent_at=datetime.utcnow(), consent_version=CONSENT_VERSION))
         await db.commit()
 
         monkeypatch.setattr(settings, "automation_enabled", True)
