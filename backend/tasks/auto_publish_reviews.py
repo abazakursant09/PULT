@@ -24,6 +24,7 @@ from models.user import User
 from models.execution_log import ExecutionLog
 from services.marketplace import executor
 from services.marketplace.guard import NEGATIVE_RATING_MAX
+from services.marketplace import review_automation_gate as gate
 
 log = logging.getLogger(__name__)
 
@@ -85,12 +86,25 @@ async def run_auto_publish_reviews() -> dict:
                 log.warning("auto-publish breaker tripped for user=%s — skipping rule", rule.user_id)
                 continue
 
+            # AR-CONTROL server-side gate: re-read the rule + its connection and assert automated
+            # publishing is allowed (consent present + not revoked, enabled, mode=auto, connection
+            # owned + connected + marketplace supported + feedbacks permission, kill switch off). A
+            # blocked rule is skipped this tick — never a frontend-trusted decision.
+            try:
+                rule, conn = await gate.assert_auto_publish_allowed(db, rule.id, rule.user_id)
+            except gate.AutoPublishBlocked as blocked:
+                log.info("auto-publish gate blocked rule=%s: %s", rule.id, blocked.reason)
+                skipped += 1
+                continue
+
             policy = rule.guard or {}
-            marketplaces = policy.get("marketplaces") or []
             min_rating = policy.get("min_rating")
             rule_dict = {"enabled": rule.enabled, "guard": policy}
+            # The rule is bound to ONE connection, so its marketplace is the connection's marketplace
+            # — not a free-form guard list. Only that marketplace's SAFE reviews are candidates.
+            rule_marketplace = conn.marketplace
 
-            # Candidate SAFE, synced reviews for this user, within the rule's data-driven policy.
+            # Candidate SAFE, synced reviews for this user on this connection's marketplace.
             # Ownership is via product → user; soft-deleted sellers are excluded; a row still in
             # backoff (retry_next_at in the future) is not re-selected.
             stmt = (
@@ -100,14 +114,13 @@ async def run_auto_publish_reviews() -> dict:
                 .where(
                     Product.user_id == rule.user_id,
                     User.deleted_at.is_(None),                          # G5: not soft-deleted
+                    ReviewResponse.marketplace == rule_marketplace,      # bound to the connection
                     ReviewResponse.status.in_(_PUBLISHABLE),
                     ReviewResponse.external_review_id.isnot(None),
                     ReviewResponse.safety_category == _SAFE,             # G1: SAFE only
                     ReviewResponse.rating > NEGATIVE_RATING_MAX,
                 )
             )
-            if marketplaces:                                            # G6: data-driven scope
-                stmt = stmt.where(ReviewResponse.marketplace.in_(marketplaces))
             if min_rating is not None:
                 stmt = stmt.where(ReviewResponse.rating >= int(min_rating))
             reviews = (await db.execute(stmt)).scalars().all()
@@ -120,6 +133,15 @@ async def run_auto_publish_reviews() -> dict:
                 if not (review.response_text or "").strip():
                     skipped += 1
                     continue
+
+                # Re-assert the gate immediately before publishing, so a mid-tick disable / consent
+                # revoke stops further publishes at once (fail-closed).
+                try:
+                    await gate.assert_auto_publish_allowed(db, rule.id, rule.user_id)
+                except gate.AutoPublishBlocked as blocked:
+                    log.info("auto-publish gate blocked mid-run rule=%s: %s", rule.id, blocked.reason)
+                    skipped += 1
+                    break
 
                 res = await executor.execute(
                     db=db, user_id=rule.user_id,
