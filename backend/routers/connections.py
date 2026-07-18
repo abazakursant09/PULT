@@ -32,6 +32,11 @@ router = APIRouter()
 _VALID_MP = {"wildberries", "ozon", "yandex"}
 _VALID_SCOPES = {"feedbacks", "prices", "advert", "content", "stocks", "promotions"}
 
+# A marketplace whose credential is a PAIR names the second half here. Kept as data so the route
+# stays free of marketplace branching (`marketplace` is a value, never a code path): a new
+# marketplace with a compound credential is one entry, not another `if`.
+_REQUIRED_CREDENTIAL_FIELD = {"ozon": "ozon_client_id"}
+
 # Identity of a cabinet connected through this route is not yet verified: F1.1 connects
 # cabinets, it does not discover them. `unverified_legacy` is reserved for rows the F1.1
 # migration reconstructed from pre-F1.1 connections; both mean "external id unknown" and
@@ -89,6 +94,14 @@ async def create_connection(
         raise HTTPException(422, f"unknown scope: {body.scope}")
     if not body.token.strip():
         raise HTTPException(422, "token is required")
+    # Some marketplaces authenticate with a PAIR, not a lone token — Ozon needs a Client-Id beside
+    # the key, and a connection saved without it would look connected and fail at the very first
+    # call, with the probe reporting invalid_credentials for what is really a missing field. The
+    # requirement is DATA (_REQUIRED_CREDENTIAL_FIELD), not a branch: the router never asks "is this
+    # Ozon?", only "what does this marketplace require?", so the next marketplace is one dict entry.
+    required_field = _REQUIRED_CREDENTIAL_FIELD.get(body.marketplace)
+    if required_field and not (getattr(body, required_field, None) or "").strip():
+        raise HTTPException(422, f"{required_field} is required for {body.marketplace}")
 
     try:
         workspace_id = await resolve_workspace_id(db, current_user.id)

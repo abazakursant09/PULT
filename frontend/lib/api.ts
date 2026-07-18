@@ -1128,15 +1128,38 @@ export interface MarketplaceConnectionOut {
   id: string
   marketplace: string
   label: string | null
+  // Set to "connected" the moment a key is SAVED — before anything is verified. Not evidence that
+  // the connection works; the per-scope verification verdict below is.
   status: string                 // connected | invalid | revoked
-  verification_status: string
+  verification_status: string    // rollup of the per-scope states
   scopes: string[]
+  scopes_verification?: { scope: string; verification_status: string; verified_at: string | null }[]
   created_at: string
   // AR-VIS-1 review-sync cadence (read-only). Optional: a cached or older response may omit them,
   // and the UI treats missing the same as null — "no schedule known yet", never an invented one.
   // The timestamp is UTC but the backend sends it WITHOUT a timezone suffix — parse it as UTC.
   review_sync_next_at?: string | null
   review_sync_fail_count?: number
+}
+
+export interface ConnectionCreateBody {
+  marketplace: string
+  token: string
+  scope: string
+  label?: string | null
+  ozon_client_id?: string | null   // Ozon authenticates with a PAIR; the backend rejects it missing
+}
+
+export interface VerifyOut {
+  connection_id: string
+  marketplace: string
+  scope: string
+  outcome: string                  // VerificationOutcome wire value — translate, never render raw
+  verification_status: string      // this scope, after the attempt
+  verified_at: string | null
+  connection_verification_status: string
+  connection_verified_at: string | null
+  retry_after_seconds?: number | null   // only when the marketplace supplied one — often null
 }
 
 export interface AutomationRuleOut {
@@ -1228,6 +1251,14 @@ export const api = {
 
   connections: {
     list: () => req<MarketplaceConnectionOut[]>('/api/connections'),
+    // The secret travels in the POST body only — never a query string, never stored client-side.
+    create: (body: ConnectionCreateBody) =>
+      req<MarketplaceConnectionOut>('/api/connections', { method: 'POST', body: JSON.stringify(body) }),
+    // Saving a key does NOT prove it works: the backend marks a connection "connected" on save,
+    // before anything is checked. This is the call that actually asks the marketplace.
+    verify: (id: string, scope: string) =>
+      req<VerifyOut>(`/api/connections/${id}/verify`, { method: 'POST', body: JSON.stringify({ scope }) }),
+    remove: (id: string) => req<void>(`/api/connections/${id}`, { method: 'DELETE' }),
   },
 
   // AR-CONTROL: seller-controlled Auto Reviews. Backend is the single source of truth for state and

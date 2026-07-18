@@ -15,12 +15,27 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
+from models.api_credential import ApiCredential
 from models.automation_rule import AutomationRule
 from models.marketplace_connection import MarketplaceConnection
 from .reviews import get_review_provider
 
 REVIEW_ACTION = "publish_review_response"
 REQUIRED_SCOPE = "feedbacks"
+
+# Verification verdicts that PROVE the feedbacks credential cannot work. Only permanent,
+# state-changing outcomes appear here — a timeout or a rate limit never reaches persisted state
+# (services/marketplace/verification/projection.py), so a marketplace outage can never look like a
+# broken key. `verification_unsupported` is deliberately ABSENT: it means we have no way to check the
+# key (Ozon feedbacks today), which is missing evidence, not evidence of failure — blocking on it
+# would lock sellers out of a marketplace that works.
+_PROVEN_BAD_CREDENTIAL = frozenset({
+    "invalid_credentials",   # the secret is wrong
+    "revoked",               # the secret was withdrawn at the marketplace
+    "missing_scope",         # the secret is valid but grants no access to reviews
+    "ownership_conflict",    # the cabinet belongs to another workspace — publishing would post
+                             # into a store this seller does not own
+})
 
 # Consent text version currently in force. A rule whose stored consent_version is not supported is
 # treated as no consent (the seller must re-consent to the current text). Bump this set when the
@@ -69,6 +84,32 @@ def check_connection_publishable(conn: Optional[MarketplaceConnection]) -> None:
     if REQUIRED_SCOPE not in (conn.scopes or []):
         raise AutoPublishBlocked("NO_FEEDBACKS_PERMISSION",
                                  "connection lacks the 'feedbacks' permission")
+
+
+async def assert_feedbacks_credential_not_broken(db: AsyncSession, connection_id: str) -> None:
+    """Raise AutoPublishBlocked when the feedbacks key is PROVEN not to work.
+
+    The backend sets connection.status='connected' the moment a key is saved, before anything is
+    verified — so `status` is not evidence that the connection works. The per-scope verification
+    verdict is. A key we have proven bad must not be usable to switch automation on, or the seller
+    would see "on" while every publish is destined to fail.
+
+    Silence is not failure: an unverified or unverifiable key passes here. We only block on a
+    verdict we actually hold.
+    """
+    cred = (
+        await db.execute(
+            select(ApiCredential).where(
+                ApiCredential.connection_id == connection_id,
+                ApiCredential.scope == REQUIRED_SCOPE,
+            )
+        )
+    ).scalars().first()
+    if cred is not None and cred.verification_status in _PROVEN_BAD_CREDENTIAL:
+        raise AutoPublishBlocked(
+            "CREDENTIAL_INVALID",
+            f"feedbacks credential is {cred.verification_status}",
+        )
 
 
 def automation_globally_enabled() -> bool:
@@ -143,4 +184,5 @@ async def assert_auto_publish_allowed(
         )
     ).scalars().first()
     check_connection_publishable(conn)
+    await assert_feedbacks_credential_not_broken(db, conn.id)
     return rule, conn

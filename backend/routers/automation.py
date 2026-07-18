@@ -255,6 +255,11 @@ async def toggle_rule(
             ).scalars().first()
         try:
             gate.check_enable_preconditions(rule, conn)
+            # A feedbacks key we have PROVEN bad must not be switchable to "on" — the seller would
+            # see automation running while every publish is destined to fail. An unverified or
+            # unverifiable key still passes: that is missing evidence, not proof of failure.
+            if conn is not None:
+                await gate.assert_feedbacks_credential_not_broken(db, conn.id)
         except gate.AutoPublishBlocked as e:
             raise HTTPException(409, f"cannot enable: {e.reason}")
     # The resulting state after this toggle. Enabling an auto rule while the kill switch is off is
