@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { AutoReviewsPanel } from '@/components/reviews/AutoReviewsPanel'
 import { STATE_LABEL, STATE_BADGE_VARIANT } from '@/lib/reviewState'
 
 // The seller's review workspace (AR3), P3 premium redesign. Presentation only — it shows the same
@@ -97,6 +98,15 @@ export default function ReviewsPage() {
     <>
       <SellerBar title="Отзывы" sub="Ответы на отзывы маркетплейсов" />
       <div className="s-canvas">
+        {/* AR-CONTROL-UI: per-connection Auto Reviews management. Default OFF; explicit consent
+            before enabling; backend enforces every rule. */}
+        <section className="mb-5">
+          <p className="text-[11px] font-semibold uppercase tracking-wide mb-2" style={{ color: 'var(--text-3)' }}>
+            Автоответы на отзывы
+          </p>
+          <AutoReviewsPanel />
+        </section>
+
         {/* Filters — the accent one marks the active state */}
         <div className="flex gap-2 flex-wrap mb-4">
           {FILTERS.map(f => (
