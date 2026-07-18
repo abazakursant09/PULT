@@ -5,6 +5,7 @@ import { Send, Check, AlertTriangle, Calendar, Clock, RefreshCw, Trash2, AlertCi
 import { api, type TelegramSettings } from '@/lib/api'
 import { clearSession } from '@/lib/session'
 import { SellerBar } from '@/components/seller/Shell'
+import { ConnectionsSection } from '@/components/connections/ConnectionsSection'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -118,9 +119,12 @@ export default function SettingsPage() {
 
   return (
     <>
-      <SellerBar title="Настройки" sub="Telegram-уведомления · аккаунт" />
+      <SellerBar title="Настройки" sub="Магазины · Telegram-уведомления · аккаунт" />
       <div className="s-canvas">
         <div className="max-w-2xl mx-auto space-y-8">
+      {/* CONNECTION-UI: connecting a marketplace is the second step of the seller's first run —
+          it lives first on this page because nothing else in PULT works until it is done. */}
+      <ConnectionsSection />
       <div>
         <h1 className="font-bold" style={{ fontSize: '1.5rem', color: 'var(--text)' }}>
           Telegram-уведомления

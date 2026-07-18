@@ -269,9 +269,16 @@ export function AutoReviewsPanel() {
     return <p className="text-[12px]" style={{ color: 'var(--danger)' }}>{error}</p>
   }
   if (conns.length === 0) {
+    // CONNECTION-UI: this used to be a dead end — an honest sentence with nowhere to go. The seller
+    // can now actually act on it.
     return (
       <p className="text-[12px]" style={{ color: 'var(--text-3)' }}>
-        Нет подключённых магазинов. Подключите маркетплейс, чтобы настроить автоответы.
+        Нет подключённых магазинов.{' '}
+        <a href="/dashboard/settings#connections" className="underline"
+          style={{ color: 'var(--violet-text)' }}>
+          Подключить маркетплейс
+        </a>
+        , чтобы настроить автоответы.
       </p>
     )
   }

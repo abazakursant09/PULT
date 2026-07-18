@@ -465,7 +465,8 @@ def test_route_repairs_a_pre_f1_1_connection_without_identity_links():
         await db.commit()
         assert orphan.workspace_id is None and orphan.marketplace_account_id is None
 
-        await create_connection(_body(marketplace="ozon", scope="prices"), user, db)
+        # Client-Id is required for Ozon (CONNECTION-UI); incidental to the repair being tested.
+        await create_connection(_body(marketplace="ozon", scope="prices", ozon_client_id="CID"), user, db)
 
         accounts = (await db.execute(sa.select(MarketplaceAccount))).scalars().all()
         conns = (await db.execute(sa.select(MarketplaceConnection))).scalars().all()
@@ -671,7 +672,9 @@ def test_post_still_creates_only_one_connection_per_marketplace():
 
         await create_connection(_body(marketplace="wildberries"), user, db)
         await create_connection(_body(marketplace="wildberries"), user, db)
-        await create_connection(_body(marketplace="ozon"), user, db)
+        # Ozon's credential is a pair, so the route requires the Client-Id (CONNECTION-UI). That is
+        # incidental here — what this test pins is the one-connection-per-marketplace upsert.
+        await create_connection(_body(marketplace="ozon", ozon_client_id="CID"), user, db)
 
         conns = (await db.execute(sa.select(MarketplaceConnection))).scalars().all()
         assert {c.marketplace for c in conns} == {"wildberries", "ozon"}

@@ -4,19 +4,20 @@ import { describe, expect, it } from 'vitest'
 
 // Honest surfaces (Advisory MVP).
 //
-// The ONE marketplace-connection UI with a real backed purpose is the AR-CONTROL Auto Reviews
-// panel (per-connection consent + enable/disable, enforced by the backend). Every OTHER use of
-// /api/connections is still forbidden: nothing else lets a seller "connect a cabinet", nothing
-// synchronises on its own, and no other action reaches a marketplace. Everything the product
-// shows must be true under those facts.
+// The marketplace-connection UIs with a real backed purpose are: the AR-CONTROL Auto Reviews panel
+// (per-connection consent + enable/disable, enforced by the backend) and — since CONNECTION-UI — the
+// connections section itself, where a seller genuinely connects, re-checks, replaces and disconnects
+// a cabinet against live backend endpoints. Every OTHER use of /api/connections stays forbidden.
+//
+// The guard is NOT retired now that a connections UI exists: its job has simply changed from "no
+// such surface may exist" to "only these surfaces may exist". A second, decorative connections
+// screen would be exactly the kind of promise this test was written to stop.
 //
 // The execution surfaces (SellerAction's "⚡ Пульт сделает сам", OnboardingModal, the
 // execution history) still exist as components but are mounted on NO page — P7.2 unmounted
 // them deliberately. These tests hold that line: the day one of them is rendered again, or a
 // page starts promising a marketplace sync, this fails instead of shipping a promise the
 // product cannot keep.
-//
-// Delete these tests when a connections UI actually exists — not before.
 
 const ROOT = join(__dirname, '..')
 
@@ -47,17 +48,27 @@ function usages(name: string, definedIn: string): string[] {
 }
 
 describe('honest surfaces', () => {
-  it('allows api.connections ONLY in the AR-CONTROL Auto Reviews panel', () => {
-    // AR-CONTROL gives marketplace connections a real backed purpose:
-    // seller-controlled Auto Reviews settings per connection.
-    const ALLOW = join('components', 'reviews', 'AutoReviewsPanel.tsx')
+  it('allows api.connections ONLY in the surfaces that really connect a cabinet', () => {
+    // Each entry earns its place by doing real, backend-enforced work:
+    //   AutoReviewsPanel        — per-connection Auto Reviews consent + enable/disable
+    //   ConnectionsSection      — lists connections, re-check / replace / disconnect
+    //   ConnectMarketplaceDialog — the one place a seller enters an API key
+    const ALLOW = [
+      join('components', 'reviews', 'AutoReviewsPanel.tsx'),
+      join('components', 'connections', 'ConnectionsSection.tsx'),
+      join('components', 'connections', 'ConnectMarketplaceDialog.tsx'),
+    ]
     const callers = RENDERED.filter((f) => /api\/connections|api\.connections/.test(read(f)))
-    // Any OTHER file touching api.connections is still a promise the product cannot keep — a bare
+    // Any OTHER file touching api.connections is still a promise the product cannot keep — a second
     // connections page, fake connection controls, or a new call site added without updating this
-    // allow-list — and still fails. The allow-list is exactly one file, checked by path.
-    const unexpected = callers.filter((f) => !f.endsWith(ALLOW))
+    // allow-list — and still fails.
+    const unexpected = callers.filter((f) => !ALLOW.some((a) => f.endsWith(a)))
     expect(unexpected).toEqual([])
-    expect(callers.some((f) => f.endsWith(ALLOW))).toBe(true)
+    // …and every allowed file must actually still be a caller, so a stale entry cannot quietly
+    // widen the allow-list for whatever is added at that path next.
+    for (const a of ALLOW) {
+      expect(callers.some((f) => f.endsWith(a))).toBe(true)
+    }
   })
 
   it('never promises a marketplace sync to a seller who has no data', () => {
