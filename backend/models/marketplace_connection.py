@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, String, DateTime, JSON, ForeignKey, Index
+from sqlalchemy import Column, String, DateTime, JSON, ForeignKey, Index, Integer
 from database import Base
 
 
@@ -39,6 +39,17 @@ class MarketplaceConnection(Base):
     scopes         = Column(JSON, nullable=False, default=list)    # ["feedbacks","prices",...]
     ozon_client_id = Column(String(64), nullable=True)             # Ozon needs Client-Id alongside key
     last_check_at  = Column(DateTime, nullable=True)
+    # AR-AUTO-FILL review-sync cadence (per connection). `review_sync_next_at` is the earliest the
+    # scheduler may auto-sync this connection again — a fixed interval after a success, an
+    # exponentially longer one after each consecutive failure (capped). `review_sync_fail_count`
+    # drives that backoff and resets to 0 on success. `review_sync_cursor` is a persistent keyset
+    # cursor over the connection's products by their stable Product.id: each sync processes the next
+    # batch (Product.id > cursor), advances the cursor, and wraps to the start (NULL) after the last
+    # product — so a large store is covered over several cycles, no product starves, and a restart
+    # resumes where it left off (not an OFFSET, which add/delete could skip). NULL = start of a round.
+    review_sync_next_at    = Column(DateTime, nullable=True)
+    review_sync_fail_count = Column(Integer, nullable=False, default=0, server_default="0")
+    review_sync_cursor     = Column(String(36), nullable=True)
     # Verification axis (F1.2a). `unverified` is the ONLY value this slice can write:
     # no marketplace probe exists yet. A later verifier owns `verified` and the failure
     # values. Any credential write on this connection resets both columns, because the

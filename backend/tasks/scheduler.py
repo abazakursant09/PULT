@@ -404,6 +404,7 @@ async def run_scheduler() -> None:
         try:
             await _send_daily_reports()
             await _send_weekly_reports()
+            await _review_ingest_tick()
             await _automation_tick()
             await _measurement_close_tick()
             await _advisory_runtime_tick()
@@ -441,6 +442,19 @@ async def _advisory_runtime_tick() -> None:
                         res.ran, res.skipped, res.errors)
     except Exception:
         logger.exception("advisory_runtime tick error")
+
+
+async def _review_ingest_tick() -> None:
+    """AR-AUTO-FILL: auto-sync + auto-draft. Runs for enabled+consented review rules in BOTH modes
+    and is deliberately NOT gated by the kill switch — a confirm-mode seller keeps receiving reviews
+    and drafts even when automatic publishing is off. Only publishing (below) is kill-switch gated.
+    Never raises into the scheduler."""
+    from tasks.auto_review_pipeline import run_auto_sync_reviews, run_auto_draft_reviews
+    try:
+        await run_auto_sync_reviews()
+        await run_auto_draft_reviews()
+    except Exception:
+        logger.exception("review ingest tick error")
 
 
 async def _automation_tick() -> None:

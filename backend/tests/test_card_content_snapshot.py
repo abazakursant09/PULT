@@ -185,4 +185,4 @@ def test_alembic_head_unchanged():
     from alembic.config import Config
     from alembic.script import ScriptDirectory
     heads = ScriptDirectory.from_config(Config("alembic.ini")).get_heads()
-    assert heads == ["arc1a2b3c4d01"], heads   # head advanced by marketplace category reference (C2b)
+    assert heads == ["arf1a2b3c4d01"], heads   # head advanced by marketplace category reference (C2b)

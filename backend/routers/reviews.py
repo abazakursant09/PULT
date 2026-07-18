@@ -22,6 +22,7 @@ from services.marketplace import executor, credential_vault
 from services.marketplace.wb_client import wb_client
 from services.marketplace.reviews import get_review_provider, review_credential
 from services.review.draft import classify_review, build_draft
+from services.review import ingest as review_ingest
 from models.execution_log import ExecutionLog
 
 log = logging.getLogger(__name__)
@@ -111,66 +112,17 @@ async def sync_reviews(
     """
     product = await _get_product_or_404(product_id, current_user.id, db)
 
-    # Marketplace neutrality: the router asks the registry, it never knows a marketplace by name.
-    # An absent provider is an honest "unsupported" — no DB write, no external call.
-    provider = get_review_provider(product.marketplace)
-    if provider is None or not provider.supports_reviews():
+    # Shared ingestion service — the same fetch→classify→insert the scheduled auto-sync uses, so the
+    # manual and automatic paths can never diverge. Honest errors map to HTTP codes here.
+    try:
+        result = await review_ingest.sync_product_reviews(db, product)
+    except review_ingest.ReviewSyncUnsupported:
         raise HTTPException(422, f"приём отзывов для «{product.marketplace}» пока не поддерживается")
-
-    conn = (
-        await db.execute(
-            select(MarketplaceConnection).where(
-                MarketplaceConnection.user_id == current_user.id,
-                MarketplaceConnection.marketplace == product.marketplace,
-                MarketplaceConnection.status == "connected",
-            )
-        )
-    ).scalars().first()
-    if conn is None:
+    except review_ingest.ReviewSyncNoConnection:
         raise HTTPException(409, "нет подключённого кабинета маркетплейса — добавьте его в connections")
-
-    cred = (
-        await db.execute(
-            select(ApiCredential).where(
-                ApiCredential.connection_id == conn.id, ApiCredential.scope == "feedbacks"
-            )
-        )
-    ).scalars().first()
-    if cred is None:
+    except review_ingest.ReviewSyncNoScope:
         raise HTTPException(409, "у подключения нет области доступа «feedbacks»")
-
-    token = credential_vault.decrypt(cred.secret_enc)
-    # Shape the token into what this marketplace's provider expects (e.g. Ozon's composite
-    # "<client_id>:<api_key>") — same helper the publish dispatcher uses, so sync and publish agree.
-    cred_token = review_credential(product.marketplace, token, {"ozon_client_id": conn.ozon_client_id})
-    reviews = await provider.fetch_reviews(cred_token, product.sku)
-
-    # Dedup is enforced by the AR0 partial-unique index (product_id, external_review_id,
-    # marketplace). Each insert runs in its own savepoint: a duplicate (a concurrent sync of the
-    # same review, or a re-sync) raises IntegrityError, we roll that savepoint back and count it
-    # as skipped, and the rest of the batch still commits. Two concurrent syncs of one review can
-    # therefore only ever leave one row — the guarantee is the database, not an app-level check.
-    imported = 0
-    skipped = 0
-    for r in reviews:
-        # Classify at ingestion (AR2): pure, marketplace-neutral safety policy. Additive — sets
-        # two fields on the row being inserted; ownership/dedup are untouched.
-        safety_category, manual_reason = classify_review(r.rating, r.text)
-        try:
-            async with db.begin_nested():
-                db.add(ReviewResponse(
-                    id=str(uuid.uuid4()), product_id=product_id,
-                    review_text=r.text, author=r.author, rating=r.rating,
-                    status="pending", external_review_id=r.external_review_id,
-                    marketplace=r.marketplace, review_created_at=r.review_created_at,
-                    safety_category=safety_category,
-                    manual_required_reason=(manual_reason or None),
-                ))
-            imported += 1
-        except IntegrityError:
-            skipped += 1
-    await db.commit()
-    return {"synced": len(reviews), "imported": imported, "skipped": skipped, "product_id": product_id}
+    return {**result, "product_id": product_id}
 
 
 @router.patch("/reviews/{product_id}/{review_id}", response_model=ReviewResponseOut)
