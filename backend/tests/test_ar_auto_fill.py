@@ -351,7 +351,8 @@ def test_one_product_error_does_not_lose_others(monkeypatch):
     async def _fetch(token, product_ref):
         calls["n"] += 1
         if calls["n"] == 1:
-            raise ExecutionError(ExecutionError.TIMEOUT, "timeout")   # transient on the first product
+            # product-local 4xx (unknown product id) — about this product, not the connection
+            raise ExecutionError(ExecutionError.MARKETPLACE_4XX, "404: no such product")
         return []
     monkeypatch.setattr(REVIEW_PROVIDERS["wildberries"], "fetch_reviews", _fetch)
     _run(pipe.run_auto_sync_reviews())
@@ -370,6 +371,175 @@ def test_auth_error_stops_connection(monkeypatch):
     _run(pipe.run_auto_sync_reviews())
     assert calls["n"] == 1                                 # stopped after the first auth failure
     assert _conn(db).review_sync_next_at is not None        # connection backed off
+
+
+# ── Connection-level error stops the batch immediately (no extra marketplace calls) ──
+def _fail_at(monkeypatch, code, *, nth=1, marketplace="wildberries"):
+    """Provider that fails with `code` on the nth call and succeeds otherwise. Counts every call."""
+    calls = {"n": 0, "skus": []}
+    async def _fetch(token, product_ref):
+        calls["n"] += 1
+        calls["skus"].append(product_ref)
+        if calls["n"] == nth:
+            raise ExecutionError(code, f"{code} on call {nth}")
+        return []
+    monkeypatch.setattr(REVIEW_PROVIDERS[marketplace], "fetch_reviews", _fetch)
+    return calls
+
+
+def _batch_of(monkeypatch, n_extra=19, batch_size=20):
+    db = _run(_new_db()); uid = _run(_seed(db, mode="auto")); _add_products(db, uid, n_extra)
+    monkeypatch.setattr(_settings, "review_sync_product_batch_size", batch_size)
+    _bind_session(monkeypatch, db)
+    return db, uid
+
+
+def test_rate_limit_on_first_product_stops_whole_batch(monkeypatch):
+    """Batch of 20, first call 429 → exactly ONE marketplace call, then the connection backs off."""
+    db, _ = _batch_of(monkeypatch)
+    calls = _fail_at(monkeypatch, ExecutionError.RATE_LIMIT, nth=1)
+    out = _run(pipe.run_auto_sync_reviews())
+    assert calls["n"] == 1                                  # the other 19 were never requested
+    assert out["stopped"] == 1
+    c = _conn(db)
+    assert c.review_sync_fail_count == 1
+    assert (c.review_sync_next_at - datetime.utcnow()).total_seconds() > 0
+    assert c.review_sync_cursor is None                      # nothing processed → cursor unmoved
+
+
+def test_timeout_mid_batch_stops_rest(monkeypatch):
+    """Timeout (after the client's own retries) on the 5th product → 5 calls, the rest wait."""
+    db, _ = _batch_of(monkeypatch)
+    calls = _fail_at(monkeypatch, ExecutionError.TIMEOUT, nth=5)
+    _run(pipe.run_auto_sync_reviews())
+    assert calls["n"] == 5                                   # products 6..20 not called
+    assert _conn(db).review_sync_fail_count == 1
+
+
+def test_5xx_stops_batch(monkeypatch):
+    db, _ = _batch_of(monkeypatch)
+    calls = _fail_at(monkeypatch, ExecutionError.MARKETPLACE_5XX, nth=3)
+    _run(pipe.run_auto_sync_reviews())
+    assert calls["n"] == 3
+    assert _conn(db).review_sync_fail_count == 1
+
+
+def test_permission_error_stops_batch(monkeypatch):
+    db, _ = _batch_of(monkeypatch)
+    calls = _fail_at(monkeypatch, ExecutionError.MISSING_SCOPE, nth=2)
+    _run(pipe.run_auto_sync_reviews())
+    assert calls["n"] == 2
+    assert _conn(db).review_sync_fail_count == 1
+
+
+def test_product_local_4xx_does_not_back_off_connection(monkeypatch):
+    """A product-local error is recorded, the cursor passes it, and the connection stays on cadence."""
+    db, _ = _batch_of(monkeypatch, n_extra=4, batch_size=20)      # 5 products
+    calls = _fail_at(monkeypatch, ExecutionError.MARKETPLACE_4XX, nth=2)
+    out = _run(pipe.run_auto_sync_reviews())
+    assert calls["n"] == 5 and out["errors"] == 1 and out["stopped"] == 0
+    c = _conn(db)
+    assert c.review_sync_fail_count == 0                      # connection is healthy
+    delay = (c.review_sync_next_at - datetime.utcnow()).total_seconds()
+    assert delay <= pipe.SYNC_INTERVAL_SEC                    # normal 15-min cadence, not a backoff
+
+
+def test_unprocessed_products_resume_after_backoff(monkeypatch):
+    """After a connection stop the next cycle restarts at the first UNPROCESSED product."""
+    db, _ = _batch_of(monkeypatch, n_extra=9, batch_size=20)      # 10 products
+    calls = _fail_at(monkeypatch, ExecutionError.RATE_LIMIT, nth=4)
+    _run(pipe.run_auto_sync_reviews())
+    assert calls["n"] == 4
+    first_pass = list(calls["skus"])
+
+    _due_now(db)                                             # backoff elapsed
+    async def _ok(token, product_ref):
+        calls["n"] += 1; calls["skus"].append(product_ref); return []
+    monkeypatch.setattr(REVIEW_PROVIDERS["wildberries"], "fetch_reviews", _ok)
+    _run(pipe.run_auto_sync_reviews())
+
+    # products 1-3 succeeded, product 4 failed → the resumed cycle covers 4..10 (7 products)
+    assert calls["n"] == 4 + 7
+    assert len(first_pass) == 4
+
+
+def test_no_products_lost_across_connection_error(monkeypatch):
+    """Every product is reached exactly once per round even with a connection error mid-round."""
+    db, _ = _batch_of(monkeypatch, n_extra=9, batch_size=20)      # 10 products
+    ids = sorted(p.id for p in _run(db.execute(select(Product))).scalars().all())
+    state = {"fail_on": 5, "n": 0}
+    async def _fetch(token, product_ref):
+        state["n"] += 1
+        if state["n"] == state["fail_on"]:
+            raise ExecutionError(ExecutionError.TIMEOUT, "timeout")
+        return []
+    monkeypatch.setattr(REVIEW_PROVIDERS["wildberries"], "fetch_reviews", _fetch)
+
+    _run(pipe.run_auto_sync_reviews())                       # 4 ok, 5th stops the batch
+    cursor_after = _conn(db).review_sync_cursor
+    assert cursor_after == ids[3]                            # last SUCCESSFUL product, not the failed one
+
+    state["fail_on"] = -1                                    # marketplace recovers
+    _due_now(db); _run(pipe.run_auto_sync_reviews())
+    assert _conn(db).review_sync_cursor is None              # reached the end → wrapped, nothing skipped
+
+
+def test_connection_error_does_not_stop_other_connection(monkeypatch):
+    """A 429 on the WB connection must not prevent the Ozon connection from syncing in the same cycle."""
+    db = _run(_new_db())
+    _run(_seed(db, marketplace="wildberries", mode="auto"))
+    _run(_seed(db, marketplace="ozon", mode="auto"))
+    _bind_session(monkeypatch, db)
+
+    async def _wb(token, product_ref):
+        raise ExecutionError(ExecutionError.RATE_LIMIT, "rate limited")
+    ozon_calls = {"n": 0}
+    async def _ozon(token, product_ref):
+        ozon_calls["n"] += 1; return []
+    monkeypatch.setattr(REVIEW_PROVIDERS["wildberries"], "fetch_reviews", _wb)
+    monkeypatch.setattr(REVIEW_PROVIDERS["ozon"], "fetch_reviews", _ozon)
+
+    out = _run(pipe.run_auto_sync_reviews())
+    assert ozon_calls["n"] == 1 and out["stopped"] == 1      # ozon ran, wb backed off
+    conns = {c.marketplace: c for c in _run(db.execute(select(MarketplaceConnection))).scalars().all()}
+    assert conns["wildberries"].review_sync_fail_count == 1
+    assert conns["ozon"].review_sync_fail_count == 0
+
+
+def test_success_after_backoff_resets_fail_count(monkeypatch):
+    db, _ = _batch_of(monkeypatch, n_extra=2, batch_size=20)      # 3 products
+    _fail_at(monkeypatch, ExecutionError.RATE_LIMIT, nth=1)
+    _run(pipe.run_auto_sync_reviews())
+    assert _conn(db).review_sync_fail_count == 1
+
+    async def _ok(token, product_ref):
+        return []
+    monkeypatch.setattr(REVIEW_PROVIDERS["wildberries"], "fetch_reviews", _ok)
+    _due_now(db); _run(pipe.run_auto_sync_reviews())
+    c = _conn(db)
+    assert c.review_sync_fail_count == 0
+    delay = (c.review_sync_next_at - datetime.utcnow()).total_seconds()
+    assert delay <= pipe.SYNC_INTERVAL_SEC                    # back to the normal cadence
+
+
+def test_backoff_ladder_caps_at_six_hours():
+    """30 min → 1 h → 2 h → 4 h → capped at 6 h."""
+    assert pipe._next_sync_delay(1) == 30 * 60
+    assert pipe._next_sync_delay(2) == 60 * 60
+    assert pipe._next_sync_delay(3) == 2 * 60 * 60
+    assert pipe._next_sync_delay(4) == 4 * 60 * 60
+    assert pipe._next_sync_delay(5) == pipe.SYNC_BACKOFF_CAP_SEC == 6 * 60 * 60
+    assert pipe._next_sync_delay(99) == 6 * 60 * 60
+
+
+def test_backed_off_connection_makes_no_calls_next_tick(monkeypatch):
+    """While the backoff window is open the scheduler issues ZERO marketplace calls for it."""
+    db, _ = _batch_of(monkeypatch, n_extra=4, batch_size=20)
+    calls = _fail_at(monkeypatch, ExecutionError.RATE_LIMIT, nth=1)
+    _run(pipe.run_auto_sync_reviews())
+    assert calls["n"] == 1
+    out = _run(pipe.run_auto_sync_reviews())                 # next scheduler tick, still backed off
+    assert calls["n"] == 1 and out["throttled"] == 1
 
 
 def test_backoff_persists_and_success_resets(monkeypatch):

@@ -37,6 +37,35 @@ log = logging.getLogger(__name__)
 
 _ACTION = gate.REVIEW_ACTION
 
+# Sync error taxonomy. A failure is either about ONE product or about the WHOLE connection, and the
+# two must not be conflated: continuing to call a marketplace that just rate-limited or timed us out
+# is exactly what deepens a block.
+#
+# Connection-fatal — the marketplace is refusing/failing us as a caller, not refusing this product.
+# base_client already retried the retryable statuses (429/5xx/timeout) with backoff before raising,
+# so seeing one of these here means the normal retries are exhausted. Stop the batch immediately.
+_CONNECTION_FATAL_CODES = frozenset({
+    ExecutionError.AUTH,                      # 401 — credential rejected
+    ExecutionError.MISSING_SCOPE,             # 403 — permission
+    ExecutionError.NO_CONNECTION,
+    ExecutionError.CAPABILITY_NOT_SUPPORTED,
+    ExecutionError.RATE_LIMIT,                # 429 — after retries
+    ExecutionError.TIMEOUT,                   # after retries
+    ExecutionError.MARKETPLACE_5XX,           # 5xx + transport errors, after retries
+})
+
+# Ingestion-level failures that are also about the connection, not the product.
+_CONNECTION_FATAL_EXC = (
+    review_ingest.ReviewSyncUnsupported,
+    review_ingest.ReviewSyncNoConnection,
+    review_ingest.ReviewSyncNoScope,
+)
+
+# Everything else (MARKETPLACE_4XX, VALIDATION, guard rejections, unexpected exceptions) is treated
+# as local to the product: record it, move the cursor past it, keep the queue flowing. Treating an
+# unknown error as connection-fatal instead would let one bad product stall the whole store forever,
+# since the cursor would never advance past it.
+
 # Review-sync cadence. The scheduler ticks every minute, but reviews do not change that fast — a
 # connection syncs at most one batch per SYNC_INTERVAL (15 min) and backs off exponentially after
 # consecutive failures up to SYNC_BACKOFF_CAP, so a broken store is never hit every minute. A success
@@ -103,13 +132,21 @@ async def run_auto_sync_reviews() -> dict:
     A connection syncs at most one batch per SYNC_INTERVAL (15 min). The batch size is capped by
     settings.review_sync_product_batch_size and a persistent keyset cursor (review_sync_cursor, by
     Product.id) advances across cycles so a large store is covered over several cycles with a bounded
-    burst and no product starves. One failing product never stops the rest of the batch; an
-    auth/permission failure stops the connection immediately; any failure backs the connection off
-    exponentially (persisted). A clean batch resets the backoff and keeps the 15-min cadence.
+    burst and no product starves.
+
+    Failures split by blast radius (see the taxonomy above). A product-local failure is recorded, the
+    cursor moves past it and the batch continues — the connection is healthy, so no backoff. A
+    connection-level failure (auth/permission/rate-limit/timeout/5xx/transport, after the client's own
+    retries) stops this connection's batch on the spot: no further marketplace call is made for it in
+    this cycle, the cursor stays at the last SUCCESSFULLY processed product so the unprocessed tail is
+    picked up next cycle, fail_count grows and review_sync_next_at holds the connection off
+    exponentially. Other connections are unaffected. A batch with no connection-level failure resets
+    fail_count and keeps the 15-min cadence.
     """
     imported = 0
     errors = 0
     throttled = 0
+    stopped = 0
     batch_size = max(1, int(settings.review_sync_product_batch_size))
     now = datetime.utcnow()
     async with AsyncSessionLocal() as db:
@@ -124,8 +161,7 @@ async def run_auto_sync_reviews() -> dict:
 
             products = await _next_batch(db, rule.user_id, conn.marketplace,
                                          conn.review_sync_cursor, batch_size)
-            conn_errored = False
-            auth_stop = False
+            conn_stop = False
             advanced_to = conn.review_sync_cursor
             for product in products:
                 try:
@@ -134,34 +170,40 @@ async def run_auto_sync_reviews() -> dict:
                     advanced_to = product.id                 # cursor moves past processed products
                 except ExecutionError as e:
                     errors += 1
-                    conn_errored = True
-                    if e.code == ExecutionError.AUTH:        # auth/permission → stop this connection now
-                        auth_stop = True
-                        log.warning("auto-sync auth error conn=%s — stopping connection", conn.id)
+                    if e.code in _CONNECTION_FATAL_CODES:
+                        conn_stop = True                     # no more calls for this connection now
+                        log.warning("auto-sync connection error conn=%s code=%s — stopping batch",
+                                    conn.id, e.code)
                         break
-                    advanced_to = product.id                 # transient (timeout/429/5xx): skip, keep going
-                    log.warning("auto-sync transient error product=%s: %s", product.id, e)
-                except Exception as e:                       # one product never stops the rest of the batch
+                    advanced_to = product.id                 # product-local 4xx/validation: skip it
+                    log.warning("auto-sync product error product=%s code=%s", product.id, e.code)
+                except _CONNECTION_FATAL_EXC as e:
                     errors += 1
-                    conn_errored = True
+                    conn_stop = True
+                    log.warning("auto-sync connection unusable conn=%s: %s", conn.id, type(e).__name__)
+                    break
+                except Exception as e:                       # unexpected → treat as product-local
+                    errors += 1
                     advanced_to = product.id
                     log.warning("auto-sync failed product=%s: %s", product.id, e)
 
-            # Advance / wrap the cursor. A short batch means we reached the end of the list → wrap.
-            if not auth_stop and len(products) < batch_size:
-                conn.review_sync_cursor = None               # next round starts from the beginning
-            else:
+            if conn_stop:
+                # Keep the cursor at the last product we actually processed: the failing product and
+                # everything after it in this batch is untouched and is retried on the next cycle.
+                stopped += 1
                 conn.review_sync_cursor = advanced_to
-
-            if conn_errored:
                 conn.review_sync_fail_count = (conn.review_sync_fail_count or 0) + 1
-                conn.review_sync_next_at = now + timedelta(seconds=_next_sync_delay(conn.review_sync_fail_count))
+                conn.review_sync_next_at = now + timedelta(
+                    seconds=_next_sync_delay(conn.review_sync_fail_count))
             else:
-                conn.review_sync_fail_count = 0
+                # Whole batch attempted. A short batch means the end of the product list → wrap.
+                conn.review_sync_cursor = None if len(products) < batch_size else advanced_to
+                conn.review_sync_fail_count = 0              # connection is healthy
                 conn.review_sync_next_at = now + timedelta(seconds=SYNC_INTERVAL_SEC)  # 15-min cadence
             await db.commit()
-    log.info("auto-sync reviews: imported=%s errors=%s throttled=%s", imported, errors, throttled)
-    return {"imported": imported, "errors": errors, "throttled": throttled}
+    log.info("auto-sync reviews: imported=%s errors=%s throttled=%s stopped=%s",
+             imported, errors, throttled, stopped)
+    return {"imported": imported, "errors": errors, "throttled": throttled, "stopped": stopped}
 
 
 async def run_auto_draft_reviews() -> dict:
