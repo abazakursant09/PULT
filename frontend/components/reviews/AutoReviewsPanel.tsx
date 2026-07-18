@@ -43,7 +43,7 @@ function _hasConsent(r: AutomationRuleOut | null | undefined): boolean {
   return !!(r && r.consent_at && !r.consent_revoked_at)
 }
 
-function ConnectionAutoCard({ conn }: { conn: MarketplaceConnectionOut }) {
+function ConnectionAutoCard({ conn, sysEnabled }: { conn: MarketplaceConnectionOut; sysEnabled: boolean }) {
   const supported = AR_SUPPORTED.has(conn.marketplace)
   const connected = conn.status === 'connected'
   const [rule, setRule] = useState<AutomationRuleOut | null | undefined>(supported && connected ? undefined : null)
@@ -148,6 +148,14 @@ function ConnectionAutoCard({ conn }: { conn: MarketplaceConnectionOut }) {
             <span className="text-[12px]" style={{ color: 'var(--text-3)' }}>Согласие получено</span>
           </div>
 
+          {/* Kill switch honesty: when the system has automation off, auto cannot run — say so and
+              block choosing/enabling auto, so the seller never sees a false "on". */}
+          {!sysEnabled && (
+            <div className="text-[12px] rounded-[7px] px-2.5 py-2 mb-3 bg-[var(--warning-dim)] text-[var(--warning)]">
+              Автоматизация временно отключена системой. Автоматическая публикация недоступна; ручной режим работает.
+            </div>
+          )}
+
           <div className="mb-3">
             <p className="text-[11px] font-semibold uppercase tracking-wide mb-1.5" style={{ color: 'var(--text-3)' }}>Режим</p>
             <label className="flex items-start gap-2 mb-1.5 cursor-pointer">
@@ -156,11 +164,11 @@ function ConnectionAutoCard({ conn }: { conn: MarketplaceConnectionOut }) {
               <span className="text-[12px]" style={{ color: 'var(--text)' }}>Публиковать после моего подтверждения</span>
             </label>
             <label className="flex items-start gap-2 cursor-pointer">
-              <input type="radio" name={`mode-${conn.id}`} checked={mode === 'auto'} disabled={busy}
+              <input type="radio" name={`mode-${conn.id}`} checked={mode === 'auto'} disabled={busy || !sysEnabled}
                 onChange={() => run(() => api.automation.setMode(rule!.id, 'auto'))} />
-              <span className="text-[12px]" style={{ color: 'var(--text)' }}>Автоматически публиковать безопасные ответы</span>
+              <span className="text-[12px]" style={{ color: !sysEnabled ? 'var(--text-3)' : 'var(--text)' }}>Автоматически публиковать безопасные ответы</span>
             </label>
-            {mode === 'auto' && (
+            {mode === 'auto' && sysEnabled && (
               <p className="text-[11px] mt-1.5" style={{ color: 'var(--text-3)' }}>
                 Автоматически публикуются только безопасные ответы. Негативные отзывы никогда не публикуются автоматически.
               </p>
@@ -168,7 +176,10 @@ function ConnectionAutoCard({ conn }: { conn: MarketplaceConnectionOut }) {
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
+            {/* Enabling an auto rule is blocked while the kill switch is off (it could never run).
+                Disabling is always allowed; confirm-mode enable is unaffected. */}
             <Button size="sm" variant={enabled ? 'outline' : 'default'} loading={busy}
+              disabled={busy || (!enabled && mode === 'auto' && !sysEnabled)}
               onClick={() => run(() => api.automation.toggle(rule!.id))}>
               {enabled ? 'Выключить автоматизацию' : 'Включить автоматизацию'}
             </Button>
@@ -196,10 +207,16 @@ function ConnectionAutoCard({ conn }: { conn: MarketplaceConnectionOut }) {
 
 export function AutoReviewsPanel() {
   const [conns, setConns] = useState<MarketplaceConnectionOut[] | null>(null)
+  // System kill switch. Default to false (fail-safe honest) until the backend answers, so the UI
+  // never implies auto works before it is confirmed available.
+  const [sysEnabled, setSysEnabled] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => {
     api.connections.list().then(setConns).catch(e => { setError(_errorText(e)); setConns([]) })
+    api.automation.availability()
+      .then(a => setSysEnabled(!!a.automation_enabled))
+      .catch(() => setSysEnabled(false))
   }, [])
 
   if (conns === null) {
@@ -218,7 +235,7 @@ export function AutoReviewsPanel() {
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-      {conns.map(c => <ConnectionAutoCard key={c.id} conn={c} />)}
+      {conns.map(c => <ConnectionAutoCard key={c.id} conn={c} sysEnabled={sysEnabled} />)}
     </div>
   )
 }

@@ -40,14 +40,28 @@ describe('AutoReviewsPanel (AR-CONTROL-UI)', () => {
     expect(screen.queryByText(/Включить автоматизацию/)).toBeNull()
   })
 
-  it('with consent granted, shows mode choice + enable control', async () => {
+  it('with consent granted and automation available, shows mode choice + enable control', async () => {
     vi.spyOn(api.connections, 'list').mockResolvedValue([conn()])
     vi.spyOn(api.automation, 'ruleForConnection').mockResolvedValue(consentedRule)
+    vi.spyOn(api.automation, 'availability').mockResolvedValue({ automation_enabled: true })
     render(<AutoReviewsPanel />)
     expect(await screen.findByText(/Автоматически публиковать безопасные ответы/)).toBeInTheDocument()
     expect(screen.getByText(/Публиковать после моего подтверждения/)).toBeInTheDocument()
     expect(screen.getByText(/Включить автоматизацию/)).toBeInTheDocument()
     expect(screen.getByText(/Согласие получено/)).toBeInTheDocument()
+    expect(screen.queryByText(/временно отключена системой/)).toBeNull()
+  })
+
+  it('when the system kill switch is off, shows the honest notice and disables auto', async () => {
+    vi.spyOn(api.connections, 'list').mockResolvedValue([conn()])
+    vi.spyOn(api.automation, 'ruleForConnection').mockResolvedValue(consentedRule)
+    vi.spyOn(api.automation, 'availability').mockResolvedValue({ automation_enabled: false })
+    render(<AutoReviewsPanel />)
+    expect(await screen.findByText(/Автоматизация временно отключена системой/)).toBeInTheDocument()
+    // the "auto" radio is disabled — the seller cannot choose a mode the worker can't run
+    const autoRadio = screen.getByText(/Автоматически публиковать безопасные ответы/)
+      .closest('label')!.querySelector('input')!
+    expect(autoRadio).toBeDisabled()
   })
 
   it('an inactive connection exposes no Auto Reviews controls', async () => {

@@ -1228,6 +1228,8 @@ export const api = {
   // AR-CONTROL: seller-controlled Auto Reviews. Backend is the single source of truth for state and
   // enforces consent + connection ownership; the UI only calls these and re-reads the result.
   automation: {
+    availability: () =>
+      req<{ automation_enabled: boolean }>('/api/automation-rules/availability'),
     ruleForConnection: (connectionId: string) =>
       req<AutomationRuleOut | null>(`/api/automation-rules/by-connection/${connectionId}`),
     createForConnection: (connectionId: string) =>
