@@ -231,6 +231,168 @@ def test_no_consent_no_sync(monkeypatch):
     assert len(_reviews(db, uid)) == 0
 
 
+# ── Cadence: batch + persistent keyset cursor + connection backoff ───────────
+from config import settings as _settings
+from services.marketplace.errors import ExecutionError
+
+
+def _conn(db):
+    return _run(db.execute(select(MarketplaceConnection))).scalars().first()
+
+
+def _due_now(db):
+    """Simulate the 15-min cadence elapsing so the next cycle may run."""
+    c = _conn(db); c.review_sync_next_at = None; _run(db.commit())
+
+
+def _add_products(db, uid, n, marketplace="wildberries"):
+    for _ in range(n):
+        db.add(Product(id=str(uuid.uuid4()), user_id=uid, name="T", sku="SKU", marketplace=marketplace))
+    _run(db.commit())
+
+
+def _count_fetch(monkeypatch, marketplace="wildberries"):
+    seen = {"skus": []}
+    async def _fetch(token, product_ref):
+        seen["skus"].append(product_ref); return []
+    monkeypatch.setattr(REVIEW_PROVIDERS[marketplace], "fetch_reviews", _fetch)
+    return seen
+
+
+def test_batch_one_product_one_call(monkeypatch):
+    db = _run(_new_db()); _run(_seed(db, mode="auto"))     # 1 product
+    _bind_session(monkeypatch, db)
+    seen = _count_fetch(monkeypatch)
+    _run(pipe.run_auto_sync_reviews())
+    assert len(seen["skus"]) == 1                          # exactly one marketplace call
+
+
+def test_fewer_than_batch_all_processed(monkeypatch):
+    db = _run(_new_db()); uid = _run(_seed(db, mode="auto")); _add_products(db, uid, 4)  # 5 total
+    monkeypatch.setattr(_settings, "review_sync_product_batch_size", 20)
+    _bind_session(monkeypatch, db)
+    seen = _count_fetch(monkeypatch)
+    _run(pipe.run_auto_sync_reviews())
+    assert len(seen["skus"]) == 5                          # all in one batch
+    assert _conn(db).review_sync_cursor is None            # short batch → wrapped
+
+
+def test_more_than_batch_only_batch_then_continues_and_wraps(monkeypatch):
+    db = _run(_new_db()); uid = _run(_seed(db, mode="auto")); _add_products(db, uid, 4)  # 5 total
+    monkeypatch.setattr(_settings, "review_sync_product_batch_size", 2)
+    _bind_session(monkeypatch, db)
+    seen = _count_fetch(monkeypatch)
+
+    _run(pipe.run_auto_sync_reviews())                     # batch 1: 2 products
+    assert len(seen["skus"]) == 2
+    cur1 = _conn(db).review_sync_cursor
+    assert cur1 is not None                                # cursor advanced
+
+    _due_now(db); _run(pipe.run_auto_sync_reviews())       # batch 2: next 2 (continues from cursor)
+    assert len(seen["skus"]) == 4
+    _due_now(db); _run(pipe.run_auto_sync_reviews())       # batch 3: last 1 → wrap
+    assert len(seen["skus"]) == 5
+    assert _conn(db).review_sync_cursor is None            # wrapped after the last product
+
+    _due_now(db); _run(pipe.run_auto_sync_reviews())       # new round starts from the beginning
+    assert len(seen["skus"]) == 7                          # 5 + first 2 again
+
+
+def test_100_products_all_covered_no_starvation(monkeypatch):
+    db = _run(_new_db()); uid = _run(_seed(db, mode="auto")); _add_products(db, uid, 99)  # 100
+    monkeypatch.setattr(_settings, "review_sync_product_batch_size", 20)
+    _bind_session(monkeypatch, db)
+    seen = _count_fetch(monkeypatch)
+    for _ in range(5):                                     # ceil(100/20) cycles
+        _run(pipe.run_auto_sync_reviews()); _due_now(db)
+    # cursor advances monotonically by id, so 5 batches of 20 cover all 100 with no re-fetch and no
+    # product left behind — exactly one fetch per product over the round.
+    assert len(seen["skus"]) == 100
+
+
+def test_cursor_persists_in_db_survives_restart(monkeypatch):
+    db = _run(_new_db()); uid = _run(_seed(db, mode="auto")); _add_products(db, uid, 4)
+    monkeypatch.setattr(_settings, "review_sync_product_batch_size", 2)
+    _bind_session(monkeypatch, db); _count_fetch(monkeypatch)
+    _run(pipe.run_auto_sync_reviews())
+    # cursor is a DB column — a fresh read (as after a restart) still sees it
+    assert _conn(db).review_sync_cursor is not None
+
+
+def test_deleted_cursor_product_does_not_break(monkeypatch):
+    db = _run(_new_db()); uid = _run(_seed(db, mode="auto")); _add_products(db, uid, 4)  # 5
+    monkeypatch.setattr(_settings, "review_sync_product_batch_size", 2)
+    _bind_session(monkeypatch, db); seen = _count_fetch(monkeypatch)
+    _run(pipe.run_auto_sync_reviews())
+    cur = _conn(db).review_sync_cursor
+    # delete the product the cursor points at → keyset (id > cursor) still returns the rest
+    _run(db.execute(Product.__table__.delete().where(Product.id == cur)))
+    _run(db.commit())
+    _due_now(db); _run(pipe.run_auto_sync_reviews())       # must not raise, continues past the gap
+    assert len(seen["skus"]) >= 3
+
+
+def test_new_product_eventually_processed(monkeypatch):
+    db = _run(_new_db()); uid = _run(_seed(db, mode="auto")); _add_products(db, uid, 1)  # 2
+    monkeypatch.setattr(_settings, "review_sync_product_batch_size", 2)
+    _bind_session(monkeypatch, db); seen = _count_fetch(monkeypatch)
+    _run(pipe.run_auto_sync_reviews())                     # both synced → wrap
+    _add_products(db, uid, 1)                              # a new product appears
+    _due_now(db); _run(pipe.run_auto_sync_reviews())       # next round covers it too
+    _due_now(db); _run(pipe.run_auto_sync_reviews())
+    assert len(seen["skus"]) >= 3
+
+
+def test_one_product_error_does_not_lose_others(monkeypatch):
+    db = _run(_new_db()); uid = _run(_seed(db, mode="auto")); _add_products(db, uid, 2)  # 3
+    monkeypatch.setattr(_settings, "review_sync_product_batch_size", 20)
+    _bind_session(monkeypatch, db)
+    calls = {"n": 0}
+    async def _fetch(token, product_ref):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise ExecutionError(ExecutionError.TIMEOUT, "timeout")   # transient on the first product
+        return []
+    monkeypatch.setattr(REVIEW_PROVIDERS["wildberries"], "fetch_reviews", _fetch)
+    _run(pipe.run_auto_sync_reviews())
+    assert calls["n"] == 3                                 # the other two were still attempted
+
+
+def test_auth_error_stops_connection(monkeypatch):
+    db = _run(_new_db()); uid = _run(_seed(db, mode="auto")); _add_products(db, uid, 4)  # 5
+    monkeypatch.setattr(_settings, "review_sync_product_batch_size", 20)
+    _bind_session(monkeypatch, db)
+    calls = {"n": 0}
+    async def _fetch(token, product_ref):
+        calls["n"] += 1
+        raise ExecutionError(ExecutionError.AUTH, "auth rejected")
+    monkeypatch.setattr(REVIEW_PROVIDERS["wildberries"], "fetch_reviews", _fetch)
+    _run(pipe.run_auto_sync_reviews())
+    assert calls["n"] == 1                                 # stopped after the first auth failure
+    assert _conn(db).review_sync_next_at is not None        # connection backed off
+
+
+def test_backoff_persists_and_success_resets(monkeypatch):
+    db = _run(_new_db()); _run(_seed(db, mode="auto"))
+    _bind_session(monkeypatch, db)
+    async def _boom(token, product_ref):
+        raise ExecutionError(ExecutionError.TIMEOUT, "timeout")
+    monkeypatch.setattr(REVIEW_PROVIDERS["wildberries"], "fetch_reviews", _boom)
+    _run(pipe.run_auto_sync_reviews())
+    c = _conn(db)
+    delay = (c.review_sync_next_at - datetime.utcnow()).total_seconds()
+    assert c.review_sync_fail_count == 1 and delay > 0     # backed off, persisted in DB
+
+    _due_now(db); _run(pipe.run_auto_sync_reviews())
+    assert _conn(db).review_sync_fail_count == 2           # grows
+
+    async def _ok(token, product_ref):
+        return []
+    monkeypatch.setattr(REVIEW_PROVIDERS["wildberries"], "fetch_reviews", _ok)
+    _due_now(db); _run(pipe.run_auto_sync_reviews())
+    assert _conn(db).review_sync_fail_count == 0           # success resets
+
+
 # ── One failing store never stops the rest ────────────────────────────────────
 def test_one_connection_error_does_not_stop_others(monkeypatch):
     db = _run(_new_db())

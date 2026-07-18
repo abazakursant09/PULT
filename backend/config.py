@@ -81,6 +81,12 @@ class Settings(BaseSettings):
     # only fire when this is on AND a per-user AutomationRule is enabled.
     automation_enabled: bool = False
 
+    # How many products one connection's review auto-sync processes per scheduler cycle. A conservative
+    # technical default (NOT an official WB/Ozon rate limit) that bounds the request burst; the cursor
+    # advances by this many products each 15-min sync so a large store is covered over several cycles
+    # without ever firing all its fetches at once. Tunable via env after live validation, no migration.
+    review_sync_product_batch_size: int = 20
+
     # Shared secret for internal/cron-only control endpoints (e.g. the
     # measurement close-due trigger). Empty by default → those endpoints are
     # fail-closed (reject every caller) until an operator sets INTERNAL_API_KEY.
