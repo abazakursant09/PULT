@@ -1123,6 +1123,31 @@ export interface ExecutionLogDetail extends ExecutionLogItem {
   idempotency_key: string | null
 }
 
+// ── AR-CONTROL: Auto Reviews per-connection management ────────────────────────
+export interface MarketplaceConnectionOut {
+  id: string
+  marketplace: string
+  label: string | null
+  status: string                 // connected | invalid | revoked
+  verification_status: string
+  scopes: string[]
+  created_at: string
+}
+
+export interface AutomationRuleOut {
+  id: string
+  contour: string
+  action_type: string
+  trigger: Record<string, unknown>
+  guard: Record<string, unknown>
+  mode: 'confirm' | 'auto'
+  enabled: boolean
+  connection_id: string | null
+  consent_at: string | null
+  consent_version: string | null
+  consent_revoked_at: string | null
+}
+
 export const api = {
   auth: {
     login: (email: string, password: string) =>
@@ -1194,6 +1219,37 @@ export const api = {
       req<ReviewResponse>(`/api/reviews/${productId}/${reviewId}/publish`, { method: 'POST' }),
     history: (productId: string, reviewId: string) =>
       req<ReviewHistoryResponse>(`/api/reviews/${productId}/${reviewId}/history`),
+  },
+
+  connections: {
+    list: () => req<MarketplaceConnectionOut[]>('/api/connections'),
+  },
+
+  // AR-CONTROL: seller-controlled Auto Reviews. Backend is the single source of truth for state and
+  // enforces consent + connection ownership; the UI only calls these and re-reads the result.
+  automation: {
+    availability: () =>
+      req<{ automation_enabled: boolean }>('/api/automation-rules/availability'),
+    ruleForConnection: (connectionId: string) =>
+      req<AutomationRuleOut | null>(`/api/automation-rules/by-connection/${connectionId}`),
+    createForConnection: (connectionId: string) =>
+      req<AutomationRuleOut>('/api/automation-rules', {
+        method: 'POST',
+        body: JSON.stringify({
+          contour: 'reputation', action_type: 'publish_review_response',
+          connection_id: connectionId, mode: 'confirm', enabled: false, trigger: {}, guard: {},
+        }),
+      }),
+    grantConsent: (ruleId: string) =>
+      req<AutomationRuleOut>(`/api/automation-rules/${ruleId}/consent`, { method: 'POST' }),
+    revokeConsent: (ruleId: string) =>
+      req<AutomationRuleOut>(`/api/automation-rules/${ruleId}/consent/revoke`, { method: 'POST' }),
+    setMode: (ruleId: string, mode: 'confirm' | 'auto') =>
+      req<AutomationRuleOut>(`/api/automation-rules/${ruleId}/mode`, {
+        method: 'PATCH', body: JSON.stringify({ mode }),
+      }),
+    toggle: (ruleId: string) =>
+      req<AutomationRuleOut>(`/api/automation-rules/${ruleId}/toggle`, { method: 'PATCH' }),
   },
 
   pricing: {

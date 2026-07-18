@@ -4,9 +4,11 @@ import { describe, expect, it } from 'vitest'
 
 // Honest surfaces (Advisory MVP).
 //
-// PULT has NO marketplace-connection UI: nothing in the app calls /api/connections, so a
-// seller cannot connect a cabinet, nothing synchronises on its own, and no action can reach
-// a marketplace. Everything the product shows must be true under those facts.
+// The ONE marketplace-connection UI with a real backed purpose is the AR-CONTROL Auto Reviews
+// panel (per-connection consent + enable/disable, enforced by the backend). Every OTHER use of
+// /api/connections is still forbidden: nothing else lets a seller "connect a cabinet", nothing
+// synchronises on its own, and no other action reaches a marketplace. Everything the product
+// shows must be true under those facts.
 //
 // The execution surfaces (SellerAction's "⚡ Пульт сделает сам", OnboardingModal, the
 // execution history) still exist as components but are mounted on NO page — P7.2 unmounted
@@ -45,9 +47,17 @@ function usages(name: string, definedIn: string): string[] {
 }
 
 describe('honest surfaces', () => {
-  it('has no marketplace-connection UI — which is what every other check here assumes', () => {
+  it('allows api.connections ONLY in the AR-CONTROL Auto Reviews panel', () => {
+    // AR-CONTROL gives marketplace connections a real backed purpose:
+    // seller-controlled Auto Reviews settings per connection.
+    const ALLOW = join('components', 'reviews', 'AutoReviewsPanel.tsx')
     const callers = RENDERED.filter((f) => /api\/connections|api\.connections/.test(read(f)))
-    expect(callers).toEqual([])
+    // Any OTHER file touching api.connections is still a promise the product cannot keep — a bare
+    // connections page, fake connection controls, or a new call site added without updating this
+    // allow-list — and still fails. The allow-list is exactly one file, checked by path.
+    const unexpected = callers.filter((f) => !f.endsWith(ALLOW))
+    expect(unexpected).toEqual([])
+    expect(callers.some((f) => f.endsWith(ALLOW))).toBe(true)
   })
 
   it('never promises a marketplace sync to a seller who has no data', () => {

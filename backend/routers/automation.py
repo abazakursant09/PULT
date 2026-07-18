@@ -84,6 +84,15 @@ async def _load_owned_connection(db: AsyncSession, connection_id: str, user: Use
     return conn
 
 
+@router.get("/automation-rules/availability")
+async def automation_availability(
+    current_user: User = Depends(get_current_user),
+):
+    """System-level availability of automated publishing (the global kill switch). Lets the UI show
+    an honest 'temporarily disabled by the system' state instead of a misleading 'on'."""
+    return {"automation_enabled": gate.automation_globally_enabled()}
+
+
 @router.get("/automation-rules", response_model=List[AutomationRuleOut])
 async def list_rules(
     current_user: User = Depends(get_current_user),
@@ -147,6 +156,12 @@ async def create_rule(
                 rule, await _load_owned_connection(db, rule.connection_id, current_user))
         except gate.AutoPublishBlocked as e:
             raise HTTPException(409, f"cannot enable: {e.reason}")
+    # Single invariant: never persist enabled+auto while the system kill switch is off (false status).
+    if rule.action_type == REVIEW_ACTION:
+        try:
+            gate.assert_auto_state_runnable(rule.mode, rule.enabled)
+        except gate.AutoPublishBlocked as e:
+            raise HTTPException(409, f"cannot enable auto: {e.reason}")
     db.add(rule)
     try:
         await db.commit()
@@ -205,6 +220,12 @@ async def set_mode(
     if body.mode not in ("confirm", "auto"):
         raise HTTPException(422, "mode must be 'confirm' or 'auto'")
     rule = await _load_owned_rule(db, rule_id, current_user)
+    # Switching an already-enabled rule to auto while the kill switch is off would create a false
+    # "on" state — the same invariant the enable path enforces, on the resulting (mode, enabled).
+    try:
+        gate.assert_auto_state_runnable(body.mode, rule.enabled)
+    except gate.AutoPublishBlocked as e:
+        raise HTTPException(409, f"cannot switch to auto: {e.reason}")
     rule.mode = body.mode
     await db.commit()
     await db.refresh(rule)
@@ -236,6 +257,13 @@ async def toggle_rule(
             gate.check_enable_preconditions(rule, conn)
         except gate.AutoPublishBlocked as e:
             raise HTTPException(409, f"cannot enable: {e.reason}")
+    # The resulting state after this toggle. Enabling an auto rule while the kill switch is off is
+    # refused (false status); disabling is always allowed.
+    if rule.action_type == REVIEW_ACTION:
+        try:
+            gate.assert_auto_state_runnable(rule.mode, not rule.enabled)
+        except gate.AutoPublishBlocked as e:
+            raise HTTPException(409, f"cannot enable auto: {e.reason}")
     rule.enabled = not rule.enabled
     await db.commit()
     await db.refresh(rule)

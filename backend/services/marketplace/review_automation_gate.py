@@ -71,6 +71,22 @@ def check_connection_publishable(conn: Optional[MarketplaceConnection]) -> None:
                                  "connection lacks the 'feedbacks' permission")
 
 
+def automation_globally_enabled() -> bool:
+    """The system-level kill switch. When False, the worker never auto-publishes for anyone."""
+    return bool(settings.automation_enabled)
+
+
+def assert_auto_state_runnable(mode: str, enabled: bool) -> None:
+    """Reject a rule state that would read as running-auto while the kill switch blocks the worker.
+
+    A rule in mode=auto that is enabled while the global kill switch is OFF would show the seller
+    "on" though the worker can never publish it — a false status. Confirm-mode rules are unaffected
+    (they never depend on the worker). Raises AutoPublishBlocked otherwise returns None.
+    """
+    if mode == "auto" and enabled and not automation_globally_enabled():
+        raise AutoPublishBlocked("KILL_SWITCH", "automation is disabled by the system")
+
+
 def check_enable_preconditions(rule: AutomationRule, conn: Optional[MarketplaceConnection]) -> None:
     """Raise AutoPublishBlocked unless the rule may be turned on (enabled=True).
 

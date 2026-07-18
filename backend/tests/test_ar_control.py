@@ -152,7 +152,7 @@ def test_3_cannot_use_foreign_connection():
 
 
 # ── 4/5. Consent allows enable (confirm) then switch to auto ─────────────────
-def test_4_5_consent_enables_confirm_then_auto():
+def test_4_5_consent_enables_confirm_then_auto(monkeypatch):
     db = _run(_new_db())
     uid, conn = _run(_seed_seller(db))
     c = _client(db, uid)
@@ -162,9 +162,54 @@ def test_4_5_consent_enables_confirm_then_auto():
     # enable (confirm mode)
     t = c.patch(f"/api/automation-rules/{rule.id}/toggle")
     assert t.status_code == 200 and t.json()["enabled"] is True and t.json()["mode"] == "confirm"
-    # switch to auto
+    # switch to auto — allowed only while the system kill switch is on
+    monkeypatch.setattr(settings, "automation_enabled", True)
     m = c.patch(f"/api/automation-rules/{rule.id}/mode", json={"mode": "auto"})
     assert m.status_code == 200 and m.json()["mode"] == "auto"
+
+
+# ── Kill switch honesty: no false "on" while global automation is off ─────────
+def test_kill_switch_blocks_enabling_auto(monkeypatch):
+    monkeypatch.setattr(settings, "automation_enabled", False)   # global OFF
+    db = _run(_new_db())
+    uid, conn = _run(_seed_seller(db))
+    c = _client(db, uid)
+    # a consented rule already in auto mode, currently disabled
+    rule = _run(_seed_rule(db, uid, conn, enabled=False, mode="auto", consent=True))
+    r = c.patch(f"/api/automation-rules/{rule.id}/toggle")
+    assert r.status_code == 409 and "KILL_SWITCH" in r.json()["detail"]
+    assert _run(db.get(AutomationRule, rule.id)).enabled is False   # stayed off
+
+
+def test_kill_switch_allows_confirm_enable(monkeypatch):
+    monkeypatch.setattr(settings, "automation_enabled", False)   # global OFF
+    db = _run(_new_db())
+    uid, conn = _run(_seed_seller(db))
+    c = _client(db, uid)
+    rule = _run(_seed_rule(db, uid, conn, enabled=False, mode="confirm", consent=True))
+    r = c.patch(f"/api/automation-rules/{rule.id}/toggle")     # confirm never needs the worker
+    assert r.status_code == 200 and r.json()["enabled"] is True
+
+
+def test_kill_switch_blocks_switch_to_auto_when_enabled(monkeypatch):
+    monkeypatch.setattr(settings, "automation_enabled", False)   # global OFF
+    db = _run(_new_db())
+    uid, conn = _run(_seed_seller(db))
+    c = _client(db, uid)
+    rule = _run(_seed_rule(db, uid, conn, enabled=True, mode="confirm", consent=True))
+    r = c.patch(f"/api/automation-rules/{rule.id}/mode", json={"mode": "auto"})
+    assert r.status_code == 409 and "KILL_SWITCH" in r.json()["detail"]
+    assert _run(db.get(AutomationRule, rule.id)).mode == "confirm"   # unchanged
+
+
+def test_availability_reports_global_flag(monkeypatch):
+    db = _run(_new_db())
+    uid, _ = _run(_seed_seller(db))
+    c = _client(db, uid)
+    monkeypatch.setattr(settings, "automation_enabled", False)
+    assert c.get("/api/automation-rules/availability").json() == {"automation_enabled": False}
+    monkeypatch.setattr(settings, "automation_enabled", True)
+    assert c.get("/api/automation-rules/availability").json() == {"automation_enabled": True}
 
 
 # ── 6. Revoke disables the rule in the same transaction ──────────────────────
