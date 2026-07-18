@@ -72,6 +72,10 @@ services:
       # (telegram.py:17-19 returns False) while Аккаунт still offered the seller a Chat ID form,
       # a "Тест" button and three notification switches. Fail fast instead.
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?TELEGRAM_BOT_TOKEN must be set - the Account page presents Telegram as working, so it must work}
+      # Master kill switch for AUTOMATIC review publishing. Default false so a fresh install never
+      # auto-publishes; beta/prod sets AUTOMATION_ENABLED=true EXPLICITLY after validation. Review
+      # sync + drafting still run when this is off (confirm mode); only auto-publish is gated.
+      AUTOMATION_ENABLED: ${AUTOMATION_ENABLED:-false}
       # Recommended in production (empty → graceful no-op).
       SENTRY_DSN: ${SENTRY_DSN:-}
       # Payments (optional for Advisory MVP).
