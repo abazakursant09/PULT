@@ -16,7 +16,15 @@ from .errors import ExecutionError
 
 log = logging.getLogger(__name__)
 
-_RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+# 420 "Enhance Your Calm" is how Yandex Market signals throttling — it does NOT use 429. Without it
+# here a throttled response would fall through to the generic 4xx branch and surface as
+# MARKETPLACE_4XX, which the review-sync loop treats as a PRODUCT-local error: the cursor would
+# advance and the batch would keep calling a marketplace that just asked us to stop. Both marketplaces
+# that use 429 are unaffected — this only adds a second status to the same, existing path.
+_RETRYABLE_STATUS = {420, 429, 500, 502, 503, 504}
+
+# Statuses that mean "you are being rate limited", whatever number the marketplace picked for it.
+_RATE_LIMIT_STATUS = {420, 429}
 
 
 class BaseMarketplaceClient:
@@ -90,7 +98,7 @@ class BaseMarketplaceClient:
                 return {"raw": resp.text[:500]}
         if sc in (401, 403):
             raise ExecutionError(ExecutionError.AUTH, f"auth rejected ({sc})")
-        if sc == 429:
+        if sc in _RATE_LIMIT_STATUS:
             raise ExecutionError(ExecutionError.RATE_LIMIT, "rate limited")
         if 400 <= sc < 500:
             # body may contain useful validation detail (no secrets — it's the response)
