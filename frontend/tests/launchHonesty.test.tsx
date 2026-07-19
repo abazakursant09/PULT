@@ -61,7 +61,11 @@ describe('L0.1 — checkout cannot claim a fake success', () => {
   })
 
   it('never prints a successful-payment claim', () => {
-    expect(read(...CHECKOUT)).not.toMatch(/Оплата прошла успешно/)
+    // `code`, not `read`: the guard is about what the page can SHOW, and the comment at the top
+    // of checkout/page.tsx quotes the very claim it is explaining the removal of. Reading the raw
+    // file failed on that prose while the markup was honest. The guard itself is unchanged — the
+    // string reappearing in live code or markup still fails this test.
+    expect(src).not.toMatch(/Оплата прошла успешно/)
   })
 
   it('no unshipped-module tariff catalogue', () => {
