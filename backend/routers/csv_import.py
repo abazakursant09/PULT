@@ -13,7 +13,8 @@ from pathlib import Path
 from typing import Optional
 
 from typing import Literal
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import (APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request,
+                     UploadFile)
 from rate_limit import limit_import
 from fastapi.responses import PlainTextResponse, Response
 from pydantic import BaseModel
@@ -31,6 +32,7 @@ from models.imported_card_content import ImportedCardContentRow
 from models.product import Product
 from models.user import User
 from services.product_resolver import build_product_index, resolve, resolution_key
+from services.advisory_runtime.after_import import run_producers_for_user
 from tasks.csv_parser import parse_csv, get_template
 
 logger = logging.getLogger(__name__)
@@ -246,6 +248,7 @@ async def upload_csv(
 @router.post("/import/{import_id}/confirm", response_model=ConfirmResponse)
 async def confirm_import(
     import_id: str,
+    background_tasks: BackgroundTasks,
     body: ConfirmRequest = ConfirmRequest(),
     db:   AsyncSession = Depends(get_db),
     user: User         = Depends(get_current_user),
@@ -273,6 +276,16 @@ async def confirm_import(
 
     if result.errors:
         raise HTTPException(422, f"Ошибки при повторном разборе: {'; '.join(result.errors)}")
+
+    # An import that would write nothing must not be confirmable. The parser already refuses to
+    # produce a clean result with zero rows, so reaching this is a belt-and-braces guard: the rule
+    # lives on the server because a disabled button is a suggestion, not an enforcement.
+    if result.valid_rows == 0:
+        raise HTTPException(
+            422,
+            "В файле не распознано ни одной строки — импортировать нечего. "
+            "Проверьте, что колонки заполнены, и загрузите файл заново.",
+        )
 
     # Overwrite: replace the previous copy of THIS file rather than appending a second one.
     # Scope is exactly the rows of prior CONFIRMED imports with the same (user_id, file_hash),
@@ -512,6 +525,15 @@ async def confirm_import(
         "import_confirmed",
         extra={"import_id": rec.id, "imported": imported, "failed": failed, "skipped": skipped},
     )
+
+    # Analyse THIS seller's newly-landed data now, instead of leaving them to wait for the
+    # scheduler's next due window (24h for most contours). Queued after the response so the
+    # upload does not block on it, using the same BackgroundTasks mechanism already used for
+    # competitor collection. Only runs when rows actually landed — analysing nothing would
+    # produce an empty run and tell the seller "разбор готовится" about no data at all.
+    if imported > 0:
+        background_tasks.add_task(run_producers_for_user, str(user.id))
+
     return ConfirmResponse(import_id=rec.id, imported_count=imported, skipped_count=skipped)
 
 

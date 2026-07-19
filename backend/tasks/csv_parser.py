@@ -495,9 +495,13 @@ def parse_csv(
             result.unmapped_required.append(req)
 
     if result.unmapped_required:
-        result.warnings.append(
-            f"Не найдены обязательные колонки: {', '.join(result.unmapped_required)}. "
-            f"Проверьте сопоставление колонок."
+        # FATAL, not a warning. Every row needs `sku`; without that column every row is
+        # skipped, and a warning still leaves the import confirmable — which is how a seller
+        # could reach a green "Импортировано 0 строк" screen believing their report landed.
+        # Name the column, because "проверьте сопоставление" alone does not say what is wrong.
+        result.errors.append(
+            f"В файле нет обязательной колонки: {', '.join(result.unmapped_required)}. "
+            f"Добавьте её в отчёт или скачайте шаблон."
         )
 
     # Parse rows
@@ -533,6 +537,14 @@ def parse_csv(
 
     if result.total_rows == 0:
         result.errors.append("CSV не содержит строк данных (только заголовок).")
+    elif result.valid_rows == 0 and not result.errors:
+        # The file had rows and the required columns, yet nothing survived parsing. Importing
+        # this would write nothing while reporting success, so it is an error the seller can act
+        # on rather than a silent no-op.
+        result.errors.append(
+            f"Ни одна строка не распознана (проверено {result.total_rows}). "
+            f"Проверьте формат файла и заполненность колонок."
+        )
 
     # Cap warnings to avoid huge responses
     if len(result.warnings) > 50:

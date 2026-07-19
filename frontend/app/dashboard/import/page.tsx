@@ -190,6 +190,10 @@ export default function ImportPage() {
   const effectiveMp    = (preview?.marketplace ?? mp) as string
   const effectiveIType = (preview?.import_type ?? itype) as string
   const hasErrors      = (preview?.errors?.length ?? 0) > 0
+  // Nothing recognised = nothing to import. Confirming would write no rows and still show the
+  // green success screen, which is how a seller could believe their report had landed when it
+  // had not. The server refuses this too — the button is the courtesy, not the rule.
+  const nothingToImport = (preview?.valid_rows ?? 0) === 0
   const hasDup         = Boolean(preview?.duplicate_import_id)
   const curStep        = stepIndex(stage)
 
@@ -386,6 +390,20 @@ export default function ImportPage() {
               </Card>
             )}
 
+            {/* Nothing recognised, yet the parser raised no error of its own — say so plainly
+                rather than leaving a dead button with no explanation next to it. */}
+            {nothingToImport && !hasErrors && (
+              <Card variant="surface" className="p-4" style={{ borderColor: 'var(--danger)', background: 'var(--danger-dim)' }}>
+                <p className="text-[13px] font-semibold text-[var(--danger)] mb-1">
+                  Ни одна строка не распознана
+                </p>
+                <p className="text-[12px] text-[var(--danger)]">
+                  Импортировать нечего. Проверьте, что в файле заполнены обязательные колонки,
+                  и загрузите его заново.
+                </p>
+              </Card>
+            )}
+
             {/* Warnings (non-blocking) */}
             {preview.warnings.length > 0 && !hasErrors && (
               <Card variant="surface" className="p-3.5" style={{ borderColor: 'var(--warning)', background: 'var(--warning-dim)' }}>
@@ -452,8 +470,12 @@ export default function ImportPage() {
             {/* Action buttons */}
             <div className="flex gap-3">
               <Button variant="ghost" onClick={reset} className="shrink-0">← Назад</Button>
-              <Button variant="primary" className="flex-1" disabled={hasErrors || (hasDup && !dupAction)} onClick={handleConfirm}>
-                Импортировать {preview.valid_rows} строк <ArrowRight size={14} />
+              <Button variant="primary" className="flex-1"
+                disabled={hasErrors || nothingToImport || (hasDup && !dupAction)}
+                onClick={handleConfirm}>
+                {nothingToImport
+                  ? 'Импортировать нечего'
+                  : <>Импортировать {preview.valid_rows} строк <ArrowRight size={14} /></>}
               </Button>
             </div>
           </div>

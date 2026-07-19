@@ -1857,6 +1857,8 @@ export const api = {
       return req<TodayResponse>(`/api/today${s ? `?${s}` : ''}`)
     },
     getSummary: () => req<TodaySummary>('/api/today/summary'),
+    // The seller's real position on their first visit — see FirstRunState. Read-only.
+    getFirstRun: () => req<FirstRunState>('/api/today/first-run'),
   },
 
   // ── Promotion Activation — click-triggered promote+bridge (signal → Decision) ─
@@ -2542,6 +2544,21 @@ export interface PromotionRunResponse {
   skipped:           number
   items:             PromotionRunItem[]
 }
+// Why the first screen shows what it shows. `analyzing` is backed by a real in-flight run or an
+// import newer than the last finished one — never assumed from the upload alone. `missing` is
+// populated only for `insufficient` and names the concrete gap. No completion time is returned,
+// because the runtime does not guarantee one.
+export type FirstRunStateName = 'no_data' | 'analyzing' | 'ready' | 'insufficient' | 'failed'
+
+export interface FirstRunState {
+  state:             FirstRunStateName
+  finance_days:      number
+  product_snapshots: number
+  has_products:      boolean
+  has_returns:       boolean
+  missing:           string[]
+}
+
 export interface TodaySummary {
   revenue_today:              number
   profit_today:               number
