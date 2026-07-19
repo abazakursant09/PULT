@@ -20,11 +20,16 @@ import { verdict, requestErrorText, mpName } from './connectionText'
 
 const FEEDBACKS = 'feedbacks'
 
-type Choice = 'wildberries' | 'ozon'
+type Choice = 'wildberries' | 'ozon' | 'yandex'
+
+const CHOICES: Choice[] = ['wildberries', 'ozon', 'yandex']
 
 const CABINET_HINT: Record<Choice, string> = {
   wildberries: 'Личный кабинет → Настройки → Доступ к API → категория «Вопросы и отзывы»',
   ozon: 'Личный кабинет → Настройки → Seller API',
+  // The key must be able to WRITE: publishing a reply needs the communication group, and a
+  // read-only token would verify as missing the permission rather than fail later at publish time.
+  yandex: 'Кабинет продавца → Настройки → API → доступ «Общение с покупателями» (не только чтение)',
 }
 
 export function ConnectMarketplaceDialog({
@@ -101,16 +106,12 @@ export function ConnectMarketplaceDialog({
             </p>
 
             <div className="flex gap-2 flex-wrap">
-              {(['wildberries', 'ozon'] as Choice[]).map(m => (
+              {CHOICES.map(m => (
                 <Button key={m} size="sm" variant={mp === m ? 'default' : 'outline'}
                   disabled={busy} onClick={() => { setMp(m); setError('') }}>
                   {mpName(m)}
                 </Button>
               ))}
-              {/* Yandex has no review provider yet — offering it would create a dead connection. */}
-              <Button size="sm" variant="ghost" disabled aria-disabled="true">
-                Яндекс Маркет — скоро
-              </Button>
             </div>
 
             {mp === 'ozon' && (

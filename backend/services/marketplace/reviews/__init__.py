@@ -15,6 +15,7 @@ from typing import Optional
 from .base import NormalizedReview, ReviewProvider
 from .wildberries import WildberriesReviewProvider
 from .ozon import OzonReviewProvider
+from .yandex import YandexReviewProvider
 
 # marketplace label (as stored on Product.marketplace / MarketplaceConnection.marketplace) -> provider
 REVIEW_PROVIDERS: dict[str, ReviewProvider] = {
@@ -23,7 +24,8 @@ REVIEW_PROVIDERS: dict[str, ReviewProvider] = {
     # until R-OZ3 wires the publish dispatcher and flips capability_registry pult_supported — so the
     # /sync router still answers honest-unsupported for Ozon today. Registered, not yet enabled.
     "ozon": OzonReviewProvider(),
-    # yandex / megamarket: no provider yet — get_review_provider returns None (honest unsupported).
+    "yandex": YandexReviewProvider(),
+    # megamarket: no provider yet — get_review_provider returns None (honest unsupported).
 }
 
 
@@ -37,8 +39,21 @@ def get_review_provider(marketplace: str) -> Optional[ReviewProvider]:
 # composite "<client_id>:<api_key>". Both the /sync router and the publish dispatcher shape the
 # credential here so the two paths can never diverge, and a new marketplace adds a key (or uses the
 # identity default), never a branch.
+def _yandex_credential(token: str, ctx: Optional[dict]) -> str:
+    """Yandex scopes every review call to a CABINET, which the seller never types: it is discovered
+    from the key itself and cached on the credential row, arriving here as `account_ref`.
+
+    When it is absent — a publish attempted before any sync ever resolved one — the token is handed
+    over ALONE, so the provider rejects it as an incomplete credential. Interpolating the missing
+    value would build the literal cabinet "None" and send a seller's reply at it.
+    """
+    account_ref = (ctx or {}).get("account_ref")
+    return f"{account_ref}:{token}" if account_ref else token
+
+
 _REVIEW_CREDENTIAL = {
     "ozon": lambda token, ctx: f"{(ctx or {}).get('ozon_client_id')}:{token}",
+    "yandex": _yandex_credential,
 }
 
 
@@ -47,5 +62,31 @@ def review_credential(marketplace: str, token: str, ctx: Optional[dict] = None) 
     return _REVIEW_CREDENTIAL.get(marketplace, lambda t, _c: t)(token, ctx)
 
 
+async def resolve_account_ref(provider: ReviewProvider, token: str) -> Optional[str]:
+    """The provider's account/cabinet id for this key, when it needs one.
+
+    A CAPABILITY check, not a marketplace check: a provider that scopes its calls to an account
+    exposes `resolve_account_ref`, and the ingestion flow asks every provider the same question
+    without learning which marketplace answers it.
+    """
+    resolver = getattr(provider, "resolve_account_ref", None)
+    if resolver is None:
+        return None
+    return await resolver(token)
+
+
+async def answer_status(provider: ReviewProvider, token: str, external_review_id: str,
+                        comment_id: Optional[str]) -> Optional[str]:
+    """The marketplace's current view of OUR reply, for providers that moderate replies.
+
+    Capability check again, not a marketplace check. None means "this provider does not moderate" or
+    "the reply could not be found" — both are unknowns, and an unknown must never become a re-send.
+    """
+    checker = getattr(provider, "answer_status", None)
+    if checker is None:
+        return None
+    return await checker(token, external_review_id, comment_id)
+
+
 __all__ = ["NormalizedReview", "ReviewProvider", "REVIEW_PROVIDERS",
-           "get_review_provider", "review_credential"]
+           "get_review_provider", "review_credential", "resolve_account_ref", "answer_status"]

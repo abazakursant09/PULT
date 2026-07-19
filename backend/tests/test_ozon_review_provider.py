@@ -33,8 +33,11 @@ def test_wb_provider_unchanged():
     assert p.supports_reviews() is True          # WB still live
 
 
-def test_yandex_still_unsupported():
-    assert get_review_provider("yandex") is None
+def test_yandex_now_supported_megamarket_still_is_not():
+    # Yandex gained a real provider (fetch + publish against the Partner API). Megamarket has none,
+    # so it still resolves to None and the router answers an honest "unsupported".
+    assert get_review_provider("yandex") is not None
+    assert get_review_provider("yandex").supports_reviews() is True
     assert get_review_provider("megamarket") is None
 
 

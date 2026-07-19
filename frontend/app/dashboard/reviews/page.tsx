@@ -17,7 +17,8 @@ import { parseUtc, formatDateTime } from '@/lib/datetime'
 // seller with no reviews sees an honest empty state, never demo data. All colour is on P0 tokens;
 // status is communicated by a coloured P1 Badge, loading by a Skeleton, actions by P1 Buttons.
 
-const FILTERS: (ReviewState | '')[] = ['', 'New', 'NeedsAttention', 'Drafted', 'Approved', 'Published', 'Failed']
+const FILTERS: (ReviewState | '')[] = ['', 'New', 'NeedsAttention', 'Drafted', 'Approved',
+  'AwaitingModeration', 'Published', 'Failed']
 
 const _MP_NAME: Record<string, string> = {
   wb: 'Wildberries', wildberries: 'Wildberries', ozon: 'Ozon',
@@ -54,6 +55,10 @@ function _fate(r: ReviewResponse): string {
       return at ? `Ответ опубликован ${formatDateTime(at)}` : 'Ответ опубликован'
     }
     case 'Approved':       return 'Ответ одобрен и ждёт публикации'
+    // Sent — but not visible yet. Saying "опубликован" here would be the one lie the seller could
+    // only catch by opening the marketplace cabinet themselves.
+    case 'AwaitingModeration':
+      return 'Ответ отправлен и проверяется маркетплейсом'
     case 'Drafted':        return 'Черновик готов — нужно ваше подтверждение'
     case 'NeedsAttention': return 'Этот отзыв отвечается вручную'
     case 'Failed':         return `Опубликовать не удалось. Попыток: ${r.publication_attempts}`

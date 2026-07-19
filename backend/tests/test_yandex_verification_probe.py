@@ -252,16 +252,37 @@ def test_a_nested_result_envelope_is_also_accepted():
 
 # ── F. unsupported scopes ───────────────────────────────────────────────────
 
-@pytest.mark.parametrize("scope", ["feedbacks", "advert"])
+@pytest.mark.parametrize("scope", ["advert"])
 def test_unsupported_scopes_perform_no_http_call(scope):
-    """Yandex has no `advert` group at all, and the owner of goods-feedback is unconfirmed.
+    """Yandex has no `advert` group at all.
 
     Asserting a mapping we picked ourselves is the exact failure this contour exists to
-    prevent, so we say we cannot check rather than guess.
+    prevent, so we say we cannot check rather than guess. `feedbacks` left this list once the
+    documented owner of goods-feedback (the `communication` group) was confirmed.
     """
     result, t = _verify(scope)              # nothing scripted: any call would fail
     assert result.outcome is O.VERIFICATION_UNSUPPORTED
     assert t.requests == []
+
+
+# ── F2. feedbacks: verifiable, but only with a WRITE-capable grant ──────────
+
+def test_feedbacks_verified_with_communication_group():
+    result, _t = _verify("feedbacks", _resp(200, {"authScopes": ["communication"]}))
+    assert result.outcome is O.VERIFIED
+
+
+def test_feedbacks_verified_with_all_methods():
+    result, _t = _verify("feedbacks", _resp(200, {"authScopes": ["all-methods"]}))
+    assert result.outcome is O.VERIFIED
+
+
+def test_feedbacks_rejects_a_read_only_grant():
+    """Auto Reviews PUBLISHES a reply. A read-only key cannot, however much it looks like it
+    covers reviews — verifying it would defer the real failure to the first publish, where it
+    would read as a marketplace error rather than the missing permission it is."""
+    result, _t = _verify("feedbacks", _resp(200, {"authScopes": ["all-methods:read-only"]}))
+    assert result.outcome is O.MISSING_SCOPE
 
 
 def test_advert_is_not_silently_treated_as_promotion():

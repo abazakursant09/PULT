@@ -18,7 +18,7 @@ from models.review_response import ReviewResponse
 from models.marketplace_connection import MarketplaceConnection
 from models.api_credential import ApiCredential
 from services.marketplace import credential_vault
-from services.marketplace.reviews import get_review_provider, review_credential
+from services.marketplace.reviews import get_review_provider, review_credential, resolve_account_ref
 from services.review.draft import classify_review
 
 FEEDBACKS_SCOPE = "feedbacks"
@@ -49,6 +49,34 @@ async def resolve_feedbacks_connection(db: AsyncSession, user_id: str, marketpla
     ).scalars().first()
 
 
+ACCOUNT_REF_KEY = "account_ref"
+
+
+async def ensure_account_ref(db: AsyncSession, cred, provider, token: str) -> str | None:
+    """The provider's account id for this credential, resolved once and cached on the row.
+
+    Some marketplaces scope every call to an account rather than to the key — Yandex addresses
+    reviews by cabinet. The seller does not type that id: it is discovered from the key and stored in
+    `ApiCredential.meta`, so a restart does not re-ask and a rotated key re-resolves.
+
+    Capability-driven: a provider that needs no account ref simply does not expose the resolver, and
+    this returns None without the flow ever asking which marketplace it is talking to.
+    """
+    meta = dict(cred.meta or {})
+    cached = meta.get(ACCOUNT_REF_KEY)
+    if cached:
+        return str(cached)
+
+    ref = await resolve_account_ref(provider, token)
+    if not ref:
+        return None
+
+    meta[ACCOUNT_REF_KEY] = str(ref)
+    cred.meta = meta            # reassigned, not mutated — a JSON column needs a new object to dirty
+    await db.commit()
+    return str(ref)
+
+
 async def sync_product_reviews(db: AsyncSession, product) -> dict:
     """Fetch REAL reviews for one product and insert new ones. Idempotent via the DB unique index.
 
@@ -74,9 +102,13 @@ async def sync_product_reviews(db: AsyncSession, product) -> dict:
         raise ReviewSyncNoScope()
 
     token = credential_vault.decrypt(cred.secret_enc)
+    account_ref = await ensure_account_ref(db, cred, provider, token)
     # Shape the token into what this marketplace's provider expects (e.g. Ozon's composite
     # "<client_id>:<api_key>") — the same helper the publish dispatcher uses, so sync and publish agree.
-    cred_token = review_credential(product.marketplace, token, {"ozon_client_id": conn.ozon_client_id})
+    cred_token = review_credential(
+        product.marketplace, token,
+        {"ozon_client_id": conn.ozon_client_id, "account_ref": account_ref},
+    )
     reviews = await provider.fetch_reviews(cred_token, product.sku)
 
     imported = 0

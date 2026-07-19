@@ -5,7 +5,7 @@ The ReviewResponse row carries a raw `status` (pending / drafted / approved / pu
 attempt failed, AR3). The seller workspace shows one of seven states, resolved by a fixed
 precedence so a conflict (e.g. a RISK review that was approved and published) has one answer:
 
-    Published > Failed > Approved > Drafted > NeedsAttention > New
+    Published > Failed > AwaitingModeration > Approved > Drafted > NeedsAttention > New
 
 Processing is a transient state a caller may set while a sync is in flight; it is never persisted
 here, so it is not derived from a stored row.
@@ -19,6 +19,7 @@ PROCESSING = "Processing"
 DRAFTED = "Drafted"
 NEEDS_ATTENTION = "NeedsAttention"
 APPROVED = "Approved"
+AWAITING_MODERATION = "AwaitingModeration"
 PUBLISHED = "Published"
 FAILED = "Failed"
 
@@ -33,6 +34,11 @@ def derive_state(status: Optional[str], safety_category: Optional[str], failure_
     # it later succeeded (handled above).
     if failure_reason:
         return FAILED
+    # The reply reached the marketplace but is not visible yet: some marketplaces moderate a seller's
+    # answer before showing it (Yandex). It is emphatically NOT published — claiming otherwise would
+    # tell the seller their answer is live when nobody can see it — and it must never be re-sent.
+    if status == "awaiting_moderation":
+        return AWAITING_MODERATION
     if status == "approved":
         return APPROVED
     if status == "drafted":

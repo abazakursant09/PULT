@@ -24,14 +24,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from database import AsyncSessionLocal
+from models.api_credential import ApiCredential
 from models.automation_rule import AutomationRule
+from models.execution_log import ExecutionLog
 from models.marketplace_connection import MarketplaceConnection
 from models.product import Product
 from models.review_response import ReviewResponse
 from services.review import ingest as review_ingest
 from services.review.draft import build_draft
+from services.marketplace import credential_vault
 from services.marketplace import review_automation_gate as gate
 from services.marketplace.errors import ExecutionError
+from services.marketplace.reviews import (
+    answer_status as review_answer_status,
+    get_review_provider,
+    review_credential,
+)
+
+AWAITING_MODERATION_STATUS = "awaiting_moderation"
 
 log = logging.getLogger(__name__)
 
@@ -204,6 +214,132 @@ async def run_auto_sync_reviews() -> dict:
     log.info("auto-sync reviews: imported=%s errors=%s throttled=%s stopped=%s",
              imported, errors, throttled, stopped)
     return {"imported": imported, "errors": errors, "throttled": throttled, "stopped": stopped}
+
+
+# Moderation re-check cadence. A reply awaiting moderation is not urgent — the seller already knows
+# it was sent — so this is deliberately slower than the sync loop and shares its per-connection
+# backoff columns, meaning a throttled marketplace stops being polled instead of being hammered.
+MODERATION_RECHECK_SEC = 60 * 60          # at most one sweep per connection per hour
+MODERATION_BATCH = 20                     # bounded burst, same reasoning as the sync batch
+
+
+async def run_reconcile_moderation() -> dict:
+    """Resolve replies that the marketplace accepted but had not yet shown.
+
+    `awaiting_moderation` must not be a resting place: a reply sits there only until the marketplace
+    decides, and until then the seller is told the truth — sent, not yet visible. This sweep asks
+    what happened and moves the row on.
+
+    It NEVER publishes. Not finding the reply is an unknown, and an unknown leaves the row exactly
+    where it is; the one thing that must never follow a lost answer is a second copy of it.
+    """
+    resolved = 0
+    rejected = 0
+    pending = 0
+    errors = 0
+    now = datetime.utcnow()
+
+    async with AsyncSessionLocal() as db:
+        for rule in await _candidate_rules(db):
+            conn = await _publishable_connection(db, rule)
+            if conn is None:
+                continue
+            provider = get_review_provider(conn.marketplace)
+            if provider is None or getattr(provider, "answer_status", None) is None:
+                continue                       # this marketplace does not moderate replies
+
+            rows = (
+                await db.execute(
+                    select(ReviewResponse)
+                    .join(Product, ReviewResponse.product_id == Product.id)
+                    .where(
+                        Product.user_id == rule.user_id,
+                        ReviewResponse.marketplace == conn.marketplace,
+                        ReviewResponse.status == AWAITING_MODERATION_STATUS,
+                        ReviewResponse.external_review_id.isnot(None),
+                    )
+                    .limit(MODERATION_BATCH)
+                )
+            ).scalars().all()
+            if not rows:
+                continue
+
+            try:
+                cred_token = await _connection_credential(db, conn, provider)
+            except Exception as e:                       # missing/undecryptable key — not a re-send
+                errors += 1
+                log.warning("moderation re-check: no usable credential conn=%s: %s", conn.id, e)
+                continue
+
+            for review in rows:
+                try:
+                    status = await review_answer_status(
+                        provider, cred_token, review.external_review_id,
+                        await _comment_id_for(db, review),
+                    )
+                except ExecutionError as e:
+                    errors += 1
+                    if e.code in _CONNECTION_FATAL_CODES:
+                        # The marketplace is refusing us as a caller — stop this connection now,
+                        # exactly as the sync loop does, instead of walking the rest of the batch.
+                        log.warning("moderation re-check stopped conn=%s code=%s", conn.id, e.code)
+                        break
+                    continue
+                except Exception as e:
+                    errors += 1
+                    log.warning("moderation re-check failed review=%s: %s", review.id, e)
+                    continue
+
+                if status == "PUBLISHED":
+                    review.status = "published"
+                    review.published_at = datetime.utcnow()
+                    resolved += 1
+                elif status in ("BANNED", "DELETED"):
+                    review.status = "failed"
+                    review.failure_reason = "маркетплейс отклонил ответ"
+                    rejected += 1
+                else:
+                    pending += 1                 # UNMODERATED or not found — leave it alone
+            await db.commit()
+
+    log.info("moderation re-check: resolved=%s rejected=%s pending=%s errors=%s",
+             resolved, rejected, pending, errors)
+    return {"resolved": resolved, "rejected": rejected, "pending": pending, "errors": errors}
+
+
+async def _connection_credential(db: AsyncSession, conn, provider) -> str:
+    """The provider-shaped credential for a connection's feedbacks scope."""
+    cred = (
+        await db.execute(
+            select(ApiCredential).where(
+                ApiCredential.connection_id == conn.id,
+                ApiCredential.scope == review_ingest.FEEDBACKS_SCOPE,
+            )
+        )
+    ).scalars().first()
+    if cred is None:
+        raise RuntimeError("no feedbacks credential")
+    token = credential_vault.decrypt(cred.secret_enc)
+    account_ref = await review_ingest.ensure_account_ref(db, cred, provider, token)
+    return review_credential(conn.marketplace, token,
+                             {"ozon_client_id": conn.ozon_client_id, "account_ref": account_ref})
+
+
+async def _comment_id_for(db: AsyncSession, review) -> str | None:
+    """The marketplace's id for OUR reply, read back from the execution log it was recorded in.
+
+    Stored there rather than in a new column: the log already keeps the marketplace's result, and the
+    review row already points at the log.
+    """
+    if not review.execution_log_id:
+        return None
+    row = (
+        await db.execute(
+            select(ExecutionLog.result).where(ExecutionLog.id == review.execution_log_id)
+        )
+    ).scalars().first()
+    value = (row or {}).get("comment_id") if isinstance(row, dict) else None
+    return str(value) if value is not None else None
 
 
 async def run_auto_draft_reviews() -> dict:

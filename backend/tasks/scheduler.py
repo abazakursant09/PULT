@@ -449,10 +449,15 @@ async def _review_ingest_tick() -> None:
     and is deliberately NOT gated by the kill switch — a confirm-mode seller keeps receiving reviews
     and drafts even when automatic publishing is off. Only publishing (below) is kill-switch gated.
     Never raises into the scheduler."""
-    from tasks.auto_review_pipeline import run_auto_sync_reviews, run_auto_draft_reviews
+    from tasks.auto_review_pipeline import (
+        run_auto_sync_reviews, run_auto_draft_reviews, run_reconcile_moderation,
+    )
     try:
         await run_auto_sync_reviews()
         await run_auto_draft_reviews()
+        # Replies a moderating marketplace accepted but had not yet shown must not sit in
+        # "awaiting moderation" forever. Read-only: this sweep never publishes anything.
+        await run_reconcile_moderation()
     except Exception:
         logger.exception("review ingest tick error")
 

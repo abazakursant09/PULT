@@ -108,6 +108,24 @@ async def _resolve_token(db: AsyncSession, connection_id: str, scope: str) -> st
     return credential_vault.decrypt(cred.secret_enc)
 
 
+async def _account_ref(db: AsyncSession, connection_id: str, scope: str) -> str | None:
+    """The account/cabinet id cached on this credential during sync, if the provider needed one.
+
+    Non-secret, so it is read straight from `meta` — the vault boundary is only for the secret. A
+    marketplace that scopes calls to an account (Yandex addresses reviews by cabinet) must publish
+    into the same account it read from, so the two paths share one stored value.
+    """
+    cred = (
+        await db.execute(
+            select(ApiCredential).where(
+                ApiCredential.connection_id == connection_id,
+                ApiCredential.scope == scope,
+            )
+        )
+    ).scalars().first()
+    return (cred.meta or {}).get("account_ref") if cred is not None else None
+
+
 async def execute(
     *,
     db: AsyncSession,
@@ -191,7 +209,10 @@ async def execute(
                                reversible=spec.reversible)
 
     ctx = {"marketplace": conn.marketplace, "ozon_client_id": conn.ozon_client_id,
-           "db": db, "connection_id": conn.id}
+           "db": db, "connection_id": conn.id,
+           # Discovered once during sync and cached on the credential row; a provider that scopes
+           # its calls to an account (Yandex addresses reviews by cabinet) needs it to publish too.
+           "account_ref": await _account_ref(db, conn.id, spec.required_scope)}
 
     # 5) idempotency: never re-dispatch a key that already succeeded OR whose delivery is unknown.
     # A prior "ambiguous" (TIMEOUT/5XX after the request left) may have committed on the

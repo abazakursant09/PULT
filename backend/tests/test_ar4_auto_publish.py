@@ -72,13 +72,17 @@ def _install(monkeypatch, db, *, ok=True, error="TIMEOUT"):
                                mode=mode, status="rejected", error_code=e.code,
                                idempotency_key=idempotency_key, payload={})
             db.add(log); await db.flush()
-            return SimpleNamespace(ok=False, status="rejected", error=e.code, log_id=log.id)
+            return SimpleNamespace(ok=False, status="rejected", error=e.code, log_id=log.id,
+                                   result={})
         log = ExecutionLog(id=str(uuid.uuid4()), user_id=user_id, action_type=action_type,
                            mode=mode, status="success" if ok else "failed",
                            error_code=None if ok else error, idempotency_key=idempotency_key,
                            payload={})
         db.add(log); await db.flush()
-        return SimpleNamespace(ok=ok, status=("success" if ok else "failed"), error=None if ok else error, log_id=log.id)
+        # `result` mirrors the real ExecResult: the marketplace's own answer. Empty is what a
+        # marketplace that does not moderate seller replies (WB, Ozon) sends back.
+        return SimpleNamespace(ok=ok, status=("success" if ok else "failed"),
+                               error=None if ok else error, log_id=log.id, result={})
 
     monkeypatch.setattr(ap.executor, "execute", _fake_execute)
     return calls

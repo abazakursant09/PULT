@@ -20,7 +20,7 @@ const _mp = (m: string) => _MP_NAME[m] || m
 
 // Marketplaces where Auto Reviews is actually wired end-to-end (mirrors the backend review
 // providers). Others are shown honestly as not-yet-available; the seller cannot consent/enable them.
-const AR_SUPPORTED = new Set(['wildberries', 'ozon'])
+const AR_SUPPORTED = new Set(['wildberries', 'ozon', 'yandex'])
 
 const CONSENT_TEXT =
   'Разрешаю PULT обрабатывать отзывы и публиковать ответы в выбранном режиме для этого магазина. ' +

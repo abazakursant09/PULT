@@ -110,7 +110,9 @@ def _install_worker(monkeypatch, db, *, ok=True, status="success", error=None):
                            mode=mode, status=status, idempotency_key=idempotency_key, payload={})
         db.add(log)
         await db.flush()
-        return SimpleNamespace(ok=ok, status=status, error=error, log_id=log.id)
+        # `result` mirrors the real ExecResult: the marketplace's own answer. Empty is what a
+        # marketplace that does not moderate seller replies (WB, Ozon) sends back.
+        return SimpleNamespace(ok=ok, status=status, error=error, log_id=log.id, result={})
 
     monkeypatch.setattr(ap.executor, "execute", _fake_execute)
     return calls
@@ -342,9 +344,11 @@ def test_17_ozon_gate_allows_and_publishes(monkeypatch):
     assert out["published"] == 1
 
 
-# ── 18. Yandex stays closed until AR-YM ──────────────────────────────────────
-def test_18_yandex_closed():
+# ── 18. Yandex is open; Megamarket is the one that stays closed ──────────────
+def test_18_yandex_open_megamarket_closed():
+    """Yandex Auto Reviews shipped, so the gate must let it through — and must still refuse the
+    marketplace PULT genuinely cannot serve, or it has stopped being a gate at all."""
     from services.marketplace.reviews import get_review_provider
-    assert get_review_provider("yandex") is None
-    assert get_review_provider("yandex_market") is None
-    assert gate.marketplace_supports_reviews("yandex_market") is False
+    assert get_review_provider("yandex") is not None
+    assert get_review_provider("megamarket") is None
+    assert gate.marketplace_supports_reviews("megamarket") is False
