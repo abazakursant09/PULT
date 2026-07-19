@@ -320,6 +320,16 @@ export interface NotificationsResponse {
 
 export interface RegisterResponse {
   message: string
+  // Whether the verification mail actually reached SMTP. False means the account exists but no
+  // letter is coming — the screen must not tell the seller to check an inbox in that case.
+  // A delivery fact only; the verification link itself is never returned (P7.1).
+  verification_email_sent?: boolean
+}
+
+export interface ResendVerificationResponse {
+  message: string
+  // False only when a send was attempted and failed. Absent/true otherwise.
+  email_sent?: boolean
 }
 
 export interface ChatMessage {
@@ -1195,7 +1205,7 @@ export const api = {
     verifyEmail: (token: string) =>
       req<AuthResponse>(`/api/auth/verify-email?token=${encodeURIComponent(token)}`),
     resendVerification: (email: string) =>
-      req<{ message: string }>('/api/auth/resend-verification', {
+      req<ResendVerificationResponse>('/api/auth/resend-verification', {
         method: 'POST', body: JSON.stringify({ email }),
       }),
     forgotPassword: (email: string) =>

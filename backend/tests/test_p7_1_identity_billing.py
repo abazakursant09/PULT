@@ -81,8 +81,13 @@ def test_register_no_token_sends_email(monkeypatch):
                               _Req(), db)
         assert isinstance(resp, RegisterResponse)
         dumped = resp.model_dump()
-        assert set(dumped.keys()) == {"message"}          # NO verification_token
+        # Deliberately an EXACT set, not a "no token" substring check: anything that appears in
+        # this response must be justified here, one field at a time. `verification_email_sent` is
+        # a boolean DELIVERY fact (B6) — it says whether SMTP accepted the letter and nothing at
+        # all about the link, which is still delivered only by email.
+        assert set(dumped.keys()) == {"message", "verification_email_sent"}
         assert "verification_token" not in dumped
+        assert isinstance(dumped["verification_email_sent"], bool)
         assert sent and sent[0][0] == "verify" and sent[0][1] == "a@b.com"
         # token persisted in DB (delivered by email, not response)
         user = (await db.execute(select(User).where(User.email == "a@b.com"))).scalar_one()
