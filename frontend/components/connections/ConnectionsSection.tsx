@@ -71,9 +71,18 @@ function ConnectionCard({ conn, onChanged }: {
       </div>
 
       {revoked ? (
-        <p className="text-[12px]" style={{ color: 'var(--text-3)' }}>
-          Магазин отключён. Подключите его заново, чтобы снова получать отзывы.
-        </p>
+        // A disconnected card used to be a cul-de-sac: this sentence and nothing else. Reconnecting
+        // reuses the same connection row, so the seller keeps their history — and automation stays
+        // OFF until they switch it on themselves, whatever it was set to before.
+        <>
+          <p className="text-[12px] mb-2" style={{ color: 'var(--text-3)' }}>
+            Магазин отключён. Подключите его заново, чтобы снова получать отзывы.
+            Автоответы останутся выключенными, пока вы не включите их сами.
+          </p>
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => setReplacing(true)}>
+            Подключить заново
+          </Button>
+        </>
       ) : (
         <>
           {broken && (
@@ -114,8 +123,13 @@ function ConnectionCard({ conn, onChanged }: {
       {error && <p className="text-[12px] mt-2" style={{ color: 'var(--danger)' }}>{error}</p>}
 
       {/* Replacing a key is the same form as connecting — the backend upserts and resets the
-          verification verdict for that scope, so a stale green tick can never survive. */}
-      <ConnectMarketplaceDialog open={replacing} onOpenChange={setReplacing} onConnected={onChanged} />
+          verification verdict for that scope, so a stale green tick can never survive.
+          THIS card's marketplace is passed in: without it the dialog opened on Wildberries
+          whatever card you clicked, so an Ozon seller could overwrite their WB connection by
+          simply not noticing the toggle. */}
+      <ConnectMarketplaceDialog open={replacing} onOpenChange={setReplacing} onConnected={onChanged}
+        marketplace={conn.marketplace as 'wildberries' | 'ozon' | 'yandex'}
+        ozonClientId={conn.ozon_client_id ?? null} />
     </Card>
   )
 }

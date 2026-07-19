@@ -5,11 +5,12 @@ from datetime import datetime
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
 from dependencies import get_current_user
+from models.automation_rule import AutomationRule
 from models.user import User
 from models.marketplace_account import MarketplaceAccount
 from models.marketplace_connection import MarketplaceConnection
@@ -48,6 +49,25 @@ _UNVERIFIED = "unverified"
 # here — the route calls no marketplace — but they are answered by different future slices
 # (discovery vs. a verification probe), so they are kept as separate constants.
 _UNVERIFIED_CREDENTIALS = "unverified"
+
+
+async def _disable_automation(db: AsyncSession, connection_id: str) -> None:
+    """Disarm every automation rule bound to this connection. Flush-only — the caller commits.
+
+    Called on BOTH disconnect and reconnect, and that repetition is the point: automatic publishing
+    must never resume by itself after the credentials behind it changed. Whichever way a seller
+    arrives back at a working connection, the switch is off and they turn it on themselves.
+
+    Only `enabled` is touched. Consent and mode survive, because the seller really did consent and
+    making them repeat the whole agreement for a key rotation would be a punishment for good
+    hygiene.
+    """
+    await db.execute(
+        update(AutomationRule)
+        .where(AutomationRule.connection_id == connection_id,
+               AutomationRule.enabled.is_(True))
+        .values(enabled=False)
+    )
 
 
 async def _to_out(db: AsyncSession, conn: MarketplaceConnection) -> ConnectionOut:
@@ -139,6 +159,15 @@ async def create_connection(
             conn.label = body.label
         if body.ozon_client_id:
             conn.ozon_client_id = body.ozon_client_id
+        # Reconnecting a shop the seller had disconnected. `status` used to be written ONLY in the
+        # branch above, so a revoked row stayed revoked forever: the new key was stored and
+        # encrypted, the card kept saying "Отключён" with no buttons, and the automation gate went
+        # on refusing it. There was no way out through the UI or the API.
+        #
+        # Reusing the row rather than creating a second one is deliberate — the cabinet keeps one
+        # MarketplaceAccount across every reconnect (see below), which is what makes the seller's
+        # history survive.
+        conn.status = "connected"
         conn.updated_at = datetime.utcnow()
 
     # Identity (F1.1): the cabinet keeps one MarketplaceAccount across every reconnect
@@ -191,6 +220,13 @@ async def create_connection(
     # value written here directly, and never derived from an attempt outcome. No attempt is
     # recorded either: saving a credential is not an attempt to verify it.
     await verification_service.refresh_connection_rollup(db, conn)
+
+    # The credentials behind this connection just changed — on a reconnect AND on a plain key
+    # replacement. Automation stays off until the seller switches it on again: the key it would
+    # publish with is not the key they approved it for, and it has not been verified yet either.
+    # Same transaction as the credential write, so there is no window where a new secret is live
+    # while an old rule is still armed.
+    await _disable_automation(db, conn.id)
 
     await db.commit()
     await db.refresh(conn)
@@ -256,4 +292,13 @@ async def delete_connection(
     if conn is None:
         raise HTTPException(404, "connection not found")
     conn.status = "revoked"
+    # Switch this connection's automation OFF in the same transaction as the disconnect. A rule
+    # left `enabled` would be armed and waiting: reconnect the shop later — or replace the key —
+    # and automatic publishing resumes on its own, using credentials the seller never re-approved
+    # it for. Turning automation back on has to be a decision they make again, out loud.
+    #
+    # Consent and mode are deliberately KEPT: the seller did give consent, and erasing it would
+    # force them through the whole agreement again for what may be a five-minute key rotation.
+    # `enabled` alone is what arms the automation, so `enabled` alone is what we drop.
+    await _disable_automation(db, conn.id)
     await db.commit()
