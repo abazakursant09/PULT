@@ -71,6 +71,12 @@ export default function RegisterPage() {
   const [error,       setError]       = useState('')
   const [loading,     setLoading]     = useState(false)
   const [registered,  setRegistered]  = useState(false)
+  const [mailSent,    setMailSent]    = useState(true)
+  // Resend state, kept separate from the registration form's own error so one cannot overwrite
+  // the other. There is deliberately no 'sent' vs 'failed' here: the resend endpoint answers
+  // identically for every address so as not to leak which ones exist, so the UI cannot know —
+  // and must not claim — whether a letter actually left. 'idle' | 'sending' | 'done'
+  const [resend,      setResend]      = useState<'idle' | 'sending' | 'done'>('idle')
   const [refCode,     setRefCode]     = useState<string | null>(null)
   const [captchaOk,   setCaptchaOk]   = useState(false)
 
@@ -112,7 +118,11 @@ export default function RegisterPage() {
     setLoading(true)
     trackEvent('registration_started', 'auth')
     try {
-      await api.auth.register(form.email, form.name, form.password, refCode ?? undefined)
+      const res = await api.auth.register(form.email, form.name, form.password, refCode ?? undefined)
+      // The account exists either way. Whether a letter is actually on its way decides what this
+      // screen is allowed to claim — telling someone to check an inbox we failed to write to is
+      // what left sellers locked out of accounts they could not enter and could not recover.
+      setMailSent(res.verification_email_sent !== false)
       setRegistered(true)
       stampFunnel(FUNNEL_TS.signup)              // anchor for time_to_first_* activation metrics
       trackEvent('registration_completed', 'auth')
@@ -124,6 +134,18 @@ export default function RegisterPage() {
     }
   }
 
+
+  const resendMail = async () => {
+    setResend('sending')
+    try {
+      await api.auth.resendVerification(form.email)
+    } catch {
+      // Swallowed on purpose: a distinct error state would be the same oracle the endpoint just
+      // stopped being. Either way the request is finished and the button is live again.
+    } finally {
+      setResend('done')
+    }
+  }
 
   if (registered) {
     return (
@@ -142,17 +164,53 @@ export default function RegisterPage() {
                   <MailCheck size={28} style={{ color: '#1A73E8' }} />
                 </div>
               </div>
-              <h2 className="text-center font-bold text-2xl mb-2" style={{ color: '#0A2540', letterSpacing: '-0.02em' }}>Проверьте почту</h2>
-              <p className="text-center text-muted-foreground mb-6" style={{ lineHeight: 1.7 }}>
-                Мы отправили ссылку для подтверждения на <strong style={{ color: '#0A2540' }}>{form.email}</strong>.
-                Перейдите по ней, чтобы завершить регистрацию и войти.
-              </p>
-              <Link href="/login" className="btn btn-primary w-full flex items-center justify-center gap-2">
+              {mailSent ? (
+                <>
+                  {/* Only the registration response — an account the caller demonstrably owns —
+                      may assert that a letter is on its way. A resend never flips this screen. */}
+                  <h2 className="text-center font-bold text-2xl mb-2" style={{ color: '#0A2540', letterSpacing: '-0.02em' }}>
+                    Проверьте почту
+                  </h2>
+                  <p className="text-center text-muted-foreground mb-6" style={{ lineHeight: 1.7 }}>
+                    Мы отправили ссылку для подтверждения на <strong style={{ color: '#0A2540' }}>{form.email}</strong>.
+                    Перейдите по ней, чтобы завершить регистрацию и войти.
+                  </p>
+                </>
+              ) : (
+                <>
+                  {/* The account was created — say so, or the seller registers again and hits
+                      "Email уже зарегистрирован". What failed is the letter, and only the letter. */}
+                  <h2 className="text-center font-bold text-2xl mb-2" style={{ color: '#0A2540', letterSpacing: '-0.02em' }}>
+                    Аккаунт создан
+                  </h2>
+                  <p className="text-center mb-4" style={{ lineHeight: 1.7, color: '#B42318' }}>
+                    Не удалось отправить письмо. Проверьте адрес и попробуйте ещё раз.
+                  </p>
+                  <p className="text-center text-muted-foreground text-sm mb-5" style={{ lineHeight: 1.7 }}>
+                    Адрес: <strong style={{ color: '#0A2540' }}>{form.email}</strong>
+                  </p>
+                  <button type="button" onClick={resendMail} disabled={resend === 'sending'}
+                    className="btn btn-primary w-full flex items-center justify-center gap-2 mb-3">
+                    {resend === 'sending' ? 'Отправляем…' : 'Отправить письмо повторно'}
+                  </button>
+                  {resend === 'done' && (
+                    // Conditional, never a guarantee: the endpoint cannot tell us whether the
+                    // letter left without also telling anyone which addresses are registered.
+                    <p className="text-center text-sm mb-3 text-muted-foreground" style={{ lineHeight: 1.7 }}>
+                      Если адрес зарегистрирован и почта доступна, письмо будет отправлено.
+                      Проверьте папку «Спам» или попробуйте позже.
+                    </p>
+                  )}
+                </>
+              )}
+              <Link href="/login" className="btn btn-secondary w-full flex items-center justify-center gap-2">
                 Перейти ко входу
               </Link>
-              <p className="text-center mt-4 text-xs text-muted-foreground">
-                Не пришло письмо? Проверьте папку «Спам» или зарегистрируйтесь ещё раз.
-              </p>
+              {mailSent && (
+                <p className="text-center mt-4 text-xs text-muted-foreground">
+                  Не пришло письмо? Проверьте папку «Спам» — или запросите новое на странице входа.
+                </p>
+              )}
             </CardContent>
           </Card>
         </BlurFade>

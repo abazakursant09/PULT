@@ -204,10 +204,20 @@ async def register(
 
     log.info("register: user=%s email=%s ip=%s ref=%s", user.id, data.email, ip, data.ref_code)
     await _log(db, email=data.email, success=True, action="register", ip=ip)
-    await send_verification_email(user.email, user.name, verification_token)
+    # The account is kept whatever happens to the mail — losing it would be worse, and the seller
+    # can resend. But the RESULT is no longer discarded: telling someone to check an inbox we
+    # failed to write to is the lie that left them stranded.
+    sent = await send_verification_email(user.email, user.name, verification_token)
+    if not sent:
+        # No token, no address beyond the id — the operator can find the account, the log cannot
+        # be used to verify anyone.
+        log.warning("register: verification email not delivered user=%s", user.id)
 
     return RegisterResponse(
-        message="Аккаунт создан. Проверьте почту и подтвердите email для входа.",
+        message=("Аккаунт создан. Проверьте почту и подтвердите email для входа."
+                 if sent else
+                 "Аккаунт создан, но письмо отправить не удалось."),
+        verification_email_sent=sent,
     )
 
 
@@ -344,10 +354,20 @@ class ResendVerificationIn(BaseModel):
 
 
 class ResendVerificationResponse(BaseModel):
+    # ONE field, and it is a constant. This endpoint is unauthenticated and takes an arbitrary
+    # address, so ANY field that varies with the state of that address is an enumeration oracle.
+    #
+    # A delivery flag used to live here. It read `false` only for an existing-and-unverified
+    # address whose send was refused, and `true` for everything else — which means that during an
+    # SMTP outage the response told an anonymous caller which addresses are registered. Honesty
+    # about delivery belongs on the registration response, where the caller demonstrably owns the
+    # account they just created; here it can only describe someone else's.
     message: str
 
 
-_NEUTRAL_RESEND = "Если аккаунт с таким email существует и не подтверждён, мы отправили новое письмо."
+# Deliberately in the future tense and conditional. It promises nothing about an address the
+# caller may not own, and reads identically whether a letter left, failed, or was never attempted.
+_NEUTRAL_RESEND = "Если адрес зарегистрирован и требует подтверждения, письмо будет отправлено."
 
 
 @router.post("/resend-verification", response_model=ResendVerificationResponse)
@@ -362,9 +382,13 @@ async def resend_verification(
     Registration swallows a mail delivery failure and returns 201, and the verification token is
     delivered only by email — so a seller whose first mail never arrives had no way back in and no
     resend path. This closes that dead-end. It mints a FRESH token (invalidating the old one, in
-    line with the single-token design) and re-sends it. The response is identical whether or not
-    the email exists or is already verified, so it reveals nothing and enumerates no accounts. The
-    token is never returned. Rate-limited like the other unauthenticated auth endpoints.
+    line with the single-token design) and re-sends it. The token is never returned. Rate-limited
+    like the other unauthenticated auth endpoints.
+
+    The response is a CONSTANT — same status, same fields, same text, same types — for an unknown
+    address, an already-verified one, a deleted one, a successful send and a refused send alike.
+    Nothing observable to the caller distinguishes those five cases, so the endpoint cannot be used
+    to test whether an address is registered. A real SMTP failure is recorded server-side instead.
     """
     result = await db.execute(select(User).where(User.email == data.email))
     user = result.scalar_one_or_none()
@@ -375,8 +399,11 @@ async def resend_verification(
         token = secrets.token_urlsafe(32)
         user.verification_token = token
         await db.commit()
-        log.info("resend_verification: user=%s email=%s", user.id, data.email)
-        await send_verification_email(user.email, user.name, token)
+        log.info("resend_verification: user=%s", user.id)
+        if not await send_verification_email(user.email, user.name, token):
+            # The operator's only channel for this failure. Account id only: no token, no
+            # password, no message body — and nothing about it reaches the caller.
+            log.warning("resend_verification: email not delivered user=%s", user.id)
 
     return ResendVerificationResponse(message=_NEUTRAL_RESEND)
 
@@ -409,7 +436,12 @@ async def forgot_password(
     await db.commit()
 
     log.info("password_reset_requested: user=%s email=%s", user.id, data.email)
-    await send_password_reset_email(user.email, user.name, reset_token)
+    # The RESPONSE stays byte-identical whether the address exists or the send failed — this is the
+    # one endpoint where an honest delivery flag would hand an attacker an account-enumeration
+    # oracle. The failure goes to the server log instead, carrying the user id and no token, so an
+    # operator can see the outage without the log becoming a way to verify anybody.
+    if not await send_password_reset_email(user.email, user.name, reset_token):
+        log.warning("password_reset: email not delivered user=%s", user.id)
 
     return ForgotPasswordResponse(
         message="Если этот email зарегистрирован, мы отправили на него ссылку для сброса пароля.",
@@ -445,6 +477,21 @@ async def reset_password(
     user.hashed_password = hash_password(data.password)
     user.reset_token = None
     user.reset_token_expires = None
+
+    # Completing a reset PROVES control of the mailbox: the link only reached them by email, and
+    # it is checked for validity and expiry above and consumed here. So this is the second honest
+    # route to a verified account — and the one that rescues a seller whose verification mail never
+    # arrived, who could previously neither log in nor reset their way back in.
+    #
+    # It is the successful USE of a valid token that verifies, never the mere request of one: an
+    # invalid or expired token raises above and never reaches this line.
+    if not user.is_verified:
+        user.is_verified = True
+        # Retire the outstanding verification link too — the account is verified, so leaving a live
+        # token lying around would serve no purpose.
+        user.verification_token = None
+        log.info("email_verified_via_password_reset: user=%s", user.id)
+
     await db.commit()
 
     log.info("password_reset_completed: user=%s", user.id)

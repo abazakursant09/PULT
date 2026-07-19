@@ -51,6 +51,14 @@ class TokenResponse(BaseModel):
 class RegisterResponse(BaseModel):
     # P7.1 — verification link is delivered by email, never returned in the response.
     message: str
+    # Whether the verification mail was actually handed to SMTP. Registration used to return the
+    # same cheerful "Проверьте почту" whether the mail was sent, merely logged, or failed outright
+    # — so a seller whose mail never left sat waiting for a letter that did not exist, unable to
+    # log in (verification is required) and unable to reset their way in either.
+    #
+    # This is a DELIVERY fact, not a token: it says nothing about the link itself. Safe to return
+    # here because the caller just created this account — there is no one else's existence to leak.
+    verification_email_sent: bool = True
 
 
 class ForgotPasswordResponse(BaseModel):
