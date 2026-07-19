@@ -105,8 +105,8 @@ def test_unsupported_marketplace_is_honest(monkeypatch):
 
     db = _run(_new_db())
     uid = str(uuid.uuid4())
-    # Yandex has no provider (Ozon is supported as of R-OZ3) → the router answers honest-unsupported.
-    prod = _run(_seed(db, uid, marketplace="yandex"))
+    # Megamarket has no provider (WB, Ozon and now Yandex do) → honest-unsupported from the router.
+    prod = _run(_seed(db, uid, marketplace="megamarket"))
     r = _client(db, uid).post(f"/api/reviews/{prod.id}/sync")
 
     assert r.status_code == 422
@@ -117,14 +117,13 @@ def test_unsupported_marketplace_is_honest(monkeypatch):
 
 
 def test_registry_has_no_fake_providers():
-    # WB and Ozon are live (R-OZ3 enabled Ozon: real provider + supports_reviews True +
-    # capability_registry pult_supported true). Yandex/Megamarket have no provider — honest
-    # unsupported, not a fake stub.
-    assert set(REVIEW_PROVIDERS) == {"wildberries", "ozon"}
-    assert get_review_provider("wildberries").supports_reviews() is True
-    assert get_review_provider("ozon").supports_reviews() is True
-    for mp in ("yandex", "megamarket"):
-        assert get_review_provider(mp) is None
+    # WB, Ozon and Yandex are live — each a real provider with supports_reviews True and
+    # capability_registry pult_supported true. Megamarket has none, so it stays honest-unsupported
+    # rather than gaining a fake stub.
+    assert set(REVIEW_PROVIDERS) == {"wildberries", "ozon", "yandex"}
+    for mp in ("wildberries", "ozon", "yandex"):
+        assert get_review_provider(mp).supports_reviews() is True
+    assert get_review_provider("megamarket") is None
 
 
 # ── 3. Duplicate ingestion: one row, second sync skipped ─────────────────────

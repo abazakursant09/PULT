@@ -61,7 +61,7 @@ def _mock_fetch(monkeypatch, marketplace, reviews):
     monkeypatch.setattr(REVIEW_PROVIDERS[marketplace], "fetch_reviews", _fake)
 
 
-def _mock_publish(monkeypatch, *, ok=True, status="success", error=None):
+def _mock_publish(monkeypatch, *, ok=True, status="success", error=None, result=None):
     calls = {"n": 0}
     async def _fake(*, db, user_id, action_type, payload, mode, insight_key, idempotency_key, rule=None):
         calls["n"] += 1
@@ -69,7 +69,10 @@ def _mock_publish(monkeypatch, *, ok=True, status="success", error=None):
         log = ExecutionLog(id=str(uuid.uuid4()), user_id=user_id, action_type=action_type,
                            mode=mode, status=status, idempotency_key=idempotency_key, payload={})
         db.add(log); await db.flush()
-        return SimpleNamespace(ok=ok, status=status, error=error, log_id=log.id)
+        # `result` carries the marketplace's own answer — including a moderation status where the
+        # marketplace moderates seller replies. Empty means "published immediately" (WB, Ozon).
+        return SimpleNamespace(ok=ok, status=status, error=error, log_id=log.id,
+                               result=result or {})
     monkeypatch.setattr(ap.executor, "execute", _fake)
     return calls
 

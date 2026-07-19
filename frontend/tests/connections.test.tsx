@@ -151,11 +151,27 @@ describe('CONNECTION-UI — connecting a marketplace', () => {
     expect(screen.getByLabelText(/API-ключ/)).toHaveAttribute('type', 'password')
   })
 
-  it('does not let a seller connect Yandex yet', async () => {
+  it('lets a seller connect Yandex with just an API key — no cabinet id to type', async () => {
     const create = vi.spyOn(api.connections, 'create')
-    await openDialog()
-    expect(screen.getByRole('button', { name: /Яндекс Маркет — скоро/ })).toBeDisabled()
-    expect(create).not.toHaveBeenCalled()
+      .mockResolvedValue(conn({ marketplace: 'yandex' }))
+    vi.spyOn(api.connections, 'verify').mockResolvedValue(verifyOut('verified') as never)
+    const user = await openDialog()
+
+    await user.click(screen.getByRole('button', { name: 'Яндекс Маркет' }))
+    // Only one field: the businessId is discovered from the key itself, never typed.
+    expect(screen.queryByLabelText(/Client-Id/)).toBeNull()
+    await user.type(screen.getByLabelText(/API-ключ Яндекс Маркет/), 'ya-key')
+    await user.click(screen.getByRole('button', { name: 'Подключить' }))
+
+    await waitFor(() => expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ marketplace: 'yandex', token: 'ya-key', scope: 'feedbacks' }),
+    ))
+  })
+
+  it('tells the Yandex seller the key must be able to write, not only read', async () => {
+    const user = await openDialog()
+    await user.click(screen.getByRole('button', { name: 'Яндекс Маркет' }))
+    expect(screen.getByText(/не только чтение/)).toBeInTheDocument()
   })
 })
 

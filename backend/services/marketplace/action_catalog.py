@@ -67,10 +67,17 @@ async def _dispatch_publish_review(token: str, payload: dict, ctx: dict) -> dict
         )
     cred = review_credential(marketplace, token, ctx)
     resp = await provider.publish_answer(cred, payload["feedback_id"], payload["text"])
+    comment = (resp or {}).get("result") if isinstance(resp, dict) else None
+    comment = comment if isinstance(comment, dict) else {}
     return {
         "api_request_id": (resp or {}).get("requestId") if isinstance(resp, dict) else None,
         "published": True,
         "feedback_id": payload["feedback_id"],
+        # A reply can come back already live or still awaiting moderation, and a marketplace that
+        # tells us which must not have that thrown away: the caller decides whether the row may be
+        # called published. Absent for marketplaces that do not moderate — hence None, not a guess.
+        "comment_status": comment.get("status"),
+        "comment_id": comment.get("id"),
     }
 
 

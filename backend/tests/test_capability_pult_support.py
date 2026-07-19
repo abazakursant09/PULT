@@ -33,12 +33,13 @@ def test_review_reply_ozon_available_for_premium_only():
     assert blocked["status"] == "tariff" and blocked["pult_supported"] is True
 
 
-def test_review_reply_yandex_market_not_available():
+def test_review_reply_yandex_market_now_available():
+    # Yandex Auto Reviews ships a real provider (read + publish against the Partner API), so the
+    # registry's pult_supported flag flipped to true and the capability is available.
     a = cap.availability("review_reply", "yandex_market")
-    assert a["available"] is False
+    assert a["available"] is True
     assert a["marketplace_api"] is True
-    assert a["pult_supported"] is False
-    assert a["status"] == "pult"
+    assert a["pult_supported"] is True
 
 
 # ── the same separation holds for review sync ────────────────────────────────
@@ -48,7 +49,8 @@ def test_review_sync_support_matches_reply():
     # R-OZ3: Ozon sync PULT-supported; available for a premium_plus seller, tariff-blocked otherwise.
     assert cap.availability("reviews", "ozon", tariffs={"premium_plus"})["available"] is True
     assert cap.availability("reviews", "ozon")["available"] is False        # no tariff
-    assert cap.availability("reviews", "yandex_market")["available"] is False
+    # Yandex sync ships with the reply, and Yandex gates neither behind a tariff.
+    assert cap.availability("reviews", "yandex_market")["available"] is True
 
 
 # ── the marketplace-API fact is NOT erased — it stays queryable ───────────────

@@ -29,8 +29,48 @@ from services.marketplace import review_automation_gate as gate
 log = logging.getLogger(__name__)
 
 # Statuses a review may hold before it is really published. A row moved to a terminal "failed"
-# (attempt ceiling reached) is not here, so it is never re-selected.
+# (attempt ceiling reached) is not here, so it is never re-selected. Neither is
+# "awaiting_moderation": that reply HAS reached the marketplace and is waiting to be shown, so
+# re-selecting it would post the same answer a second time.
 _PUBLISHABLE = {"pending", "generated", "draft", "approved"}
+
+# How a marketplace that moderates seller replies reports the fate of one. Absent for marketplaces
+# that publish immediately, which is why the default is "live".
+_MODERATION_LIVE = "PUBLISHED"
+_MODERATION_PENDING = "UNMODERATED"
+_MODERATION_REJECTED = {"BANNED", "DELETED"}
+
+
+def _apply_publish_result(review, result: dict, log_id: str | None) -> str:
+    """Record what actually happened to a reply. Returns the outcome for counting.
+
+    A 2xx from the marketplace is not the same as "the buyer can see it". Where a moderation status
+    comes back we honour it exactly; where none does, the reply is live, which is how Wildberries and
+    Ozon behave.
+    """
+    status = (result or {}).get("comment_status")
+    comment_id = (result or {}).get("comment_id")
+    if comment_id is not None:
+        # Kept so the moderation re-check can find THIS reply later without a new column: the row
+        # already points at its ExecutionLog, and the log already stores the marketplace result.
+        review.execution_log_id = log_id
+
+    if status == _MODERATION_PENDING:
+        review.status = "awaiting_moderation"
+        review.published_at = None          # nothing is visible yet — do not date it
+        review.retry_next_at = None
+        return "awaiting_moderation"
+
+    if status in _MODERATION_REJECTED:
+        review.status = "failed"
+        review.failure_reason = "маркетплейс отклонил ответ"
+        review.retry_next_at = None
+        return "rejected"
+
+    review.status = "published"
+    review.execution_log_id = log_id
+    review.published_at = datetime.utcnow()
+    return "published"
 
 _SAFE = "SAFE"
 _MAX_ATTEMPTS = 5                 # hard ceiling — after this the row is terminally failed
@@ -66,7 +106,7 @@ async def run_auto_publish_reviews() -> dict:
     if not settings.automation_enabled:
         return {"ran": False, "reason": "automation disabled globally"}
 
-    published, skipped, deferred, terminal = 0, 0, 0, 0
+    published, skipped, deferred, terminal, moderating = 0, 0, 0, 0, 0
     now = datetime.utcnow()
 
     async with AsyncSessionLocal() as db:
@@ -159,10 +199,13 @@ async def run_auto_publish_reviews() -> dict:
                     rule=rule_dict,
                 )
                 if res.ok:
-                    review.status = "published"
-                    review.execution_log_id = res.log_id
-                    review.published_at = datetime.utcnow()
-                    published += 1
+                    outcome = _apply_publish_result(review, res.result, res.log_id)
+                    if outcome == "published":
+                        published += 1
+                    elif outcome == "awaiting_moderation":
+                        moderating += 1
+                    else:
+                        terminal += 1
                 elif res.status in ("ambiguous", "needs_reconcile"):
                     # AR5: the write may have committed on the marketplace — NEVER auto-retry.
                     # Mark terminal and tell the seller to verify the cabinet by hand.
@@ -185,7 +228,7 @@ async def run_auto_publish_reviews() -> dict:
                         skipped += 1
             await db.commit()
 
-    log.info("auto-publish reviews: published=%s skipped=%s deferred=%s terminal=%s",
-             published, skipped, deferred, terminal)
+    log.info("auto-publish reviews: published=%s moderating=%s skipped=%s deferred=%s terminal=%s",
+             published, moderating, skipped, deferred, terminal)
     return {"ran": True, "published": published, "skipped": skipped,
-            "deferred": deferred, "terminal": terminal}
+            "deferred": deferred, "terminal": terminal, "moderating": moderating}

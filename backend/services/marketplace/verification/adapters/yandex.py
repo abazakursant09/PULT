@@ -45,11 +45,17 @@ _TOKEN_INFO_URL = "https://api.partner.market.yandex.ru/v2/auth/token"
 # `all-methods:read-only` subsume every group, so they satisfy any scope we ask about.
 _ALL_METHODS = ("all-methods", "all-methods:read-only")
 
-# Our scope -> the Yandex access groups that satisfy it. Read-only variants are accepted
-# because PULT performs no writes on Yandex at all: there is no Yandex client in the
-# executor, so a read-only token is exactly what this connection is for.
+# Our scope -> the Yandex access groups that satisfy it. Read-only variants are accepted for the
+# scopes PULT only READS with.
 #
-# `feedbacks` and `advert` are absent ON PURPOSE — see _unsupported() below.
+# `feedbacks` is the exception and must stay one: Auto Reviews PUBLISHES a seller's reply, so a
+# read-only grant is NOT sufficient however much it looks like it covers reviews. Accepting
+# `all-methods:read-only` here would verify a key that then fails at the first publish, and the
+# failure would surface as a marketplace error rather than the missing permission it really is.
+#
+# `advert` is absent ON PURPOSE — see _unsupported() below.
+_WRITE_ALL_METHODS = ("all-methods",)
+
 _SCOPE_GROUPS: dict[str, tuple[str, ...]] = {
     "prices": ("pricing", "pricing:read-only") + _ALL_METHODS,
     "content": ("offers-and-cards-management",
@@ -57,6 +63,8 @@ _SCOPE_GROUPS: dict[str, tuple[str, ...]] = {
     "stocks": ("inventory-and-order-processing",
                "inventory-and-order-processing:read-only") + _ALL_METHODS,
     "promotions": ("promotion", "promotion:read-only") + _ALL_METHODS,
+    # Reviews live in the `communication` group. Write-capable grants only.
+    "feedbacks": ("communication",) + _WRITE_ALL_METHODS,
 }
 
 _LIMIT_HEADER = "x-ratelimit-resource-limit"
@@ -176,12 +184,16 @@ class YandexProbeAdapter:
 
     @staticmethod
     def _unsupported(scope: str) -> VerificationResult:
-        """`feedbacks` and `advert` have no proven Yandex access group, so nothing is called.
+        """`advert` has no proven Yandex access group, so nothing is called.
 
         Yandex has no "advert" group at all — promotion is its closest neighbour, and
-        assuming they are the same is a guess. Which group owns goods-feedback is likewise
-        unconfirmed. Reporting a confident verdict about a mapping we chose ourselves is
-        exactly the failure this whole contour exists to prevent, so we say we cannot check.
+        assuming they are the same is a guess. Reporting a confident verdict about a mapping we
+        chose ourselves is exactly the failure this whole contour exists to prevent, so we say we
+        cannot check.
+
+        `feedbacks` used to live here for the same reason; it left once the documented owner of
+        goods-feedback was confirmed to be the `communication` group. That is a mapping we can now
+        point at, not one we invented.
         """
         return VerificationResult(
             outcome=VerificationOutcome.VERIFICATION_UNSUPPORTED,

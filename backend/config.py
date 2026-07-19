@@ -76,6 +76,7 @@ class Settings(BaseSettings):
     wb_statistics_base: str = "https://statistics-api.wildberries.ru"
     ozon_seller_base: str = "https://api-seller.ozon.ru"
     ozon_performance_base: str = "https://api-performance.ozon.ru"
+    yandex_partner_base: str = "https://api.partner.market.yandex.ru"
     marketplace_http_timeout: float = 15.0
     # Master switch for the L4 automation scheduler. Off by default — L4 actions
     # only fire when this is on AND a per-user AutomationRule is enabled.

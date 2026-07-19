@@ -56,7 +56,10 @@ def test_dispatch_routes_to_wb_provider(monkeypatch):
 
     out = _run(ac._dispatch_publish_review(
         "WBTOKEN", {"feedback_id": "fb1", "text": "Спасибо!"}, {"marketplace": "wildberries"}))
-    assert out == {"api_request_id": "req-wb", "published": True, "feedback_id": "fb1"}
+    # comment_status/comment_id are None for WB: it does not moderate seller replies, so there is
+    # no moderation verdict to report and the caller treats the reply as live.
+    assert out == {"api_request_id": "req-wb", "published": True, "feedback_id": "fb1",
+                   "comment_status": None, "comment_id": None}
     assert seen == {"token": "WBTOKEN", "feedback_id": "fb1", "text": "Спасибо!"}   # WB token as-is
 
 
@@ -132,14 +135,30 @@ def test_ozon_publish_routes_and_succeeds(monkeypatch):
     _run(go())
 
 
-def test_yandex_publish_still_fails_closed(monkeypatch):
-    # Yandex has no provider + pult_supported false → still CAPABILITY_NOT_SUPPORTED, no dispatch.
+def test_yandex_publish_without_a_resolved_cabinet_fails_closed(monkeypatch):
+    """Yandex now has a provider, but every review call is scoped to a cabinet. When none has been
+    resolved yet — a publish before any sync ran — the credential is incomplete and the attempt must
+    stop right there. The failure mode this guards against is interpolating the missing value into
+    the literal cabinet "None" and sending a seller's reply at it."""
     async def go():
-        db, uid = await _setup(marketplace="yandex")
+        db, uid = await _setup(marketplace="yandex")     # credential carries no account_ref
         res = await executor.execute(
             db=db, user_id=uid, action_type="publish_review_response",
             payload={"marketplace": "yandex", "feedback_id": "fb1", "text": "hi", "rating": 5},
             idempotency_key="review:ym")
+        assert res.ok is False
+        assert res.error["code"] == ExecutionError.AUTH
+    _run(go())
+
+
+def test_megamarket_publish_still_fails_closed(monkeypatch):
+    # No provider at all → CAPABILITY_NOT_SUPPORTED before anything is dispatched.
+    async def go():
+        db, uid = await _setup(marketplace="megamarket")
+        res = await executor.execute(
+            db=db, user_id=uid, action_type="publish_review_response",
+            payload={"marketplace": "megamarket", "feedback_id": "fb1", "text": "hi", "rating": 5},
+            idempotency_key="review:mm")
         assert res.status == "rejected"
         assert res.error["code"] == ExecutionError.CAPABILITY_NOT_SUPPORTED
     _run(go())

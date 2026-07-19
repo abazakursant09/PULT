@@ -10,10 +10,17 @@ type Variant = NonNullable<BadgeProps['variant']>
 
 export const STATE_LABEL: Record<ReviewState, string> = {
   New: 'Новый', Processing: 'Обработка', Drafted: 'Черновик',
-  NeedsAttention: 'Требует внимания', Approved: 'Одобрен', Published: 'Опубликован', Failed: 'Ошибка',
+  NeedsAttention: 'Требует внимания', Approved: 'Одобрен',
+  // Sent, but the marketplace has not shown it yet. Deliberately not "Опубликован": nobody can
+  // read the answer while it is in moderation, and saying otherwise would be a lie the seller
+  // could only discover by checking the cabinet themselves.
+  AwaitingModeration: 'На проверке маркетплейса',
+  Published: 'Опубликован', Failed: 'Ошибка',
 }
 
 export const STATE_BADGE_VARIANT: Record<ReviewState, Variant> = {
   New: 'neutral', Processing: 'neutral', Drafted: 'default',
-  NeedsAttention: 'warning', Approved: 'success', Published: 'success', Failed: 'danger',
+  NeedsAttention: 'warning', Approved: 'success',
+  AwaitingModeration: 'default',        // in flight, not yet a success
+  Published: 'success', Failed: 'danger',
 }

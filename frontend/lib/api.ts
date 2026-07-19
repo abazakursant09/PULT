@@ -385,7 +385,9 @@ export interface CompetitorReport {
 }
 
 export type ReviewState =
-  'New' | 'Processing' | 'Drafted' | 'NeedsAttention' | 'Approved' | 'Published' | 'Failed'
+  'New' | 'Processing' | 'Drafted' | 'NeedsAttention' | 'Approved'
+  | 'AwaitingModeration'   // sent, but the marketplace has not shown it yet (Yandex moderates)
+  | 'Published' | 'Failed'
 
 export interface ReviewResponse {
   id: string
