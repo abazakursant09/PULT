@@ -104,6 +104,45 @@ class TodaySummaryView(BaseModel):
     has_data: bool
 
 
+class FirstRunView(BaseModel):
+    """The seller's real position, so the first screen can stop guessing.
+
+    `state` is one of no_data / analyzing / ready / insufficient / failed. `missing` is populated
+    only for `insufficient`, and names the concrete gap rather than apologising in general terms.
+    No completion estimate is returned: the runtime does not guarantee one, so promising one would
+    be inventing a fact.
+    """
+    state: str
+    finance_days: int
+    product_snapshots: int
+    has_products: bool
+    has_returns: bool
+    missing: list[str]
+
+
+@router.get("/today/first-run", response_model=FirstRunView)
+async def get_first_run_state(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> FirstRunView:
+    """Read-only. Counts existing rows; computes no diagnosis and writes nothing."""
+    from services.first_run_state import compute_first_run_state
+
+    # Same source the dashboard's card check uses, so "ready" here and a rendered diagnosis can
+    # never disagree.
+    feed = await build_feed(db, user_id=current_user.id, limit=1)
+    st = await compute_first_run_state(db, str(current_user.id), has_diagnosis=bool(feed))
+
+    return FirstRunView(
+        state=st.state,
+        finance_days=st.finance_days,
+        product_snapshots=st.product_snapshots,
+        has_products=st.has_products,
+        has_returns=st.has_returns,
+        missing=list(st.missing),
+    )
+
+
 @router.get("/today/summary", response_model=TodaySummaryView)
 async def get_today_summary(
     current_user: User = Depends(get_current_user),

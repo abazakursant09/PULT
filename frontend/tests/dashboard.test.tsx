@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import Dashboard from '@/app/dashboard/page'
 import { api } from '@/lib/api'
-import { diagnosisCard, secondCard, todayNoData, todayWithData } from './fixtures'
+import { diagnosisCard, firstRun, secondCard, todayNoData, todayWithData } from './fixtures'
 import { routerPush } from './setup'
 
 // The dashboard is the destination of the whole MVP path: it decides whether the seller sees
@@ -70,6 +70,100 @@ describe('Dashboard', () => {
       expect(body).not.toMatch(/синхронизаци/i)           // nothing synchronises
       expect(body).not.toMatch(/Проверить подключение/)   // that page does not exist
     })
+
+  // ── The first screen after an upload (B3) ──────────────────────────────────
+  // A seller used to upload a report, be told "PULT анализирует", land here, and read
+  // "Нет данных для анализа" — with the only button sending them back to the page they had
+  // just come from. These pin the honest states.
+  describe('what the seller is told before a diagnosis exists', () => {
+    const noDiagnosis = () => {
+      vi.spyOn(api.today, 'getSummary').mockResolvedValue(todayNoData)
+      vi.spyOn(api.presentation, 'getCards').mockResolvedValue({ cards: [] })
+    }
+
+    it('does not say "нет данных" to a seller whose import is still being analysed', async () => {
+      noDiagnosis()
+      vi.spyOn(api.today, 'getFirstRun').mockResolvedValue(firstRun({ state: 'analyzing' }))
+
+      render(<Dashboard />)
+
+      expect(await screen.findByText(/Разбор готовится/)).toBeInTheDocument()
+      expect(screen.queryByText(/Нет данных для анализа/)).not.toBeInTheDocument()
+    })
+
+    it('offers no upload button while the analysis is running', async () => {
+      // Sending them back to import is what made the old screen a loop.
+      noDiagnosis()
+      vi.spyOn(api.today, 'getFirstRun').mockResolvedValue(firstRun({ state: 'analyzing' }))
+
+      render(<Dashboard />)
+
+      await screen.findByText(/Разбор готовится/)
+      expect(screen.queryByRole('link', { name: /Загрузить отчёт/i })).not.toBeInTheDocument()
+    })
+
+    it('promises no completion time, because nothing guarantees one', async () => {
+      noDiagnosis()
+      vi.spyOn(api.today, 'getFirstRun').mockResolvedValue(firstRun({ state: 'analyzing' }))
+
+      render(<Dashboard />)
+
+      await screen.findByText(/Разбор готовится/)
+      const body = document.body.textContent ?? ''
+      expect(body).not.toMatch(/через \d+ (минут|час|секунд)/i)
+      expect(body).not.toMatch(/в течение \d+/i)
+    })
+
+    it('names the missing data instead of apologising in general terms', async () => {
+      noDiagnosis()
+      vi.spyOn(api.today, 'getFirstRun').mockResolvedValue(firstRun({
+        state: 'insufficient',
+        finance_days: 2,
+        missing: ['Для разбора выручки нужны данные минимум за 6 разных дней — сейчас 2.'],
+      }))
+
+      render(<Dashboard />)
+
+      expect(await screen.findByText(/Данных пока недостаточно/)).toBeInTheDocument()
+      expect(screen.getByText(/минимум за 6 разных дней/)).toBeInTheDocument()
+      // …and it still offers the action that would actually help
+      expect(screen.getByRole('link', { name: /Загрузить отчёт/i })).toBeInTheDocument()
+    })
+
+    it('does not blame the seller when the analysis itself failed', async () => {
+      noDiagnosis()
+      vi.spyOn(api.today, 'getFirstRun').mockResolvedValue(firstRun({ state: 'failed' }))
+
+      render(<Dashboard />)
+
+      expect(await screen.findByText(/Разбор не удался/)).toBeInTheDocument()
+      // Scoped to THIS screen: BusinessToday has its own "недостаточно данных за сегодня" line,
+      // which is about today's money and is not the claim under test.
+      expect(screen.queryByText(/Данных пока недостаточно для разбора/)).not.toBeInTheDocument()
+    })
+
+    it('falls back to the plain empty state if the status call fails', async () => {
+      noDiagnosis()
+      vi.spyOn(api.today, 'getFirstRun').mockRejectedValue(new Error('boom'))
+
+      render(<Dashboard />)
+
+      // No invented state: it says the one thing still known to be true.
+      expect(await screen.findByText(/Нет данных для анализа/)).toBeInTheDocument()
+    })
+
+    it('promises CSV only — the backend rejects everything else', async () => {
+      noDiagnosis()
+      vi.spyOn(api.today, 'getFirstRun').mockResolvedValue(firstRun({ state: 'no_data' }))
+
+      render(<Dashboard />)
+
+      await screen.findByText(/Нет данных для анализа/)
+      const body = document.body.textContent ?? ''
+      expect(body).not.toMatch(/Excel/)
+      expect(body).toMatch(/CSV/)
+    })
+  })
 
   it('fails open to the normal dashboard if the summary call errors', async () => {
     vi.spyOn(api.today, 'getSummary').mockRejectedValue(new Error('boom'))

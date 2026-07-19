@@ -1,8 +1,18 @@
-import type { PresentationCard, TodaySummary } from '@/lib/api'
+import type { FirstRunState, PresentationCard, TodaySummary } from '@/lib/api'
 
 // Fixtures shaped EXACTLY like the real API responses (lib/api.ts). If the backend contract
 // moves, these stop type-checking — which is the point: a silent shape drift between
 // backend and frontend is precisely the failure this suite exists to catch.
+
+export const firstRun = (over: Partial<FirstRunState> = {}): FirstRunState => ({
+  state: 'no_data',
+  finance_days: 0,
+  product_snapshots: 0,
+  has_products: false,
+  has_returns: false,
+  missing: [],
+  ...over,
+})
 
 export const todayWithData: TodaySummary = {
   revenue_today: 128_400,
