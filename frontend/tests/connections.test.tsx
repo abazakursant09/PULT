@@ -203,7 +203,9 @@ describe('CONNECTION-UI — managing an existing connection', () => {
     render(<ConnectionsSection />)
 
     await user.click(await screen.findByRole('button', { name: /Заменить ключ/ }))
-    expect(await screen.findByText('Подключить маркетплейс')).toBeInTheDocument()
+    // The dialog says what it is doing. It used to be titled "Подключить маркетплейс" here, which
+    // matched the bug: it really was opening a fresh connect form, defaulted to Wildberries.
+    expect(await screen.findByRole('heading', { name: 'Заменить ключ' })).toBeInTheDocument()
   })
 
   it('disconnects only after an explicit confirmation', async () => {
@@ -238,6 +240,122 @@ describe('CONNECTION-UI — managing an existing connection', () => {
     render(<ConnectionsSection />)
     expect(await screen.findByText('Ключ не проверен')).toBeInTheDocument()
     expect(document.body.textContent || '').not.toMatch(/Ключ проверен/)
+  })
+
+  // ── Replacing a key (B2) ───────────────────────────────────────────────────
+  // The replace dialog used to open on Wildberries whatever card you clicked, because it was
+  // never told which connection it was editing. An Ozon seller who pasted their key without
+  // noticing the toggle overwrote a DIFFERENT marketplace's connection — silently, since the
+  // request was perfectly valid.
+  describe('replacing the key of an existing connection', () => {
+    const openReplace = async (c: MarketplaceConnectionOut) => {
+      vi.spyOn(api.connections, 'list').mockResolvedValue([c])
+      const user = userEvent.setup()
+      render(<ConnectionsSection />)
+      await user.click(await screen.findByRole('button', { name: 'Заменить ключ' }))
+      return user
+    }
+
+    it('sends the Ozon key to Ozon, not to Wildberries', async () => {
+      const create = vi.spyOn(api.connections, 'create')
+        .mockResolvedValue(conn({ marketplace: 'ozon' }))
+      vi.spyOn(api.connections, 'verify').mockResolvedValue(verifyOut('verified') as never)
+      const user = await openReplace(conn({ marketplace: 'ozon', ozon_client_id: 'CID-7' }))
+
+      await user.type(screen.getByLabelText(/API-ключ Ozon/), 'oz-key')
+      await user.click(screen.getByRole('button', { name: 'Сохранить ключ' }))
+
+      await waitFor(() => expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({ marketplace: 'ozon', token: 'oz-key' }),
+      ))
+    })
+
+    it('prefills the Ozon Client-Id so it need not be retyped', async () => {
+      await openReplace(conn({ marketplace: 'ozon', ozon_client_id: 'CID-7' }))
+      expect(screen.getByLabelText(/Client-Id/)).toHaveValue('CID-7')
+    })
+
+    it('sends the Yandex key to Yandex', async () => {
+      const create = vi.spyOn(api.connections, 'create')
+        .mockResolvedValue(conn({ marketplace: 'yandex' }))
+      vi.spyOn(api.connections, 'verify').mockResolvedValue(verifyOut('verified') as never)
+      const user = await openReplace(conn({ marketplace: 'yandex' }))
+
+      await user.type(screen.getByLabelText(/API-ключ Яндекс Маркет/), 'ya-key')
+      await user.click(screen.getByRole('button', { name: 'Сохранить ключ' }))
+
+      await waitFor(() => expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({ marketplace: 'yandex', token: 'ya-key' }),
+      ))
+    })
+
+    it('sends the Wildberries key to Wildberries', async () => {
+      const create = vi.spyOn(api.connections, 'create').mockResolvedValue(conn())
+      vi.spyOn(api.connections, 'verify').mockResolvedValue(verifyOut('verified') as never)
+      const user = await openReplace(conn({ marketplace: 'wildberries' }))
+
+      await user.type(screen.getByLabelText(/API-ключ Wildberries/), 'wb-key')
+      await user.click(screen.getByRole('button', { name: 'Сохранить ключ' }))
+
+      await waitFor(() => expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({ marketplace: 'wildberries', token: 'wb-key' }),
+      ))
+    })
+
+    it('does not let the marketplace be changed while replacing', async () => {
+      await openReplace(conn({ marketplace: 'ozon', ozon_client_id: 'CID-7' }))
+      // the picker is gone entirely — the marketplace is a fact of the card, not an option
+      expect(screen.queryByRole('button', { name: 'Wildberries' })).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Яндекс Маркет' })).toBeNull()
+      expect(screen.getByText(/Магазин:/)).toBeInTheDocument()
+    })
+
+    it('never shows or prefills the stored secret', async () => {
+      await openReplace(conn({ marketplace: 'ozon', ozon_client_id: 'CID-7' }))
+      const field = screen.getByLabelText(/API-ключ Ozon/)
+      expect(field).toHaveValue('')                 // the old key is not brought back
+      expect(field).toHaveAttribute('type', 'password')
+    })
+
+    it('still lets a NEW connection pick its marketplace', async () => {
+      const user = await openDialog([conn()])
+      expect(screen.getByRole('button', { name: 'Яндекс Маркет' })).toBeInTheDocument()
+      await user.click(screen.getByRole('button', { name: 'Яндекс Маркет' }))
+      expect(screen.getByLabelText(/API-ключ Яндекс Маркет/)).toBeInTheDocument()
+    })
+  })
+
+  // ── Reconnecting a disconnected shop (B1) ─────────────────────────────────
+  describe('a disconnected shop', () => {
+    it('offers a way back instead of being a dead end', async () => {
+      vi.spyOn(api.connections, 'list').mockResolvedValue([conn({ status: 'revoked' })])
+      render(<ConnectionsSection />)
+      expect(await screen.findByRole('button', { name: 'Подключить заново' })).toBeInTheDocument()
+    })
+
+    it('warns that automation will stay off until the seller turns it on', async () => {
+      vi.spyOn(api.connections, 'list').mockResolvedValue([conn({ status: 'revoked' })])
+      render(<ConnectionsSection />)
+      expect(await screen.findByText(/Автоответы останутся выключенными/)).toBeInTheDocument()
+    })
+
+    it('reconnects the SAME marketplace, not the default one', async () => {
+      const create = vi.spyOn(api.connections, 'create')
+        .mockResolvedValue(conn({ marketplace: 'ozon' }))
+      vi.spyOn(api.connections, 'verify').mockResolvedValue(verifyOut('verified') as never)
+      vi.spyOn(api.connections, 'list')
+        .mockResolvedValue([conn({ marketplace: 'ozon', status: 'revoked', ozon_client_id: 'CID-7' })])
+      const user = userEvent.setup()
+      render(<ConnectionsSection />)
+
+      await user.click(await screen.findByRole('button', { name: 'Подключить заново' }))
+      await user.type(screen.getByLabelText(/API-ключ Ozon/), 'oz-key-2')
+      await user.click(screen.getByRole('button', { name: 'Сохранить ключ' }))
+
+      await waitFor(() => expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({ marketplace: 'ozon', ozon_client_id: 'CID-7' }),
+      ))
+    })
   })
 
   it('shows a translated message when the list cannot be loaded', async () => {

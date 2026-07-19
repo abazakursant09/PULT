@@ -1136,6 +1136,8 @@ export interface MarketplaceConnectionOut {
   verification_status: string    // rollup of the per-scope states
   scopes: string[]
   scopes_verification?: { scope: string; verification_status: string; verified_at: string | null }[]
+  // Ozon's PUBLIC Client-Id, so a key replacement can prefill it. The API key is never returned.
+  ozon_client_id?: string | null
   created_at: string
   // AR-VIS-1 review-sync cadence (read-only). Optional: a cached or older response may omit them,
   // and the UI treats missing the same as null — "no schedule known yet", never an invented one.

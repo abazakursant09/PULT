@@ -48,6 +48,11 @@ class ConnectionOut(BaseModel):
     verified_at: Optional[datetime]       # NULL unless every stored scope is verified
     scopes: list[str]
     scopes_verification: list[ScopeVerificationOut] = []
+    # Ozon's Client-Id — the PUBLIC half of its credential pair, not a secret: the connect form
+    # takes it in a plain text field. Returned so replacing an Ozon key does not make the seller
+    # retype an identifier they never changed. The API key itself is never returned, here or
+    # anywhere else.
+    ozon_client_id: Optional[str] = None
     created_at: datetime
     # AR-VIS-1: review-sync cadence, read-only. Written only by the scheduler
     # (tasks/auto_review_pipeline.py) and surfaced so the seller can see that review fetching is alive
