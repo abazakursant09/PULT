@@ -327,9 +327,10 @@ export interface RegisterResponse {
 }
 
 export interface ResendVerificationResponse {
+  // Just the neutral message, and by design nothing else. Resend is unauthenticated and accepts
+  // any address, so a delivery flag here would tell an anonymous caller which addresses exist.
+  // Registration reports delivery honestly instead — there the caller owns the account.
   message: string
-  // False only when a send was attempted and failed. Absent/true otherwise.
-  email_sent?: boolean
 }
 
 export interface ChatMessage {

@@ -122,34 +122,89 @@ def test_a_failed_send_never_claims_the_mail_was_sent():
     assert body["verification_email_sent"] is False
 
 
-# ── 4-5. Resending ──────────────────────────────────────────────────────────
+# ── 4-5. Resending, and the enumeration oracle it must not be ───────────────
+#
+# Resend is unauthenticated and takes an arbitrary address, so an honest delivery flag here is a
+# different defect from the one above: while SMTP is down it answers "this address is registered
+# and unverified" to anyone who asks. Registration may report delivery — the caller just created
+# that account. Resend may not, because the address it is asked about is usually someone else's.
 
-def test_resend_reports_success_once_the_mail_server_recovers():
+
+def _resend(client, email):
+    return client.post("/api/auth/resend-verification", json={"email": email})
+
+
+def test_resend_for_an_unknown_address():
+    db = _run(_new_db())
+    with patch.object(auth_router, "send_verification_email", _sent(True)):
+        r = _resend(_client(db), f"{uuid.uuid4()}@example.com")
+    assert r.status_code == 200
+    assert r.json() == {"message": auth_router._NEUTRAL_RESEND}
+
+
+def test_resend_for_an_already_verified_address():
+    db = _run(_new_db())
+    user = _run(_seed(db, verified=True))
+    with patch.object(auth_router, "send_verification_email", _sent(True)):
+        r = _resend(_client(db), user.email)
+    assert r.status_code == 200
+    assert r.json() == {"message": auth_router._NEUTRAL_RESEND}
+
+
+def test_resend_for_an_unverified_address_when_the_mail_goes_out():
     db = _run(_new_db())
     user = _run(_seed(db, verified=False))
     with patch.object(auth_router, "send_verification_email", _sent(True)):
-        r = _client(db).post("/api/auth/resend-verification", json={"email": user.email})
+        r = _resend(_client(db), user.email)
     assert r.status_code == 200
-    assert r.json()["email_sent"] is True
+    assert r.json() == {"message": auth_router._NEUTRAL_RESEND}
 
 
-def test_resend_reports_a_repeat_failure_honestly():
+def test_resend_for_an_unverified_address_when_smtp_refuses():
+    """The leak that was here: this case used to answer differently from all the others."""
     db = _run(_new_db())
     user = _run(_seed(db, verified=False))
     with patch.object(auth_router, "send_verification_email", _sent(False)):
-        r = _client(db).post("/api/auth/resend-verification", json={"email": user.email})
-    assert r.json()["email_sent"] is False
+        r = _resend(_client(db), user.email)
+    assert r.status_code == 200
+    assert r.json() == {"message": auth_router._NEUTRAL_RESEND}
 
 
-def test_resend_to_an_unknown_address_stays_neutral():
-    """`email_sent` must not become an enumeration oracle in the ordinary case: nothing to send is
-    reported the same as a successful send, and the message text never varies."""
+def test_all_four_resend_outcomes_are_byte_identical():
+    """THE enumeration test. Unknown, verified, unverified-sent and unverified-failed must be
+    indistinguishable in status, fields, text and types — the whole response, compared directly."""
     db = _run(_new_db())
+    client = _client(db)
+    unverified_ok   = _run(_seed(db, verified=False))
+    unverified_fail = _run(_seed(db, verified=False))
+    verified        = _run(_seed(db, verified=True))
+
     with patch.object(auth_router, "send_verification_email", _sent(True)):
-        known = _client(db).post("/api/auth/resend-verification",
-                                 json={"email": f"{uuid.uuid4()}@example.com"})
-    assert known.json()["email_sent"] is True
-    assert "Если аккаунт" in known.json()["message"]
+        responses = [_resend(client, f"{uuid.uuid4()}@example.com"),
+                     _resend(client, verified.email),
+                     _resend(client, unverified_ok.email)]
+    with patch.object(auth_router, "send_verification_email", _sent(False)):
+        responses.append(_resend(client, unverified_fail.email))
+
+    first = responses[0]
+    for r in responses[1:]:
+        assert r.status_code == first.status_code
+        assert r.json() == first.json()
+        assert r.text == first.text                      # same text, same types, same field order
+        assert sorted(r.json().keys()) == sorted(first.json().keys())
+
+
+def test_the_resend_response_carries_no_delivery_or_diagnostic_detail():
+    """Nothing may creep back in: no delivery flag, no token, no technical reason."""
+    db = _run(_new_db())
+    user = _run(_seed(db, verified=False))
+    with patch.object(auth_router, "send_verification_email", _sent(False)):
+        r = _resend(_client(db), user.email)
+    body = r.json()
+    assert set(body.keys()) == {"message"}               # exact — not a "no flag" substring check
+    assert isinstance(body["message"], str)
+    for leak in ("email_sent", "sent", "token", "smtp", "SMTP", "error", "exception", user.email):
+        assert leak not in r.text
 
 
 def test_resend_never_returns_a_token():

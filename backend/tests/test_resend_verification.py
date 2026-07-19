@@ -57,7 +57,9 @@ async def _seed(db, *, verified: bool, deleted: bool = False, token="old-token")
     return email
 
 
-_NEUTRAL = "Если аккаунт с таким email существует и не подтверждён"
+# Conditional and in the future tense: it neither confirms the address exists nor promises the
+# letter left. The full-response equality checks live in test_email_failure_recovery.py.
+_NEUTRAL = "Если адрес зарегистрирован и требует подтверждения, письмо будет отправлено."
 
 
 def test_resend_for_unverified_user_mints_new_token_and_sends():

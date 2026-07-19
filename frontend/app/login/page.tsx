@@ -119,7 +119,11 @@ export default function LoginPage() {
                 onClick={async () => {
                   if (!form.email.trim()) return
                   try { await api.auth.resendVerification(form.email.trim()) } catch {}
-                  setError(''); setInfo('Мы отправили письмо для подтверждения ещё раз. Проверьте почту.')
+                  // Conditional, not a promise: the endpoint answers the same for every address
+                  // so it cannot be used to discover which ones are registered.
+                  setError('')
+                  setInfo('Если адрес зарегистрирован и почта доступна, письмо будет отправлено. '
+                        + 'Проверьте папку «Спам» или попробуйте позже.')
                 }}
                 className="block mt-2 underline"
                 style={{ color: '#FCA5A5', fontSize: '12.5px' }}

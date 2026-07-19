@@ -51,12 +51,22 @@ describe('the two post-registration screens are mutually exclusive', () => {
     expect(src()).toContain('Отправить письмо повторно')
   })
 
-  it('confirms a successful resend', () => {
-    expect(src()).toContain('Письмо отправлено')
+  // The resend endpoint answers identically for an unknown address, a verified one, a successful
+  // send and a refused one — otherwise it would tell any anonymous caller which addresses are
+  // registered. The consequence for this screen: it does not know whether a letter left, so it is
+  // not allowed to say one did. Registration's own flag is unaffected; that account is the
+  // caller's own.
+  it('never promises that the resent letter was actually sent', () => {
+    const s = src()
+    expect(s).not.toContain('Письмо отправлено')
+    expect(s).not.toContain('Письмо снова не отправилось')
+    // No resend delivery flag is read. `verification_email_sent` — registration's own, and the
+    // caller's own account — is deliberately still there, so match the property access exactly.
+    expect(s).not.toMatch(/\.email_sent/)
   })
 
-  it('keeps a repeated failure on screen instead of claiming success', () => {
-    expect(src()).toContain('Письмо снова не отправилось')
+  it('answers a resend with the conditional message instead', () => {
+    expect(src()).toContain('Если адрес зарегистрирован и почта доступна, письмо будет отправлено.')
   })
 
   it('has a sending state so the button cannot be hammered', () => {
@@ -64,12 +74,15 @@ describe('the two post-registration screens are mutually exclusive', () => {
     expect(src()).toMatch(/disabled=\{resend === 'sending'\}/)
   })
 
-  it('resends through the existing rate-limited endpoint', () => {
-    expect(src()).toMatch(/api\.auth\.resendVerification/)
+  it('lets the seller try again once the request finishes', () => {
+    // Only 'sending' disables it — a finished attempt leaves the button live, throttled by the
+    // endpoint's own rate limit rather than by a one-shot UI state.
+    expect(src()).not.toMatch(/disabled=\{resend !== 'idle'\}/)
+    expect(src()).toMatch(/setResend\('done'\)/)
   })
 
-  it('treats an explicit email_sent:false as a failure', () => {
-    expect(src()).toMatch(/email_sent === false/)
+  it('resends through the existing rate-limited endpoint', () => {
+    expect(src()).toMatch(/api\.auth\.resendVerification/)
   })
 
   it('no longer advises registering again, which would 400', () => {

@@ -73,8 +73,10 @@ export default function RegisterPage() {
   const [registered,  setRegistered]  = useState(false)
   const [mailSent,    setMailSent]    = useState(true)
   // Resend state, kept separate from the registration form's own error so one cannot overwrite
-  // the other: 'idle' | 'sending' | 'sent' | 'failed'
-  const [resend,      setResend]      = useState<'idle' | 'sending' | 'sent' | 'failed'>('idle')
+  // the other. There is deliberately no 'sent' vs 'failed' here: the resend endpoint answers
+  // identically for every address so as not to leak which ones exist, so the UI cannot know —
+  // and must not claim — whether a letter actually left. 'idle' | 'sending' | 'done'
+  const [resend,      setResend]      = useState<'idle' | 'sending' | 'done'>('idle')
   const [refCode,     setRefCode]     = useState<string | null>(null)
   const [captchaOk,   setCaptchaOk]   = useState(false)
 
@@ -136,12 +138,12 @@ export default function RegisterPage() {
   const resendMail = async () => {
     setResend('sending')
     try {
-      const r = await api.auth.resendVerification(form.email)
-      // The endpoint reports whether the send itself succeeded. A failure stays on screen so the
-      // seller can try again later rather than being told it worked.
-      setResend(r.email_sent === false ? 'failed' : 'sent')
+      await api.auth.resendVerification(form.email)
     } catch {
-      setResend('failed')
+      // Swallowed on purpose: a distinct error state would be the same oracle the endpoint just
+      // stopped being. Either way the request is finished and the button is live again.
+    } finally {
+      setResend('done')
     }
   }
 
@@ -162,10 +164,12 @@ export default function RegisterPage() {
                   <MailCheck size={28} style={{ color: '#1A73E8' }} />
                 </div>
               </div>
-              {mailSent || resend === 'sent' ? (
+              {mailSent ? (
                 <>
+                  {/* Only the registration response — an account the caller demonstrably owns —
+                      may assert that a letter is on its way. A resend never flips this screen. */}
                   <h2 className="text-center font-bold text-2xl mb-2" style={{ color: '#0A2540', letterSpacing: '-0.02em' }}>
-                    {resend === 'sent' && !mailSent ? 'Письмо отправлено' : 'Проверьте почту'}
+                    Проверьте почту
                   </h2>
                   <p className="text-center text-muted-foreground mb-6" style={{ lineHeight: 1.7 }}>
                     Мы отправили ссылку для подтверждения на <strong style={{ color: '#0A2540' }}>{form.email}</strong>.
@@ -189,10 +193,12 @@ export default function RegisterPage() {
                     className="btn btn-primary w-full flex items-center justify-center gap-2 mb-3">
                     {resend === 'sending' ? 'Отправляем…' : 'Отправить письмо повторно'}
                   </button>
-                  {resend === 'failed' && (
-                    // Stays on screen: the seller can try again later instead of being told it worked.
-                    <p className="text-center text-sm mb-3" style={{ color: '#B42318' }}>
-                      Письмо снова не отправилось. Попробуйте позже.
+                  {resend === 'done' && (
+                    // Conditional, never a guarantee: the endpoint cannot tell us whether the
+                    // letter left without also telling anyone which addresses are registered.
+                    <p className="text-center text-sm mb-3 text-muted-foreground" style={{ lineHeight: 1.7 }}>
+                      Если адрес зарегистрирован и почта доступна, письмо будет отправлено.
+                      Проверьте папку «Спам» или попробуйте позже.
                     </p>
                   )}
                 </>
@@ -200,7 +206,7 @@ export default function RegisterPage() {
               <Link href="/login" className="btn btn-secondary w-full flex items-center justify-center gap-2">
                 Перейти ко входу
               </Link>
-              {(mailSent || resend === 'sent') && (
+              {mailSent && (
                 <p className="text-center mt-4 text-xs text-muted-foreground">
                   Не пришло письмо? Проверьте папку «Спам» — или запросите новое на странице входа.
                 </p>

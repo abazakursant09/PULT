@@ -12,7 +12,7 @@ import { Input } from '@/components/ui/input'
 
 function ResendVerification() {
   const [email, setEmail] = useState('')
-  const [state, setState] = useState<'idle' | 'sending' | 'sent'>('idle')
+  const [state, setState] = useState<'idle' | 'sending' | 'done'>('idle')
   const [note, setNote] = useState('')
 
   async function submit(e: React.FormEvent) {
@@ -20,17 +20,19 @@ function ResendVerification() {
     if (!email.trim() || state === 'sending') return
     setState('sending')
     try {
-      const r = await api.auth.resendVerification(email.trim())
-      setNote(r.message)   // neutral message — reveals nothing about the account
+      await api.auth.resendVerification(email.trim())
     } catch {
-      // The endpoint answers neutrally even on error; keep the same reassuring message.
-      setNote('Если аккаунт с таким email существует и не подтверждён, мы отправили новое письмо.')
+      // Ignored on purpose: showing a distinct error would leak more than the endpoint does.
     } finally {
-      setState('sent')
+      // One conditional message for every outcome. We are not told — and must not imply — whether
+      // a letter actually left, because that answer would also reveal whether the address exists.
+      setNote('Если адрес зарегистрирован и почта доступна, письмо будет отправлено. '
+            + 'Проверьте папку «Спам» или попробуйте позже.')
+      setState('done')
     }
   }
 
-  if (state === 'sent') {
+  if (state === 'done') {
     return <p style={{ color: '#5F6368', fontSize: '0.875rem', marginBottom: 12 }}>{note}</p>
   }
   return (
