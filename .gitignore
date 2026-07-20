@@ -56,3 +56,8 @@ graphify-out/
 *.zip
 project_backup_*/
 frontend/tsconfig.tsbuildinfo
+
+# ── Seller uploads ────────────────────────────────────────────────────────────
+# Transient: an uploaded CSV is consumed at confirm and deleted. Nothing here is source, and a
+# seller's financial export must never reach the repository by an absent-minded `git add`.
+backend/uploads/

@@ -1,0 +1,16 @@
+# Build context is ./backend (docker-compose.yml), so these paths are relative to backend/.
+
+# Sellers' uploaded CSVs. They are transient by design — consumed at confirm and deleted — and
+# must never be baked into an image: `COPY . .` in the Dockerfile would otherwise ship whatever
+# happened to be on the building machine's disk into every container built from it.
+uploads/
+
+# Local noise that has no business in an image.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+*.db
+*.sqlite3

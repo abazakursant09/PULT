@@ -408,10 +408,28 @@ async def run_scheduler() -> None:
             await _automation_tick()
             await _measurement_close_tick()
             await _advisory_runtime_tick()
+            await _uploads_cleanup_tick()
         except Exception:
             logger.exception("Scheduler iteration error")
         now = datetime.now()
         await asyncio.sleep(60 - now.second)
+
+
+async def _uploads_cleanup_tick() -> None:
+    """Delete uploaded CSVs that were never confirmed. Confirm cleans up after itself, but only
+    for a seller who confirms something — a seller who previews a file and walks away leaves it
+    behind for good. Touches no database and never raises into the scheduler."""
+    from tasks.uploads_cleanup import run_uploads_cleanup
+    try:
+        # Called on every tick, but sweeps on its own 15-minute interval — the scheduler does not
+        # need to know when, and no second scheduler exists to tell it.
+        files, dirs = await run_uploads_cleanup()
+        if files or dirs:
+            # Counts only. A filename is a seller's upload and a directory name is their user id;
+            # neither belongs in a log line, and the CSV contents certainly do not.
+            logger.info("uploads cleanup: removed %d file(s), %d empty directory(ies)", files, dirs)
+    except Exception:
+        logger.exception("uploads_cleanup tick error")
 
 
 async def _measurement_close_tick() -> None:

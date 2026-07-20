@@ -42,6 +42,12 @@ router = APIRouter()
 _UPLOAD_DIR = Path(__file__).parent.parent / "uploads" / "imports"
 _MAX_FILE_BYTES = 10 * 1024 * 1024   # 10 MB
 
+# How long an uploaded file may sit unconfirmed. It exists only to carry a seller from preview to
+# confirm — nothing reads it afterwards — so an hour is already generous for deciding whether to
+# press the button. Named here rather than written twice: tasks/uploads_cleanup.py sweeps by the
+# SAME number, and two retention periods that drifted apart would be a silent data-retention bug.
+_ORPHAN_TTL_SECONDS = 3600
+
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
 
@@ -269,9 +275,16 @@ async def confirm_import(
     if not rec.temp_path or not os.path.exists(rec.temp_path):
         raise HTTPException(400, "Временный файл недоступен. Загрузите файл заново.")
 
-    # Re-parse from temp file
-    with open(rec.temp_path, "rb") as f:
-        raw = f.read()
+    # Re-parse from temp file. The check above is not a guarantee: the scheduled sweep can delete
+    # this file between that line and this one, and the seller must be told to upload it again —
+    # the same thing the check says — rather than being handed a 500 with a traceback. The window
+    # is tiny and only opens for a file already past its retention window, but "rare" is not
+    # "impossible", and the difference is a clear instruction versus an unexplained error.
+    try:
+        with open(rec.temp_path, "rb") as f:
+            raw = f.read()
+    except FileNotFoundError:
+        raise HTTPException(400, "Временный файл недоступен. Загрузите файл заново.")
     result = parse_csv(raw, rec.marketplace, rec.import_type)
 
     if result.errors:
@@ -510,13 +523,15 @@ async def confirm_import(
     except OSError:
         logger.warning("Could not delete temp file: %s", path_to_delete)
 
-    # Best-effort cleanup of orphaned temp files older than 1h
+    # Best-effort cleanup of THIS seller's orphans. Only reaches the seller who just confirmed,
+    # which is why tasks/uploads_cleanup.py sweeps every directory on a schedule: a seller who
+    # previews a file and never confirms would otherwise leave it behind for good.
     try:
         import time
         user_dir = _user_upload_dir(str(user.id))
         now = time.time()
         for f in user_dir.glob("*.csv"):
-            if now - f.stat().st_mtime > 3600:
+            if now - f.stat().st_mtime > _ORPHAN_TTL_SECONDS:
                 f.unlink(missing_ok=True)
     except Exception:
         pass
