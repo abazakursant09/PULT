@@ -421,11 +421,13 @@ async def _uploads_cleanup_tick() -> None:
     behind for good. Touches no database and never raises into the scheduler."""
     from tasks.uploads_cleanup import run_uploads_cleanup
     try:
-        n = await run_uploads_cleanup()
-        if n:
-            # Count only. The filenames are opaque uuids and the contents are a seller's finances;
-            # neither belongs in a log line.
-            logger.info("uploads cleanup: %d unconfirmed upload(s) removed", n)
+        # Called on every tick, but sweeps on its own 15-minute interval — the scheduler does not
+        # need to know when, and no second scheduler exists to tell it.
+        files, dirs = await run_uploads_cleanup()
+        if files or dirs:
+            # Counts only. A filename is a seller's upload and a directory name is their user id;
+            # neither belongs in a log line, and the CSV contents certainly do not.
+            logger.info("uploads cleanup: removed %d file(s), %d empty directory(ies)", files, dirs)
     except Exception:
         logger.exception("uploads_cleanup tick error")
 

@@ -275,9 +275,16 @@ async def confirm_import(
     if not rec.temp_path or not os.path.exists(rec.temp_path):
         raise HTTPException(400, "Временный файл недоступен. Загрузите файл заново.")
 
-    # Re-parse from temp file
-    with open(rec.temp_path, "rb") as f:
-        raw = f.read()
+    # Re-parse from temp file. The check above is not a guarantee: the scheduled sweep can delete
+    # this file between that line and this one, and the seller must be told to upload it again —
+    # the same thing the check says — rather than being handed a 500 with a traceback. The window
+    # is tiny and only opens for a file already past its retention window, but "rare" is not
+    # "impossible", and the difference is a clear instruction versus an unexplained error.
+    try:
+        with open(rec.temp_path, "rb") as f:
+            raw = f.read()
+    except FileNotFoundError:
+        raise HTTPException(400, "Временный файл недоступен. Загрузите файл заново.")
     result = parse_csv(raw, rec.marketplace, rec.import_type)
 
     if result.errors:

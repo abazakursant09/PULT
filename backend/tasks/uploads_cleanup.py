@@ -12,6 +12,7 @@ walks away triggers nothing at all, and their file stays forever: there is no ot
 
 This is that missing sweep, over every seller, on the scheduler's tick.
 """
+import asyncio
 import logging
 import time
 from pathlib import Path
@@ -19,6 +20,21 @@ from pathlib import Path
 from routers import csv_import
 
 logger = logging.getLogger(__name__)
+
+# How often the sweep actually runs. The scheduler ticks every minute, which is far more often
+# than a one-hour retention window needs: a file may outlive its window by up to this interval,
+# which costs nothing, while scanning every seller's directory sixty times an hour costs real
+# syscalls. The sweep decides for itself whether its time has come — no second scheduler, and no
+# sleeping inside the tick.
+_SWEEP_INTERVAL_SECONDS = 15 * 60
+
+# Monotonic timestamp of the last completed sweep. None means "never ran", so the first tick after
+# a restart sweeps immediately rather than waiting out the interval.
+_last_sweep_at: float | None = None
+
+# Guards against a second sweep starting while one is still going. A slow filesystem must not
+# stack overlapping sweeps deleting the same files underneath each other.
+_sweep_lock = asyncio.Lock()
 
 
 def _sweep_dir(user_dir: Path, cutoff: float) -> int:
@@ -31,7 +47,9 @@ def _sweep_dir(user_dir: Path, cutoff: float) -> int:
             # a delete-anything primitive. Unlinking the link would still be deleting a thing we
             # did not create, so leave it alone entirely and let it be noticed.
             if entry.is_symlink():
-                logger.warning("uploads cleanup: skipping symlink %s", entry.name)
+                # No name, no path: the filename is a seller's upload and the directory name is
+                # their user id. That an unexpected symlink exists is the whole message.
+                logger.warning("uploads cleanup: skipped an unexpected symlink")
                 continue
             if not entry.is_file() or entry.suffix.lower() != ".csv":
                 continue
@@ -45,26 +63,26 @@ def _sweep_dir(user_dir: Path, cutoff: float) -> int:
             continue
         except OSError:
             # One unreadable or locked file must not cost us the rest of the sweep.
-            logger.warning("uploads cleanup: could not remove an entry in %s", user_dir.name)
+            logger.warning("uploads cleanup: could not remove a file")
             continue
     return removed
 
 
-async def run_uploads_cleanup() -> int:
-    """Remove unconfirmed uploads older than the retention window, everywhere.
+def _sweep_now() -> tuple[int, int]:
+    """The whole filesystem walk, synchronous. Returns (files removed, directories removed).
 
-    Returns the number of files deleted. Never raises: cleaning up is not worth failing a
-    scheduler tick over, and the caller logs whatever comes back.
+    Deliberately a plain function: it is pure blocking I/O, so it runs in a worker thread rather
+    than on the event loop that is also serving the API.
     """
     # Read the module attributes at call time rather than binding them at import: the upload root
     # is a module-level default, and resolving it once at import would silently ignore any later
     # reconfiguration — which is exactly how a sweep ends up cleaning a directory nobody uses.
     root = Path(csv_import._UPLOAD_DIR)
     if not root.is_dir():
-        return 0
+        return 0, 0
 
     cutoff = time.time() - csv_import._ORPHAN_TTL_SECONDS
-    removed = 0
+    files = dirs = 0
 
     for user_dir in root.iterdir():
         try:
@@ -74,7 +92,7 @@ async def run_uploads_cleanup() -> int:
             if user_dir.is_symlink() or not user_dir.is_dir():
                 continue
 
-            removed += _sweep_dir(user_dir, cutoff)
+            files += _sweep_dir(user_dir, cutoff)
 
             # An empty directory is just the shape of a seller's id left lying around. Remove it
             # with rmdir, never a recursive delete: if anything is still in there, rmdir refuses,
@@ -83,10 +101,43 @@ async def run_uploads_cleanup() -> int:
                 next(user_dir.iterdir())
             except StopIteration:
                 user_dir.rmdir()
+                dirs += 1
         except (FileNotFoundError, StopIteration):
             continue
         except OSError:
             logger.warning("uploads cleanup: could not process a seller directory")
             continue
 
-    return removed
+    return files, dirs
+
+
+async def run_uploads_cleanup(force: bool = False) -> tuple[int, int]:
+    """Remove unconfirmed uploads older than the retention window, everywhere.
+
+    Returns (files removed, directories removed) — (0, 0) when it is not yet time to sweep, or
+    when another sweep is already running. `force` skips the interval check; the tests use it,
+    and it is what a caller who wants a sweep *now* would reach for.
+    """
+    global _last_sweep_at
+
+    now = time.monotonic()
+    if not force and _last_sweep_at is not None and now - _last_sweep_at < _SWEEP_INTERVAL_SECONDS:
+        return 0, 0
+
+    # Never block waiting for the other sweep: this runs on a one-minute tick, so if a sweep is
+    # still going, the right move is to leave and let the next tick decide.
+    if _sweep_lock.locked():
+        return 0, 0
+
+    async with _sweep_lock:
+        try:
+            # The walk is blocking I/O. Run it on a worker thread so the single-worker backend
+            # keeps serving requests while it happens — a directory per seller, scanned on the
+            # event loop, would stall every API call for the length of the scan.
+            files, dirs = await asyncio.to_thread(_sweep_now)
+        finally:
+            # Stamp even on failure, so a filesystem that keeps erroring is retried on the
+            # interval rather than on every single tick.
+            _last_sweep_at = time.monotonic()
+
+    return files, dirs
