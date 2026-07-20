@@ -20,7 +20,14 @@ const consentedRule: AutomationRuleOut = {
 }
 
 describe('AutoReviewsPanel (AR-CONTROL-UI)', () => {
-  beforeEach(() => { vi.restoreAllMocks() })
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    // The panel asks for automation availability on mount. Two tests below never stubbed it, so
+    // it reached the real network: the component fails open, the assertions still passed, and the
+    // request outlived the test — an unhandled rejection with nothing to attribute it to.
+    // Individual tests override this where the value is what they are testing.
+    vi.spyOn(api.automation, 'availability').mockResolvedValue({ automation_enabled: false })
+  })
 
   it('shows Yandex honestly as not-yet-available and never fetches a rule for it', async () => {
     vi.spyOn(api.connections, 'list').mockResolvedValue([conn({ id: 'y', marketplace: 'yandex_market' })])

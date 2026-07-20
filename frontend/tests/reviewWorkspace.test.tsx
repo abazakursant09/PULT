@@ -22,6 +22,11 @@ function review(over: Partial<ReviewResponse> = {}): ReviewResponse {
 beforeEach(() => {
   vi.restoreAllMocks()
   vi.spyOn(api.reviews, 'history').mockResolvedValue({ review_id: 'r1', entries: [] } as never)
+  // The page also mounts the automation panel, which asks for connections and availability. Left
+  // unstubbed those two went to the real backend; the component fails open so nothing here
+  // noticed, but the requests outlived the test and surfaced as unattributed rejections.
+  vi.spyOn(api.connections, 'list').mockResolvedValue([])
+  vi.spyOn(api.automation, 'availability').mockResolvedValue({ automation_enabled: false })
 })
 
 describe('review workspace', () => {

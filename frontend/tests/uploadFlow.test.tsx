@@ -11,14 +11,10 @@ import { routerPush } from './setup'
 // nothing syncs on its own, so if this flow breaks, PULT has no data and therefore nothing to
 // diagnose. The whole product hangs off these three steps — upload → preview → confirm.
 //
-// Analytics fire on every step; they are stubbed so the flow, not the telemetry, is measured.
-vi.mock('@/lib/analytics', () => ({
-  trackEvent: vi.fn(),
-  stampFunnel: vi.fn(),
-  firstTimeOnly: () => false,
-  elapsedSince: () => 0,
-  FUNNEL_TS: { signup: 'signup', firstImport: 'firstImport' },
-}))
+// Analytics used to be stubbed here against '@/lib/analytics' — a module that does not exist.
+// The real one is '@/lib/events', so the mock resolved to nothing and every step fired real,
+// timer-deferred telemetry requests. Telemetry is now stubbed once in tests/setup.tsx, for every
+// test, where it cannot be pointed at the wrong path unnoticed.
 
 // No `as` cast: the response type must be satisfied in full. An incomplete fixture would
 // otherwise sail past the compiler and blow up at render — which is exactly what a real
@@ -56,6 +52,11 @@ describe('CSV upload flow (the only way data enters PULT)', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
     localStorage.setItem('token', 'test-token')
+    // The page asks for import history on mount to decide whether this is a first import. It was
+    // never stubbed, so it hit the real backend; the effect fails open, so the flow assertions
+    // below passed regardless, and lib/api.ts's two backoff retries kept the request alive well
+    // past the end of the test — which is what surfaced as an unhandled rejection.
+    vi.spyOn(api.csvImport, 'history').mockResolvedValue([])
   })
 
   it('carries a report from file to imported rows, then on to the diagnosis', async () => {

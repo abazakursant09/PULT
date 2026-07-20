@@ -16,6 +16,12 @@ describe('Dashboard', () => {
     vi.restoreAllMocks()
     localStorage.setItem('token', 'test-token')
     vi.spyOn(api.presentation, 'getCards').mockResolvedValue({ cards: [diagnosisCard] })
+    // The dashboard and the TodayFocus panel it mounts fire these on mount too. Three tests below
+    // never stubbed them, so they reached the real backend: both fail quiet, so the assertions
+    // passed regardless, and the calls outlived the tests that made them. Tests that care about
+    // these values override them.
+    vi.spyOn(api.today, 'get').mockResolvedValue({ top_action: null } as never)
+    vi.spyOn(api.today, 'getFirstRun').mockResolvedValue(null as never)
   })
 
   it('sends an unauthenticated visitor to login', async () => {
