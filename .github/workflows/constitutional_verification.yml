@@ -67,3 +67,37 @@ jobs:
 
       - name: Build frontend
         run: npm run build
+
+  # A production build compiles the app; it does not run a single test. That gap is not
+  # theoretical: a runaway render loop that exhausted the heap, and a race that left real network
+  # requests outliving their tests, both reached master while frontend-build stayed green.
+  #
+  # Deliberately NOT tuned to pass. Default parallel mode, stock memory limit, no
+  # continue-on-error: the suite must fail here for the same reasons it would fail locally,
+  # including an OOM or an unhandled rejection. Independent of frontend-build — a broken build and
+  # a broken test suite are separate facts, and each should be reported on its own.
+  frontend-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # --no-install so a missing devDependency fails loudly instead of being fetched on the fly.
+      - name: Run frontend tests
+        run: npx --no-install vitest run
