@@ -7,6 +7,7 @@ Real referral system with:
 import logging
 import secrets
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -204,6 +205,26 @@ async def mark_referral_paid(
 
 # ── Account soft-delete ────────────────────────────────────────────────────────
 
+def _remove_upload_dir(user_id: str) -> None:
+    """Delete one seller's upload directory, and only that one.
+
+    The path is built from the upload root plus this id, never from anything the caller typed —
+    the id comes from the authenticated user. Missing directory is the normal case (most sellers
+    have no pending upload) and is not an error.
+    """
+    import shutil
+    from routers.csv_import import _UPLOAD_DIR
+
+    target = Path(_UPLOAD_DIR) / user_id
+    # Refuse anything that is not a real directory directly under the root — a symlink here would
+    # make this delete something that is not ours.
+    if target.is_symlink() or not target.is_dir():
+        return
+    if target.parent != Path(_UPLOAD_DIR):
+        return
+    shutil.rmtree(target, ignore_errors=True)
+
+
 @router.delete("/account")
 async def delete_account(
     db: AsyncSession = Depends(get_db),
@@ -234,5 +255,16 @@ async def delete_account(
     current_user.was_referred = current_user.referred_by_id is not None
 
     await db.commit()
+
+    # Any CSV this seller uploaded but never confirmed would otherwise outlive the account that
+    # owned it — the scheduled sweep would get to it, but only after the retention window, and
+    # "we deleted your account" should not leave their financial export sitting on our disk in
+    # the meantime. Strictly this seller's own directory, and only after the delete committed:
+    # a filesystem problem must not fail an account deletion that already succeeded.
+    try:
+        _remove_upload_dir(str(current_user.id))
+    except Exception:
+        log.warning("account_deleted: could not remove uploads for user=%s", current_user.id)
+
     log.info("account_deleted: user=%s", current_user.id)
     return {"ok": True, "message": "Аккаунт помечен как удалённый. Email может быть повторно использован."}
