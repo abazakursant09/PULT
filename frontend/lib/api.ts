@@ -148,7 +148,16 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (isGet) {
     _inflight.set(path, promise as Promise<unknown>)
-    promise.finally(() => _inflight.delete(path))
+    // Clear the dedup entry whichever way the request ends, WITHOUT creating a second rejected
+    // promise. `promise.finally(...)` returned a derived promise that inherits the rejection and
+    // that nobody handles — so an ordinary network failure raised an unhandled rejection even
+    // though the caller had caught the error properly. Passing both handlers to `.then` means the
+    // derived promise resolves, so there is nothing left unhandled; `promise` itself is untouched
+    // and still rejects for the caller.
+    void promise.then(
+      () => _inflight.delete(path),
+      () => _inflight.delete(path),
+    )
   }
 
   return promise

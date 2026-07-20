@@ -28,6 +28,48 @@ vi.mock('next/navigation', () => {
   }
 })
 
+// Telemetry is infrastructure, never the thing under test — and it is the one module that fires
+// on a TIMER. `trackEvent` defers through requestIdleCallback/setTimeout and then POSTs
+// /api/events/track, so a component that tracks anything schedules a real request that lands
+// AFTER the test that caused it has finished. By then the environment is being torn down and the
+// rejection has no live handler left: an unhandled rejection, attributed to no test, failing the
+// run about half the time. Stubbed here so no test can schedule one.
+//
+// Two test files mocked '@/lib/analytics' for this. That module does not exist — the real one is
+// '@/lib/events' — so those mocks silently did nothing. A mock of a path that does not resolve is
+// indistinguishable from working, which is why this went unnoticed.
+vi.mock('@/lib/events', () => ({
+  trackEvent: vi.fn(),
+  stampFunnel: vi.fn(),
+  elapsedSince: () => undefined,
+  firstTimeOnly: () => false,
+  getVisitorId: () => 'test-visitor',
+  captureAttribution: vi.fn(),
+  FUNNEL_TS: { signup: 'bp_ts_signup', firstImport: 'bp_ts_first_import', firstInsight: 'bp_ts_first_insight' },
+}))
+
+// No test may reach the network. Two things are needed, and throwing alone is only the first:
+//
+//  1. Throw, so nothing is actually sent and no fake data hides the omission. Returning a stubbed
+//     response would conceal unmocked calls — which is how the import page came to be fetching
+//     /api/import/history for real in a unit test.
+//  2. RECORD the URL and fail the offending test in afterEach. Throwing on its own is not enough,
+//     because the components here fail open: they catch the error, render their fallback, and the
+//     assertions still pass. The test goes green while a call it never mocked escapes into
+//     lib/api.ts's retry chain and surfaces later, attributed to nobody.
+//
+// So the violation is reported against the exact test that caused it, synchronously, by URL.
+const unexpectedRequests: string[] = []
+
+globalThis.fetch = ((...args: unknown[]) => {
+  const url = String(args[0])
+  unexpectedRequests.push(url)
+  throw new Error(
+    `Unmocked network call in a test: ${url}\n` +
+    'Mock the api client method the component calls (vi.spyOn(api.<group>, "<method>")).',
+  )
+}) as unknown as typeof fetch
+
 // next/link renders a plain anchor so hrefs stay assertable.
 vi.mock('next/link', () => ({
   default: ({ href, children, ...rest }: any) =>
@@ -35,8 +77,19 @@ vi.mock('next/link', () => ({
 }))
 
 afterEach(() => {
-  cleanup()
+  cleanup()                   // unmount first, so anything fired during teardown is counted too
   routerPush.mockReset()
   routerRefresh.mockReset()   // reset in place: the identity must survive, only the calls reset
   localStorage.clear()
+
+  // Fail the test that made the call, not a later innocent one. Reset before throwing so a single
+  // offender cannot cascade into every test that follows it.
+  if (unexpectedRequests.length) {
+    const urls = [...new Set(unexpectedRequests)]
+    unexpectedRequests.length = 0
+    throw new Error(
+      `This test made ${urls.length} unmocked network call(s):\n  ${urls.join('\n  ')}\n` +
+      'Stub the api client method the component calls on mount.',
+    )
+  }
 })

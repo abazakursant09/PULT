@@ -26,6 +26,11 @@ describe('diagnosis visibility', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
     localStorage.setItem('token', 'test-token')
+    // The dashboard and the TodayFocus panel it mounts fire several requests on mount. These two
+    // were never stubbed and reached the real backend. Both fail quiet, so nothing below noticed
+    // — the calls simply outlived the test and surfaced later with nothing to attribute them to.
+    vi.spyOn(api.today, 'getFirstRun').mockResolvedValue(null as never)
+    vi.spyOn(api.today, 'get').mockResolvedValue({ top_action: null } as never)
   })
 
   it('shows the diagnosis even when today reports no data — the defect', async () => {
