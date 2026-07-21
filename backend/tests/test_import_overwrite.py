@@ -21,7 +21,22 @@ from rate_limit import limit_import
 import models  # registers tables
 from models.import_record import ImportRecord
 from models.imported_finance import ImportedFinanceRow
+from models.marketplace_account import MarketplaceAccount
+from models.marketplace_store import MarketplaceStore
+from models.workspace import Workspace
 from routers import csv_import
+
+
+async def _seed_store(db, uid):
+    """A wildberries cabinet + primary store for `uid` (PULT-LAUNCH-1.4.2 upload needs one)."""
+    ws = str(uuid.uuid4()); acc = str(uuid.uuid4()); sid = str(uuid.uuid4())
+    db.add(Workspace(id=ws, owner_user_id=uid))
+    db.add(MarketplaceAccount(id=acc, workspace_id=ws, marketplace="wildberries",
+                              identity_status="unverified", label="K"))
+    db.add(MarketplaceStore(id=sid, marketplace_account_id=acc, marketplace="wildberries",
+                            store_key="primary", label="S", source="manual", status="active"))
+    await db.commit()
+    return sid
 
 _LOOP = asyncio.new_event_loop()
 
@@ -58,10 +73,10 @@ _CSV = (
 _REVENUE_ONE = 1000.0
 
 
-def _upload_and_confirm(c, mode="new"):
+def _upload_and_confirm(c, store_id, mode="new"):
     up = c.post("/api/import/upload",
                 files={"file": ("finance.csv", _CSV, "text/csv")},
-                data={"marketplace": "wildberries", "import_type": "finance"})
+                data={"marketplace_store_id": store_id, "import_type": "finance"})
     assert up.status_code == 200, up.text
     import_id = up.json()["import_id"]
     cf = c.post(f"/api/import/{import_id}/confirm", json={"mode": mode})
@@ -79,11 +94,12 @@ def test_overwrite_same_file_twice_does_not_double_totals():
     db = _run(_new_db())
     uid = str(uuid.uuid4())
     c = _client(db, uid)
+    sid = _run(_seed_store(db, uid))
 
-    _upload_and_confirm(c, mode="new")                      # first copy
+    _upload_and_confirm(c, sid, mode="new")                 # first copy
     assert _run(_total_revenue(db, uid)) == _REVENUE_ONE
 
-    _upload_and_confirm(c, mode="overwrite")               # re-upload, overwrite
+    _upload_and_confirm(c, sid, mode="overwrite")           # re-upload, overwrite
     # One dataset, not two: revenue is NOT doubled.
     assert _run(_total_revenue(db, uid)) == _REVENUE_ONE
 
@@ -93,9 +109,10 @@ def test_new_mode_still_appends():
     db = _run(_new_db())
     uid = str(uuid.uuid4())
     c = _client(db, uid)
+    sid = _run(_seed_store(db, uid))
 
-    _upload_and_confirm(c, mode="new")
-    _upload_and_confirm(c, mode="new")
+    _upload_and_confirm(c, sid, mode="new")
+    _upload_and_confirm(c, sid, mode="new")
     assert _run(_total_revenue(db, uid)) == 2 * _REVENUE_ONE
 
 
@@ -105,13 +122,15 @@ def test_overwrite_only_touches_current_user():
     uid_b = str(uuid.uuid4())
 
     # Seller B imports the same file and keeps it.
-    _upload_and_confirm(_client(db, uid_b), mode="new")
+    sid_b = _run(_seed_store(db, uid_b))
+    _upload_and_confirm(_client(db, uid_b), sid_b, mode="new")
     assert _run(_total_revenue(db, uid_b)) == _REVENUE_ONE
 
     # Seller A imports the same file twice with overwrite.
+    sid_a = _run(_seed_store(db, uid_a))
     ca = _client(db, uid_a)
-    _upload_and_confirm(ca, mode="new")
-    _upload_and_confirm(ca, mode="overwrite")
+    _upload_and_confirm(ca, sid_a, mode="new")
+    _upload_and_confirm(ca, sid_a, mode="overwrite")
 
     # A collapsed to one dataset; B is completely untouched.
     assert _run(_total_revenue(db, uid_a)) == _REVENUE_ONE
@@ -123,5 +142,6 @@ def test_overwrite_with_no_prior_import_just_inserts():
     db = _run(_new_db())
     uid = str(uuid.uuid4())
     c = _client(db, uid)
-    _upload_and_confirm(c, mode="overwrite")
+    sid = _run(_seed_store(db, uid))
+    _upload_and_confirm(c, sid, mode="overwrite")
     assert _run(_total_revenue(db, uid)) == _REVENUE_ONE

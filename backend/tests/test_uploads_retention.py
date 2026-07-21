@@ -284,16 +284,33 @@ _CSV = (
 ).encode("utf-8")
 
 
+async def _seed_store(db, uid):
+    """A wildberries cabinet + active primary store (PULT-LAUNCH-1.4.2 upload needs one)."""
+    import uuid as _uuid
+    from models.marketplace_account import MarketplaceAccount
+    from models.marketplace_store import MarketplaceStore
+    from models.workspace import Workspace
+    ws = str(_uuid.uuid4()); acc = str(_uuid.uuid4()); sid = str(_uuid.uuid4())
+    db.add(Workspace(id=ws, owner_user_id=uid))
+    db.add(MarketplaceAccount(id=acc, workspace_id=ws, marketplace="wildberries",
+                              identity_status="unverified", label="K"))
+    db.add(MarketplaceStore(id=sid, marketplace_account_id=acc, marketplace="wildberries",
+                            store_key="primary", label="S", source="manual", status="active"))
+    await db.commit()
+    return sid
+
+
 def test_preview_then_confirm_still_works_and_leaves_no_file(uploads):
     """The whole reason the file exists. It must survive long enough to be confirmed — and must
     not survive the confirm itself."""
     db = _run(_new_db())
     uid = str(uuid.uuid4())
     c = _client(db, uid)
+    sid = _run(_seed_store(db, uid))
 
     up = c.post("/api/import/upload",
                 files={"file": ("finance.csv", _CSV, "text/csv")},
-                data={"marketplace": "wildberries", "import_type": "finance"})
+                data={"marketplace_store_id": sid, "import_type": "finance"})
     assert up.status_code == 200, up.text
 
     written = list((uploads / uid).glob("*.csv"))
@@ -317,10 +334,11 @@ def test_an_abandoned_preview_is_eventually_swept(uploads):
     db = _run(_new_db())
     uid = str(uuid.uuid4())
     c = _client(db, uid)
+    sid = _run(_seed_store(db, uid))
 
     up = c.post("/api/import/upload",
                 files={"file": ("finance.csv", _CSV, "text/csv")},
-                data={"marketplace": "wildberries", "import_type": "finance"})
+                data={"marketplace_store_id": sid, "import_type": "finance"})
     assert up.status_code == 200, up.text
     orphan = next((uploads / uid).glob("*.csv"))
 
@@ -437,10 +455,11 @@ def test_confirm_answers_400_when_the_file_vanishes_before_the_read(uploads, mon
     db = _run(_new_db())
     uid = str(uuid.uuid4())
     c = _client(db, uid)
+    sid = _run(_seed_store(db, uid))
 
     up = c.post("/api/import/upload",
                 files={"file": ("finance.csv", _CSV, "text/csv")},
-                data={"marketplace": "wildberries", "import_type": "finance"})
+                data={"marketplace_store_id": sid, "import_type": "finance"})
     assert up.status_code == 200, up.text
     stored = next((uploads / uid).glob("*.csv"))
 

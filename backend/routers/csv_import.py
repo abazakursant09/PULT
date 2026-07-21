@@ -16,9 +16,9 @@ from typing import Literal
 from fastapi import (APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request,
                      UploadFile)
 from rate_limit import limit_import
-from fastapi.responses import PlainTextResponse, Response
+from fastapi.responses import Response
 from pydantic import BaseModel
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,9 +29,13 @@ from models.imported_finance import ImportedFinanceRow
 from models.imported_product import ImportedProductRow
 from models.imported_return import ImportedReturnRow
 from models.imported_card_content import ImportedCardContentRow
+from models.marketplace_account import MarketplaceAccount
+from models.marketplace_store import MarketplaceStore
 from models.product import Product
 from models.user import User
+from services.marketplace.identity_normalize import to_parser_code
 from services.product_resolver import build_product_index, resolve, resolution_key
+from services.workspace_resolver import WorkspaceMissing, resolve_workspace_id
 from services.advisory_runtime.after_import import run_producers_for_user
 from tasks.csv_parser import parse_csv, get_template
 
@@ -53,6 +57,10 @@ _ORPHAN_TTL_SECONDS = 3600
 
 class PreviewResponse(BaseModel):
     import_id:          str
+    marketplace_account_id: Optional[str]
+    marketplace_store_id:   Optional[str]
+    account_label:      Optional[str]
+    store_label:        Optional[str]
     marketplace:        Optional[str]
     import_type:        Optional[str]
     total_rows:         int
@@ -135,6 +143,35 @@ def _user_upload_dir(user_id: str) -> Path:
     return d
 
 
+async def _workspace_id(db: AsyncSession, user: User) -> str:
+    try:
+        return await resolve_workspace_id(db, str(user.id))
+    except WorkspaceMissing:
+        logger.error("workspace missing for authenticated user")
+        raise HTTPException(500, "Не удалось определить рабочее пространство")
+
+
+async def _owned_active_store(db: AsyncSession, user: User, store_id: str):
+    """Load the caller's ACTIVE store together with its cabinet, or raise.
+
+    Ownership is Store -> Account -> Workspace. marketplace and account_id are READ from the
+    DB here and never trusted from the client. A foreign or missing store returns the same 404.
+    """
+    workspace_id = await _workspace_id(db, user)
+    hit = (await db.execute(
+        select(MarketplaceStore, MarketplaceAccount)
+        .join(MarketplaceAccount, MarketplaceAccount.id == MarketplaceStore.marketplace_account_id)
+        .where(MarketplaceStore.id == store_id, MarketplaceAccount.workspace_id == workspace_id)
+    )).first()
+    if hit is None:
+        raise HTTPException(404, "Магазин не найден")
+    store, account = hit
+    if store.status != "active":
+        raise HTTPException(
+            409, "Магазин архивирован — импорт недоступен. Восстановите магазин или выберите другой.")
+    return store, account
+
+
 def _month_label(period: str) -> str:
     months = ["Январь","Февраль","Март","Апрель","Май","Июнь",
               "Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"]
@@ -151,7 +188,11 @@ def _month_label(period: str) -> str:
 async def upload_csv(
     request:      Request,
     file:         UploadFile = File(...),
-    marketplace:  str        = Form(""),
+    marketplace_store_id: str = Form(None),
+    # Legacy Form field. Kept so the OLD request shape does not 400 at validation, but it is NOT
+    # trusted: the marketplace and account are read from the chosen Store (see below). Form(None)
+    # so the cheap size/empty guards still fire before store validation.
+    marketplace:  str        = Form(None),
     import_type:  str        = Form(""),
     db:           AsyncSession = Depends(get_db),
     user:         User         = Depends(get_current_user),
@@ -185,10 +226,19 @@ async def upload_csv(
     if not raw.strip():
         raise HTTPException(400, "Файл пустой.")
 
-    # Parse
-    mp  = marketplace.strip() or None
+    # Store binding (1.4.2): a CSV always lands in ONE chosen store. store_id is Form(None) so the
+    # cheap size/empty guards above still fire first; here we require it and trust ONLY the DB for
+    # the marketplace and account — never the client's `marketplace` form field.
+    if not marketplace_store_id:
+        raise HTTPException(422, "Выберите магазин перед загрузкой файла")
+    store, account = await _owned_active_store(db, user, marketplace_store_id)
+
+    # Parse — the parser speaks short codes, so convert the store's full marketplace at the boundary.
     itype = import_type.strip() or None
-    result = parse_csv(raw, mp, itype)
+    parser_code = to_parser_code(store.marketplace)
+    if parser_code is None:
+        raise HTTPException(422, "Маркетплейс магазина не поддерживается")
+    result = parse_csv(raw, parser_code, itype)
 
     # Duplicate check — same file_hash + user + confirmed
     dup_id, dup_date = None, None
@@ -217,10 +267,13 @@ async def upload_csv(
         user_id     = str(user.id),
         filename    = filename[:255],
         file_hash   = result.file_hash,
-        marketplace = result.marketplace or mp or "unknown",
+        marketplace = store.marketplace,                 # FULL identity name, trusted from the store
         import_type = result.import_type or itype or "unknown",
         status      = "failed" if result.errors else "pending",
         temp_path   = temp_path,
+        marketplace_account_id = account.id,
+        marketplace_store_id   = store.id,
+        source      = "csv",
         total_rows  = result.total_rows,
         valid_rows  = result.valid_rows,
         skipped_rows = result.skipped_rows,
@@ -232,7 +285,11 @@ async def upload_csv(
 
     return PreviewResponse(
         import_id          = rec.id,
-        marketplace        = result.marketplace,
+        marketplace_account_id = account.id,
+        marketplace_store_id   = store.id,
+        account_label      = account.label,
+        store_label        = store.label,
+        marketplace        = store.marketplace,
         import_type        = result.import_type,
         total_rows         = result.total_rows,
         valid_rows         = result.valid_rows,
@@ -251,61 +308,16 @@ async def upload_csv(
 
 # ── Confirm import ────────────────────────────────────────────────────────────
 
-@router.post("/import/{import_id}/confirm", response_model=ConfirmResponse)
-async def confirm_import(
-    import_id: str,
-    background_tasks: BackgroundTasks,
-    body: ConfirmRequest = ConfirmRequest(),
-    db:   AsyncSession = Depends(get_db),
-    user: User         = Depends(get_current_user),
-):
-    rec_q = await db.execute(
-        select(ImportRecord).where(
-            ImportRecord.id      == import_id,
-            ImportRecord.user_id == str(user.id),
-        )
-    )
-    rec: Optional[ImportRecord] = rec_q.scalar_one_or_none()
-    if not rec:
-        raise HTTPException(404, "Запись импорта не найдена")
-    if rec.status == "confirmed":
-        raise HTTPException(400, "Этот импорт уже подтверждён")
-    if rec.status == "failed":
-        raise HTTPException(400, "Нельзя подтвердить импорт с ошибками")
-    if not rec.temp_path or not os.path.exists(rec.temp_path):
-        raise HTTPException(400, "Временный файл недоступен. Загрузите файл заново.")
+async def _persist_import_rows(db: AsyncSession, rec: ImportRecord, result, *, mode: str,
+                               user: User) -> tuple[int, int, int]:
+    """Insert the parsed rows for a confirmed import. Returns (imported, failed, skipped).
 
-    # Re-parse from temp file. The check above is not a guarantee: the scheduled sweep can delete
-    # this file between that line and this one, and the seller must be told to upload it again —
-    # the same thing the check says — rather than being handed a 500 with a traceback. The window
-    # is tiny and only opens for a file already past its retention window, but "rare" is not
-    # "impossible", and the difference is a clear instruction versus an unexplained error.
-    try:
-        with open(rec.temp_path, "rb") as f:
-            raw = f.read()
-    except FileNotFoundError:
-        raise HTTPException(400, "Временный файл недоступен. Загрузите файл заново.")
-    result = parse_csv(raw, rec.marketplace, rec.import_type)
-
-    if result.errors:
-        raise HTTPException(422, f"Ошибки при повторном разборе: {'; '.join(result.errors)}")
-
-    # An import that would write nothing must not be confirmable. The parser already refuses to
-    # produce a clean result with zero rows, so reaching this is a belt-and-braces guard: the rule
-    # lives on the server because a disabled button is a suggestion, not an enforcement.
-    if result.valid_rows == 0:
-        raise HTTPException(
-            422,
-            "В файле не распознано ни одной строки — импортировать нечего. "
-            "Проверьте, что колонки заполнены, и загрузите файл заново.",
-        )
-
+    PULT-LAUNCH-1.4.2 scope note: the row-write is intentionally UNCHANGED here — rows are still
+    resolved by (user, marketplace, sku) and carry no account_id/store_id. Making the write
+    store-aware is 1.4.3. This helper exists only so confirm() can wrap it in the status machine.
+    """
     # Overwrite: replace the previous copy of THIS file rather than appending a second one.
-    # Scope is exactly the rows of prior CONFIRMED imports with the same (user_id, file_hash),
-    # in the table for this import_type. Strictly this user's own data — the delete is filtered
-    # by user_id, so no other seller's rows can ever be touched. Done only after a clean re-parse
-    # so a bad new file never wipes good existing data. New rows are inserted below as usual.
-    if body.mode == "overwrite":
+    if mode == "overwrite":
         row_model = _ROW_MODEL.get(rec.import_type)
         if row_model is not None:
             prior_q = await db.execute(
@@ -325,15 +337,10 @@ async def confirm_import(
                     )
                 )
 
-    # Batch insert
     imported = 0
     failed   = 0
-    skipped  = 0
     BATCH    = 200
 
-    # ── Product Spine (Step 1): resolve every row → canonical Product.id ──
-    # Finance rows: resolve only (no auto-create). Product rows: resolve, else
-    # auto-create a Product from the catalog row. Empty sku → product_id stays None.
     _spine_res = await db.execute(
         select(Product).where(Product.user_id == str(user.id)).order_by(Product.created_at)
     )
@@ -505,27 +512,104 @@ async def confirm_import(
                 logger.warning("batch_insert_failed", extra={"rows": len(rows_to_insert), "error": str(exc)})
                 failed += len(rows_to_insert)
 
-    skipped = result.skipped_rows
+    return imported, failed, result.skipped_rows
 
-    # Update record — store temp_path before nulling for cleanup
-    path_to_delete     = rec.temp_path
-    rec.status         = "confirmed"
-    rec.imported_count = imported
-    rec.skipped_rows   = skipped
-    rec.confirmed_at   = datetime.utcnow()
-    rec.temp_path      = None
+
+@router.post("/import/{import_id}/confirm", response_model=ConfirmResponse)
+async def confirm_import(
+    import_id: str,
+    background_tasks: BackgroundTasks,
+    body: ConfirmRequest = ConfirmRequest(),   # only `mode`; account_id/store_id are NEVER accepted
+    db:   AsyncSession = Depends(get_db),
+    user: User         = Depends(get_current_user),
+):
+    rec = (await db.execute(
+        select(ImportRecord).where(
+            ImportRecord.id == import_id, ImportRecord.user_id == str(user.id))
+    )).scalar_one_or_none()
+    if not rec:
+        raise HTTPException(404, "Запись импорта не найдена")
+    if rec.status == "confirmed":
+        raise HTTPException(400, "Этот импорт уже подтверждён")
+    if rec.status == "processing":
+        raise HTTPException(409, "Импорт уже обрабатывается")
+    if rec.status == "failed":
+        raise HTTPException(400, "Импорт завершился ошибкой. Загрузите файл заново.")
+    # Legacy record predating store binding (1.4.2): the store is unknown and must never be guessed.
+    if not rec.marketplace_store_id:
+        raise HTTPException(400, "Этот импорт создан до выбора магазина. Загрузите файл заново.")
+    # Re-verify the store is still the caller's and active — it may have been archived since preview.
+    # This also re-proves ownership from the DB, so a body/query cannot redirect the import.
+    await _owned_active_store(db, user, rec.marketplace_store_id)
+    if not rec.temp_path or not os.path.exists(rec.temp_path):
+        raise HTTPException(400, "Временный файл недоступен. Загрузите файл заново.")
+
+    # Atomically claim the record: only the request that flips pending -> processing may write rows.
+    # A concurrent confirm sees rowcount 0 and is refused, so two confirms can never both insert.
+    claim = await db.execute(
+        update(ImportRecord)
+        .where(ImportRecord.id == rec.id, ImportRecord.user_id == str(user.id),
+               ImportRecord.status == "pending")
+        .values(status="processing")
+    )
     await db.commit()
+    if claim.rowcount == 0:
+        fresh = (await db.execute(
+            select(ImportRecord.status).where(ImportRecord.id == rec.id))).scalar_one_or_none()
+        if fresh == "confirmed":
+            raise HTTPException(400, "Этот импорт уже подтверждён")
+        if fresh == "processing":
+            raise HTTPException(409, "Импорт уже обрабатывается")
+        raise HTTPException(409, "Импорт нельзя подтвердить в текущем состоянии")
 
-    # Delete temp file using path captured before nulling
+    # The record is now 'processing'. Everything below runs under a guard that leaves it 'failed'
+    # on ANY error — it can never become 'confirmed' with a partial write.
+    try:
+        try:
+            with open(rec.temp_path, "rb") as f:
+                raw = f.read()
+        except FileNotFoundError:
+            raise HTTPException(400, "Временный файл недоступен. Загрузите файл заново.")
+
+        result = parse_csv(raw, to_parser_code(rec.marketplace), rec.import_type)
+        if result.errors:
+            raise HTTPException(422, f"Ошибки при повторном разборе: {'; '.join(result.errors)}")
+        if result.valid_rows == 0:
+            raise HTTPException(
+                422,
+                "В файле не распознано ни одной строки — импортировать нечего. "
+                "Проверьте, что колонки заполнены, и загрузите файл заново.",
+            )
+
+        imported, failed, skipped = await _persist_import_rows(
+            db, rec, result, mode=body.mode, user=user)
+
+        path_to_delete     = rec.temp_path
+        rec.status         = "confirmed"
+        rec.imported_count = imported
+        rec.skipped_rows   = skipped
+        rec.confirmed_at   = datetime.utcnow()
+        rec.temp_path      = None
+        await db.commit()
+    except HTTPException:
+        await db.rollback()
+        await db.execute(update(ImportRecord).where(ImportRecord.id == rec.id).values(status="failed"))
+        await db.commit()
+        raise
+    except Exception:
+        await db.rollback()
+        await db.execute(update(ImportRecord).where(ImportRecord.id == rec.id).values(status="failed"))
+        await db.commit()
+        logger.exception("import_confirm_failed", extra={"import_id": rec.id})
+        raise HTTPException(500, "Не удалось завершить импорт")
+
+    # ── post-commit best-effort side effects (a failure here does NOT unconfirm the import) ──
     try:
         if path_to_delete:
             os.unlink(path_to_delete)
     except OSError:
         logger.warning("Could not delete temp file: %s", path_to_delete)
 
-    # Best-effort cleanup of THIS seller's orphans. Only reaches the seller who just confirmed,
-    # which is why tasks/uploads_cleanup.py sweeps every directory on a schedule: a seller who
-    # previews a file and never confirms would otherwise leave it behind for good.
     try:
         import time
         user_dir = _user_upload_dir(str(user.id))
@@ -536,16 +620,9 @@ async def confirm_import(
     except Exception:
         pass
 
-    logger.info(
-        "import_confirmed",
-        extra={"import_id": rec.id, "imported": imported, "failed": failed, "skipped": skipped},
-    )
+    logger.info("import_confirmed",
+                extra={"import_id": rec.id, "imported": imported, "failed": failed, "skipped": skipped})
 
-    # Analyse THIS seller's newly-landed data now, instead of leaving them to wait for the
-    # scheduler's next due window (24h for most contours). Queued after the response so the
-    # upload does not block on it, using the same BackgroundTasks mechanism already used for
-    # competitor collection. Only runs when rows actually landed — analysing nothing would
-    # produce an empty run and tell the seller "разбор готовится" about no data at all.
     if imported > 0:
         background_tasks.add_task(run_producers_for_user, str(user.id))
 

@@ -37,3 +37,21 @@ def normalize_identity_marketplace(value: Optional[str]) -> Optional[str]:
     if value is None:
         return None
     return _ALIASES.get(value.strip().lower())
+
+
+# Boundary adapter to the CSV parser / template layer, which speaks the SHORT codes
+# (wb | ozon | ym) — the ONLY place the identity layer is allowed to emit them. Applied
+# strictly at parse_csv / get_template call sites, never stored. Unknown -> None (reject).
+_PARSER_CODE = {"wildberries": "wb", "ozon": "ozon", "yandex": "ym"}
+
+
+def to_parser_code(full_marketplace: Optional[str]) -> Optional[str]:
+    """Full canonical identity name -> the parser's short code, or None if unknown.
+
+    Accepts a legacy short value too (it is normalized to full first), so a legacy
+    ImportRecord re-parses correctly. None means the caller must reject, not guess.
+    """
+    full = normalize_identity_marketplace(full_marketplace)
+    if full is None:
+        return None
+    return _PARSER_CODE.get(full)

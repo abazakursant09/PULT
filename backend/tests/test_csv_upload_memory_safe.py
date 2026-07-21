@@ -20,6 +20,9 @@ from database import Base, get_db
 from dependencies import get_current_user
 from rate_limit import limit_import
 import models  # registers tables
+from models.marketplace_account import MarketplaceAccount
+from models.marketplace_store import MarketplaceStore
+from models.workspace import Workspace
 from routers import csv_import
 from routers.csv_import import _MAX_FILE_BYTES
 
@@ -54,6 +57,23 @@ def _setup():
     return _client(_run(_new_db()), uid)
 
 
+def _setup_with_store():
+    """Client + a valid active store (PULT-LAUNCH-1.4.2: a real upload needs one)."""
+    uid = str(uuid.uuid4())
+    db = _run(_new_db())
+    ws = str(uuid.uuid4()); acc = str(uuid.uuid4()); sid = str(uuid.uuid4())
+
+    async def _seed():
+        db.add(Workspace(id=ws, owner_user_id=uid))
+        db.add(MarketplaceAccount(id=acc, workspace_id=ws, marketplace="wildberries",
+                                  identity_status="unverified", label="K"))
+        db.add(MarketplaceStore(id=sid, marketplace_account_id=acc, marketplace="wildberries",
+                                store_key="primary", label="S", source="manual", status="active"))
+        await db.commit()
+    _run(_seed())
+    return _client(db, uid), sid
+
+
 _VALID_FINANCE = (
     "дата,артикул,название,выручка,комиссия,логистика,реклама,чистая прибыль,количество\n"
     "2026-07-01,ART-1,Товар,1000,100,50,30,820,3\n"
@@ -61,10 +81,10 @@ _VALID_FINANCE = (
 
 
 def test_valid_finance_csv_is_accepted():
-    c = _setup()
+    c, sid = _setup_with_store()
     r = c.post("/api/import/upload",
                files={"file": ("finance.csv", io.BytesIO(_VALID_FINANCE), "text/csv")},
-               data={"marketplace": "wildberries", "import_type": "finance"})
+               data={"marketplace_store_id": sid, "import_type": "finance"})
     assert r.status_code == 200, r.text
     body = r.json()
     assert body.get("import_type") == "finance"
