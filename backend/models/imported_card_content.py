@@ -36,6 +36,11 @@ class ImportedCardContentRow(Base):
     # Product Spine (Step 1): canonical link. Nullable; a card-only sku without a catalog Product
     # stays NULL (no auto-create from card content). SET NULL on delete.
     product_id          = Column(String(36), ForeignKey("products.id", ondelete="SET NULL"), nullable=True)
+    # PULT-LAUNCH-1.3: card content is CABINET-level (shared across a cabinet's stores), so it gets
+    # account_id (CASCADE — cabinet delete purges seller cards) but deliberately NO store_id.
+    marketplace_account_id = Column(String(36), ForeignKey("marketplace_accounts.id", ondelete="CASCADE"), nullable=True)
+    source              = Column(String(10), nullable=False, default="csv", server_default="csv")  # csv | api
+    fetched_at          = Column(DateTime, nullable=True)
     created_at          = Column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (

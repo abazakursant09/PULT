@@ -59,5 +59,8 @@ class MarketplaceAccount(Base):
 
     __table_args__ = (
         UniqueConstraint("marketplace", "external_account_id", name="uq_mp_account_mp_ext"),
+        # composite-FK target for marketplace_stores(marketplace_account_id, marketplace):
+        # a store's marketplace can never differ from its cabinet's.
+        UniqueConstraint("id", "marketplace", name="uq_mp_account_id_mp"),
         Index("ix_mp_account_ws", "workspace_id"),
     )
