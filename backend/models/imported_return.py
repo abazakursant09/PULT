@@ -25,6 +25,11 @@ class ImportedReturnRow(Base):
     # Product Spine (Step 1): canonical link. Nullable; a returns-only sku without a catalog
     # Product stays NULL (no auto-create from returns). SET NULL on delete.
     product_id    = Column(String(36), ForeignKey("products.id", ondelete="SET NULL"), nullable=True)
+    # PULT-LAUNCH-1.3 store binding — see ImportedProductRow. account_id CASCADE, store_id SET NULL.
+    marketplace_account_id = Column(String(36), ForeignKey("marketplace_accounts.id", ondelete="CASCADE"), nullable=True)
+    marketplace_store_id   = Column(String(36), ForeignKey("marketplace_stores.id", ondelete="SET NULL"), nullable=True)
+    source        = Column(String(10), nullable=False, default="csv", server_default="csv")  # csv | api
+    fetched_at    = Column(DateTime, nullable=True)
     created_at    = Column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (

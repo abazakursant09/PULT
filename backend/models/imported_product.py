@@ -20,6 +20,14 @@ class ImportedProductRow(Base):
     # Product Spine (Step 1): canonical link. Nullable until backfill coverage
     # is proven; SET NULL so deleting a Product never drops import history.
     product_id    = Column(String(36), ForeignKey("products.id", ondelete="SET NULL"), nullable=True)
+    # PULT-LAUNCH-1.3 store binding. account_id CASCADE: deleting a cabinet purges all its
+    # commercial rows (no seller data left behind). store_id SET NULL: archiving/removing ONE
+    # store must keep the cabinet's history (money/stock), so the row stays linked to the account
+    # with store_id cleared — never lost. source/fetched_at prepare API+CSV provenance.
+    marketplace_account_id = Column(String(36), ForeignKey("marketplace_accounts.id", ondelete="CASCADE"), nullable=True)
+    marketplace_store_id   = Column(String(36), ForeignKey("marketplace_stores.id", ondelete="SET NULL"), nullable=True)
+    source        = Column(String(10), nullable=False, default="csv", server_default="csv")  # csv | api
+    fetched_at    = Column(DateTime, nullable=True)
     created_at    = Column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (

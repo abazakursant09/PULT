@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, String, DateTime, JSON, ForeignKey, Index, Integer
+from sqlalchemy import Column, String, DateTime, JSON, ForeignKey, Index, Integer, UniqueConstraint
 from database import Base
 
 
@@ -70,4 +70,8 @@ class MarketplaceConnection(Base):
         Index("ix_mp_conn_user", "user_id"),
         Index("ix_mp_conn_user_mp", "user_id", "marketplace"),
         Index("ix_mp_conn_account", "marketplace_account_id"),
+        # PULT-LAUNCH-1.3: one API connection per cabinet. marketplace_account_id stays nullable
+        # (a CSV-only cabinet has zero connections; a NOT NULL promotion is a later preflight-gated
+        # step), and NULLs are distinct in both PostgreSQL and SQLite, so keyless rows never collide.
+        UniqueConstraint("marketplace_account_id", name="uq_mp_conn_account"),
     )
