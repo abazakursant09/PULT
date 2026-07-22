@@ -19,7 +19,7 @@ from rate_limit import limit_import
 from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import delete, func, select, update
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
@@ -32,9 +32,10 @@ from models.imported_card_content import ImportedCardContentRow
 from models.marketplace_account import MarketplaceAccount
 from models.marketplace_store import MarketplaceStore
 from models.product import Product
+from models.product_placement import ProductPlacement
 from models.user import User
+from services.account_product_resolver import AMBIGUOUS, AccountProductIndex
 from services.marketplace.identity_normalize import to_parser_code
-from services.product_resolver import build_product_index, resolve, resolution_key
 from services.workspace_resolver import WorkspaceMissing, resolve_workspace_id
 from services.advisory_runtime.after_import import run_producers_for_user
 from tasks.csv_parser import parse_csv, get_template
@@ -308,15 +309,65 @@ async def upload_csv(
 
 # ── Confirm import ────────────────────────────────────────────────────────────
 
+class _AmbiguousSku(HTTPException):
+    """Raised when a row's SKU maps to more than one Product in the cabinet. It aborts the whole
+    confirm (the status machine rolls back and marks the record failed) — never picks a Product.
+    Per-row conflict persistence is 1.4.4."""
+    def __init__(self, sku: str):
+        super().__init__(
+            409,
+            f"Артикул «{sku}»: в кабинете несколько товаров с этим SKU — импорт остановлен, "
+            f"требуется ваш выбор.",
+        )
+
+
+def _sku_present(value) -> bool:
+    return bool((value or "").strip())
+
+
+async def _reconcile_placements(db: AsyncSession, present: set, existing: dict,
+                                account_id: str, store_id: str, now: datetime) -> None:
+    """Ensure a ProductPlacement exists for every product PRESENT in this store per this import.
+
+    Idempotent: a product already placed keeps its first_seen_at and only bumps last_seen_at; a
+    new one is created. A concurrent import creating the same (store, product) races on the DB
+    UNIQUE — we swallow that IntegrityError (it now exists) rather than 500, and still bump
+    last_seen_at. Cross-cabinet placement is impossible: the composite FK (1.3) rejects it.
+    """
+    prior = [pid for pid in present if pid in existing]
+    for pid in [pid for pid in present if pid not in existing]:
+        try:
+            async with db.begin_nested():
+                db.add(ProductPlacement(
+                    id=str(uuid.uuid4()), product_id=pid, marketplace_store_id=store_id,
+                    marketplace_account_id=account_id, source="csv", status="active",
+                    first_seen_at=now, last_seen_at=now))
+                await db.flush()
+        except IntegrityError:
+            prior.append(pid)     # another writer created it first — treat as existing
+    if prior:
+        await db.execute(
+            update(ProductPlacement)
+            .where(ProductPlacement.marketplace_store_id == store_id,
+                   ProductPlacement.product_id.in_(prior))
+            .values(last_seen_at=now))
+
+
 async def _persist_import_rows(db: AsyncSession, rec: ImportRecord, result, *, mode: str,
                                user: User) -> tuple[int, int, int]:
-    """Insert the parsed rows for a confirmed import. Returns (imported, failed, skipped).
+    """Insert the parsed rows store-aware (PULT-LAUNCH-1.4.3). Returns (imported, failed, skipped).
 
-    PULT-LAUNCH-1.4.2 scope note: the row-write is intentionally UNCHANGED here — rows are still
-    resolved by (user, marketplace, sku) and carry no account_id/store_id. Making the write
-    store-aware is 1.4.3. This helper exists only so confirm() can wrap it in the status machine.
+    Every row lands in the ImportRecord's cabinet (marketplace_account_id) and store
+    (marketplace_store_id). Products are resolved WITHIN the account; a SKU that maps to >1 product
+    is ambiguous and aborts the whole confirm (no partial write). Only products-import creates a
+    Product. card_content is cabinet-level (account_id, no store_id, no placement).
     """
-    # Overwrite: replace the previous copy of THIS file rather than appending a second one.
+    account_id = rec.marketplace_account_id
+    store_id   = rec.marketplace_store_id
+    now = datetime.utcnow()
+
+    # Overwrite: replace the previous copy of THIS file (file-hash scope). Store/period-scoped
+    # overwrite is 1.4.4 — unchanged here.
     if mode == "overwrite":
         row_model = _ROW_MODEL.get(rec.import_type)
         if row_model is not None:
@@ -337,182 +388,93 @@ async def _persist_import_rows(db: AsyncSession, rec: ImportRecord, result, *, m
                     )
                 )
 
-    imported = 0
-    failed   = 0
-    BATCH    = 200
+    # Account-scoped product index + placements already in this store.
+    prods = (await db.execute(
+        select(Product).where(Product.marketplace_account_id == account_id))).scalars().all()
+    index = AccountProductIndex(prods, account_id)
+    existing_pl = dict((await db.execute(
+        select(ProductPlacement.product_id, ProductPlacement.id)
+        .where(ProductPlacement.marketplace_store_id == store_id))).all())
+    present: set = set()          # products present in this store per this import (→ placement)
 
-    _spine_res = await db.execute(
-        select(Product).where(Product.user_id == str(user.id)).order_by(Product.created_at)
-    )
-    product_index = build_product_index(_spine_res.scalars().all())
+    def _resolve(sku):
+        res = index.resolve(sku=sku)      # CSV carries no external_product_id today
+        if res.status == AMBIGUOUS:
+            raise _AmbiguousSku(sku or "")
+        return res.product_id
+
+    to_insert: list = []
 
     if rec.import_type == "finance":
-        rows_to_insert = []
         for row in result.parsed_data:
-            rows_to_insert.append(ImportedFinanceRow(
-                import_id   = rec.id,
-                user_id     = str(user.id),
-                marketplace = rec.marketplace,
-                date        = row.get("date"),
-                sku         = row.get("sku", ""),
-                title       = row.get("title", ""),
-                revenue     = row.get("revenue", 0.0),
-                commission  = row.get("commission", 0.0),
-                logistics   = row.get("logistics", 0.0),
-                ad_spend    = row.get("ad_spend", 0.0),
-                net_profit  = row.get("net_profit", 0.0),
-                quantity    = row.get("quantity", 0),
-                product_id  = resolve(product_index, str(user.id), rec.marketplace, row.get("sku", "")),
-            ))
-            if len(rows_to_insert) >= BATCH:
-                try:
-                    async with db.begin_nested():
-                        db.add_all(rows_to_insert)
-                        await db.flush()
-                    imported += len(rows_to_insert)
-                except SQLAlchemyError as exc:
-                    logger.warning("batch_insert_failed", extra={"rows": len(rows_to_insert), "error": str(exc)})
-                    failed += len(rows_to_insert)
-                rows_to_insert = []
-        if rows_to_insert:
-            try:
-                async with db.begin_nested():
-                    db.add_all(rows_to_insert)
-                    await db.flush()
-                imported += len(rows_to_insert)
-            except SQLAlchemyError as exc:
-                logger.warning("batch_insert_failed", extra={"rows": len(rows_to_insert), "error": str(exc)})
-                failed += len(rows_to_insert)
+            pid = _resolve(row.get("sku", ""))
+            if pid:
+                present.add(pid)          # a money row is evidence the product is in this store
+            to_insert.append(ImportedFinanceRow(
+                import_id=rec.id, user_id=str(user.id), marketplace=rec.marketplace,
+                date=row.get("date"), sku=row.get("sku", ""), title=row.get("title", ""),
+                revenue=row.get("revenue", 0.0), commission=row.get("commission", 0.0),
+                logistics=row.get("logistics", 0.0), ad_spend=row.get("ad_spend", 0.0),
+                net_profit=row.get("net_profit", 0.0), quantity=row.get("quantity", 0),
+                product_id=pid, marketplace_account_id=account_id,
+                marketplace_store_id=store_id, source="csv", fetched_at=now))
 
     elif rec.import_type == "products":
-        rows_to_insert = []
         for row in result.parsed_data:
             sku = row.get("sku", "")
-            pid = resolve(product_index, str(user.id), rec.marketplace, sku)
-            if pid is None:
-                key = resolution_key(str(user.id), rec.marketplace, sku)
-                if key is not None:                      # non-empty sku → auto-create Product
-                    new_p = Product(
-                        id          = str(uuid.uuid4()),   # set now: column default applies only at flush
-                        user_id     = str(user.id),
-                        name        = row.get("title") or sku,
-                        marketplace = rec.marketplace,
-                        sku         = sku,
-                        price       = row.get("price"),
-                    )
-                    db.add(new_p)
-                    product_index[key] = new_p.id        # reuse for later rows in this batch
-                    pid = new_p.id
-            rows_to_insert.append(ImportedProductRow(
-                import_id     = rec.id,
-                user_id       = str(user.id),
-                marketplace   = rec.marketplace,
-                sku           = sku,
-                title         = row.get("title", ""),
-                price         = row.get("price"),
-                stock         = row.get("stock"),
-                rating        = row.get("rating"),
-                reviews_count = row.get("reviews_count"),
-                product_id    = pid,
-            ))
-            if len(rows_to_insert) >= BATCH:
-                try:
-                    async with db.begin_nested():
-                        db.add_all(rows_to_insert)
-                        await db.flush()
-                    imported += len(rows_to_insert)
-                except SQLAlchemyError as exc:
-                    logger.warning("batch_insert_failed", extra={"rows": len(rows_to_insert), "error": str(exc)})
-                    failed += len(rows_to_insert)
-                rows_to_insert = []
-        if rows_to_insert:
-            try:
-                async with db.begin_nested():
-                    db.add_all(rows_to_insert)
-                    await db.flush()
-                imported += len(rows_to_insert)
-            except SQLAlchemyError as exc:
-                logger.warning("batch_insert_failed", extra={"rows": len(rows_to_insert), "error": str(exc)})
-                failed += len(rows_to_insert)
+            pid = _resolve(sku)
+            if pid is None and _sku_present(sku):        # missing → create Product in this cabinet
+                new_p = Product(
+                    id=str(uuid.uuid4()), user_id=str(user.id),
+                    name=row.get("title") or sku, marketplace=rec.marketplace, sku=sku,
+                    price=row.get("price"), marketplace_account_id=account_id,
+                    external_product_id=None)             # no proven external id in the CSV
+                db.add(new_p)
+                index.add(new_p)
+                pid = new_p.id
+            if pid:
+                present.add(pid)
+            to_insert.append(ImportedProductRow(
+                import_id=rec.id, user_id=str(user.id), marketplace=rec.marketplace,
+                sku=sku, title=row.get("title", ""), price=row.get("price"),
+                stock=row.get("stock"), rating=row.get("rating"),
+                reviews_count=row.get("reviews_count"), product_id=pid,
+                marketplace_account_id=account_id, marketplace_store_id=store_id,
+                source="csv", fetched_at=now))
 
     elif rec.import_type == "returns":
-        # Returns rows: resolve to a catalog Product only (no auto-create, like finance).
-        # A returns-only sku without a Product stays product_id=None. Ingestion only.
-        rows_to_insert = []
         for row in result.parsed_data:
-            rows_to_insert.append(ImportedReturnRow(
-                import_id     = rec.id,
-                user_id       = str(user.id),
-                marketplace   = rec.marketplace,
-                date          = row.get("date"),
-                sku           = row.get("sku", ""),
-                returns_qty   = row.get("returns_qty", 0),
-                return_amount = row.get("return_amount", 0.0),
-                reason        = row.get("reason"),
-                product_id    = resolve(product_index, str(user.id), rec.marketplace, row.get("sku", "")),
-            ))
-            if len(rows_to_insert) >= BATCH:
-                try:
-                    async with db.begin_nested():
-                        db.add_all(rows_to_insert)
-                        await db.flush()
-                    imported += len(rows_to_insert)
-                except SQLAlchemyError as exc:
-                    logger.warning("batch_insert_failed", extra={"rows": len(rows_to_insert), "error": str(exc)})
-                    failed += len(rows_to_insert)
-                rows_to_insert = []
-        if rows_to_insert:
-            try:
-                async with db.begin_nested():
-                    db.add_all(rows_to_insert)
-                    await db.flush()
-                imported += len(rows_to_insert)
-            except SQLAlchemyError as exc:
-                logger.warning("batch_insert_failed", extra={"rows": len(rows_to_insert), "error": str(exc)})
-                failed += len(rows_to_insert)
+            pid = _resolve(row.get("sku", ""))
+            if pid:
+                present.add(pid)
+            to_insert.append(ImportedReturnRow(
+                import_id=rec.id, user_id=str(user.id), marketplace=rec.marketplace,
+                date=row.get("date"), sku=row.get("sku", ""),
+                returns_qty=row.get("returns_qty", 0), return_amount=row.get("return_amount", 0.0),
+                reason=row.get("reason"), product_id=pid,
+                marketplace_account_id=account_id, marketplace_store_id=store_id,
+                source="csv", fetched_at=now))
 
     elif rec.import_type == "card_content":
-        # Card-content rows (UPLOAD Evidence for SEO): resolve to a catalog Product only (no
-        # auto-create, like finance/returns). A card-only sku without a Product stays
-        # product_id=None. Ingestion only — no diagnosis, no marketplace API.
-        rows_to_insert = []
+        # Cabinet-level: account_id only, NO store_id, NO placement (a card is not store presence).
         for row in result.parsed_data:
-            rows_to_insert.append(ImportedCardContentRow(
-                import_id            = rec.id,
-                user_id              = str(user.id),
-                marketplace          = rec.marketplace,
-                date                 = row.get("date"),
-                sku                  = row.get("sku", ""),
-                title                = row.get("title"),
-                description          = row.get("description"),
-                brand                = row.get("brand"),
-                category             = row.get("category"),
-                characteristics_json = row.get("characteristics_json"),
-                image_count          = row.get("image_count"),
-                image_urls_json      = row.get("image_urls_json"),
-                product_id           = resolve(product_index, str(user.id), rec.marketplace, row.get("sku", "")),
-            ))
-            if len(rows_to_insert) >= BATCH:
-                try:
-                    async with db.begin_nested():
-                        db.add_all(rows_to_insert)
-                        await db.flush()
-                    imported += len(rows_to_insert)
-                except SQLAlchemyError as exc:
-                    logger.warning("batch_insert_failed", extra={"rows": len(rows_to_insert), "error": str(exc)})
-                    failed += len(rows_to_insert)
-                rows_to_insert = []
-        if rows_to_insert:
-            try:
-                async with db.begin_nested():
-                    db.add_all(rows_to_insert)
-                    await db.flush()
-                imported += len(rows_to_insert)
-            except SQLAlchemyError as exc:
-                logger.warning("batch_insert_failed", extra={"rows": len(rows_to_insert), "error": str(exc)})
-                failed += len(rows_to_insert)
+            pid = _resolve(row.get("sku", ""))
+            to_insert.append(ImportedCardContentRow(
+                import_id=rec.id, user_id=str(user.id), marketplace=rec.marketplace,
+                date=row.get("date"), sku=row.get("sku", ""), title=row.get("title"),
+                description=row.get("description"), brand=row.get("brand"),
+                category=row.get("category"), characteristics_json=row.get("characteristics_json"),
+                image_count=row.get("image_count"), image_urls_json=row.get("image_urls_json"),
+                product_id=pid, marketplace_account_id=account_id, source="csv", fetched_at=now))
 
-    return imported, failed, result.skipped_rows
+    # Atomic write: all rows in one flush. Any DB error propagates → confirm rolls back → failed.
+    db.add_all(to_insert)
+    await db.flush()
+    imported = len(to_insert)
+
+    await _reconcile_placements(db, present, existing_pl, account_id, store_id, now)
+
+    return imported, 0, result.skipped_rows
 
 
 @router.post("/import/{import_id}/confirm", response_model=ConfirmResponse)
@@ -592,15 +554,17 @@ async def confirm_import(
         rec.temp_path      = None
         await db.commit()
     except HTTPException:
+        # rollback expires `rec`; use the path param (a plain str), never rec.id, to avoid a lazy
+        # load outside the greenlet. Failed-status write is a separate transaction after rollback.
         await db.rollback()
-        await db.execute(update(ImportRecord).where(ImportRecord.id == rec.id).values(status="failed"))
+        await db.execute(update(ImportRecord).where(ImportRecord.id == import_id).values(status="failed"))
         await db.commit()
         raise
     except Exception:
         await db.rollback()
-        await db.execute(update(ImportRecord).where(ImportRecord.id == rec.id).values(status="failed"))
+        await db.execute(update(ImportRecord).where(ImportRecord.id == import_id).values(status="failed"))
         await db.commit()
-        logger.exception("import_confirm_failed", extra={"import_id": rec.id})
+        logger.exception("import_confirm_failed", extra={"import_id": import_id})
         raise HTTPException(500, "Не удалось завершить импорт")
 
     # ── post-commit best-effort side effects (a failure here does NOT unconfirm the import) ──

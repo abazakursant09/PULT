@@ -416,6 +416,30 @@ def _margin(net: float, rev: float) -> float:
     return round(net / rev * 100, 2) if rev else 0.0
 
 
+async def store_financial_totals(store_id: str, db: AsyncSession) -> dict:
+    """Revenue / net profit for ONE store (PULT-LAUNCH-1.4.3).
+
+    Filtered strictly by marketplace_store_id, so store A's figures never include store B's rows.
+    Rows with product_id IS NULL (money that did not resolve to a Product) ARE included in the
+    store total — the store's money must not disappear because a product is unmatched — but they
+    are simply not attributed to any product. The existing user-scoped aggregators are left
+    unchanged: a cabinet-wide figure sums stores explicitly, it does not silently blend them.
+    """
+    row = (await db.execute(
+        select(
+            func.coalesce(func.sum(ImportedFinanceRow.revenue), 0.0).label("revenue"),
+            func.coalesce(func.sum(ImportedFinanceRow.net_profit), 0.0).label("net"),
+            func.coalesce(func.sum(ImportedFinanceRow.revenue).filter(
+                ImportedFinanceRow.product_id.is_(None)), 0.0).label("unassigned_revenue"),
+        ).where(ImportedFinanceRow.marketplace_store_id == store_id)
+    )).one()
+    return {
+        "revenue": round(float(row.revenue), 2),
+        "net_profit": round(float(row.net), 2),
+        "unassigned_revenue": round(float(row.unassigned_revenue), 2),
+    }
+
+
 async def summary_by_product(user_id: str, db: AsyncSession) -> tuple[list[dict], dict]:
     """
     Per-product money summary from the ledger, JOINed to the canonical Product.
