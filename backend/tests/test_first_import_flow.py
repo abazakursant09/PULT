@@ -297,7 +297,7 @@ def test_confirm_queues_analysis_for_the_importing_seller():
     import routers.csv_import as ci
     src = inspect.getsource(ci.confirm_import)
     assert "background_tasks.add_task(run_producers_for_user" in src
-    assert "if imported > 0:" in src           # nothing landed → nothing to analyse
+    assert "if counts.imported > 0:" in src           # nothing landed → nothing to analyse
 
 
 def test_analysis_is_not_queued_when_nothing_was_imported():
@@ -307,7 +307,7 @@ def test_analysis_is_not_queued_when_nothing_was_imported():
     import routers.csv_import as ci
     src = inspect.getsource(ci.confirm_import)
     add_at = src.index("background_tasks.add_task")
-    guard_at = src.index("if imported > 0:")
+    guard_at = src.index("if counts.imported > 0:")
     assert guard_at < add_at
 
 

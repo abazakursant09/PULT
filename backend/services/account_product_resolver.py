@@ -61,6 +61,14 @@ class AccountProductIndex:
         """Register a Product created during this import."""
         self._register(product)
 
+    def candidates(self, *, sku: Optional[str] = None) -> list[str]:
+        """Product ids in this account matching the seller SKU (0, 1, or many). Used to show the
+        seller which products a conflict row could be — recomputed within the account, never stored."""
+        sk = _norm_sku(sku)
+        if sk is None:
+            return []
+        return list(self._by_sku.get(sk, []))
+
     def resolve(self, *, external_product_id: Optional[str] = None,
                 sku: Optional[str] = None) -> Resolution:
         if external_product_id:

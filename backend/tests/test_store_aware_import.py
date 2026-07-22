@@ -182,8 +182,10 @@ def test_other_account_product_not_used():
     assert a1_prod[0].marketplace_account_id == a1
 
 
-# 7 & 8 & 9. Ambiguous SKU → abort, no first pick, full rollback
-def test_ambiguous_sku_aborts_confirm():
+# 7 & 8 & 9. Ambiguous SKU → per-row conflict (PULT-LAUNCH-1.4.4 replaced the 1.4.3 abort):
+# the row is saved with link_status='conflict', product_id NULL, never auto-picked; the import
+# still confirms and reports the conflict count.
+def test_ambiguous_sku_saved_as_conflict():
     db = _run(_new_db()); uid = str(uuid.uuid4()); ws = _run(_ws(db, uid))
     acc = _run(_account(db, ws)); s = _run(_store(db, acc))
 
@@ -200,10 +202,10 @@ def test_ambiguous_sku_aborts_confirm():
                 data={"marketplace_store_id": s, "import_type": "finance"})
     iid = up.json()["import_id"]
     cf = c.post(f"/api/import/{iid}/confirm", json={"mode": "new"})
-    assert cf.status_code == 409                                  # ambiguous → stop
-    # full rollback: no finance rows, record failed
-    assert _run(db.execute(select(ImportedFinanceRow))).scalars().all() == []
-    assert _run(db.get(ImportRecord, iid)).status == "failed"
+    assert cf.status_code == 200 and cf.json()["conflicts"] == 1   # saved, not aborted
+    row = _run(db.execute(select(ImportedFinanceRow))).scalars().one()
+    assert row.link_status == "conflict" and row.product_id is None
+    assert _run(db.get(ImportRecord, iid)).status == "confirmed"
 
 
 # 10. Products missing → Product + Placement created
@@ -357,4 +359,4 @@ def test_single_head_unchanged():
     from alembic.config import Config
     from alembic.script import ScriptDirectory
     heads = ScriptDirectory.from_config(Config("alembic.ini")).get_heads()
-    assert heads == ["imp2a2b3c4d01"]
+    assert heads == ["imp4a2b3c4d01"]

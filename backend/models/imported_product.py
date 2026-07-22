@@ -28,6 +28,9 @@ class ImportedProductRow(Base):
     marketplace_store_id   = Column(String(36), ForeignKey("marketplace_stores.id", ondelete="SET NULL"), nullable=True)
     source        = Column(String(10), nullable=False, default="csv", server_default="csv")  # csv | api
     fetched_at    = Column(DateTime, nullable=True)
+    # PULT-LAUNCH-1.4.4: linked (product_id set) | unassigned (no product) | conflict (>1 candidate,
+    # never auto-picked; awaits the seller). conflict/unassigned keep product_id NULL.
+    link_status   = Column(String(10), nullable=False, default="unassigned", server_default="unassigned")
     created_at    = Column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (

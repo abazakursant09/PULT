@@ -425,13 +425,16 @@ async def store_financial_totals(store_id: str, db: AsyncSession) -> dict:
     are simply not attributed to any product. The existing user-scoped aggregators are left
     unchanged: a cabinet-wide figure sums stores explicitly, it does not silently blend them.
     """
+    # conflict rows await the seller and count in nothing until resolved; unassigned money still
+    # belongs to the store total (it is simply not attributed to a product).
     row = (await db.execute(
         select(
             func.coalesce(func.sum(ImportedFinanceRow.revenue), 0.0).label("revenue"),
             func.coalesce(func.sum(ImportedFinanceRow.net_profit), 0.0).label("net"),
             func.coalesce(func.sum(ImportedFinanceRow.revenue).filter(
                 ImportedFinanceRow.product_id.is_(None)), 0.0).label("unassigned_revenue"),
-        ).where(ImportedFinanceRow.marketplace_store_id == store_id)
+        ).where(ImportedFinanceRow.marketplace_store_id == store_id,
+                ImportedFinanceRow.link_status != "conflict")
     )).one()
     return {
         "revenue": round(float(row.revenue), 2),
