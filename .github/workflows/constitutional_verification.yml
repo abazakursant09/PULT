@@ -23,7 +23,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install ruff pytest pytest-cov coverage
+          # Ruff is pinned: unpinned, every run picked up whatever release existed that day,
+          # so a new Ruff turned this job red on files no PR had touched (0.16.0 found 42
+          # errors in the constitutional packages that 0.15.22 did not). 0.15.22 is the
+          # version the last green master run (29861338041, commit 3068f3c) actually used.
+          # Raising it is a deliberate decision, made in its own PR, never a surprise.
+          pip install "ruff==0.15.22" pytest pytest-cov coverage
 
       - name: Ruff (constitutional packages)
         run: |
