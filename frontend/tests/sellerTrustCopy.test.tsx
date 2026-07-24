@@ -14,7 +14,9 @@ const ROOT = join(__dirname, '..')
 const read = (...p: string[]) => readFileSync(join(ROOT, ...p), 'utf-8')
 
 describe('L1.1 — import copy drops the fixed-minute promise', () => {
-  const src = read('app', 'dashboard', 'import', 'page.tsx')
+  // The CSV flow moved to the store-scoped route in 1.4.5C (a file must name its store), so the
+  // copy this guard protects moved with it. /dashboard/import is now the store picker.
+  const src = read('app', 'dashboard', 'stores', '[storeId]', 'import', 'page.tsx')
 
   it('no longer promises a diagnosis "в течение минуты"', () => {
     expect(src).not.toMatch(/в течение минуты/)

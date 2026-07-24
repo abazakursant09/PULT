@@ -33,6 +33,9 @@ describe('P5 — navigation contents (unchanged)', () => {
     renderShell()
     const expected: [string, string][] = [
       ['Главная', '/dashboard'],
+      // Stores joined the nav with 1.4.5C: it is a real, working page, and a CSV cannot be
+      // uploaded without choosing one of them first.
+      ['Магазины', '/dashboard/stores'],
       ['Импорт данных', '/dashboard/import'],
       ['Отзывы', '/dashboard/reviews'],
       ['Настройки', '/dashboard/settings'],
@@ -42,6 +45,14 @@ describe('P5 — navigation contents (unchanged)', () => {
       const link = screen.getByRole('link', { name: new RegExp(label) })
       expect(link.getAttribute('href')).toBe(href)
     }
+  })
+
+  it('does not offer a page that is still a stub', () => {
+    renderShell()
+    // The global products page is a ComingSoon stub, and Decisions has no page at all. A nav
+    // item pointing at either would be a promise the product cannot keep.
+    expect(screen.queryByRole('link', { name: /^Товары/ })).toBeNull()
+    expect(screen.queryByRole('link', { name: /Решения/ })).toBeNull()
   })
 
   it('marks the current route active', () => {

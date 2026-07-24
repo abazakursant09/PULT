@@ -99,7 +99,7 @@ describe('the import page promises no section that does not exist', () => {
   it('does not say the data will appear in Финансы', () => {
     // There is no seller-visible "Финансы" section. What actually happens is that the runtime
     // picks the seller up on the next tick and the diagnosis lands on the dashboard.
-    const src = read('app', 'dashboard', 'import', 'page.tsx')
+    const src = read('app', 'dashboard', 'stores', '[storeId]', 'import', 'page.tsx')
 
     expect(src).not.toMatch(/в Финансах/)
     // The import page tells the seller the result lands on the dashboard — no fake "Финансы"

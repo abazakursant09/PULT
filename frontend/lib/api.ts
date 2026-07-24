@@ -1660,17 +1660,78 @@ export const api = {
     },
   },
 
+  // ── Cabinets and stores (keyless, PULT-LAUNCH-1.4.1) ────────────────────────
+  // A cabinet is the seller's marketplace login; a store is what a CSV lands in. No API key is
+  // involved anywhere here — that is the connections API, a different thing entirely.
+  marketplaceAccounts: {
+    // include_stores is opt-in on the backend: without it `stores` comes back null, not empty.
+    list: (includeStores = false) =>
+      req<MarketplaceAccountOut[]>(
+        `/api/marketplace-accounts${includeStores ? '?include_stores=true' : ''}`),
+    // WB/Ozon get their single store created by the backend in the same transaction; Yandex
+    // gets none, and its stores are added one by one with createStore.
+    create: (body: { marketplace: string; label: string }) =>
+      req<MarketplaceAccountOut>('/api/marketplace-accounts', {
+        method: 'POST', body: JSON.stringify(body),
+      }),
+    createStore: (accountId: string, body: { label: string }) =>
+      req<MarketplaceStoreOut>(`/api/marketplace-accounts/${accountId}/stores`, {
+        method: 'POST', body: JSON.stringify(body),
+      }),
+    setStoreStatus: (storeId: string, status: 'active' | 'archived') =>
+      req<MarketplaceStoreOut>(`/api/marketplace-stores/${storeId}`, {
+        method: 'PATCH', body: JSON.stringify({ status }),
+      }),
+  },
+
+  // ── Read-only store catalog (PULT-LAUNCH-1.4.5B) ────────────────────────────
+  marketplaceStores: {
+    products: (storeId: string, params: { page?: number; page_size?: number; search?: string; status?: string } = {}) => {
+      const q = new URLSearchParams()
+      if (params.page)      q.set('page', String(params.page))
+      if (params.page_size) q.set('page_size', String(params.page_size))
+      if (params.search)    q.set('search', params.search)
+      if (params.status)    q.set('status', params.status)
+      const s = q.toString()
+      return req<StoreProductsPage>(`/api/marketplace-stores/${storeId}/products${s ? `?${s}` : ''}`)
+    },
+    imports: (storeId: string, params: { page?: number; page_size?: number; status?: string; import_type?: string } = {}) => {
+      const q = new URLSearchParams()
+      if (params.page)        q.set('page', String(params.page))
+      if (params.page_size)   q.set('page_size', String(params.page_size))
+      if (params.status)      q.set('status', params.status)
+      if (params.import_type) q.set('import_type', params.import_type)
+      const s = q.toString()
+      return req<StoreImportsPage>(`/api/marketplace-stores/${storeId}/imports${s ? `?${s}` : ''}`)
+    },
+  },
+
   csvImport: {
-    upload: (file: File, marketplace?: string, importType?: string) => {
+    // marketplace_store_id is REQUIRED: since PULT-LAUNCH-1.4.2 the backend refuses an upload
+    // without it, and the marketplace is read from that store — never from the client. The
+    // import_type sent here is only a hint; the parser decides the real type from the file and
+    // returns it in the preview.
+    upload: (file: File, marketplaceStoreId: string, importType?: string) => {
       const form = new FormData()
       form.append('file', file)
-      if (marketplace) form.append('marketplace', marketplace)
-      if (importType)  form.append('import_type', importType)
+      form.append('marketplace_store_id', marketplaceStoreId)
+      if (importType) form.append('import_type', importType)
       return reqForm<ImportPreviewResponse>('/api/import/upload', form)
     },
     confirm: (importId: string, mode: 'new' | 'overwrite' = 'new') =>
       req<ImportConfirmResponse>(`/api/import/${importId}/confirm`, {
         method: 'POST', body: JSON.stringify({ mode }),
+      }),
+    conflicts: (importId: string) =>
+      req<ImportConflictRow[]>(`/api/import/${importId}/conflicts`),
+    // Only the three actions the backend implements. There is no per-row overwrite.
+    resolveConflict: (importId: string, body: {
+      row_id: string
+      action: 'link_existing' | 'create_new' | 'leave_unassigned'
+      product_id?: string
+    }) =>
+      req<ImportConflictResolution>(`/api/import/${importId}/conflicts/resolve`, {
+        method: 'POST', body: JSON.stringify(body),
       }),
     history: () => req<ImportHistoryItem[]>('/api/import/history'),
     templateUrl: (marketplace: string, importType: string) =>
@@ -2036,7 +2097,20 @@ export interface PromoStats {
 export interface ImportPreviewResponse {
   import_id:           string
   marketplace:         string | null
+  // The TYPE IS THE SERVER'S ANSWER, not the seller's choice: the parser reads the file's own
+  // columns and decides. Everything downstream (overwrite wording, confirm) must read it here.
   import_type:         string | null
+  marketplace_account_id?: string | null
+  marketplace_store_id?:   string | null
+  account_label?:      string | null
+  store_label?:        string | null
+  new_products?:       number
+  updates?:            number
+  conflicts?:          number
+  unassigned?:         number
+  // Exact number of already-stored csv rows the "replace" mode would delete, computed by the
+  // backend over the real overwrite scope. Never inferred on the client.
+  rows_to_replace?:    number
   total_rows:          number
   valid_rows:          number
   skipped_rows:        number
@@ -2055,6 +2129,106 @@ export interface ImportConfirmResponse {
   import_id:      string
   imported_count: number
   skipped_count:  number
+  linked?:        number
+  conflicts?:     number
+  unassigned?:    number
+  replaced?:      number
+}
+
+// ── Cabinets, stores and their read-only catalog (PULT-LAUNCH-1.4.1 / 1.4.5B) ──
+
+export interface MarketplaceStoreOut {
+  id:                     string
+  marketplace_account_id: string
+  marketplace:            string
+  label:                  string
+  status:                 string          // active | archived
+  placement_type:         string | null
+  external_store_id:      string | null
+  source:                 string
+}
+
+export interface MarketplaceAccountOut {
+  id:                  string
+  marketplace:         string
+  label:               string | null
+  identity_status:     string
+  external_account_id: string | null
+  has_connection:      boolean
+  stores:              MarketplaceStoreOut[] | null   // null unless include_stores was asked for
+}
+
+export interface StoreRef {
+  id:          string
+  label:       string
+  marketplace: string
+  status:      string
+}
+
+export interface StoreProductItem {
+  product_id:       string
+  sku:              string | null
+  name:             string
+  placement_status: string
+  placement_source: string
+  first_seen_at:    string
+  last_seen_at:     string
+}
+
+export interface StoreProductsPage {
+  store:     StoreRef
+  items:     StoreProductItem[]
+  page:      number
+  page_size: number
+  total:     number
+  pages:     number
+}
+
+export interface StoreImportItem {
+  import_id:                string
+  filename:                 string
+  import_type:              string
+  status:                   string
+  created_at:               string
+  confirmed_at:             string | null
+  total_rows:               number
+  imported_count:           number
+  skipped_rows:             number
+  conflicts:                number
+  unassigned:               number
+  has_unresolved_conflicts: boolean
+  source:                   string
+}
+
+export interface StoreImportsPage {
+  store:     StoreRef
+  items:     StoreImportItem[]
+  page:      number
+  page_size: number
+  total:     number
+  pages:     number
+}
+
+export interface ImportConflictCandidate {
+  product_id: string
+  sku:        string | null
+  name:       string | null
+}
+
+export interface ImportConflictRow {
+  row_type:             string
+  row_id:               string
+  sku:                  string | null
+  title:                string | null
+  marketplace:          string | null
+  marketplace_store_id: string | null
+  candidates:           ImportConflictCandidate[]
+}
+
+export interface ImportConflictResolution {
+  row_id:      string
+  link_status: string
+  product_id:  string | null
 }
 
 export interface ImportHistoryItem {
