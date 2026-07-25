@@ -70,17 +70,28 @@ class PriceErosionDiagnosis:
 
 
 async def build_price_series(
-    db: AsyncSession, user_id: str, marketplace: str, sku: str
+    db: AsyncSession, user_id: str, marketplace: str, sku: str,
+    *, source: str = "csv", store_id: str | None = None,
 ) -> List[float]:
     """Observed price per dated ImportedProductRow snapshot, oldest→newest, for one
     (user, marketplace, sku). DB-headless — ImportedProductRow only, ordered by created_at
-    (snapshot date), NOT insert order. Only price-bearing snapshots (price not None)."""
+    (snapshot date), NOT insert order. Only price-bearing snapshots (price not None).
+
+    Source-single (PULT-LAUNCH-1.4.5H): a series is built from ONE `source` only — never interleaving
+    CSV and API snapshots, which would fabricate a price trend. `source` defaults to 'csv' (today's
+    behaviour); the resolver passes 'api' + a `store_id` when policy selects the API for that store.
+    `store_id` scopes to one campaign store so two Yandex stores never mix."""
+    conds = [
+        ImportedProductRow.user_id == user_id,
+        ImportedProductRow.marketplace == marketplace,
+        ImportedProductRow.sku == sku,
+        ImportedProductRow.price.isnot(None),
+        ImportedProductRow.source == source,
+    ]
+    if store_id is not None:
+        conds.append(ImportedProductRow.marketplace_store_id == store_id)
     rows = (await db.execute(
-        select(ImportedProductRow.price).where(
-            ImportedProductRow.user_id == user_id,
-            ImportedProductRow.marketplace == marketplace,
-            ImportedProductRow.sku == sku,
-            ImportedProductRow.price.isnot(None))
+        select(ImportedProductRow.price).where(*conds)
         .order_by(ImportedProductRow.created_at.asc()))).all()
     return [float(p) for (p,) in rows]
 

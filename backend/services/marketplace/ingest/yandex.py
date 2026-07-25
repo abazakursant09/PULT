@@ -165,7 +165,8 @@ async def _snapshot_row(db, state, ext: str) -> ImportedProductRow:
     return row
 
 
-async def _upsert_operation(db, state, *, external_operation_id, operation_type, provider_code=None,
+async def _upsert_operation(db, state, *, external_operation_id, operation_type, provider_dataset,
+                            provider_code=None,
                             parent=None, product_id=None, occurred_at=None, status=None,
                             quantity=None, amount=None, currency=None, now: datetime) -> None:
     row = (await db.execute(
@@ -180,6 +181,7 @@ async def _upsert_operation(db, state, *, external_operation_id, operation_type,
             marketplace_store_id=state.marketplace_store_id, marketplace=MARKETPLACE, source="api",
             external_operation_id=external_operation_id, operation_type=operation_type)
         db.add(row)
+    row.provider_dataset = provider_dataset
     row.external_parent_id = parent
     row.provider_operation_code = provider_code
     row.product_id = product_id
@@ -379,7 +381,7 @@ async def _page_orders(db, state, token) -> dict:
         # itemsTotal is the buyer-facing order cost, kept as a signed Decimal amount (never PII).
         await _upsert_operation(
             db, state, external_operation_id=f"order:{campaign_id}:{oid}", operation_type="order",
-            provider_code=_s(o.get("status")), product_id=product_id,
+            provider_dataset="orders", provider_code=_s(o.get("status")), product_id=product_id,
             occurred_at=_dt(o.get("creationDate")), status=_s(o.get("substatus") or o.get("status")),
             quantity=qty, amount=_dec(o.get("itemsTotal") or o.get("buyerItemsTotal")),
             currency="RUR", now=now)
@@ -415,7 +417,7 @@ async def _page_returns(db, state, token) -> dict:
         # refund amount is exposed → amount stays NULL, never a guessed money value.
         await _upsert_operation(
             db, state, external_operation_id=f"return:{campaign_id}:{rid}", operation_type="return",
-            provider_code="return", parent=_s(r.get("orderId")), product_id=product_id,
+            provider_dataset="returns", provider_code="return", parent=_s(r.get("orderId")), product_id=product_id,
             occurred_at=_dt(r.get("creationDate")), quantity=qty, amount=None, currency=None, now=now)
     next_token = ((result.get("paging") or {}).get("nextPageToken")) or None
     done = not returns or not next_token

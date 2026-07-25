@@ -1,7 +1,10 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, String, DateTime, Integer, Index, ForeignKey, UniqueConstraint
+from sqlalchemy import (
+    Column, String, DateTime, Integer, Boolean, Index, ForeignKey, UniqueConstraint,
+    false as sa_false,
+)
 from database import Base
 
 
@@ -36,7 +39,15 @@ class ApiSyncState(Base):
     covered_from = Column(String(10), nullable=True)   # YYYY-MM-DD
     covered_to = Column(String(10), nullable=True)      # YYYY-MM-DD
 
-    status = Column(String(20), nullable=False, default="pending")  # pending|running|synced|paused|failed
+    status = Column(String(20), nullable=False, default="pending")  # pending|running|synced|paused|failed|unmapped|unsupported
+    # Honest coverage (PULT-LAUNCH-1.4.5H). A cursor proves progress, NOT completeness: a period
+    # metric may be chosen as an API source ONLY when a full range was covered with no gaps. Set true
+    # only after a clean full pass; ANY skipped money row, or a paused/failed/unsupported state, keeps
+    # it false. covered_from/covered_to mean "complete" only in combination with this flag.
+    coverage_complete = Column(Boolean, nullable=False, default=False, server_default=sa_false())
+    # How many rows a pass could not safely persist (e.g. an unparseable money row). Non-zero forbids
+    # coverage_complete: a period with a dropped money row is not a period we may trust as an API total.
+    skipped_rows_count = Column(Integer, nullable=False, default=0, server_default="0")
     last_attempt_at = Column(DateTime, nullable=True)
     last_success_at = Column(DateTime, nullable=True)
     next_run_at = Column(DateTime, nullable=True)       # earliest a scheduler may retry; NULL = now

@@ -14,6 +14,15 @@ OPERATION_TYPES = (
     "commission", "logistics", "penalty", "deduction", "other",
 )
 
+# The provider FEED a row came from (PULT-LAUNCH-1.4.5H). This is what stops one real sale from being
+# counted twice inside ONE marketplace — e.g. WB reports the same sale in both the sales feed and the
+# finance report, and only ONE of them is the authoritative money source. The source-policy money
+# reader selects exactly one dataset per metric; 'legacy' is every row written before this field
+# existed and NEVER enters a user total automatically.
+PROVIDER_DATASETS = (
+    "orders", "sales", "finance", "returns", "fbo_postings", "fbs_postings", "legacy",
+)
+
 
 class MarketplaceOperation(Base):
     """One normalized marketplace EVENT from the API (PULT-LAUNCH-1.4.5E2).
@@ -51,6 +60,9 @@ class MarketplaceOperation(Base):
     # Links a downstream operation back to its order (WB srid) when the API carries it.
     external_parent_id = Column(String(64), nullable=True)
     operation_type = Column(String(20), nullable=False)
+    # The provider feed this row came from (orders|sales|finance|returns|fbo_postings|fbs_postings|
+    # legacy). Distinguishes the SAME sale seen in two feeds so money is counted from one only.
+    provider_dataset = Column(String(20), nullable=False, default="legacy", server_default="legacy")
     # The official WB operation name/code, kept verbatim so a new/unknown operation is preserved
     # under operation_type='other' instead of being lost. Safe: an operation name, not PII.
     provider_operation_code = Column(String(120), nullable=True)
@@ -76,8 +88,14 @@ class MarketplaceOperation(Base):
         CheckConstraint(
             "operation_type IN ('order','sale','return','cancellation','commission','logistics',"
             "'penalty','deduction','other')", name="ck_mp_operation_type"),
+        CheckConstraint(
+            "provider_dataset IN ('orders','sales','finance','returns','fbo_postings',"
+            "'fbs_postings','legacy')", name="ck_mp_operation_dataset"),
         Index("ix_mp_operation_account_time", "marketplace_account_id", "occurred_at"),
         Index("ix_mp_operation_store_time", "marketplace_store_id", "occurred_at"),
+        # The money reader filters by store + dataset + time, so index that path.
+        Index("ix_mp_operation_store_dataset_time", "marketplace_store_id", "provider_dataset",
+              "occurred_at"),
         Index("ix_mp_operation_product", "product_id"),
         Index("ix_mp_operation_external", "external_operation_id"),
     )

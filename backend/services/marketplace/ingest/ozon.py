@@ -113,7 +113,8 @@ async def _ensure_placement(db, product_id: str, account_id: str, store_id: str)
                             status="active", source="api"))
 
 
-async def _upsert_operation(db, state, *, external_operation_id, operation_type, provider_code=None,
+async def _upsert_operation(db, state, *, external_operation_id, operation_type, provider_dataset,
+                            provider_code=None,
                             parent=None, product_id=None, occurred_at=None, status=None,
                             quantity=None, amount=None, currency=None, now: datetime) -> None:
     row = (await db.execute(
@@ -128,6 +129,7 @@ async def _upsert_operation(db, state, *, external_operation_id, operation_type,
             marketplace_store_id=state.marketplace_store_id, marketplace=MARKETPLACE, source="api",
             external_operation_id=external_operation_id, operation_type=operation_type)
         db.add(row)
+    row.provider_dataset = provider_dataset
     row.external_parent_id = parent
     row.provider_operation_code = provider_code
     row.product_id = product_id
@@ -312,7 +314,8 @@ async def _page_postings(db, state, *, scheme, token, client_id) -> dict:
         # A posting is an ORDER lifecycle, never a sale; FBO/FBS namespaced so they never collide.
         await _upsert_operation(
             db, state, external_operation_id=f"{scheme}:{posting}", operation_type="order",
-            provider_code=scheme, product_id=product_id, occurred_at=_dt(r.get("in_process_at")),
+            provider_dataset=f"{scheme}_postings", provider_code=scheme, product_id=product_id,
+            occurred_at=_dt(r.get("in_process_at")),
             status=_s(r.get("status")), quantity=qty, amount=None, currency=None, now=now)
     done = len(rows) < _PAGE
     state.cursor = json.dumps({"since": since, "offset": 0 if done else offset + len(rows)})
@@ -360,7 +363,8 @@ async def _page_finance(db, state, *, token, client_id) -> dict:
         primary = "return" if "возврат" in low or "return" in low else \
                   ("sale" if any(k in low for k in ("продаж", "sale", "orders", "достав")) else "other")
         await _upsert_operation(
-            db, state, external_operation_id=oid, operation_type=primary, provider_code=op_name,
+            db, state, external_operation_id=oid, operation_type=primary, provider_dataset="finance",
+            provider_code=op_name,
             parent=parent, product_id=product_id, occurred_at=_dt(op.get("operation_date")),
             amount=_dec(op.get("amount")), currency=_s(op.get("currency_code")), now=now)
         count += 1
@@ -373,7 +377,7 @@ async def _page_finance(db, state, *, token, client_id) -> dict:
             comp = _service_type(_s(svc.get("name")))
             await _upsert_operation(
                 db, state, external_operation_id=f"{oid}:{comp}:{_s(svc.get('name'))}",
-                operation_type=comp, provider_code=_s(svc.get("name")), parent=oid,
+                operation_type=comp, provider_dataset="finance", provider_code=_s(svc.get("name")), parent=oid,
                 product_id=product_id, occurred_at=_dt(op.get("operation_date")),
                 amount=val, currency=_s(op.get("currency_code")), now=now)
             count += 1
@@ -404,7 +408,8 @@ async def _page_returns(db, state, *, token, client_id) -> dict:
         # A return comes ONLY from the official returns endpoint — never inferred from a cancellation.
         await _upsert_operation(
             db, state, external_operation_id=rid, operation_type="return",
-            provider_code="return", parent=_s(r.get("posting_number")), product_id=product_id,
+            provider_dataset="returns", provider_code="return", parent=_s(r.get("posting_number")),
+            product_id=product_id,
             occurred_at=_dt(r.get("created_at") or r.get("accepted_at")),
             quantity=_int(prod.get("quantity")), amount=_dec(r.get("price") or (prod or {}).get("price")),
             currency=None, now=now)

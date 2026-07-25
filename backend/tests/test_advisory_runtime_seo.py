@@ -170,4 +170,4 @@ def test_alembic_head_unchanged():
     from alembic.config import Config
     from alembic.script import ScriptDirectory
     heads = ScriptDirectory.from_config(Config("alembic.ini")).get_heads()
-    assert heads == ["wbo1a2b3c4d01"], heads
+    assert heads == ["sdp1a2b3c4d01"], heads

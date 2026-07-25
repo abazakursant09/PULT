@@ -72,15 +72,24 @@ class RatingDiagnosis:
 
 
 async def build_rating_series(
-    db: AsyncSession, user_id: str, marketplace: str, sku: str
+    db: AsyncSession, user_id: str, marketplace: str, sku: str,
+    *, source: str = "csv", store_id: str | None = None,
 ) -> List[Tuple[Optional[float], Optional[int]]]:
     """(rating, reviews_count) per dated ImportedProductRow snapshot, oldest→newest, for one
-    (user, marketplace, sku). DB-headless — ImportedProductRow only, ordered by created_at."""
+    (user, marketplace, sku). DB-headless — ImportedProductRow only, ordered by created_at.
+
+    Source-single (PULT-LAUNCH-1.4.5H): built from ONE `source` (default 'csv') so CSV and API
+    snapshots never interleave into a false rating trend; `store_id` scopes to one store."""
+    conds = [
+        ImportedProductRow.user_id == user_id,
+        ImportedProductRow.marketplace == marketplace,
+        ImportedProductRow.sku == sku,
+        ImportedProductRow.source == source,
+    ]
+    if store_id is not None:
+        conds.append(ImportedProductRow.marketplace_store_id == store_id)
     rows = (await db.execute(
-        select(ImportedProductRow.rating, ImportedProductRow.reviews_count).where(
-            ImportedProductRow.user_id == user_id,
-            ImportedProductRow.marketplace == marketplace,
-            ImportedProductRow.sku == sku)
+        select(ImportedProductRow.rating, ImportedProductRow.reviews_count).where(*conds)
         .order_by(ImportedProductRow.created_at.asc()))).all()
     return [(rating, reviews) for rating, reviews in rows]
 

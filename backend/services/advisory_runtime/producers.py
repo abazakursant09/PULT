@@ -750,9 +750,11 @@ async def run_operations_low_stock_producer(ctx: RuntimeContext) -> ProducerResu
     replacing it."""
     db, uid = ctx.db, ctx.user_id
 
-    # bounded: pre-filter to the critically-low rows only (the source re-guards)
+    # bounded: pre-filter to the critically-low rows only (the source re-guards). CSV-only until the
+    # source policy (1.4.5H) selects API for a store — API snapshots must never silently enter this.
     rows = (await db.execute(select(ImportedProductRow).where(
         ImportedProductRow.user_id == uid,
+        ImportedProductRow.source == "csv",
         ImportedProductRow.stock.isnot(None),
         ImportedProductRow.stock >= 0,
         ImportedProductRow.stock <= LOW_STOCK_UNITS,

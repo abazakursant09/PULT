@@ -101,6 +101,25 @@ class CampaignLinkOut(BaseModel):
     created_store: bool = False
 
 
+# ── Source policy (PULT-LAUNCH-1.4.5H) ───────────────────────────────────────────
+class SourcePolicyMetric(BaseModel):
+    metric_type: str
+    preference: str                       # EFFECTIVE preference (auto|api|csv); 'csv' when unset
+    api_supported: bool                   # can the API ever be an authoritative source for this metric
+    api_available: bool                   # supported AND currently synced/covered/fresh
+    limitation: Optional[str] = None      # e.g. yandex_finance_unsupported | manual_only_csv
+
+
+class SourcePolicyOut(BaseModel):
+    store_id: str
+    marketplace: str
+    metrics: list[SourcePolicyMetric] = []
+
+
+class SourcePolicyPatch(BaseModel):
+    preference: str                       # auto | api | csv
+
+
 # ── Execution ──────────────────────────────────────────────────────────────────
 class ExecuteRequest(BaseModel):
     action_type: str

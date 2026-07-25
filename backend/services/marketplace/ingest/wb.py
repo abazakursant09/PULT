@@ -236,12 +236,17 @@ async def _resolve_product(db, index: AccountProductIndex, state, nm: Optional[s
 
 
 async def _upsert_operation(db, state, *, external_operation_id: str, operation_type: str,
+                            provider_dataset: str,
                             provider_code: Optional[str] = None, parent: Optional[str] = None,
                             product_id: Optional[str] = None, occurred_at: Optional[datetime] = None,
                             status: Optional[str] = None, quantity: Optional[int] = None,
                             amount: Optional[Decimal] = None, currency: Optional[str] = None,
                             now: datetime) -> None:
-    """Insert or update ONE operation, idempotent on (account, source, external id, type)."""
+    """Insert or update ONE operation, idempotent on (account, source, external id, type).
+
+    `provider_dataset` records the feed this row came from (orders|sales|finance) so the source-policy
+    money reader counts a sale from exactly one feed — WB reports the same sale in both sales and
+    finance, and only one is the authoritative money source."""
     row = (await db.execute(
         select(MarketplaceOperation).where(
             MarketplaceOperation.marketplace_account_id == state.marketplace_account_id,
@@ -254,6 +259,7 @@ async def _upsert_operation(db, state, *, external_operation_id: str, operation_
             marketplace_store_id=state.marketplace_store_id, marketplace=MARKETPLACE, source="api",
             external_operation_id=external_operation_id, operation_type=operation_type)
         db.add(row)
+    row.provider_dataset = provider_dataset
     row.external_parent_id = parent
     row.provider_operation_code = provider_code
     row.product_id = product_id
@@ -310,7 +316,7 @@ async def _page_orders(db, state, token: str) -> dict:
         # is a status change, never a return.
         await _upsert_operation(
             db, state, external_operation_id=srid, operation_type="order",
-            provider_code="order", product_id=product_id,
+            provider_dataset="orders", provider_code="order", product_id=product_id,
             occurred_at=_dt(r.get("date")), status="cancelled" if r.get("isCancel") else "new",
             quantity=1, amount=_dec(r.get("priceWithDisc") or r.get("totalPrice")),
             currency="RUB" if r.get("priceWithDisc") is not None else None, now=now)
@@ -348,7 +354,7 @@ async def _page_sales(db, state, token: str) -> dict:
             op_type = "other"
         await _upsert_operation(
             db, state, external_operation_id=sale_id, operation_type=op_type,
-            provider_code=_s(r.get("saleID")), parent=srid, product_id=product_id,
+            provider_dataset="sales", provider_code=_s(r.get("saleID")), parent=srid, product_id=product_id,
             occurred_at=_dt(r.get("date")), status=None, quantity=1,
             amount=_dec(r.get("forPay")),
             currency="RUB" if r.get("forPay") is not None else None, now=now)
@@ -384,7 +390,7 @@ async def _page_finance(db, state, token: str) -> dict:
         primary = _FINANCE_TYPE.get((oper_name or "").lower(), "other")
         await _upsert_operation(
             db, state, external_operation_id=rrd, operation_type=primary,
-            provider_code=oper_name, parent=srid, product_id=product_id, occurred_at=occurred,
+            provider_dataset="finance", provider_code=oper_name, parent=srid, product_id=product_id, occurred_at=occurred,
             quantity=_int(r.get("quantity")), amount=_dec(r.get("retail_amount") or r.get("ppvz_for_pay")),
             currency=_s(r.get("currency_name")), now=now)
         count += 1
@@ -399,7 +405,7 @@ async def _page_finance(db, state, token: str) -> dict:
                 continue
             await _upsert_operation(
                 db, state, external_operation_id=f"{rrd}:{op_type}", operation_type=op_type,
-                provider_code=oper_name, parent=rrd, product_id=product_id, occurred_at=occurred,
+                provider_dataset="finance", provider_code=oper_name, parent=rrd, product_id=product_id, occurred_at=occurred,
                 amount=val, currency=_s(r.get("currency_name")), now=now)
             count += 1
     state.covered_from = date_from
