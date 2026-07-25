@@ -35,7 +35,10 @@ log = logging.getLogger(__name__)
 _MAX_PAGES_PER_RUN = 20                 # a bounded slice of one type per pass
 _BACKOFF_BASE_MIN = 5                   # first retry delay
 _BACKOFF_CAP_MIN = 6 * 60              # never wait longer than this
-_CADENCE_MIN = {"card_content": 6 * 60, "prices": 60}   # gap after a successful full sync
+_CADENCE_MIN = {                              # gap after a successful full sync, per type
+    "card_content": 6 * 60, "prices": 60,
+    "orders": 60, "sales": 60, "stocks": 60, "finance": 6 * 60,
+}
 
 
 def _backoff_minutes(fail_count: int) -> int:
@@ -112,6 +115,13 @@ async def _sync_state(db: AsyncSession, state: ApiSyncState, token: str, now: da
             return
         state.fail_count = 0
         state.last_safe_error_code = None
+        if result.get("defer"):
+            # An async report (stocks) is not ready yet — stop this run, come back shortly. The
+            # cursor (the task id) is already persisted, so the next tick polls it.
+            state.status = "running"
+            state.next_run_at = now + timedelta(minutes=1)
+            await db.commit()
+            return
         if result["done"]:
             cadence = _CADENCE_MIN.get(state.data_type, 6 * 60)
             state.status = "synced"

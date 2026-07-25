@@ -52,7 +52,7 @@ from services.marketplace.verification.taxonomy import (
 )
 from services.marketplace.verification.service import NullVerifier
 
-REV = "wba1a2b3c4d01"
+REV = "wbo1a2b3c4d01"
 PRIOR = "cri1a2b3c4d01"
 TABLE = "connection_verification_attempts"
 

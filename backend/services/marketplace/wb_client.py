@@ -222,10 +222,69 @@ class WBClient:
         )
         return data if isinstance(data, list) else []
 
+    # ── Ingest reads (PULT-LAUNCH-1.4.5E2) ────────────────────────────────────
+    async def list_orders(self, *, token: str, date_from: str, flag: int = 0) -> list[dict]:
+        """WB Statistics: GET /api/v1/supplier/orders?dateFrom=&flag=. One row per order line;
+        `srid` is the stable order id, `lastChangeDate` drives incremental paging."""
+        data = await self._statistics().request(
+            "GET", "/api/v1/supplier/orders", token=token,
+            params={"dateFrom": date_from, "flag": flag})
+        return data if isinstance(data, list) else []
+
+    async def list_sales(self, *, token: str, date_from: str, flag: int = 0) -> list[dict]:
+        """WB Statistics: GET /api/v1/supplier/sales?dateFrom=&flag=. One row = one sale OR return;
+        `saleID` (S… sale / R… return) is the stable per-line id, `srid` links back to the order."""
+        return await self.get_sales(token=token, date_from=date_from, flag=flag)
+
+    async def create_warehouse_remains_report(self, *, token: str) -> str:
+        """WB Analytics: POST /api/v1/warehouse_remains → task id. The stocks snapshot is an async
+        report (create → poll → download); the current supplier/stocks sync method was retired."""
+        data = await self._analytics().request(
+            "POST", "/api/v1/warehouse_remains", token=token,
+            params={"groupByNm": "true"})
+        return str(((data or {}).get("data") or {}).get("taskId") or (data or {}).get("taskId") or "")
+
+    async def warehouse_remains_status(self, *, token: str, task_id: str) -> str:
+        """GET /api/v1/warehouse_remains/tasks/{id}/status → 'new'|'processing'|'done'|... ."""
+        data = await self._analytics().request(
+            "GET", f"/api/v1/warehouse_remains/tasks/{task_id}/status", token=token)
+        return str(((data or {}).get("data") or {}).get("status") or (data or {}).get("status") or "")
+
+    async def download_warehouse_remains(self, *, token: str, task_id: str) -> list[dict]:
+        """GET /api/v1/warehouse_remains/tasks/{id}/download → rows (nmId, warehouseName, quantity)."""
+        data = await self._analytics().request(
+            "GET", f"/api/v1/warehouse_remains/tasks/{task_id}/download", token=token)
+        if isinstance(data, list):
+            return data
+        return ((data or {}).get("data")) or [] if isinstance(data, dict) else []
+
+    async def finance_sales_report_detailed(self, *, token: str, date_from: str,
+                                            date_to: str) -> list[dict]:
+        """NEW WB Finance API (replaces the retired v5 reportDetailByPeriod):
+            POST /api/finance/v1/sales-reports/detailed  (Finance category token)
+        Each row carries rrd_id (stable finance row id), srid, supplier_oper_name, quantity and the
+        signed money components."""
+        data = await self._finance().request(
+            "POST", "/api/finance/v1/sales-reports/detailed", token=token,
+            json={"period": {"begin": date_from, "end": date_to}})
+        if isinstance(data, list):
+            return data
+        return ((data or {}).get("data")) or [] if isinstance(data, dict) else []
+
     def _statistics(self) -> "BaseMarketplaceClient":
         if not hasattr(self, "_statistics_client"):
             self._statistics_client = BaseMarketplaceClient(settings.wb_statistics_base)
         return self._statistics_client
+
+    def _analytics(self) -> "BaseMarketplaceClient":
+        if not hasattr(self, "_analytics_client"):
+            self._analytics_client = BaseMarketplaceClient(settings.wb_analytics_base)
+        return self._analytics_client
+
+    def _finance(self) -> "BaseMarketplaceClient":
+        if not hasattr(self, "_finance_client"):
+            self._finance_client = BaseMarketplaceClient(settings.wb_finance_base)
+        return self._finance_client
 
 
 wb_client = WBClient()

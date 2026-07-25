@@ -46,6 +46,8 @@ from .imported_return import ImportedReturnRow
 from .imported_card_content import ImportedCardContentRow
 # API ingestion cursor/schedule (PULT-LAUNCH-1.4.5E)
 from .api_sync_state import ApiSyncState
+# Normalized marketplace events — orders/sales/returns/finance (PULT-LAUNCH-1.4.5E2)
+from .marketplace_operation import MarketplaceOperation
 from .marketplace_category import MarketplaceCategoryRow
 from .marketplace_category_attribute import MarketplaceCategoryAttributeRow
 from .returns_audit import ReturnsAudit

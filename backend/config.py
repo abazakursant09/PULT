@@ -74,6 +74,8 @@ class Settings(BaseSettings):
     wb_content_base: str = "https://content-api.wildberries.ru"
     wb_advert_base: str = "https://advert-api.wildberries.ru"
     wb_statistics_base: str = "https://statistics-api.wildberries.ru"
+    wb_analytics_base: str = "https://seller-analytics-api.wildberries.ru"
+    wb_finance_base: str = "https://finance-api.wildberries.ru"
     ozon_seller_base: str = "https://api-seller.ozon.ru"
     ozon_performance_base: str = "https://api-performance.ozon.ru"
     yandex_partner_base: str = "https://api.partner.market.yandex.ru"

@@ -114,6 +114,25 @@ class _StubWB:
         self.price_calls += 1
         return self._price_pages.pop(0) if self._price_pages else []
 
+    # E2 data types: safe empty defaults so the expanded scheduler completes in E1 tests.
+    async def list_orders(self, *, token, date_from, flag=0):
+        return []
+
+    async def list_sales(self, *, token, date_from, flag=0):
+        return []
+
+    async def finance_sales_report_detailed(self, *, token, date_from, date_to):
+        return []
+
+    async def create_warehouse_remains_report(self, *, token):
+        return "task"
+
+    async def warehouse_remains_status(self, *, token, task_id):
+        return "done"
+
+    async def download_warehouse_remains(self, *, token, task_id):
+        return []
+
 
 def _use_stub(monkeypatch, stub):
     monkeypatch.setattr(wb_ingest, "wb_client", stub)
@@ -329,7 +348,9 @@ def test_flag_on_runs_and_persists(monkeypatch):
     assert _run(db.execute(select(func.count()).select_from(ImportedCardContentRow))).scalar_one() == 1
     assert _run(db.execute(select(func.count()).select_from(ImportedProductRow))).scalar_one() == 1
     states = _run(db.execute(select(ApiSyncState))).scalars().all()
-    assert {s.status for s in states} == {"synced"}
+    # cards/prices/orders/sales/finance sync in one pass; stocks defers to a second tick (running).
+    assert {s.status for s in states} <= {"synced", "running"}
+    assert not any(s.status in ("paused", "failed") for s in states)
 
 
 def test_unverified_connection_not_synced(monkeypatch):
@@ -358,6 +379,14 @@ def test_auth_error_pauses_connection(monkeypatch):
         async def list_cards(self, *, token, cursor=None, limit=100):
             raise ExecutionError(ExecutionError.AUTH, "auth")
         async def list_prices(self, *, token, offset=0, limit=1000):
+            raise ExecutionError(ExecutionError.AUTH, "auth")
+        async def list_orders(self, *, token, date_from, flag=0):
+            raise ExecutionError(ExecutionError.AUTH, "auth")
+        async def list_sales(self, *, token, date_from, flag=0):
+            raise ExecutionError(ExecutionError.AUTH, "auth")
+        async def finance_sales_report_detailed(self, *, token, date_from, date_to):
+            raise ExecutionError(ExecutionError.AUTH, "auth")
+        async def create_warehouse_remains_report(self, *, token):
             raise ExecutionError(ExecutionError.AUTH, "auth")
     monkeypatch.setattr(api_sync.wb_ingest, "wb_client", _Auth())
     _run(api_sync.run_api_sync_once(db))
@@ -413,4 +442,4 @@ def test_one_connection_failure_does_not_stop_another(monkeypatch):
 def test_alembic_single_head():
     from alembic.config import Config
     from alembic.script import ScriptDirectory
-    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["wba1a2b3c4d01"]
+    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["wbo1a2b3c4d01"]
