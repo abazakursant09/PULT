@@ -7,6 +7,7 @@ import { AddCabinetDialog } from './AddCabinetDialog'
 import { AddYandexStoreDialog } from './AddYandexStoreDialog'
 import { ArchiveStoreDialog } from './ArchiveStoreDialog'
 import { CabinetGroup, marketplaceLabel } from './CabinetGroup'
+import { ConnectApiDialog } from './ConnectApiDialog'
 import { LedgerShell } from './LedgerShell'
 
 // The ledger of cabinets and stores.
@@ -44,6 +45,7 @@ export function StoresLedger() {
   const [cabinetOpen, setCabinetOpen] = useState(false)
   const [storeFor, setStoreFor] = useState<MarketplaceAccountOut | null>(null)
   const [archiveFor, setArchiveFor] = useState<MarketplaceStoreOut | null>(null)
+  const [connectFor, setConnectFor] = useState<MarketplaceAccountOut | null>(null)
   const [restoringId, setRestoringId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
@@ -202,6 +204,7 @@ export function StoresLedger() {
                   collapsed={collapsed.has(account.id)}
                   onToggle={() => toggle(account.id)}
                   onAddStore={setStoreFor}
+                  onConnectApi={setConnectFor}
                   onArchive={setArchiveFor}
                   onRestore={store => void restore(store)}
                   restoringId={restoringId}
@@ -226,7 +229,18 @@ export function StoresLedger() {
         open={cabinetOpen}
         onOpenChange={setCabinetOpen}
         onCreated={() => void load()}
+        onConnectApi={setConnectFor}
       />
+      {connectFor && (
+        <ConnectApiDialog
+          open
+          onOpenChange={o => { if (!o) setConnectFor(null) }}
+          marketplaceAccountId={connectFor.id}
+          marketplace={connectFor.marketplace}
+          accountLabel={connectFor.label ?? marketplaceLabel(connectFor.marketplace)}
+          onConnected={() => void load()}
+        />
+      )}
       {storeFor && (
         <AddYandexStoreDialog
           open

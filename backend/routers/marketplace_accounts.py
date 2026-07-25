@@ -183,9 +183,15 @@ async def list_accounts(
         return []
 
     acc_ids = [a.id for a in accounts]
+    # has_connection means the seller's API key was PROVEN, not merely saved (PULT-LAUNCH-1.4.5D).
+    # A revoked, invalid or not-yet-verified connection is not "connected": its mere existence must
+    # never light up "API подключён". So both axes are required — the lifecycle gate says the key is
+    # live, and the verification axis says the marketplace confirmed it.
     connected = set((await db.execute(
         select(MarketplaceConnection.marketplace_account_id)
-        .where(MarketplaceConnection.marketplace_account_id.in_(acc_ids))
+        .where(MarketplaceConnection.marketplace_account_id.in_(acc_ids),
+               MarketplaceConnection.status == "connected",
+               MarketplaceConnection.verification_status == "verified")
     )).scalars().all())
 
     stores_by_account: dict[str, list[MarketplaceStore]] = {}

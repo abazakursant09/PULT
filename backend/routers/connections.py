@@ -5,7 +5,8 @@ from datetime import datetime
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
@@ -19,6 +20,8 @@ from schemas.marketplace import (
     ConnectionCreate, ConnectionOut, ScopeVerificationOut, VerifyOut, VerifyRequest,
 )
 from services.marketplace import credential_vault
+from services.marketplace.errors import ExecutionError
+from services.marketplace.yandex_client import yandex_client
 from services.marketplace.verification import runner as verification_runner
 from services.marketplace.verification import service as verification_service
 from services.workspace_resolver import WorkspaceMissing, resolve_workspace_id
@@ -68,6 +71,78 @@ async def _disable_automation(db: AsyncSession, connection_id: str) -> None:
                AutomationRule.enabled.is_(True))
         .values(enabled=False)
     )
+
+
+class _ExternalIdentityConflict(Exception):
+    """The real cabinet behind a verified key is already bound to another Account."""
+
+
+async def _ozon_external_id(conn: MarketplaceConnection, credential) -> str | None:
+    """Ozon's Client-Id IS the stable cabinet id — already on the connection, no call needed."""
+    return (conn.ozon_client_id or "").strip() or None
+
+
+async def _yandex_external_id(conn: MarketplaceConnection, credential) -> str | None:
+    """The businessId behind the Yandex key, read once via the existing resolver."""
+    token = credential_vault.decrypt(credential.secret_enc)
+    try:
+        return await yandex_client.resolve_business_id(token=token)
+    except ExecutionError:
+        # Verified, but the cabinet could not be resolved (ambiguous / unreachable). Do not guess.
+        return None
+
+
+# marketplace -> how to read its stable external cabinet id. A marketplace ABSENT here (e.g.
+# Wildberries) has no such id and keeps external_account_id NULL. Kept as data so the route never
+# branches on a marketplace as a code path — the same discipline as _REQUIRED_CREDENTIAL_FIELD.
+_EXTERNAL_ID_RESOLVER = {
+    "ozon":   _ozon_external_id,
+    "yandex": _yandex_external_id,
+}
+
+# marketplaces with no stable external id, whose only cross-cabinet dedupe is the token fingerprint.
+_FINGERPRINT_MARKETPLACES = {"wildberries"}
+
+
+async def _capture_external_identity(db: AsyncSession, conn: MarketplaceConnection,
+                                     credential) -> None:
+    """Write the cabinet's stable external id onto its MarketplaceAccount, after a positive verify.
+
+    Data-driven: a marketplace that exposes a stable id has a resolver in _EXTERNAL_ID_RESOLVER; one
+    that does not (Wildberries) is simply absent and keeps external_account_id NULL — WB relies on
+    the token fingerprint instead of a made-up id.
+
+    Idempotent: an id already present is left as-is. A clash with another Account raises
+    `_ExternalIdentityConflict`, which the caller turns into a safe 409. Nothing is merged.
+    """
+    resolver = _EXTERNAL_ID_RESOLVER.get(conn.marketplace)
+    account_id = conn.marketplace_account_id
+    if resolver is None or account_id is None:
+        return
+
+    external_id = await resolver(conn, credential)
+    if not external_id:
+        return
+
+    account = (await db.execute(
+        select(MarketplaceAccount).where(MarketplaceAccount.id == account_id)
+    )).scalars().first()
+    if account is None:
+        return
+    if account.external_account_id == external_id:
+        return   # already captured — idempotent
+    if account.external_account_id and account.external_account_id != external_id:
+        # The account is already pinned to a DIFFERENT cabinet — never silently repoint it.
+        raise _ExternalIdentityConflict()
+
+    account.external_account_id = external_id
+    account.identity_status = "verified"
+    try:
+        await db.flush()
+    except IntegrityError:
+        # uq_mp_account_mp_ext: this real cabinet is already on another Account.
+        raise _ExternalIdentityConflict()
+    await db.commit()
 
 
 async def _to_out(db: AsyncSession, conn: MarketplaceConnection) -> ConnectionOut:
@@ -131,65 +206,122 @@ async def create_connection(
         log.error("workspace missing for authenticated user")   # no user id in the log
         raise HTTPException(500, "connection could not be saved")
 
-    # reuse an existing cabinet for this marketplace, or create one
-    conn = (
-        await db.execute(
-            select(MarketplaceConnection).where(
-                MarketplaceConnection.user_id == current_user.id,
-                MarketplaceConnection.marketplace == body.marketplace,
+    # PULT-LAUNCH-1.4.5D: two entry shapes.
+    #   * account-bound (marketplace_account_id given) — the seller picked a cabinet they already
+    #     created (usually CSV-only) on the Stores screen. Attach to THAT account, never mint one.
+    #   * legacy (no account_id) — the old Settings path: find-or-create by user+marketplace.
+    if body.marketplace_account_id is not None:
+        account = (
+            await db.execute(
+                select(MarketplaceAccount)
+                .where(MarketplaceAccount.id == body.marketplace_account_id,
+                       MarketplaceAccount.workspace_id == workspace_id)
             )
-        )
-    ).scalars().first()
+        ).scalars().first()
+        # A foreign cabinet and a missing one return the SAME 404 — the reply must never reveal
+        # that an id exists but belongs to someone else.
+        if account is None:
+            raise HTTPException(404, "cabinet not found")
+        # The key must match the cabinet's marketplace; a WB key on an Ozon cabinet is a mistake,
+        # not a silent re-typing of the cabinet.
+        if account.marketplace != body.marketplace:
+            raise HTTPException(422, "marketplace does not match the selected cabinet")
 
-    if conn is None:
-        conn = MarketplaceConnection(
-            id=str(uuid.uuid4()),
-            user_id=current_user.id,
-            marketplace=body.marketplace,
-            label=body.label,
-            status="connected",
-            scopes=[body.scope],
-            ozon_client_id=body.ozon_client_id,
-        )
-        db.add(conn)
+        # At most one connection per account (uq_mp_conn_account). Reuse it on reconnect, so the
+        # cabinet keeps one identity and its history survives.
+        conn = (
+            await db.execute(
+                select(MarketplaceConnection).where(
+                    MarketplaceConnection.marketplace_account_id == account.id)
+            )
+        ).scalars().first()
+        if conn is None:
+            conn = MarketplaceConnection(
+                id=str(uuid.uuid4()), user_id=current_user.id,
+                marketplace=body.marketplace, label=body.label or account.label,
+                status="connected", scopes=[body.scope], ozon_client_id=body.ozon_client_id,
+                marketplace_account_id=account.id,
+            )
+            db.add(conn)
+        else:
+            if body.scope not in (conn.scopes or []):
+                conn.scopes = [*(conn.scopes or []), body.scope]
+            if body.label:
+                conn.label = body.label
+            if body.ozon_client_id:
+                conn.ozon_client_id = body.ozon_client_id
+            conn.status = "connected"
+            conn.updated_at = datetime.utcnow()
+        # No new MarketplaceAccount is ever created on this path, and the account's Store rows are
+        # never touched — connecting an API key adds credentials, it does not reshape the cabinet.
     else:
-        if body.scope not in (conn.scopes or []):
-            conn.scopes = [*(conn.scopes or []), body.scope]
-        if body.label:
-            conn.label = body.label
-        if body.ozon_client_id:
-            conn.ozon_client_id = body.ozon_client_id
-        # Reconnecting a shop the seller had disconnected. `status` used to be written ONLY in the
-        # branch above, so a revoked row stayed revoked forever: the new key was stored and
-        # encrypted, the card kept saying "Отключён" with no buttons, and the automation gate went
-        # on refusing it. There was no way out through the UI or the API.
-        #
-        # Reusing the row rather than creating a second one is deliberate — the cabinet keeps one
-        # MarketplaceAccount across every reconnect (see below), which is what makes the seller's
-        # history survive.
-        conn.status = "connected"
-        conn.updated_at = datetime.utcnow()
+        # ── Legacy Settings path (unchanged behaviour) ──────────────────────────────────────────
+        conn = (
+            await db.execute(
+                select(MarketplaceConnection).where(
+                    MarketplaceConnection.user_id == current_user.id,
+                    MarketplaceConnection.marketplace == body.marketplace,
+                )
+            )
+        ).scalars().first()
 
-    # Identity (F1.1): the cabinet keeps one MarketplaceAccount across every reconnect
-    # and token rotation, so an account is minted only when the connection has none —
-    # either because it is new, or because it predates F1.1 and the migration could not
-    # resolve its workspace. `external_account_id` stays NULL: this route performs no
-    # discovery, and ozon_client_id is a credential component, not a verified cabinet id.
-    if conn.marketplace_account_id is None:
-        account = MarketplaceAccount(
-            id=str(uuid.uuid4()),
-            workspace_id=workspace_id,
-            marketplace=conn.marketplace,
-            external_account_id=None,
-            identity_status=_UNVERIFIED,
-            label=conn.label,
-        )
-        db.add(account)
-        conn.marketplace_account_id = account.id
+        if conn is None:
+            conn = MarketplaceConnection(
+                id=str(uuid.uuid4()),
+                user_id=current_user.id,
+                marketplace=body.marketplace,
+                label=body.label,
+                status="connected",
+                scopes=[body.scope],
+                ozon_client_id=body.ozon_client_id,
+            )
+            db.add(conn)
+        else:
+            if body.scope not in (conn.scopes or []):
+                conn.scopes = [*(conn.scopes or []), body.scope]
+            if body.label:
+                conn.label = body.label
+            if body.ozon_client_id:
+                conn.ozon_client_id = body.ozon_client_id
+            # Reconnecting a shop the seller had disconnected. `status` used to be written ONLY in
+            # the branch above, so a revoked row stayed revoked forever: the new key was stored and
+            # encrypted, the card kept saying "Отключён" with no buttons, and the automation gate
+            # went on refusing it. There was no way out through the UI or the API.
+            conn.status = "connected"
+            conn.updated_at = datetime.utcnow()
+
+        # Identity (F1.1): the cabinet keeps one MarketplaceAccount across every reconnect and token
+        # rotation, so an account is minted only when the connection has none. `external_account_id`
+        # stays NULL here: identity capture happens on verify, not on save.
+        if conn.marketplace_account_id is None:
+            account = MarketplaceAccount(
+                id=str(uuid.uuid4()),
+                workspace_id=workspace_id,
+                marketplace=conn.marketplace,
+                external_account_id=None,
+                identity_status=_UNVERIFIED,
+                label=conn.label,
+            )
+            db.add(account)
+            conn.marketplace_account_id = account.id
 
     conn.workspace_id = workspace_id
 
-    await db.flush()
+    # A marketplace with no stable external id names itself here, so the route never branches on a
+    # marketplace as a code path (it asks "does this marketplace need a fingerprint?", data, not
+    # "is this WB?"). For such a marketplace a keyed fingerprint of the token is the only way to
+    # notice the SAME key on a second cabinet. HMAC, never the token, never returned or logged.
+    if body.marketplace in _FINGERPRINT_MARKETPLACES:
+        conn.credential_fingerprint = credential_vault.fingerprint(body.token.strip())
+
+    try:
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        # Either the account already has a connection (uq_mp_conn_account) or this WB token is
+        # already used by another cabinet (uq_mp_conn_fingerprint). Both are the same safe answer:
+        # a 409 that names no other cabinet and no owner.
+        raise HTTPException(409, "this API key or cabinet is already connected")
 
     # store/replace the encrypted token for this scope
     existing = (
@@ -262,6 +394,18 @@ async def verify_connection_scope(
     log.info("verification: conn=%s mp=%s scope=%s outcome=%s",   # token never logged
              conn.id, conn.marketplace, body.scope, result.outcome.value)
 
+    # Identity is captured ONLY on a real, positive verify (PULT-LAUNCH-1.4.5D). A stored key is
+    # not a connected cabinet: the external id is written after the marketplace confirms the key,
+    # never on save. A failed verify writes nothing here.
+    if result.outcome.value == "verified" and credential is not None:
+        try:
+            await _capture_external_identity(db, conn, credential)
+        except _ExternalIdentityConflict:
+            # The real cabinet behind this key is already attached to another Account — mine or
+            # someone else's; the reply cannot tell which. Same safe 409, no owner revealed.
+            await db.rollback()
+            raise HTTPException(409, "this cabinet is already connected")
+
     return VerifyOut(
         connection_id=conn.id,
         marketplace=conn.marketplace,
@@ -292,6 +436,13 @@ async def delete_connection(
     if conn is None:
         raise HTTPException(404, "connection not found")
     conn.status = "revoked"
+    # Delete the stored secrets (PULT-LAUNCH-1.4.5D). Revoking the connection stops it being used,
+    # but the ciphertext lingering in the vault is a secret we no longer need — disconnect means the
+    # key is gone. The connection row itself stays (revoked) so a reconnect reuses the SAME cabinet;
+    # only the credentials are removed. The token fingerprint goes with them, so re-entering the key
+    # later is a fresh, unconflicted save.
+    await db.execute(delete(ApiCredential).where(ApiCredential.connection_id == conn.id))
+    conn.credential_fingerprint = None
     # Switch this connection's automation OFF in the same transaction as the disconnect. A rule
     # left `enabled` would be armed and waiting: reconnect the shop later — or replace the key —
     # and automatic publishing resumes on its own, using credentials the seller never re-approved
@@ -300,5 +451,8 @@ async def delete_connection(
     # Consent and mode are deliberately KEPT: the seller did give consent, and erasing it would
     # force them through the whole agreement again for what may be a five-minute key rotation.
     # `enabled` alone is what arms the automation, so `enabled` alone is what we drop.
+    #
+    # Account, Store, Product, ProductPlacement, imported CSV rows and review history are all left
+    # untouched — disconnect removes the key, never the data the seller already has.
     await _disable_automation(db, conn.id)
     await db.commit()

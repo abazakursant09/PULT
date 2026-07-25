@@ -1172,6 +1172,9 @@ export interface ConnectionCreateBody {
   scope: string
   label?: string | null
   ozon_client_id?: string | null   // Ozon authenticates with a PAIR; the backend rejects it missing
+  // PULT-LAUNCH-1.4.5D: bind the key to a cabinet the seller already created. The backend attaches
+  // to THAT MarketplaceAccount and never mints a second one. Omitted = legacy Settings behaviour.
+  marketplace_account_id?: string | null
 }
 
 export interface VerifyOut {

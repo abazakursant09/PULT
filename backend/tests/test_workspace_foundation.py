@@ -40,7 +40,7 @@ import routers.auth as auth
 from routers.auth import register
 from schemas.auth import UserRegister
 
-REV = "imp4a2b3c4d01"      # current alembic head; these tests upgrade to "head"
+REV = "apf1a2b3c4d01"      # current alembic head; these tests upgrade to "head"
 PRIOR = "mcs1a2b3c4d01"    # the revision before F1.0 — where `workspaces` does not exist yet
 TABLE = "workspaces"
 

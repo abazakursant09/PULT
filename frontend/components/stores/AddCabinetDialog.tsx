@@ -22,14 +22,17 @@ const MARKETPLACES: { value: string; label: string }[] = [
 const SINGLE_STORE = new Set(['wildberries', 'ozon'])
 
 export function AddCabinetDialog({
-  open, onOpenChange, onCreated,
+  open, onOpenChange, onCreated, onConnectApi,
 }: {
   open: boolean
   onOpenChange: (v: boolean) => void
   onCreated: (account: MarketplaceAccountOut) => void
+  /** Called instead of a plain close when the seller chose to connect an API key to the new cabinet. */
+  onConnectApi?: (account: MarketplaceAccountOut) => void
 }) {
   const [marketplace, setMarketplace] = useState('wildberries')
   const [label, setLabel] = useState('')
+  const [mode, setMode] = useState<'csv' | 'api'>('csv')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -42,6 +45,9 @@ export function AddCabinetDialog({
       onCreated(account)
       onOpenChange(false)
       setLabel('')
+      // The cabinet exists either way; connecting a key is a second, honest step. Choosing "API"
+      // hands the fresh account to the connect dialog — it never skips creating the cabinet.
+      if (mode === 'api') onConnectApi?.(account)
     } catch {
       setError('Не удалось создать кабинет. Повторите попытку.')
     } finally {
@@ -94,6 +100,22 @@ export function AddCabinetDialog({
             <p className="l-dim" style={{ fontSize: 13.5, marginTop: 9 }}>
               Название видите только вы. Оно подписывает загруженные файлы.
             </p>
+          </div>
+
+          <div style={{ padding: '16px 0', borderBottom: '1px solid var(--line)' }}>
+            <span className="l-caps l-muted" style={{ display: 'block', marginBottom: 9 }}>Как получать данные</span>
+            <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: '6px 0', cursor: 'pointer' }}>
+              <input type="radio" name="cab-mode" checked={mode === 'csv'} onChange={() => setMode('csv')}
+                     style={{ marginTop: 4, accentColor: 'var(--text)' }} />
+              <span><span style={{ fontSize: 15 }}>Работать через CSV</span>
+                <span className="l-dim" style={{ display: 'block', fontSize: 13.5 }}>Загружать отчёты файлом.</span></span>
+            </label>
+            <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: '6px 0', cursor: 'pointer' }}>
+              <input type="radio" name="cab-mode" checked={mode === 'api'} onChange={() => setMode('api')}
+                     style={{ marginTop: 4, accentColor: 'var(--text)' }} />
+              <span><span style={{ fontSize: 15 }}>Подключить API</span>
+                <span className="l-dim" style={{ display: 'block', fontSize: 13.5 }}>Ввести ключ после создания кабинета. CSV останется доступен.</span></span>
+            </label>
           </div>
         </div>
 

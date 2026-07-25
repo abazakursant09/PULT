@@ -52,11 +52,13 @@ describe('honest surfaces', () => {
     // Each entry earns its place by doing real, backend-enforced work:
     //   AutoReviewsPanel        — per-connection Auto Reviews consent + enable/disable
     //   ConnectionsSection      — lists connections, re-check / replace / disconnect
-    //   ConnectMarketplaceDialog — the one place a seller enters an API key
+    //   ConnectMarketplaceDialog — the Settings place a seller enters an API key
+    //   ConnectApiDialog         — the Stores place a seller binds a key to a chosen cabinet (1.4.5D)
     const ALLOW = [
       join('components', 'reviews', 'AutoReviewsPanel.tsx'),
       join('components', 'connections', 'ConnectionsSection.tsx'),
       join('components', 'connections', 'ConnectMarketplaceDialog.tsx'),
+      join('components', 'stores', 'ConnectApiDialog.tsx'),
     ]
     const callers = RENDERED.filter((f) => /api\/connections|api\.connections/.test(read(f)))
     // Any OTHER file touching api.connections is still a promise the product cannot keep — a second

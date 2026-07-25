@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional, Any
+from typing import Optional
 from pydantic import BaseModel
 
 
@@ -10,6 +10,10 @@ class ConnectionCreate(BaseModel):
     token: str                            # raw API token — encrypted server-side, never returned
     scope: str                            # feedbacks | prices | advert | content | stocks | promotions
     ozon_client_id: Optional[str] = None
+    # PULT-LAUNCH-1.4.5D: bind this connection to a cabinet the seller already created (e.g. a
+    # CSV-only one). When given, the route attaches to THAT MarketplaceAccount and never mints a
+    # new one. Omitted = the legacy Settings path, which keeps its old find-or-create behaviour.
+    marketplace_account_id: Optional[str] = None
 
 
 class ScopeVerificationOut(BaseModel):

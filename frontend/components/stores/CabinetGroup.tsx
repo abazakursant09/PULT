@@ -28,13 +28,14 @@ function storesWord(n: number): string {
 }
 
 export function CabinetGroup({
-  account, stores, collapsed, onToggle, onAddStore, onArchive, onRestore, restoringId,
+  account, stores, collapsed, onToggle, onAddStore, onConnectApi, onArchive, onRestore, restoringId,
 }: {
   account: MarketplaceAccountOut
   stores: MarketplaceStoreOut[]
   collapsed: boolean
   onToggle: () => void
   onAddStore: (account: MarketplaceAccountOut) => void
+  onConnectApi: (account: MarketplaceAccountOut) => void
   onArchive: (store: MarketplaceStoreOut) => void
   onRestore: (store: MarketplaceStoreOut) => void
   restoringId: string | null
@@ -42,6 +43,11 @@ export function CabinetGroup({
   const mp = marketplaceLabel(account.marketplace)
   const label = account.label ?? mp
   const single = SINGLE_STORE.has(account.marketplace)
+  // Offered until the key is PROVEN (has_connection means verified, 1.4.5D). A cabinet with a
+  // verified key shows "API подключён" instead and this action disappears.
+  const connectApi = !account.has_connection
+    ? <button type="button" className="l-link l-caps" onClick={() => onConnectApi(account)}>Подключить API</button>
+    : null
 
   // WB/Ozon: cabinet + its one store on a single line. The seller still sees where a file goes.
   if (single) {
@@ -59,6 +65,11 @@ export function CabinetGroup({
           onRestore={onRestore}
           restoring={restoringId === store.id}
         />
+        {connectApi && (
+          <div className="l-indent" style={{ padding: '10px 0 12px', borderBottom: '1px solid var(--line)' }}>
+            {connectApi}
+          </div>
+        )}
       </div>
     )
   }
@@ -104,10 +115,11 @@ export function CabinetGroup({
               В кабинете пока нет магазинов.
             </p>
           )}
-          <div className="l-indent" style={{ padding: '12px 0 14px', borderBottom: '1px solid var(--line)' }}>
+          <div className="l-indent" style={{ display: 'flex', gap: 22, flexWrap: 'wrap', padding: '12px 0 14px', borderBottom: '1px solid var(--line)' }}>
             <button type="button" className="l-link l-caps" onClick={() => onAddStore(account)}>
               + Добавить магазин в кабинет
             </button>
+            {connectApi}
           </div>
         </>
       )}
