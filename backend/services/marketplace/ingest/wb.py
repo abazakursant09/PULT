@@ -267,14 +267,13 @@ async def _upsert_operation(db, state, *, external_operation_id: str, operation_
 
 # ── Page drivers (one page, one transaction; cursor moves only on commit) ───────
 
-async def fetch_and_persist_page(db, state, token: str) -> dict:
+async def fetch_and_persist_page(db, state, token: str, client_id=None) -> dict:
     """Pull ONE step for state.data_type, persist it and the advanced cursor in one transaction.
 
     Returns {"done": bool, "count": int, "defer": bool}. `done` True means the type is fully synced;
     `defer` True (stocks async report not ready) means "come back later", nothing more to do now.
     Raising leaves the transaction to be rolled back, so the cursor never advances past unwritten
-    rows.
-    """
+    rows. `client_id` is accepted for a uniform provider signature (WB does not use it)."""
     if state.data_type == "card_content":
         return await _page_cards(db, state, token)
     if state.data_type == "prices":

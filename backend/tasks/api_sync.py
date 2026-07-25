@@ -27,17 +27,25 @@ from models.marketplace_connection import MarketplaceConnection
 from models.marketplace_store import MarketplaceStore
 from services.marketplace import credential_vault
 from services.marketplace.errors import ExecutionError
+from services.marketplace.ingest import ozon as ozon_ingest
 from services.marketplace.ingest import wb as wb_ingest
 
 log = logging.getLogger(__name__)
 
-# Conservative internal pacing — PULT's own settings, NOT published WB limits.
+# Provider per marketplace. Each exposes MARKETPLACE, DATA_TYPES and fetch_and_persist_page — so the
+# scheduler stays marketplace-neutral and a new marketplace is one registry entry, not a branch.
+_PROVIDERS = {wb_ingest.MARKETPLACE: wb_ingest, ozon_ingest.MARKETPLACE: ozon_ingest}
+
+# Conservative internal pacing — PULT's own settings, NOT any published marketplace limit.
 _MAX_PAGES_PER_RUN = 20                 # a bounded slice of one type per pass
 _BACKOFF_BASE_MIN = 5                   # first retry delay
 _BACKOFF_CAP_MIN = 6 * 60              # never wait longer than this
+_DEFAULT_CADENCE = 6 * 60
 _CADENCE_MIN = {                              # gap after a successful full sync, per type
     "card_content": 6 * 60, "prices": 60,
     "orders": 60, "sales": 60, "stocks": 60, "finance": 6 * 60,
+    # Ozon
+    "products": 6 * 60, "fbo_postings": 60, "fbs_postings": 60, "returns": 60,
 }
 
 
@@ -48,7 +56,7 @@ def _backoff_minutes(fail_count: int) -> int:
 async def _eligible_connections(db: AsyncSession) -> list[MarketplaceConnection]:
     return list((await db.execute(
         select(MarketplaceConnection).where(
-            MarketplaceConnection.marketplace == wb_ingest.MARKETPLACE,
+            MarketplaceConnection.marketplace.in_(list(_PROVIDERS)),
             MarketplaceConnection.status == "connected",
             MarketplaceConnection.verification_status == "verified",
             MarketplaceConnection.marketplace_account_id.isnot(None))
@@ -71,10 +79,10 @@ async def _token_for(db: AsyncSession, connection_id: str) -> str | None:
 
 
 async def _ensure_states(db: AsyncSession, conn: MarketplaceConnection,
-                         store: MarketplaceStore) -> list[ApiSyncState]:
+                         store: MarketplaceStore, provider) -> list[ApiSyncState]:
     """One ApiSyncState per supported data_type for this (connection, store). Idempotent."""
     out: list[ApiSyncState] = []
-    for data_type in wb_ingest.DATA_TYPES:
+    for data_type in provider.DATA_TYPES:
         state = (await db.execute(
             select(ApiSyncState).where(
                 ApiSyncState.marketplace_connection_id == conn.id,
@@ -96,7 +104,8 @@ def _due(state: ApiSyncState, now: datetime) -> bool:
     return state.next_run_at is None or state.next_run_at <= now
 
 
-async def _sync_state(db: AsyncSession, state: ApiSyncState, token: str, now: datetime) -> None:
+async def _sync_state(db: AsyncSession, state: ApiSyncState, provider, token: str,
+                      client_id: str | None, now: datetime) -> None:
     """Pull up to a bounded number of pages for ONE state, committing each page."""
     state._owner_user_id = state._owner_user_id if hasattr(state, "_owner_user_id") else None
     state.status = "running"
@@ -105,7 +114,7 @@ async def _sync_state(db: AsyncSession, state: ApiSyncState, token: str, now: da
 
     for _ in range(_MAX_PAGES_PER_RUN):
         try:
-            result = await wb_ingest.fetch_and_persist_page(db, state, token)
+            result = await provider.fetch_and_persist_page(db, state, token, client_id)
             # rows + advanced cursor commit together: the cursor never moves past unwritten data.
             await db.commit()
         except ExecutionError as exc:
@@ -123,7 +132,7 @@ async def _sync_state(db: AsyncSession, state: ApiSyncState, token: str, now: da
             await db.commit()
             return
         if result["done"]:
-            cadence = _CADENCE_MIN.get(state.data_type, 6 * 60)
+            cadence = _CADENCE_MIN.get(state.data_type, _DEFAULT_CADENCE)
             state.status = "synced"
             state.last_success_at = now
             state.next_run_at = now + timedelta(minutes=cadence)
@@ -159,18 +168,22 @@ async def run_api_sync_once(db: AsyncSession) -> dict:
     touched = 0
     for conn in conns:
         try:
+            provider = _PROVIDERS.get(conn.marketplace)
+            if provider is None:
+                continue
             store = await _active_store(db, conn.marketplace_account_id)
             if store is None:
                 continue
             token = await _token_for(db, conn.id)
             if not token:
                 continue
-            states = await _ensure_states(db, conn, store)
+            client_id = conn.ozon_client_id   # None for WB; the Ozon provider needs it
+            states = await _ensure_states(db, conn, store, provider)
             for state in states:
                 if not _due(state, now):
                     continue
                 state._owner_user_id = conn.user_id
-                await _sync_state(db, state, token, now)
+                await _sync_state(db, state, provider, token, client_id, now)
                 touched += 1
         except Exception:  # noqa: BLE001 — one connection's failure must not stop the others
             await db.rollback()
