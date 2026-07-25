@@ -51,7 +51,8 @@ async def derive_advertising_thresholds(
             func.coalesce(func.sum(ImportedFinanceRow.revenue), 0.0),
             func.coalesce(func.sum(ImportedFinanceRow.ad_spend), 0.0),
         )
-        .where(ImportedFinanceRow.user_id == user_id, ImportedFinanceRow.sku.isnot(None))
+        .where(ImportedFinanceRow.user_id == user_id, ImportedFinanceRow.sku.isnot(None),
+               ImportedFinanceRow.source == "csv")   # single-source (1.4.5H2)
         .group_by(ImportedFinanceRow.sku))).all()
 
     # advertising is about AD spend — only ad-spending listings anchor the baseline

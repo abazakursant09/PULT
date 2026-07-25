@@ -80,6 +80,7 @@ from services.overstock.persist import reconcile_overstock_signal
 from models.price_erosion_audit import PriceErosionAudit
 from services.price_erosion.diagnosis_source import build_price_series, classify_price_erosion
 from services.price_erosion.persist import reconcile_price_erosion_signal
+from services.source_policy.snapshot_source import resolved_snapshot
 
 from models.returns_audit import ReturnsAudit
 from services.returns.diagnosis_source import (
@@ -269,7 +270,8 @@ async def run_supply_producer(ctx: RuntimeContext) -> ProducerResult:
     for marketplace, sku in await _candidate_pairs(db, uid):
         seen += 1
         listing_id = await _resolve_listing_id(db, uid, marketplace, sku)
-        stock = await latest_stock(db, uid, marketplace, sku)
+        _src, _store = await resolved_snapshot(db, uid, marketplace, sku, "stock")
+        stock = await latest_stock(db, uid, marketplace, sku, source=_src, store_id=_store)
         distinct_days, total_units = await observed_velocity(db, uid, marketplace, sku)
         diag = classify_supply_risk(stock, distinct_days, total_units,
                                     marketplace=marketplace, sku=sku)
@@ -319,7 +321,8 @@ async def run_rating_producer(ctx: RuntimeContext) -> ProducerResult:
     for marketplace, sku in await _candidate_pairs(db, uid):
         seen += 1
         listing_id = await _resolve_listing_id(db, uid, marketplace, sku)
-        series = await build_rating_series(db, uid, marketplace, sku)
+        _src, _store = await resolved_snapshot(db, uid, marketplace, sku, "rating")
+        series = await build_rating_series(db, uid, marketplace, sku, source=_src, store_id=_store)
         diag = classify_rating_decline(series, marketplace=marketplace, sku=sku)
 
         audit = RatingAudit(
@@ -419,7 +422,8 @@ async def run_overstock_producer(ctx: RuntimeContext) -> ProducerResult:
     for marketplace, sku in await _candidate_pairs(db, uid):
         seen += 1
         listing_id = await _resolve_listing_id(db, uid, marketplace, sku)
-        stock = await overstock_latest_stock(db, uid, marketplace, sku)
+        _src, _store = await resolved_snapshot(db, uid, marketplace, sku, "stock")
+        stock = await overstock_latest_stock(db, uid, marketplace, sku, source=_src, store_id=_store)
         distinct_days, total_units = await overstock_observed_velocity(db, uid, marketplace, sku)
         diag = classify_overstock(stock, distinct_days, total_units,
                                   marketplace=marketplace, sku=sku)
@@ -470,7 +474,8 @@ async def run_price_erosion_producer(ctx: RuntimeContext) -> ProducerResult:
     for marketplace, sku in await _candidate_pairs(db, uid):
         seen += 1
         listing_id = await _resolve_listing_id(db, uid, marketplace, sku)
-        series = await build_price_series(db, uid, marketplace, sku)
+        _src, _store = await resolved_snapshot(db, uid, marketplace, sku, "price")
+        series = await build_price_series(db, uid, marketplace, sku, source=_src, store_id=_store)
         diag = classify_price_erosion(series, marketplace=marketplace, sku=sku)
 
         audit = PriceErosionAudit(

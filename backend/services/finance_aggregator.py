@@ -8,15 +8,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from typing import Optional
 
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config import settings
 from database import AsyncSessionLocal
 from models.imported_finance import ImportedFinanceRow
 from models.imported_product import ImportedProductRow
+from models.marketplace_store import MarketplaceStore
 from models.product import Product
+from services.source_policy.money_reader import api_money as _api_money
+from services.source_policy.resolver import resolve_source as _resolve_source
+from services.source_policy.store_totals import _canon as _canon_mp
+from services.source_policy.store_totals import resolved_finance_period
 
 
 # ── Data classes ───────────────────────────────────────────────────────────────
@@ -29,6 +36,13 @@ class FinancePeriod:
     ad_spend:   float = 0.0
     commission: float = 0.0
     logistics:  float = 0.0
+    # Source-policy meta (PULT-LAUNCH-1.4.5H2). Additive/optional: with the flag off every store
+    # resolves to CSV, so these carry the default 'csv'/'complete' values and existing callers see
+    # exactly the numbers they saw before.
+    source:         str  = "csv"
+    completeness:   str  = "complete"        # complete | incomplete
+    missing_fields: list = field(default_factory=list)
+    conflict:       bool = False
 
     @property
     def has_data(self) -> bool:
@@ -113,28 +127,20 @@ async def _agg_period(
     date_to:   str,
     db:        AsyncSession,
 ) -> FinancePeriod:
-    """Single aggregation query for a date range (inclusive)."""
-    row = (await db.execute(
-        select(
-            func.coalesce(func.sum(ImportedFinanceRow.revenue),    0.0).label("revenue"),
-            func.coalesce(func.sum(ImportedFinanceRow.net_profit), 0.0).label("profit"),
-            func.coalesce(func.sum(ImportedFinanceRow.quantity),   0  ).label("orders"),
-            func.coalesce(func.sum(ImportedFinanceRow.ad_spend),   0.0).label("ad_spend"),
-            func.coalesce(func.sum(ImportedFinanceRow.commission), 0.0).label("commission"),
-            func.coalesce(func.sum(ImportedFinanceRow.logistics),  0.0).label("logistics"),
-        ).where(
-            ImportedFinanceRow.user_id == user_id,
-            ImportedFinanceRow.date    >= date_from,
-            ImportedFinanceRow.date    <= date_to,
-        )
-    )).one()
+    """One period total, built store-by-store through the source resolver then summed
+    (PULT-LAUNCH-1.4.5H2). With the flag off this is exactly the whole-user CSV sum."""
+    t = await resolved_finance_period(db, user_id, date_from, date_to)
     return FinancePeriod(
-        revenue=    float(row.revenue),
-        profit=     float(row.profit),
-        orders=     int(row.orders),
-        ad_spend=   float(row.ad_spend),
-        commission= float(row.commission),
-        logistics=  float(row.logistics),
+        revenue=    t.revenue,
+        profit=     (t.net_profit if t.net_profit is not None else 0.0),
+        orders=     t.orders,
+        ad_spend=   t.ad_spend,
+        commission= t.commission,
+        logistics=  t.logistics,
+        source=     t.revenue_source or "csv",
+        completeness=t.completeness,
+        missing_fields=list(t.missing_fields),
+        conflict=   t.conflict,
     )
 
 
@@ -157,6 +163,7 @@ async def _top_products(
         )
         .where(
             ImportedFinanceRow.user_id == user_id,
+            ImportedFinanceRow.source  == "csv",   # single-source: never blend API money in (1.4.5H2)
             ImportedFinanceRow.date    >= date_from,
             ImportedFinanceRow.date    <= date_to,
         )
@@ -199,6 +206,7 @@ async def _loss_products(
         )
         .where(
             ImportedFinanceRow.user_id == user_id,
+            ImportedFinanceRow.source  == "csv",   # single-source (1.4.5H2)
             ImportedFinanceRow.date    >= date_from,
             ImportedFinanceRow.date    <= date_to,
         )
@@ -238,6 +246,7 @@ async def _marketplace_breakdown(
         )
         .where(
             ImportedFinanceRow.user_id == user_id,
+            ImportedFinanceRow.source  == "csv",   # single-source (1.4.5H2)
             ImportedFinanceRow.date    >= date_from,
             ImportedFinanceRow.date    <= date_to,
         )
@@ -433,7 +442,8 @@ async def store_financial_totals(store_id: str, db: AsyncSession) -> dict:
     unchanged: a cabinet-wide figure sums stores explicitly, it does not silently blend them.
     """
     # conflict rows await the seller and count in nothing until resolved; unassigned money still
-    # belongs to the store total (it is simply not attributed to a product).
+    # belongs to the store total (it is simply not attributed to a product). CSV candidate is
+    # source='csv' only — never blended with API (1.4.5H2).
     row = (await db.execute(
         select(
             func.coalesce(func.sum(ImportedFinanceRow.revenue), 0.0).label("revenue"),
@@ -441,13 +451,34 @@ async def store_financial_totals(store_id: str, db: AsyncSession) -> dict:
             func.coalesce(func.sum(ImportedFinanceRow.revenue).filter(
                 ImportedFinanceRow.product_id.is_(None)), 0.0).label("unassigned_revenue"),
         ).where(ImportedFinanceRow.marketplace_store_id == store_id,
+                ImportedFinanceRow.source == "csv",
                 ImportedFinanceRow.link_status != "conflict")
     )).one()
-    return {
-        "revenue": round(float(row.revenue), 2),
-        "net_profit": round(float(row.net), 2),
-        "unassigned_revenue": round(float(row.unassigned_revenue), 2),
-    }
+    csv_rev, csv_net = float(row.revenue), float(row.net)
+    out = {"revenue": round(csv_rev, 2), "net_profit": round(csv_net, 2),
+           "unassigned_revenue": round(float(row.unassigned_revenue), 2),
+           "source": "csv", "completeness": "complete", "missing_fields": [], "conflict": False}
+
+    # Resolve API vs CSV for this store's revenue (flag off ⇒ CSV, byte-identical to before).
+    if settings.api_data_sync_enabled:
+        store = await db.get(MarketplaceStore, store_id)
+        marketplace = _canon_mp(store.marketplace) if store else None
+        if marketplace:
+            api_rev = await _api_money(db, store_id=store_id, marketplace=marketplace,
+                                       metric_type="revenue", period=None)
+            res = await _resolve_source(db, store_id=store_id, marketplace=marketplace,
+                                        metric_type="revenue", period=None,
+                                        api_value=(Decimal(str(api_rev)) if api_rev is not None else None),
+                                        csv_value=Decimal(str(csv_rev)))
+            out["source"] = res.source or "csv"
+            out["conflict"] = res.conflict
+            if res.source == "api":
+                out["revenue"] = round(float(res.value), 2) if res.value is not None else 0.0
+                # net profit follows the revenue source; API has no cost of goods → suppress exact.
+                out["net_profit"] = None
+                out["completeness"] = "incomplete"
+                out["missing_fields"] = ["cogs"]
+    return out
 
 
 async def summary_by_product(user_id: str, db: AsyncSession) -> tuple[list[dict], dict]:
@@ -467,7 +498,8 @@ async def summary_by_product(user_id: str, db: AsyncSession) -> tuple[list[dict]
             func.count(func.distinct(_PERIOD)).label("periods"),
         )
         .join(Product, Product.id == ImportedFinanceRow.product_id)
-        .where(ImportedFinanceRow.user_id == user_id)
+        .where(ImportedFinanceRow.user_id == user_id,
+               ImportedFinanceRow.source == "csv")   # single-source (1.4.5H2)
         .group_by(Product.id, Product.name)
     )).all()
 
@@ -491,6 +523,7 @@ async def summary_by_product(user_id: str, db: AsyncSession) -> tuple[list[dict]
             func.count(func.distinct(_PERIOD)).label("periods"),
         ).where(
             ImportedFinanceRow.user_id == user_id,
+            ImportedFinanceRow.source == "csv",       # single-source (1.4.5H2)
             ImportedFinanceRow.product_id.is_(None),
         )
     )).one()
@@ -511,7 +544,8 @@ async def summary_by_product(user_id: str, db: AsyncSession) -> tuple[list[dict]
         select(
             func.coalesce(func.sum(ImportedFinanceRow.revenue),    0.0),
             func.coalesce(func.sum(ImportedFinanceRow.net_profit), 0.0),
-        ).where(ImportedFinanceRow.user_id == user_id)
+        ).where(ImportedFinanceRow.user_id == user_id,
+                ImportedFinanceRow.source == "csv")   # single-source (1.4.5H2)
     )).one()
     totals = {"revenue": round(float(tot[0]), 2), "net_profit": round(float(tot[1]), 2)}
     return items, totals
@@ -534,6 +568,7 @@ async def product_monthly_rollup(product_id: str, user_id: str, db: AsyncSession
         .where(
             ImportedFinanceRow.product_id == product_id,
             ImportedFinanceRow.user_id == user_id,
+            ImportedFinanceRow.source == "csv",       # single-source (1.4.5H2)
             ImportedFinanceRow.date.isnot(None),
         )
         .group_by(_PERIOD)
