@@ -78,6 +78,11 @@ class Settings(BaseSettings):
     ozon_performance_base: str = "https://api-performance.ozon.ru"
     yandex_partner_base: str = "https://api.partner.market.yandex.ru"
     marketplace_http_timeout: float = 15.0
+    # PULT-LAUNCH-1.4.5E: master switch for API data ingestion (WB provider + scheduler). OFF by
+    # default and NOT seller-controlled. While false, run_api_sync makes ZERO marketplace calls, so
+    # a verified connection stores no data yet — the honest state until the source policy (1.4.5H)
+    # decides how API and CSV data combine. Nothing tells a seller "данные синхронизированы" here.
+    api_data_sync_enabled: bool = False
     # Master switch for the L4 automation scheduler. Off by default — L4 actions
     # only fire when this is on AND a per-user AutomationRule is enabled.
     automation_enabled: bool = False

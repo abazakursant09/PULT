@@ -261,6 +261,9 @@ async def _avg_rating(user_id: str, db: AsyncSession) -> Optional[float]:
         .where(
             ImportedProductRow.user_id == user_id,
             ImportedProductRow.rating.isnot(None),
+            # CSV only, until the source policy (1.4.5H) decides how API and CSV combine. API rows
+            # live in the same table but must not silently enter a user-facing total.
+            ImportedProductRow.source == "csv",
         )
     )
     val = q.scalar()
@@ -270,7 +273,11 @@ async def _avg_rating(user_id: str, db: AsyncSession) -> Optional[float]:
 async def _active_products_count(user_id: str, db: AsyncSession) -> int:
     q = await db.execute(
         select(func.count(func.distinct(ImportedProductRow.sku)))
-        .where(ImportedProductRow.user_id == user_id)
+        .where(
+            ImportedProductRow.user_id == user_id,
+            # CSV only until 1.4.5H (see _avg_rating).
+            ImportedProductRow.source == "csv",
+        )
     )
     return q.scalar() or 0
 

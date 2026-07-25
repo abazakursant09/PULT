@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Text, DateTime, Integer, Index, ForeignKey
+from sqlalchemy import Column, String, Text, DateTime, Integer, Index, ForeignKey, text
 from database import Base
 
 
@@ -41,6 +41,8 @@ class ImportedCardContentRow(Base):
     marketplace_account_id = Column(String(36), ForeignKey("marketplace_accounts.id", ondelete="CASCADE"), nullable=True)
     source              = Column(String(10), nullable=False, default="csv", server_default="csv")  # csv | api
     fetched_at          = Column(DateTime, nullable=True)
+    # Stable external id of an API row (PULT-LAUNCH-1.4.5E): the WB nmID. NULL for CSV rows.
+    external_row_id     = Column(String(64), nullable=True)
     # PULT-LAUNCH-1.4.4: linked | unassigned | conflict (see ImportedProductRow).
     link_status         = Column(String(10), nullable=False, default="unassigned", server_default="unassigned")
     created_at          = Column(DateTime, default=datetime.utcnow)
@@ -48,4 +50,9 @@ class ImportedCardContentRow(Base):
     __table_args__ = (
         Index("ix_imp_card_user_mp", "user_id", "marketplace"),
         Index("ix_imp_card_product_id", "product_id"),
+        # Card content is cabinet-level (no store_id), so one API card per (cabinet, external id).
+        Index("uq_imp_card_api_row", "marketplace_account_id", "source", "external_row_id",
+              unique=True,
+              sqlite_where=text("external_row_id IS NOT NULL"),
+              postgresql_where=text("external_row_id IS NOT NULL")),
     )

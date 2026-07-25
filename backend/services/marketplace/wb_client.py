@@ -166,6 +166,45 @@ class WBClient:
             "POST", "/content/v2/cards/update", token=token, json=[card]
         )
 
+    async def list_cards(self, *, token: str, cursor: dict | None = None,
+                         limit: int = 100) -> dict:
+        """Read a page of the seller's product cards (PULT-LAUNCH-1.4.5E ingest).
+
+            POST /content/v2/get/cards/list   (Content category token)
+
+        Cursor pagination: the first request sends only {limit}; each next request copies
+        `updatedAt` + `nmID` from the previous response's `cursor` block. A page shorter than the
+        limit is the last one. Returns the raw {cards, cursor} object for the provider to normalize
+        and to persist the next cursor.
+        """
+        cur: dict = {"limit": int(limit)}
+        if cursor:
+            if cursor.get("updatedAt") is not None:
+                cur["updatedAt"] = cursor["updatedAt"]
+            if cursor.get("nmID") is not None:
+                cur["nmID"] = cursor["nmID"]
+        body = {"settings": {"cursor": cur, "filter": {"withPhoto": -1}}}
+        data = await self._content().request(
+            "POST", "/content/v2/get/cards/list", token=token, json=body)
+        if not isinstance(data, dict):
+            return {"cards": [], "cursor": {}}
+        return data
+
+    async def list_prices(self, *, token: str, offset: int = 0, limit: int = 1000) -> list[dict]:
+        """Read a page of the seller's prices (PULT-LAUNCH-1.4.5E ingest).
+
+            GET /api/v2/list/goods/filter?limit=&offset=   (Prices & Discounts category token)
+
+        Offset pagination: repeat with offset += limit until an empty list. Each item carries the
+        nmID and its price/discount. Returns the list of goods for this page.
+        """
+        data = await self._prices.request(
+            "GET", "/api/v2/list/goods/filter", token=token,
+            params={"limit": int(limit), "offset": int(offset)})
+        if isinstance(data, dict):
+            return ((data.get("data") or {}).get("listGoods")) or []
+        return data if isinstance(data, list) else []
+
     def _content(self) -> "BaseMarketplaceClient":
         if not hasattr(self, "_content_client"):
             self._content_client = BaseMarketplaceClient(settings.wb_content_base)

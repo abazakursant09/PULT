@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, Float, Integer, Index, ForeignKey
+from sqlalchemy import Column, String, DateTime, Float, Integer, Index, ForeignKey, text
 from database import Base
 
 
@@ -28,6 +28,10 @@ class ImportedProductRow(Base):
     marketplace_store_id   = Column(String(36), ForeignKey("marketplace_stores.id", ondelete="SET NULL"), nullable=True)
     source        = Column(String(10), nullable=False, default="csv", server_default="csv")  # csv | api
     fetched_at    = Column(DateTime, nullable=True)
+    # Stable external id of an API row, for idempotency (PULT-LAUNCH-1.4.5E). For Wildberries this
+    # is the nmID — a stable business id, never a page number, array index, uuid, title or
+    # fetched_at. NULL for CSV rows, so the partial unique below never constrains them.
+    external_row_id = Column(String(64), nullable=True)
     # PULT-LAUNCH-1.4.4: linked (product_id set) | unassigned (no product) | conflict (>1 candidate,
     # never auto-picked; awaits the seller). conflict/unassigned keep product_id NULL.
     link_status   = Column(String(10), nullable=False, default="unassigned", server_default="unassigned")
@@ -36,4 +40,11 @@ class ImportedProductRow(Base):
     __table_args__ = (
         Index("ix_imp_product_user_mp", "user_id", "marketplace"),
         Index("ix_imp_product_product_id", "product_id"),
+        # One API snapshot per (cabinet, store, external id): a repeated page or a repeated full
+        # sync updates the row in place instead of inserting a second. Partial on the non-null
+        # external_row_id, so CSV rows (external_row_id NULL) are never constrained.
+        Index("uq_imp_product_api_row", "marketplace_account_id", "marketplace_store_id",
+              "source", "external_row_id", unique=True,
+              sqlite_where=text("external_row_id IS NOT NULL"),
+              postgresql_where=text("external_row_id IS NOT NULL")),
     )
