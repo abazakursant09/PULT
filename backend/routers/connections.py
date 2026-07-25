@@ -15,8 +15,10 @@ from models.automation_rule import AutomationRule
 from models.user import User
 from models.marketplace_account import MarketplaceAccount
 from models.marketplace_connection import MarketplaceConnection
+from models.marketplace_store import MarketplaceStore
 from models.api_credential import ApiCredential
 from schemas.marketplace import (
+    CampaignLinkOut, CampaignLinkRequest, CampaignOut,
     ConnectionCreate, ConnectionOut, ScopeVerificationOut, VerifyOut, VerifyRequest,
 )
 from services.marketplace import credential_vault
@@ -102,6 +104,11 @@ _EXTERNAL_ID_RESOLVER = {
 
 # marketplaces with no stable external id, whose only cross-cabinet dedupe is the token fingerprint.
 _FINGERPRINT_MARKETPLACES = {"wildberries"}
+
+# marketplaces whose cabinet holds MANY campaign stores that the seller maps explicitly (Yandex).
+# Kept as data so the router never branches on a marketplace as a code path — the same discipline as
+# _EXTERNAL_ID_RESOLVER / _FINGERPRINT_MARKETPLACES, and it keeps the AST neutrality guard happy.
+_CAMPAIGN_STORE_MARKETPLACES = {"yandex"}
 
 
 async def _capture_external_identity(db: AsyncSession, conn: MarketplaceConnection,
@@ -456,3 +463,167 @@ async def delete_connection(
     # untouched — disconnect removes the key, never the data the seller already has.
     await _disable_automation(db, conn.id)
     await db.commit()
+
+
+# ── Yandex campaign mapping (PULT-LAUNCH-1.4.5G) ─────────────────────────────────
+# A Yandex cabinet (businessId) holds MANY campaign stores (campaignId). Sync must land each store's
+# data in the RIGHT MarketplaceStore, so the seller maps campaignId → Store explicitly. The store is
+# never chosen by name and never created silently. Everything here is read/attach — no marketplace
+# is called except the read that lists the campaigns the key can actually reach.
+
+async def _owned_yandex_connection(
+    db: AsyncSession, user_id: str, connection_id: str,
+) -> tuple[MarketplaceConnection, MarketplaceAccount]:
+    """The caller's own, verified Yandex connection and its cabinet — or the right refusal.
+
+    A foreign connection and a missing one return the SAME 404, so the reply never reveals that an
+    id exists but belongs to someone else.
+    """
+    conn = (await db.execute(
+        select(MarketplaceConnection).where(
+            MarketplaceConnection.id == connection_id,
+            MarketplaceConnection.user_id == user_id))).scalars().first()
+    if conn is None:
+        raise HTTPException(404, "connection not found")
+    if conn.marketplace not in _CAMPAIGN_STORE_MARKETPLACES:
+        raise HTTPException(422, "campaign mapping is only for campaign-store marketplaces")
+    if conn.verification_status != "verified":
+        raise HTTPException(409, "connection is not verified")
+    account = (await db.execute(
+        select(MarketplaceAccount).where(
+            MarketplaceAccount.id == conn.marketplace_account_id))).scalars().first()
+    if account is None or not (account.external_account_id or "").strip():
+        # Verified but the cabinet's businessId was never resolved — nothing to map against yet.
+        raise HTTPException(409, "cabinet identity not resolved")
+    return conn, account
+
+
+async def _yandex_token(db: AsyncSession, connection_id: str) -> str:
+    cred = (await db.execute(
+        select(ApiCredential).where(ApiCredential.connection_id == connection_id))).scalars().first()
+    if cred is None:
+        raise HTTPException(409, "connection has no stored credentials")
+    return credential_vault.decrypt(cred.secret_enc)
+
+
+async def _stores_by_campaign(db: AsyncSession, account_id: str) -> dict[str, MarketplaceStore]:
+    stores = (await db.execute(
+        select(MarketplaceStore).where(
+            MarketplaceStore.marketplace_account_id == account_id))).scalars().all()
+    return {s.external_store_id: s for s in stores if s.external_store_id}
+
+
+@router.get("/connections/{connection_id}/campaigns", response_model=List[CampaignOut])
+async def list_connection_campaigns(
+    connection_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The campaigns this Yandex key can reach, each with the store it is already linked to (if any).
+
+    Only campaigns whose `business.id` matches THIS cabinet's businessId are returned — a key that
+    (wrongly) spanned two cabinets could not be used to map a foreign campaign in here.
+    """
+    conn, account = await _owned_yandex_connection(db, current_user.id, connection_id)
+    token = await _yandex_token(db, conn.id)
+    try:
+        campaigns = await yandex_client.list_campaigns(token=token)
+    except ExecutionError:
+        # A read failure is not a mapping error the seller can fix by retyping — surface it plainly.
+        raise HTTPException(502, "could not read campaigns from Yandex")
+
+    linked = await _stores_by_campaign(db, account.id)
+    out: list[CampaignOut] = []
+    for c in campaigns:
+        if c.get("business_id") and str(c["business_id"]) != str(account.external_account_id):
+            continue   # not this cabinet's campaign — never expose or allow mapping it
+        cid = str(c["campaign_id"])
+        store = linked.get(cid)
+        out.append(CampaignOut(
+            campaign_id=cid, business_id=c.get("business_id"), label=c.get("label"),
+            placement_type=c.get("placement_type"),
+            linked_store_id=(store.id if store else None),
+            link_state=("linked" if store else "unlinked")))
+    return out
+
+
+@router.post("/connections/{connection_id}/campaigns/link", response_model=CampaignLinkOut)
+async def link_connection_campaign(
+    connection_id: str,
+    body: CampaignLinkRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Bind one campaignId to a store of this cabinet — an existing store, or a new one created now.
+
+    Invariants (DB-backed where possible):
+      * the campaign really belongs to this verified cabinet (checked against the live list) — else 404;
+      * exactly one of store_id / new_store_label — else 422;
+      * an existing store must belong to THIS cabinet — else the same 404;
+      * one campaignId ↔ one store: a store already bound to a DIFFERENT campaign, or a campaign
+        already bound to a DIFFERENT store, is a 409;
+      * the store's marketplace is Yandex by construction (composite FK) — a mismatch is 422;
+      * a store is never created unless new_store_label was explicitly given.
+    The name is never used to pick a store; only the ids the caller passed are.
+    """
+    if bool(body.store_id) == bool(body.new_store_label):
+        raise HTTPException(422, "provide exactly one of store_id or new_store_label")
+
+    conn, account = await _owned_yandex_connection(db, current_user.id, connection_id)
+    campaign_id = (body.campaign_id or "").strip()
+    if not campaign_id:
+        raise HTTPException(422, "campaign_id is required")
+
+    # The campaign must be one this key actually reaches, in THIS cabinet — never map a made-up id.
+    token = await _yandex_token(db, conn.id)
+    try:
+        campaigns = await yandex_client.list_campaigns(token=token)
+    except ExecutionError:
+        raise HTTPException(502, "could not read campaigns from Yandex")
+    match = next((c for c in campaigns if str(c.get("campaign_id")) == campaign_id), None)
+    if match is None:
+        raise HTTPException(404, "campaign not found for this connection")
+    if match.get("business_id") and str(match["business_id"]) != str(account.external_account_id):
+        raise HTTPException(422, "campaign belongs to a different cabinet")
+
+    # A campaign already bound to a store: idempotent if it's the same target, a 409 otherwise.
+    existing_for_campaign = (await db.execute(
+        select(MarketplaceStore).where(
+            MarketplaceStore.marketplace_account_id == account.id,
+            MarketplaceStore.external_store_id == campaign_id))).scalars().first()
+
+    created_store = False
+    if body.store_id:
+        store = (await db.execute(
+            select(MarketplaceStore).where(
+                MarketplaceStore.id == body.store_id,
+                MarketplaceStore.marketplace_account_id == account.id))).scalars().first()
+        if store is None:
+            raise HTTPException(404, "store not found")
+        if store.external_store_id and store.external_store_id != campaign_id:
+            raise HTTPException(409, "store is already linked to another campaign")
+        if existing_for_campaign is not None and existing_for_campaign.id != store.id:
+            raise HTTPException(409, "campaign is already linked to another store")
+        store.external_store_id = campaign_id
+        store.updated_at = datetime.utcnow()
+    else:
+        if existing_for_campaign is not None:
+            raise HTTPException(409, "campaign is already linked to another store")
+        store = MarketplaceStore(
+            id=str(uuid.uuid4()), marketplace_account_id=account.id, marketplace=account.marketplace,
+            store_key=str(uuid.uuid4()), external_store_id=campaign_id,
+            label=(body.new_store_label or match.get("label") or campaign_id),
+            source="api", status="active")
+        db.add(store)
+        created_store = True
+
+    try:
+        await db.flush()
+    except IntegrityError:
+        # uq_store_account_external: this campaign is already bound elsewhere in the cabinet.
+        await db.rollback()
+        raise HTTPException(409, "campaign is already linked to another store")
+    store_id = store.id
+    await db.commit()
+    return CampaignLinkOut(campaign_id=campaign_id, linked_store_id=store_id,
+                           link_state="linked", created_store=created_store)

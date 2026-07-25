@@ -122,6 +122,95 @@ class YandexClient:
             json={"feedbackId": _as_int(feedback_id), "comment": {"text": text}},
         )
 
+    # ── Campaign discovery (PULT-LAUNCH-1.4.5G) ───────────────────────────────
+    async def list_campaigns(self, *, token: str) -> list[dict]:
+        """Every campaign (store) the Api-Key can reach, from GET /v2/campaigns.
+
+        A campaign is a Yandex STORE inside a business CABINET; the two ids are distinct axes
+        (`business.id` = cabinet, `id` = store) and must never be conflated. Returns a SAFE
+        projection only — ids and a display label — never the raw payload. The name is a label
+        for a human to recognise, never used to auto-link anything.
+        """
+        data = await self._get("/v2/campaigns", token=token)
+        campaigns = (data or {}).get("campaigns") or []
+        out: list[dict] = []
+        for c in campaigns:
+            if not isinstance(c, dict):
+                continue
+            business = c.get("business") if isinstance(c.get("business"), dict) else {}
+            cid = c.get("id")
+            if cid is None:
+                continue
+            out.append({
+                "campaign_id": str(cid),
+                "business_id": (str(business["id"]) if business.get("id") is not None else None),
+                "label": _s(c.get("clientId")) or _s((c.get("domain"))) or _s(business.get("name")),
+                "placement_type": _s(c.get("placementType")),
+            })
+        return out
+
+    # ── Ingest reads (PULT-LAUNCH-1.4.5G) ─────────────────────────────────────
+    # Products/cards live at BUSINESS level (offer-mappings); prices/stocks/orders/returns live at
+    # CAMPAIGN level. That split is real in the API and preserved here — the provider passes the
+    # right id to the right read, never a conflated one.
+    async def offer_mappings(self, *, token: str, business_id: str,
+                             page_token: str | None = None, limit: int = 200) -> dict:
+        """POST /v2/businesses/{businessId}/offer-mappings → cards+identity for the whole business.
+        result.offerMappings[].offer (offerId, name, category, vendor, ...) + .mapping (marketSku)."""
+        params: dict = {"limit": int(limit)}
+        if page_token:
+            params["page_token"] = page_token
+        return await self._post(f"/v2/businesses/{business_id}/offer-mappings",
+                                token=token, json={}, params=params)
+
+    async def campaign_prices(self, *, token: str, campaign_id: str,
+                              page_token: str | None = None, limit: int = 500) -> dict:
+        """GET /v2/campaigns/{campaignId}/offer-prices → result.offers[] {id, price:{value,
+        currencyId, discountBase}, marketSku, updatedAt}, paging.nextPageToken. Store-level."""
+        params: dict = {"limit": int(limit)}
+        if page_token:
+            params["pageToken"] = page_token
+        return await self._get(f"/v2/campaigns/{campaign_id}/offer-prices",
+                               token=token, params=params)
+
+    async def campaign_stocks(self, *, token: str, campaign_id: str,
+                              page_token: str | None = None, limit: int = 200) -> dict:
+        """POST /v2/campaigns/{campaignId}/offers/stocks → result.warehouses[] {warehouseId,
+        offers[] {offerId, stocks[] {type, count}}}, paging.nextPageToken. Store-level."""
+        params: dict = {"limit": int(limit)}
+        if page_token:
+            params["pageToken"] = page_token
+        return await self._post(f"/v2/campaigns/{campaign_id}/offers/stocks",
+                                token=token, json={}, params=params)
+
+    async def campaign_orders(self, *, token: str, campaign_id: str, from_date: str, to_date: str,
+                              page_token: str | None = None, limit: int = 50) -> dict:
+        """GET /v2/campaigns/{campaignId}/orders → orders[] {id, status, substatus, creationDate,
+        items[] {offerId, count}, itemsTotal}, paging.nextPageToken. Store-level. Dates DD-MM-YYYY."""
+        params: dict = {"fromDate": from_date, "toDate": to_date, "limit": int(limit)}
+        if page_token:
+            params["pageToken"] = page_token
+        return await self._get(f"/v2/campaigns/{campaign_id}/orders",
+                               token=token, params=params)
+
+    async def campaign_returns(self, *, token: str, campaign_id: str,
+                               page_token: str | None = None, limit: int = 50) -> dict:
+        """GET /v2/campaigns/{campaignId}/returns?type=RETURN → result.returns[] {id, orderId,
+        creationDate, items[]}, paging.nextPageToken. Store-level. type=RETURN excludes UNREDEEMED
+        (a non-purchase is not a return)."""
+        params: dict = {"type": "RETURN", "limit": int(limit)}
+        if page_token:
+            params["pageToken"] = page_token
+        return await self._get(f"/v2/campaigns/{campaign_id}/returns",
+                               token=token, params=params)
+
+
+def _s(value) -> str | None:
+    if value is None:
+        return None
+    s = str(value).strip()
+    return s or None
+
 
 def _as_int(value) -> int:
     """Yandex feedback ids are integers; PULT stores external ids as strings."""

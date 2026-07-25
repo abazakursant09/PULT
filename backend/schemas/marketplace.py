@@ -71,6 +71,36 @@ class ConnectionOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ── Yandex campaign mapping (PULT-LAUNCH-1.4.5G) ─────────────────────────────────
+class CampaignOut(BaseModel):
+    """A Yandex campaign (store) the connection's key can reach. SAFE projection only — ids and a
+    display label, never the raw payload. `linked_store_id` is the MarketplaceStore already bound to
+    this campaignId (via Store.external_store_id), or None; the name is NEVER used to auto-link."""
+    campaign_id: str
+    business_id: Optional[str] = None
+    label: Optional[str] = None
+    placement_type: Optional[str] = None
+    linked_store_id: Optional[str] = None
+    link_state: str                       # linked | unlinked
+
+
+class CampaignLinkRequest(BaseModel):
+    """Bind one campaignId to a store of this connection's cabinet. Exactly one of:
+      * store_id  — link the campaign to an EXISTING store of the cabinet, or
+      * new_store_label — CREATE a new store and link it.
+    A store is never created silently; the caller states which shape it wants."""
+    campaign_id: str
+    store_id: Optional[str] = None
+    new_store_label: Optional[str] = None
+
+
+class CampaignLinkOut(BaseModel):
+    campaign_id: str
+    linked_store_id: str
+    link_state: str = "linked"
+    created_store: bool = False
+
+
 # ── Execution ──────────────────────────────────────────────────────────────────
 class ExecuteRequest(BaseModel):
     action_type: str
