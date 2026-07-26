@@ -17,7 +17,6 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from database import Base
-import models  # registers tables
 from models.decision import Decision
 from models.engine_signal_decision_link import EngineSignalDecisionLink
 from models.product_listing import ProductListing
@@ -53,22 +52,31 @@ async def _engine():
 
 
 async def _seed(db, uid, *, action_key="stop_auto_promotion", mp="wildberries",
-                sku="SKU1", with_listing=True, ikey=IKEY):
+                sku="SKU1", with_listing=True, ikey=IKEY, link_action="stop_auto_promotion",
+                contour="advertising", signal_key="adv_ad_on_low_stock",
+                problem_type="ad_on_low_stock"):
     did = str(uuid.uuid4())
     db.add(Decision(id=did, user_id=uid, problem="adv", action_key=action_key,
                     insight_key=ikey, status="open"))
-    db.add(EngineSignalDecisionLink(user_id=uid, contour="advertising",
-           signal_table="advertising_signal", signal_id="sig1", insight_key=ikey,
-           action_key="stop_auto_promotion", decision_id=did, link_status="promoted",
+    db.add(EngineSignalDecisionLink(user_id=uid, contour=contour,
+           signal_table=f"{contour}_signal", signal_id="sig1", insight_key=ikey,
+           action_key=link_action, decision_id=did, link_status="promoted",
            marketplace=mp, sku=sku))
     db.add(AdvertisingSignal(audit_id=str(uuid.uuid4()), user_id=uid,
-           signal_key="adv_ad_on_low_stock", problem_type="ad_on_low_stock",
+           signal_key=signal_key, problem_type=problem_type,
            insight_key=ikey, marketplace=mp, sku=sku, status="promoted_to_decision"))
     if with_listing:
         db.add(ProductListing(physical_product_id="ph1", user_id=uid, marketplace="wb",
                               external_id=sku))
     await db.commit()
     return did
+
+
+# 2.1A: stop_auto_promotion is contained (non-executable). The apply-hand-off happy paths ride a
+# still-executable lever — reduce_discount (WB), offer_id-only payload, via pricing_negative_margin.
+_LIVE = dict(action_key="reduce_discount", link_action="reduce_discount",
+             ikey="pricing_negative_margin:wildberries:SKU1", contour="pricing",
+             signal_key="pricing_negative_margin", problem_type="negative_margin")
 
 
 async def _count(db, model):
@@ -80,11 +88,11 @@ async def _count(db, model):
 def test_dry_run_reaches_apply_path():
     async def go():
         db = await _engine(); uid = str(uuid.uuid4())
-        did = await _seed(db, uid)
+        did = await _seed(db, uid, **_LIVE)
         res = await execute_bound_decision(db, user_id=uid, decision_id=did,
                                            marketplace="wildberries", sku="SKU1", dry_run=True)
         assert isinstance(res, BoundExecutionResult)
-        assert res.payload == {"offer_id": "SKU1"} and res.action_key == "stop_auto_promotion"
+        assert res.payload == {"offer_id": "SKU1", "discount": 0} and res.action_key == "reduce_discount"
         # reached the executor (not a bridge-level reject)
         assert res.status != NOT_EXECUTED and res.reason not in _BRIDGE_REJECTS
         assert res.status in ("dry_run_ok", "rejected", "failed", "success")
@@ -96,7 +104,7 @@ def test_dry_run_reaches_apply_path():
 def test_payload_not_derivable_no_executor():
     async def go():
         db = await _engine(); uid = str(uuid.uuid4())
-        did = await _seed(db, uid, with_listing=False)   # no listing → offer_id not derivable
+        did = await _seed(db, uid, with_listing=False, **_LIVE)   # no listing → offer_id not derivable
         res = await execute_bound_decision(db, user_id=uid, decision_id=did,
                                            marketplace="wildberries", sku="SKU1", dry_run=True)
         assert res.ok is False and res.status == NOT_EXECUTED
@@ -177,7 +185,7 @@ def test_decision_and_link_not_found():
 def test_idempotency_and_no_measurement():
     async def go():
         db = await _engine(); uid = str(uuid.uuid4())
-        did = await _seed(db, uid)
+        did = await _seed(db, uid, **_LIVE)
         res = await execute_bound_decision(db, user_id=uid, decision_id=did,
                                            marketplace="wildberries", sku="SKU1",
                                            dry_run=True, idempotency_key="idem-123")

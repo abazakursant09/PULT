@@ -76,9 +76,20 @@ class BridgeResult:
     items: List[BridgeItem] = field(default_factory=list)
 
 
+# 2.1A CONTAINMENT: an action with no provider-verified execution path must never be surfaced as an
+# executable Decision — no false Feed button, no bound execution. stop_auto_promotion promised an
+# auto-promotion EXIT that no wired marketplace path delivers (WB endpoint unconfirmed, Ozon
+# deactivate is an ordinary-action opt-out, Yandex has no write API), so it is contained here (the
+# binding/promotion gate) as well as in the executor. The diagnostic signal still exists; it simply
+# does not promote to an executable Decision. Lifted only when 2.2 builds a provider-verified exit.
+_CONTAINED_ACTIONS = frozenset({"stop_auto_promotion"})
+
+
 def capability_supported(action_key: Optional[str], marketplace: Optional[str]) -> bool:
     """Deterministic capability gate from the action catalog (no credentials)."""
     if not action_key or action_key not in action_catalog.known_actions():
+        return False
+    if action_key in _CONTAINED_ACTIONS:
         return False
     spec = action_catalog.get(action_key)
     mp = normalize_marketplace(marketplace)

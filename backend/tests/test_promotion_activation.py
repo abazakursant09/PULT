@@ -47,7 +47,9 @@ async def _engine():
     return sessionmaker(e, class_=AsyncSession, expire_on_commit=False)()
 
 
-async def _adv(db, uid, *, mp="wildberries", sku="SKU1", itype="ad_on_low_stock"):
+# 2.1A: the indirect low-stock adv type binds stop_auto_promotion (contained). The promotion
+# machinery is action-agnostic, so the default rides an overspend type → ad_set_state (live).
+async def _adv(db, uid, *, mp="wildberries", sku="SKU1", itype="ad_destroying_profit"):
     db.add(AdvertisingSignal(audit_id=str(uuid.uuid4()), user_id=uid,
            signal_key=f"adv_{itype}", problem_type=itype,
            insight_key=f"adv_{itype}:{mp}:{sku}", marketplace=mp, sku=sku, status="active",
@@ -71,7 +73,7 @@ def test_actionable_adv_promotes():
         link = (await db.execute(select(EngineSignalDecisionLink))).scalars().one()
         assert link.decision_id is not None and link.link_status == "promoted"
         d = (await db.execute(select(Decision))).scalars().one()
-        assert d.action_key == "stop_auto_promotion"
+        assert d.action_key == "ad_set_state"
         sig = (await db.execute(select(AdvertisingSignal))).scalars().one()
         assert sig.status == "promoted_to_decision" and sig.decision_id == d.id
         # no execution, no measurement — Decision is intent only

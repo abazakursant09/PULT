@@ -26,10 +26,9 @@ from sqlalchemy.pool import StaticPool
 from database import Base, get_db
 from dependencies import get_current_user
 import models  # registers tables
-from models.advertising_signal import AdvertisingSignal
+from models.pricing_signal import PricingSignal
 from models.imported_finance import ImportedFinanceRow
 from models.engine_signal_decision_link import EngineSignalDecisionLink
-from models.engine_effect_observation import EngineEffectObservation
 
 from services.decision_outcome.promotion import promote_eligible_candidates
 from services.decision_outcome.decision_bridge import bridge_links_to_decisions
@@ -77,11 +76,12 @@ async def _set_profit(db, uid, value):
 
 async def _seed_open(db, uid, baseline):
     """Promote an advertising signal → link/decision, capture a baseline observation."""
-    db.add(AdvertisingSignal(audit_id=str(uuid.uuid4()), user_id=uid,
-           signal_key="adv_ad_on_low_stock", problem_type="ad_on_low_stock",
-           insight_key=f"adv_ad_on_low_stock:{MP}:{SKU}", marketplace=MP, sku=SKU,
-           status="active", what="x", why="y", expected_effect="z", what_to_do="w",
-           priority_level="critical"))
+    # 2.1A: former vehicle (adv_ad_on_low_stock → stop_auto_promotion) is contained; ride a live
+    # net_profit-metric lever instead (pricing_price_below_floor → set_price).
+    db.add(PricingSignal(user_id=uid, signal_key="pricing_price_below_floor",
+           insight_key=f"pricing_price_below_floor:{MP}:{SKU}", problem_type="price_below_floor",
+           category="pricing", marketplace=MP, sku=SKU, what="x", why="y", meaning="m",
+           what_to_do="w", expected_effect="z", priority_level="critical", status="active"))
     await db.commit()
     await promote_eligible_candidates(db, user_id=uid); await db.commit()
     await bridge_links_to_decisions(db, user_id=uid); await db.commit()

@@ -26,12 +26,9 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from database import Base
-import models  # registers tables
 from models.physical_product import PhysicalProduct
 from models.product_listing import ProductListing
 from models.operations_signal import OperationsSignal
-from models.decision import Decision
-from models.engine_effect_observation import EngineEffectObservation
 from models.marketplace_connection import MarketplaceConnection
 from models.api_credential import ApiCredential
 from models.imported_finance import ImportedFinanceRow
@@ -39,14 +36,9 @@ from models.imported_finance import ImportedFinanceRow
 from services.marketplace import credential_vault
 from services.marketplace.ozon_client import ozon_client
 from services.operations.signal_builder import build_operations_signal, SIGNAL_KEY as OPS_SIGNAL
-from services.decision_outcome.registry import BY_SIGNAL_KEY
 from services.decision_feed.builder import build_feed
-from services.decision_apply_ux.confirm import confirm_and_apply_decision
-from services.learning_os.registry import get_action_learning_summary
-import tasks.measurement_close as mclose
 
 from routers.promotion_activation import promotion_activation_run, RunRequest
-from routers.decision_apply import decision_apply_preview
 
 ACTION = "stop_auto_promotion"
 METRIC = "net_profit"
@@ -101,72 +93,33 @@ def _patch_executor(monkeypatch, calls):
 
 
 def test_closed_decision_loop_e2e(monkeypatch):
+    """2.1A — the operations auto-promo margin-drain signal remains a DIAGNOSTIC in the Feed, but
+    stop_auto_promotion is contained: it never promotes to an executable Decision (no Apply button)
+    and no marketplace call is ever made. The full detect→execute→measure→learn loop is proven for a
+    still-executable lever in test_decision_apply_execution_loop.py (reduce_discount)."""
     async def go():
         factory = await _factory(); uid = str(uuid.uuid4()); calls = []
         db = factory()
         await _seed(db, uid)
         _patch_executor(monkeypatch, calls)
-        # close tick owns its own session → point it at this in-memory DB
-        monkeypatch.setattr(mclose, "AsyncSessionLocal", factory)
 
-        # (1) Feed carries the bound signal with a surfaced action_key
+        # (1) Feed carries the diagnostic signal with its advised action surfaced
         feed = await build_feed(db, user_id=uid)
         item = next(i for i in feed if i.contour == "operations")
         assert item.item_key == INSIGHT
         assert item.action_key == ACTION
-        assert item.source_context.get("decision_id") is None   # not promoted yet
+        assert item.source_context.get("decision_id") is None   # not promoted
 
-        # (2)(3) Apply click → promotion-activation run endpoint → Decision
+        # (2) Apply click → promotion-activation run: the contained action never yields an executable
+        # Decision (no false button) and never touches the marketplace
         r = await promotion_activation_run(RunRequest(contour="operations"),
                                            current_user=_User(uid), db=db)
         did = next((i.decision_id for i in r.items
                     if i.insight_key == item.item_key and i.decision_id), None)
-        assert did, "promotion did not yield a decision_id for the clicked signal"
-        assert (await db.execute(select(Decision).where(Decision.id == did))).scalar_one()
+        assert did is None                                      # contained: not executable
+        assert calls == []                                      # 0 marketplace calls
 
-        # (4) Preview endpoint
-        pv = await decision_apply_preview(did, marketplace="ozon", sku=SKU,
-                                          current_user=_User(uid), db=db)
-        assert pv.applyable is True
-        assert pv.action_key == ACTION
-
-        # (5)(6) Confirm → executor + baseline measurement (time pinned to T0)
-        cf = await confirm_and_apply_decision(
-            db, user_id=uid, decision_id=did, marketplace="ozon", sku=SKU,
-            idempotency_key="k-loop-1", now=T0)
-        assert cf.ok and cf.status == "success"
-        assert cf.measurement_opened is True
-        assert calls == [(SKU, False)]                          # executor really ran
-
-        # (7) baseline observation exists, still open
-        obs = (await db.execute(select(EngineEffectObservation)
-                                .where(EngineEffectObservation.user_id == uid))).scalars().all()
-        assert len(obs) == 1 and obs[0].measured_at is None
-        assert obs[0].metric_key == METRIC == BY_SIGNAL_KEY[OPS_SIGNAL].default_metric_key
-
-        # observed improvement in the window, then (8) the close tick (own session)
-        await _fin(db, uid, date="2026-06-20", net_profit=500.0)   # loss → profit
-        await db.commit()
-        n = await mclose.run_measurement_close(now=T1)
-        assert n >= 1
-
-        # steps 8-10 read on a FRESH session — the tick committed in its own session,
-        # so the long-lived `db` above holds a stale (still-open) view of the observation.
-        async with factory() as db2:
-            # (8) observation closed with a proven band
-            closed = (await db2.execute(select(EngineEffectObservation)
-                                        .where(EngineEffectObservation.user_id == uid))).scalars().one()
-            assert closed.measured_at is not None
-            assert closed.effect_band == "improved"
-
-            # (9) Effect Summary surfaces the proven effect in the feed
-            feed2 = await build_feed(db2, user_id=uid, include_resolved=True)
-            do = next(i for i in feed2 if i.contour == "decision_outcome")
-            assert do.effect_status == "proven_improved"
-
-            # (10) Learning OS counts the closed observation, keyed (mp, action, metric)
-            summ = await get_action_learning_summary(
-                db2, user_id=uid, marketplace="ozon", action_key=ACTION, metric_key=METRIC)
-            assert summ is not None
-            assert summ.total_count >= 1 and summ.improved_count >= 1
+        # (3) the diagnostic signal itself survives — advice, not an auto action
+        sig = (await db.execute(select(OperationsSignal))).scalars().one()
+        assert sig.status == "active" and "Остановить участие товара" in sig.what_to_do
     _run(go())

@@ -509,18 +509,20 @@
       "block": "Цены",
       "label": "Управление участием в акциях (write)",
       "wb": {
-        "verdict": "api",
-        "endpoint": "/api/v1/promotions/participation"
+        "verdict": "impossible",
+        "note": "2.1A: автоматический выход из автоакции недоступен через API. Endpoint /api/v1/promotions/participation не подтверждён официальной документацией — не вызывается ни на одном runtime-пути."
       },
       "ozon": {
         "verdict": "api",
-        "endpoint": "/v1/actions/products/(de)activate"
+        "endpoint": "/v1/actions/products/(de)activate",
+        "pult_supported": false,
+        "note": "2.1A: /v1/actions/products/deactivate — выход из ОБЫЧНОЙ акции, не из Hot Sale/автоакции. Автоматический выход из автоакции не поддерживается до отдельной реализации (2.2)."
       },
       "yandex": {
         "verdict": "impossible"
       },
-      "pult_verdict": "api",
-      "note": "A3 stop_auto_promotion. Yandex: нет write-API участия в акциях (honest stub)."
+      "pult_verdict": "impossible",
+      "note": "2.1A CONTAINMENT: stop_auto_promotion как автоматический выход из автоакции не поддерживается ни на одном маркетплейсе. Диагностика остаётся, действие — ручная рекомендация. Yandex: нет write-API участия в акциях."
     }
   ],
   "freshness": {

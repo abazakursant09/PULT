@@ -59,6 +59,34 @@ def capability_for_action(action_type: str) -> str | None:
 def _canon_mp(mp: str | None) -> str:
     return _CANON_MP.get((mp or "").lower(), (mp or "").lower())
 
+
+# ── 2.1A CONTAINMENT ──────────────────────────────────────────────────────────
+# `stop_auto_promotion` promised an AUTOMATIC EXIT from an auto-promotion, but no marketplace
+# path PULT has wired actually delivers that: Wildberries' /api/v1/promotions/participation is
+# unconfirmed against the official API, Ozon's /v1/actions/products/deactivate is an ORDINARY-action
+# opt-out (NOT Hot Sale / auto-promotion), and Yandex has no participation write API. Until a
+# dedicated, provider-verified exit exists (2.2), the action is fail-closed HERE — before any
+# connection, token or marketplace call — so a stale saved recommendation, a hand-built payload,
+# an idempotent replay or a revert can never reach a provider. Strictly 0 marketplace calls.
+_CONTAINED_ACTIONS = frozenset({"stop_auto_promotion"})
+
+_CONTAINED_DETAIL = {
+    "wb": "Автоматический выход из автоакции Wildberries через API пока не поддерживается. "
+          "Выйдите из акции вручную в личном кабинете.",
+    "ozon": "Автоматический выход из автоакции Ozon через API пока не поддерживается. "
+            "Выйдите из акции вручную в личном кабинете.",
+    "yandex": "Автоматический выход из акции Яндекс Маркета через API пока не поддерживается. "
+              "Выйдите из акции вручную в личном кабинете.",
+}
+_CONTAINED_DEFAULT = ("Автоматический выход из автоакции через API пока не поддерживается. "
+                      "Выйдите из акции вручную в личном кабинете.")
+
+
+def _contained_error(marketplace: str | None) -> ExecutionError:
+    detail = _CONTAINED_DETAIL.get(_canon_mp(marketplace), _CONTAINED_DEFAULT)
+    return ExecutionError(ExecutionError.CAPABILITY_NOT_SUPPORTED, detail)
+
+
 _SECRET_KEYS = {"text"}  # payload keys safe to keep; secrets are never in payload anyway
 
 
@@ -145,6 +173,22 @@ async def execute(
     # Marketplace may be fixed by the spec, or carried in the payload for
     # marketplace-agnostic actions (e.g. set_price works for WB and Ozon).
     target_mp = spec.marketplace or payload.get("marketplace")
+
+    # 2.1A fail-closed: a contained action is rejected BEFORE any connection, token, guard,
+    # idempotency replay or dispatch. Honest Russian reason; a rejected log for audit (never a
+    # dry_run false success). No marketplace client is ever touched on this path.
+    if action_type in _CONTAINED_ACTIONS:
+        err = _contained_error(target_mp)
+        if dry_run:
+            return ExecutionResult(None, "rejected", action_type, target_mp or "unknown",
+                                   error=err.to_dict())
+        rec = _new_log(user_id, action_type, target_mp, mode, payload, insight_key,
+                       idempotency_key, status="rejected", error_code=err.code,
+                       connection_id=connection_id, decision_id=decision_id)
+        db.add(rec)
+        await db.commit()
+        return ExecutionResult(rec.id, "rejected", action_type, target_mp or "unknown",
+                               error=err.to_dict())
 
     # 1) resolve connection + 2) scope check
     try:
@@ -302,7 +346,10 @@ async def revert(*, db: AsyncSession, user_id: str, log_id: str) -> ExecutionRes
     inverse_action, inverse_payload = spec.reverter(rec.payload or {}, rec.result or {})
     res = await execute(db=db, user_id=user_id, action_type=inverse_action,
                         payload=inverse_payload, mode=rec.mode, connection_id=rec.connection_id)
-    if res.log_id:
+    # Only a SUCCESSFUL inverse may mark the original reverted. A rejected inverse (e.g. a
+    # 2.1A-contained stop_auto_promotion) reached no provider, so the original must stay as-is —
+    # never a false "reverted" on an action that did not actually run.
+    if res.ok and res.log_id:
         # link the revert
         rv = (await db.execute(select(ExecutionLog).where(ExecutionLog.id == res.log_id))).scalars().first()
         if rv:

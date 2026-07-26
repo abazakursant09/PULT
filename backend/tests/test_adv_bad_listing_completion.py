@@ -21,7 +21,6 @@ from models.advertising_signal import AdvertisingSignal
 from models.product_listing import ProductListing
 from models.marketplace_connection import MarketplaceConnection
 from models.decision import Decision
-from models.engine_signal_decision_link import EngineSignalDecisionLink
 from models.engine_effect_observation import EngineEffectObservation
 
 from services.marketplace import action_catalog
@@ -32,11 +31,7 @@ from services.action_binding.payload_builder import build_action_payload
 from services.decision_outcome.registry import BY_SIGNAL_KEY
 from services.decision_outcome.candidate_engine import build_promotion_candidates, ELIGIBLE
 from services.decision_outcome.promotion import promote_eligible_candidates
-from services.decision_outcome.decision_bridge import bridge_links_to_decisions, PROMOTED
-from services.decision_apply_ux.preview import build_apply_preview
-import services.decision_apply_ux.confirm as confirm_mod
-from services.decision_apply_ux.confirm import confirm_and_apply_decision
-from services.action_binding.execution_bridge import BoundExecutionResult
+from services.decision_outcome.decision_bridge import bridge_links_to_decisions
 
 SIGNAL_TYPE = "adv_ad_on_bad_listing"
 ITYPE = "ad_on_bad_listing"
@@ -73,14 +68,6 @@ async def _seed_marketplace(db, uid):
 
 async def _count(db, model):
     return (await db.execute(select(func.count()).select_from(model))).scalar()
-
-
-def _fake_exec_success():
-    async def f(db, *, user_id, decision_id, marketplace, sku, dry_run, idempotency_key, now=None):
-        return BoundExecutionResult(ok=True, decision_id=decision_id,
-                                    action_key="stop_auto_promotion", payload={"offer_id": sku},
-                                    execution_log_id="log-bl", status="success", reason=None)
-    return f
 
 
 # ── 1. binding registry: bad_listing is BOUND to stop_auto_promotion ──────────
@@ -125,7 +112,9 @@ def test_promotion_candidate_eligible():
     _run(go())
 
 
-# ── 4. decision creation: bridge promotes a bad_listing signal on WB ──────────
+# ── 4. 2.1A: bad_listing binds the CONTAINED stop_auto_promotion → no Decision ─
+# The binding, payload and candidate above stay valid (the capability gate is at the bridge), but the
+# bridge never promotes the contained action to an executable Decision — so no Apply button appears.
 
 def test_decision_created_via_bridge():
     async def go():
@@ -133,14 +122,12 @@ def test_decision_created_via_bridge():
         await _adv_signal(db, uid)
         await promote_eligible_candidates(db, user_id=uid); await db.commit()
         res = await bridge_links_to_decisions(db, user_id=uid); await db.commit()
-        assert res.promoted == 1 and res.items[0].outcome == PROMOTED
-        d = (await db.execute(select(Decision))).scalars().one()
-        assert d.action_key == "stop_auto_promotion"
-        assert d.insight_key == IKEY
+        assert res.promoted == 0                                   # contained: not promoted
+        assert (await db.execute(select(Decision))).scalars().all() == []
     _run(go())
 
 
-# ── 5. apply preview: bad_listing decision is applyable on WB ─────────────────
+# ── 5. no executable Decision → no applyable preview / Apply button ───────────
 
 def test_apply_preview_applyable():
     async def go():
@@ -149,19 +136,12 @@ def test_apply_preview_applyable():
         await _seed_marketplace(db, uid)
         await promote_eligible_candidates(db, user_id=uid); await db.commit()
         await bridge_links_to_decisions(db, user_id=uid); await db.commit()
-        did = (await db.execute(select(Decision))).scalars().one().id
-        prev = await build_apply_preview(db, user_id=uid, decision_id=did,
-                                         marketplace="wildberries", sku="SKU1")
-        assert prev.applyable is True
-        assert prev.action_key == "stop_auto_promotion"
-        assert prev.payload == {"offer_id": "SKU1"}
-        assert prev.capability_ok is True and prev.safety_class == MANUAL_APPROVAL
-        # preview is read-only: no execution log, no measurement written
-        assert await _count(db, EngineEffectObservation) == 0
+        # contained → no executable Decision exists, so there is nothing to preview/apply
+        assert (await db.execute(select(Decision))).scalars().all() == []
     _run(go())
 
 
-# ── 6. measurement path: a successful apply opens an effect observation ───────
+# ── 6. contained action opens no measurement (nothing executed) ───────────────
 
 def test_measurement_opens_on_apply():
     async def go():
@@ -170,15 +150,6 @@ def test_measurement_opens_on_apply():
         await _seed_marketplace(db, uid)
         await promote_eligible_candidates(db, user_id=uid); await db.commit()
         await bridge_links_to_decisions(db, user_id=uid); await db.commit()
-        did = (await db.execute(select(Decision))).scalars().one().id
-        orig = confirm_mod.execute_bound_decision
-        confirm_mod.execute_bound_decision = _fake_exec_success()
-        try:
-            r = await confirm_and_apply_decision(db, user_id=uid, decision_id=did,
-                                                 marketplace="wildberries", sku="SKU1",
-                                                 idempotency_key="bl-idem")
-        finally:
-            confirm_mod.execute_bound_decision = orig
-        assert r.ok is True and r.measurement_opened is True
-        assert await _count(db, EngineEffectObservation) == 1   # existing DO path, no new measure
+        assert (await db.execute(select(Decision))).scalars().all() == []
+        assert await _count(db, EngineEffectObservation) == 0
     _run(go())
