@@ -120,7 +120,7 @@ export function StoresLedger() {
       title="Магазины"
       action={!empty && (
         <button type="button" className="l-btn-ink" onClick={() => setCabinetOpen(true)}>
-          Добавить магазин
+          Добавить кабинет
         </button>
       )}
     >
@@ -136,10 +136,10 @@ export function StoresLedger() {
             Здесь появятся ваши магазины.
           </h2>
           <p className="l-dim" style={{ margin: '0 0 28px' }}>
-            Добавьте первый магазин, чтобы загрузить товары и показатели.
+            Добавьте кабинет маркетплейса и выберите, как получать данные.
           </p>
           <button type="button" className="l-btn-ink" onClick={() => setCabinetOpen(true)}>
-            Добавить магазин
+            Добавить кабинет
           </button>
         </div>
       )}

@@ -1,20 +1,18 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import Link from 'next/link'
 import { api, type MarketplaceConnectionOut } from '@/lib/api'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { ConnectMarketplaceDialog } from './ConnectMarketplaceDialog'
 import { verdict, statusLabel, isBroken, requestErrorText, mpName } from './connectionText'
 
-// CONNECTION-UI — the seller's own view of their marketplace connections, with the four actions
-// that make this self-service: connect, re-check, replace the key, disconnect.
-//
-// The card never claims a connection works just because it exists. `status === 'connected'` is set
-// by the backend the moment a key is saved, before anything is verified, so what the seller sees
-// here is the per-scope VERIFICATION verdict — including the honest "not checked" that Ozon
-// feedbacks gets today, because there is no probe for it.
+// CONNECTION-UI — read-only in Settings (PULT-LAUNCH-1.4.5I). Every NEW connection is now created on
+// the «Магазины» page, bound to a chosen cabinet (marketplace_account_id). This section no longer
+// offers a second, account-less create path: it only shows the status of existing connections and
+// the two safe self-service actions that touch no key material — re-check and disconnect. The API
+// key is never shown and never re-entered here; replacing a key happens in the store flow.
 
 const FEEDBACKS = 'feedbacks'
 
@@ -30,7 +28,6 @@ function ConnectionCard({ conn, onChanged }: {
   const [note, setNote] = useState('')
   const [error, setError] = useState('')
   const [confirmOff, setConfirmOff] = useState(false)
-  const [replacing, setReplacing] = useState(false)
 
   const revoked = conn.status === 'revoked'
   const state = scopeStatus(conn)
@@ -71,23 +68,14 @@ function ConnectionCard({ conn, onChanged }: {
       </div>
 
       {revoked ? (
-        // A disconnected card used to be a cul-de-sac: this sentence and nothing else. Reconnecting
-        // reuses the same connection row, so the seller keeps their history — and automation stays
-        // OFF until they switch it on themselves, whatever it was set to before.
-        <>
-          <p className="text-[12px] mb-2" style={{ color: 'var(--text-3)' }}>
-            Магазин отключён. Подключите его заново, чтобы снова получать отзывы.
-            Автоответы останутся выключенными, пока вы не включите их сами.
-          </p>
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => setReplacing(true)}>
-            Подключить заново
-          </Button>
-        </>
+        <p className="text-[12px] mb-2" style={{ color: 'var(--text-3)' }}>
+          Магазин отключён. Подключить его заново можно в разделе «Магазины».
+        </p>
       ) : (
         <>
           {broken && (
             <p className="text-[12px] mb-2" style={{ color: 'var(--danger)' }}>
-              Автоответы не будут работать, пока ключ не заменён.
+              Автоответы не будут работать, пока ключ не заменён в разделе «Магазины».
             </p>
           )}
           {note && <p className="text-[12px] mb-2" style={{ color: 'var(--text-2)' }}>{note}</p>}
@@ -96,9 +84,6 @@ function ConnectionCard({ conn, onChanged }: {
             <Button size="sm" variant="outline" loading={busy} onClick={recheck}>
               Повторить проверку
             </Button>
-            <Button size="sm" variant="ghost" disabled={busy} onClick={() => setReplacing(true)}>
-              Заменить ключ
-            </Button>
             {!confirmOff ? (
               <Button size="sm" variant="ghost" disabled={busy} onClick={() => setConfirmOff(true)}>
                 Отключить
@@ -106,7 +91,7 @@ function ConnectionCard({ conn, onChanged }: {
             ) : (
               <span className="flex items-center gap-2">
                 <span className="text-[12px]" style={{ color: 'var(--text-2)' }}>
-                  Автоответы для этого магазина перестанут работать. Отключить?
+                  Ключ будет удалён. Кабинет, магазины, товары и загруженные CSV сохранятся. Отключить?
                 </span>
                 <Button size="sm" variant="destructive" loading={busy} onClick={disconnect}>
                   Да, отключить
@@ -121,15 +106,6 @@ function ConnectionCard({ conn, onChanged }: {
       )}
 
       {error && <p className="text-[12px] mt-2" style={{ color: 'var(--danger)' }}>{error}</p>}
-
-      {/* Replacing a key is the same form as connecting — the backend upserts and resets the
-          verification verdict for that scope, so a stale green tick can never survive.
-          THIS card's marketplace is passed in: without it the dialog opened on Wildberries
-          whatever card you clicked, so an Ozon seller could overwrite their WB connection by
-          simply not noticing the toggle. */}
-      <ConnectMarketplaceDialog open={replacing} onOpenChange={setReplacing} onConnected={onChanged}
-        marketplace={conn.marketplace as 'wildberries' | 'ozon' | 'yandex'}
-        ozonClientId={conn.ozon_client_id ?? null} />
     </Card>
   )
 }
@@ -137,7 +113,6 @@ function ConnectionCard({ conn, onChanged }: {
 export function ConnectionsSection() {
   const [conns, setConns] = useState<MarketplaceConnectionOut[] | null>(null)
   const [error, setError] = useState('')
-  const [adding, setAdding] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -157,20 +132,24 @@ export function ConnectionsSection() {
         <h2 className="text-[15px] font-semibold" style={{ color: 'var(--text)' }}>
           Подключённые магазины
         </h2>
-        {conns !== null && conns.length > 0 && (
-          <Button size="sm" onClick={() => setAdding(true)}>Подключить ещё</Button>
-        )}
+      </div>
+
+      <div className="mb-3 rounded-[8px] p-3" style={{ background: 'var(--surface-2, #f5f5f4)' }}>
+        <p className="text-[12px] mb-2" style={{ color: 'var(--text-2)' }}>
+          Подключения к маркетплейсам управляются в разделе «Магазины» — там ключ привязывается к
+          нужному кабинету, а не создаётся отдельно.
+        </p>
+        <Link href="/dashboard/stores">
+          <Button size="sm">Перейти к магазинам</Button>
+        </Link>
       </div>
 
       {conns === null ? (
         <p className="text-[12px]" style={{ color: 'var(--text-3)' }}>Загрузка подключений…</p>
       ) : conns.length === 0 ? (
-        <div>
-          <p className="text-[12px] mb-3" style={{ color: 'var(--text-3)' }}>
-            Пока ни один магазин не подключён. Подключите Wildberries или Ozon, чтобы PULT получал отзывы.
-          </p>
-          <Button size="sm" onClick={() => setAdding(true)}>Подключить маркетплейс</Button>
-        </div>
+        <p className="text-[12px]" style={{ color: 'var(--text-3)' }}>
+          Пока ни один магазин не подключён. Добавьте кабинет в разделе «Магазины».
+        </p>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {conns.map(c => <ConnectionCard key={c.id} conn={c} onChanged={load} />)}
@@ -178,8 +157,6 @@ export function ConnectionsSection() {
       )}
 
       {error && <p className="text-[12px] mt-2" style={{ color: 'var(--danger)' }}>{error}</p>}
-
-      <ConnectMarketplaceDialog open={adding} onOpenChange={setAdding} onConnected={load} />
     </section>
   )
 }

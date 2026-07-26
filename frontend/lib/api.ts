@@ -1189,6 +1189,42 @@ export interface VerifyOut {
   retry_after_seconds?: number | null   // only when the marketplace supplied one — often null
 }
 
+// Yandex campaign (store) mapping (PULT-LAUNCH-1.4.5G). A safe projection — ids and a label, never an
+// internal UUID. `linked_store_id` is the PULT store already bound to this campaignId, or null.
+export interface CampaignOut {
+  campaign_id: string
+  business_id: string | null
+  label: string | null
+  placement_type: string | null
+  linked_store_id: string | null
+  link_state: 'linked' | 'unlinked'
+}
+export interface CampaignLinkBody {
+  campaign_id: string
+  store_id?: string          // link an EXISTING store …
+  new_store_label?: string   // … or create a new one. Exactly one.
+}
+export interface CampaignLinkOut {
+  campaign_id: string
+  linked_store_id: string
+  link_state: string
+  created_store: boolean
+}
+
+// Source policy (PULT-LAUNCH-1.4.5H). `preference` is the EFFECTIVE choice ('csv' when unset).
+export interface SourcePolicyMetric {
+  metric_type: string
+  preference: 'auto' | 'api' | 'csv'
+  api_supported: boolean
+  api_available: boolean
+  limitation: string | null   // yandex_finance_unsupported | manual_only_csv | api_unsupported
+}
+export interface SourcePolicyOut {
+  store_id: string
+  marketplace: string
+  metrics: SourcePolicyMetric[]
+}
+
 export interface AutomationRuleOut {
   id: string
   contour: string
@@ -1286,6 +1322,25 @@ export const api = {
     verify: (id: string, scope: string) =>
       req<VerifyOut>(`/api/connections/${id}/verify`, { method: 'POST', body: JSON.stringify({ scope }) }),
     remove: (id: string) => req<void>(`/api/connections/${id}`, { method: 'DELETE' }),
+    // Yandex campaign (store) mapping (PULT-LAUNCH-1.4.5G). The campaigns a verified Yandex key can
+    // reach, and binding one to a PULT store — an existing one or a new one. Never auto-linked by name.
+    campaigns: (id: string) => req<CampaignOut[]>(`/api/connections/${id}/campaigns`),
+    linkCampaign: (id: string, body: CampaignLinkBody) =>
+      req<CampaignLinkOut>(`/api/connections/${id}/campaigns/link`, {
+        method: 'POST', body: JSON.stringify(body),
+      }),
+  },
+
+  // Source policy (PULT-LAUNCH-1.4.5H): per (store, metric) which source feeds the numbers — API or
+  // CSV. Absent ⇒ effective CSV. The UI reads the effective policy and writes explicit choices; it
+  // never fabricates an 'auto' default on open.
+  sourcePolicy: {
+    get: (storeId: string) =>
+      req<SourcePolicyOut>(`/api/marketplace-stores/${storeId}/source-policy`),
+    set: (storeId: string, metricType: string, preference: 'auto' | 'api' | 'csv') =>
+      req<SourcePolicyMetric>(`/api/marketplace-stores/${storeId}/source-policy/${metricType}`, {
+        method: 'PATCH', body: JSON.stringify({ preference }),
+      }),
   },
 
   // AR-CONTROL: seller-controlled Auto Reviews. Backend is the single source of truth for state and

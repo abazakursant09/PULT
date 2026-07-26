@@ -45,7 +45,7 @@ describe('stores ledger', () => {
     vi.spyOn(api.marketplaceAccounts, 'list').mockResolvedValue([])
     render(<StoresLedger />)
     expect(await screen.findByText(/Здесь появятся ваши магазины/)).toBeInTheDocument()
-    expect(screen.getAllByRole('button', { name: 'Добавить магазин' })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: 'Добавить кабинет' })).toHaveLength(1)
   })
 
   it('asks the backend for the stores, not just the cabinets', async () => {
@@ -150,7 +150,7 @@ describe('stores ledger', () => {
     render(<StoresLedger />)
     await screen.findByText('Основной кабинет')
 
-    await user.click(screen.getByRole('button', { name: 'Добавить магазин' }))
+    await user.click(screen.getByRole('button', { name: 'Добавить кабинет' }))
     const dialog = within(await screen.findByRole('dialog', { name: 'Добавить кабинет' }))
     expect(dialog.getByLabelText('Название кабинета')).toBeInTheDocument()
     expect(dialog.queryByLabelText('Название магазина')).toBeNull()

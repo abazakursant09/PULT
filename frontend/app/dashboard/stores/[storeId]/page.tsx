@@ -6,6 +6,7 @@ import { api, type StoreRef } from '@/lib/api'
 import { LedgerShell } from '@/components/stores/LedgerShell'
 import { StoreImportsTable } from '@/components/stores/StoreImportsTable'
 import { StoreProductsTable } from '@/components/stores/StoreProductsTable'
+import { SourcePolicySection } from '@/components/stores/SourcePolicySection'
 import { marketplaceLabel } from '@/components/stores/CabinetGroup'
 
 // One store: what is in it, and what was loaded into it.
@@ -102,8 +103,18 @@ export default function StorePage({ params }: { params: { storeId: string } }) {
         </div>
       )}
 
+      {store?.marketplace === 'yandex' && (
+        <div style={{ borderLeft: '2px solid var(--ledger-oxide)', padding: '10px 0 10px 14px', margin: '18px 0 0', maxWidth: '60ch' }}>
+          Финансовая синхронизация Яндекс Маркета пока недоступна. Финансовые данные загружайте через CSV.
+          Товары, карточки, цены, остатки, заказы и возвраты по API работают.
+        </div>
+      )}
+
       <h2 className="l-serif l-h2" style={{ padding: '34px 0 10px' }}>Товары магазина</h2>
       <StoreProductsTable storeId={storeId} />
+
+      <h2 className="l-serif l-h2" style={{ padding: '40px 0 10px' }}>Источники данных</h2>
+      <SourcePolicySection storeId={storeId} marketplace={store?.marketplace ?? ''} />
 
       <h2 className="l-serif l-h2" style={{ padding: '40px 0 10px' }}>История загрузок</h2>
       <StoreImportsTable storeId={storeId} />

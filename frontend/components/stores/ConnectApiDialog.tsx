@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { api } from '@/lib/api'
+import { YandexCampaignMapping } from './YandexCampaignMapping'
 
 // Connecting an API key to a cabinet the seller already has (PULT-LAUNCH-1.4.5D).
 //
@@ -39,11 +40,12 @@ export function ConnectApiDialog({
   const [clientId, setClientId] = useState('')
   const [phase, setPhase] = useState<Phase>('form')
   const [error, setError] = useState('')
+  const [connectionId, setConnectionId] = useState('')
 
   const isOzon = marketplace === 'ozon'
   const isYandex = marketplace === 'yandex'
 
-  const reset = () => { setToken(''); setClientId(''); setPhase('form'); setError('') }
+  const reset = () => { setToken(''); setClientId(''); setPhase('form'); setError(''); setConnectionId('') }
   const close = (v: boolean) => { if (!v) reset(); onOpenChange(v) }
 
   const submit = async () => {
@@ -60,6 +62,7 @@ export function ConnectApiDialog({
         marketplace_account_id: marketplaceAccountId,
       })
       setToken(''); setClientId('')     // wipe immediately
+      setConnectionId(conn.id)
 
       setPhase('verifying')
       const outcome = (await api.connections.verify(conn.id, FEEDBACKS)).outcome
@@ -137,8 +140,9 @@ export function ConnectApiDialog({
           <div style={{ padding: '18px 0' }}>
             <p className="l-green" style={{ fontSize: 18 }}>API проверен</p>
             <p className="l-dim" style={{ marginTop: 6 }}>
-              Ключ подтверждён маркетплейсом. Загрузка данных через API появится в следующих
-              обновлениях — сейчас данные загружаются файлом (CSV).
+              Ключ подтверждён маркетплейсом. Автоматическое получение данных пока не включено
+              системой — сейчас данные загружаются файлом (CSV). Выбрать источник по каждому показателю
+              можно в разделе «Источники данных» магазина.
             </p>
             <button type="button" className="l-btn" style={{ marginTop: 16 }} onClick={() => close(false)}>Готово</button>
           </div>
@@ -146,11 +150,9 @@ export function ConnectApiDialog({
 
         {phase === 'yandex_mapping' && (
           <div style={{ padding: '18px 0' }}>
-            <p className="l-green" style={{ fontSize: 18 }}>API проверен. Требуется сопоставить магазины</p>
-            <p className="l-dim" style={{ marginTop: 6 }}>
-              У кабинета Яндекса несколько магазинов. Сопоставление появится в следующем обновлении;
-              пока данные загружаются файлом (CSV).
-            </p>
+            <p className="l-green" style={{ fontSize: 18, marginBottom: 4 }}>API проверен. Требуется сопоставить магазины</p>
+            <YandexCampaignMapping connectionId={connectionId} accountId={marketplaceAccountId}
+                                   onChanged={onConnected} />
             <button type="button" className="l-btn" style={{ marginTop: 16 }} onClick={() => close(false)}>Готово</button>
           </div>
         )}

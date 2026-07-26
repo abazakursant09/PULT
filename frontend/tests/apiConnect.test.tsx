@@ -99,6 +99,9 @@ describe('ConnectApiDialog', () => {
   it('for Yandex, verify success says the stores still need mapping — not "synced"', async () => {
     vi.spyOn(api.connections, 'create').mockResolvedValue({ id: 'c-1' } as never)
     vi.spyOn(api.connections, 'verify').mockResolvedValue({ outcome: 'verified' } as never)
+    // The mapping surface reads the real campaigns + the cabinet's stores; give it empty, honest data.
+    vi.spyOn(api.connections, 'campaigns').mockResolvedValue([])
+    vi.spyOn(api.marketplaceAccounts, 'list').mockResolvedValue([])
     const user = userEvent.setup()
     render(<ConnectApiDialog {...base} marketplace="yandex" />)
 

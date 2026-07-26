@@ -37,7 +37,12 @@ function imports(over: Partial<StoreImportsPage> = {}): StoreImportsPage {
 }
 
 describe('store page', () => {
-  beforeEach(() => { vi.restoreAllMocks() })
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    // The store page now shows a source-policy section (1.4.5I); give it an honest empty policy so
+    // these product/upload tests exercise the catalog surfaces without a network error.
+    vi.spyOn(api.sourcePolicy, 'get').mockResolvedValue({ store_id: 'st-1', marketplace: 'wildberries', metrics: [] })
+  })
 
   it('lists the products of THIS store', async () => {
     vi.spyOn(api.marketplaceStores, 'imports').mockResolvedValue(imports())
