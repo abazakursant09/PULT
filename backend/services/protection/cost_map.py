@@ -6,6 +6,10 @@ Maps a source-policy money metric onto a canonical 2.4 cost_key, chooses ONE sou
 the existing resolver (never sums API + CSV, preserves conflict), and proves product+store
 attribution before a value may be used. A fee/logistics amount is a COST magnitude: the signed
 reader value is taken as |amount| (marketplace fees are always a reduction).
+
+Store isolation: a CSV money sum is scoped to the ONE marketplace_store_id — never merged across two
+stores of the same seller. user_id is NOT a sufficient key (a seller may own several stores, and the
+same SKU may exist in more than one), so it is not used here.
 """
 from __future__ import annotations
 
@@ -46,10 +50,12 @@ class MetricMoney:
     reason: Optional[str] = None
 
 
-async def _csv_sum(db: AsyncSession, *, user_id: str, marketplace: str, product_id: str,
+async def _csv_sum(db: AsyncSession, *, store_id: str, marketplace: str, product_id: str,
                    column: str, period) -> Optional[Decimal]:
+    """Sum ONE CSV money column for a product, scoped to a single store (never cross-store).
+    Filters: marketplace_store_id + product_id + source='csv' + marketplace + period."""
     aliases = _FIN_ALIASES.get((marketplace or "").lower(), ((marketplace or "").lower(),))
-    conds = [ImportedFinanceRow.user_id == user_id,
+    conds = [ImportedFinanceRow.marketplace_store_id == store_id,
              ImportedFinanceRow.marketplace.in_(aliases),
              ImportedFinanceRow.product_id == product_id,
              ImportedFinanceRow.source == "csv"]
@@ -60,15 +66,16 @@ async def _csv_sum(db: AsyncSession, *, user_id: str, marketplace: str, product_
     return None if total is None else Decimal(str(total))
 
 
-async def resolve_metric_money(db: AsyncSession, *, user_id: str, store_id: str, product_id: str,
+async def resolve_metric_money(db: AsyncSession, *, store_id: str, product_id: str,
                                marketplace: str, metric_type: str, period,
                                now: Optional[datetime] = None) -> MetricMoney:
-    """Resolve ONE money metric (period magnitude) for a product through the source policy."""
+    """Resolve ONE money metric (period magnitude) for a product through the source policy.
+    The CSV candidate is store-scoped; API + CSV are never summed; conflict is preserved."""
     cost_key, csv_col = MONEY_METRICS[metric_type]
     api_val = await api_product_money(db, store_id=store_id, product_id=product_id,
                                       marketplace=marketplace, metric_type=metric_type,
                                       period=period)
-    csv_val = (await _csv_sum(db, user_id=user_id, marketplace=marketplace, product_id=product_id,
+    csv_val = (await _csv_sum(db, store_id=store_id, marketplace=marketplace, product_id=product_id,
                               column=csv_col, period=period)) if csv_col else None
     res = await resolve_source(db, store_id=store_id, marketplace=marketplace, metric_type=metric_type,
                                period=period, api_value=api_val, csv_value=csv_val, now=now)
