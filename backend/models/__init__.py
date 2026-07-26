@@ -50,6 +50,14 @@ from .api_sync_state import ApiSyncState
 from .marketplace_operation import MarketplaceOperation
 # Per (store, metric) source preference: API vs CSV (PULT-LAUNCH-1.4.5H)
 from .store_data_source_policy import StoreDataSourcePolicy
+# ExecutionLog is registered in the package so execution_logs is always in Base.metadata
+# (protection_action_states carries a real FK to it, and create_all must be able to resolve it).
+from .execution_log import ExecutionLog
+# Loss-promotion protection — schema foundation, feature OFF (PULT-LAUNCH-2.3)
+from .protection import (
+    ProtectionPolicy, ProtectionTaxSetting, ProtectionAdditionalCost,
+    ProtectionEvaluation, ProtectionActionState,
+)
 from .marketplace_category import MarketplaceCategoryRow
 from .marketplace_category_attribute import MarketplaceCategoryAttributeRow
 from .returns_audit import ReturnsAudit
