@@ -21,6 +21,7 @@ from models.imported_product import ImportedProductRow
 from models.marketplace_store import MarketplaceStore
 from models.product import Product
 from services.source_policy.money_reader import api_money as _api_money
+from services.source_policy.product_totals import resolved_products as _resolved_products
 from services.source_policy.resolver import resolve_source as _resolve_source
 from services.source_policy.store_totals import _canon as _canon_mp
 from services.source_policy.store_totals import resolved_finance_period
@@ -175,6 +176,7 @@ async def _top_products(
         .order_by(func.sum(ImportedFinanceRow.revenue).desc())
         .limit(limit)
     )).all()
+    comp = await ranking_completeness(user_id, db)   # 'incomplete' once a store sources via API (1.4.5H3)
     return [
         {
             "sku":         r.sku,
@@ -183,6 +185,7 @@ async def _top_products(
             "revenue":     float(r.revenue   or 0),
             "profit":      float(r.profit    or 0),
             "orders":      int(r.orders      or 0),
+            "completeness": comp,
         }
         for r in rows
     ]
@@ -219,6 +222,7 @@ async def _loss_products(
         .order_by(func.sum(ImportedFinanceRow.net_profit).asc())
         .limit(limit)
     )).all()
+    comp = await ranking_completeness(user_id, db)   # (1.4.5H3)
     return [
         {
             "sku":         r.sku,
@@ -226,6 +230,7 @@ async def _loss_products(
             "marketplace": r.marketplace,
             "profit":      float(r.profit  or 0),
             "revenue":     float(r.revenue or 0),
+            "completeness": comp,
         }
         for r in rows
     ]
@@ -253,12 +258,14 @@ async def _marketplace_breakdown(
         .group_by(ImportedFinanceRow.marketplace)
         .order_by(func.sum(ImportedFinanceRow.revenue).desc())
     )).all()
+    comp = await ranking_completeness(user_id, db)   # (1.4.5H3)
     return [
         {
             "marketplace": r.marketplace,
             "revenue":     float(r.revenue or 0),
             "profit":      float(r.profit  or 0),
             "orders":      int(r.orders    or 0),
+            "completeness": comp,
         }
         for r in rows
     ]
@@ -487,7 +494,14 @@ async def summary_by_product(user_id: str, db: AsyncSession) -> tuple[list[dict]
     Returns (items, totals). `items` reconstructs FinanceSummaryItem; a synthetic
     "unassigned" item carries ledger rows whose product_id is NULL so that
     Σ(items) == whole-ledger total (no drift between strip and breakdown).
+
+    With the flag on, each product's money is resolved per store through the source policy
+    (PULT-LAUNCH-1.4.5H3); an API product with incomplete attribution is marked incomplete and its
+    exact profit is suppressed. Flag off is byte-identical to the CSV query below.
     """
+    if settings.api_data_sync_enabled:
+        return await _resolved_summary_by_product(user_id, db)
+
     # Resolved rows → per canonical product
     rows = (await db.execute(
         select(
@@ -551,6 +565,63 @@ async def summary_by_product(user_id: str, db: AsyncSession) -> tuple[list[dict]
     return items, totals
 
 
+async def _resolved_summary_by_product(user_id: str, db: AsyncSession) -> tuple[list[dict], dict]:
+    """summary_by_product with each product's money resolved per store (flag on, 1.4.5H3)."""
+    products = await _resolved_products(db, user_id, None, None)   # all-time (period-less coverage)
+    items: list[dict] = []
+    for pm in products.values():
+        rev, net = pm.revenue, pm.net_profit
+        items.append({
+            "product_id":         pm.product_id,
+            "product_name":       pm.name or pm.product_id,
+            "total_revenue":      round(rev, 2),
+            "total_net_profit":   (round(net, 2) if net is not None else None),
+            "avg_margin_percent": (_margin(net, rev) if net is not None else None),
+            "snapshots_count":    0,
+            "source":             pm.source,
+            "completeness":       pm.completeness,
+            "missing_fields":     list(pm.missing_fields),
+            "conflict":           pm.conflict,
+        })
+    # Unassigned CSV money (product_id NULL) stays CSV and is never split across products.
+    un = (await db.execute(
+        select(func.coalesce(func.sum(ImportedFinanceRow.revenue), 0.0),
+               func.coalesce(func.sum(ImportedFinanceRow.net_profit), 0.0))
+        .where(ImportedFinanceRow.user_id == user_id, ImportedFinanceRow.source == "csv",
+               ImportedFinanceRow.product_id.is_(None)))).one()
+    if float(un[0]) or float(un[1]):
+        items.append({
+            "product_id": "__unassigned__", "product_name": "Без привязки к товару",
+            "total_revenue": round(float(un[0]), 2), "total_net_profit": round(float(un[1]), 2),
+            "avg_margin_percent": _margin(float(un[1]), float(un[0])), "snapshots_count": 0,
+            "source": "csv", "completeness": "complete", "missing_fields": [], "conflict": False})
+    items.sort(key=lambda x: x["total_revenue"], reverse=True)
+    tot_rev = round(sum(i["total_revenue"] for i in items), 2)
+    tot_net = round(sum((i["total_net_profit"] or 0.0) for i in items), 2)
+    return items, {"revenue": tot_rev, "net_profit": tot_net}
+
+
+async def ranking_completeness(user_id: str, db: AsyncSession) -> str:
+    """'incomplete' when a CSV-built ranking (top/loss/breakdown) can no longer be presented as an
+    exact total because a store now sources money from the API (1.4.5H3). Flag off ⇒ always
+    'complete'. Marks the ranking honestly instead of silently mixing sources."""
+    if not settings.api_data_sync_enabled:
+        return "complete"
+    from models.store_data_source_policy import StoreDataSourcePolicy  # local import to avoid cycle
+    from models.marketplace_store import MarketplaceStore as _Store
+    from models.marketplace_account import MarketplaceAccount as _Acc
+    rows = (await db.execute(
+        select(StoreDataSourcePolicy.preference)
+        .join(_Store, _Store.id == StoreDataSourcePolicy.marketplace_store_id)
+        .join(_Acc, _Acc.id == _Store.marketplace_account_id)
+        .join(Product, Product.marketplace_account_id == _Acc.id)
+        .join(ImportedFinanceRow, ImportedFinanceRow.product_id == Product.id)
+        .where(ImportedFinanceRow.user_id == user_id,
+               StoreDataSourcePolicy.metric_type == "revenue",
+               StoreDataSourcePolicy.preference.in_(("api", "auto"))))).scalars().first()
+    return "incomplete" if rows else "complete"
+
+
 async def product_monthly_rollup(product_id: str, user_id: str, db: AsyncSession) -> list[dict]:
     """
     Per-product monthly rollup from the ledger, shaped as FinancialSnapshotOut.
@@ -575,6 +646,7 @@ async def product_monthly_rollup(product_id: str, user_id: str, db: AsyncSession
         .order_by(_PERIOD)
     )).all()
 
+    comp = await ranking_completeness(user_id, db)   # (1.4.5H3)
     out: list[dict] = []
     for r in rows:
         rev = float(r.revenue or 0); net = float(r.net or 0)
@@ -589,6 +661,7 @@ async def product_monthly_rollup(product_id: str, user_id: str, db: AsyncSession
             "cogs":            round(rev - net - fee - ad, 2),   # residual (incl logistics + COGS)
             "net_profit":      round(net, 2),
             "margin_percent":  _margin(net, rev),
+            "completeness":    comp,
             "created_at":      datetime.utcnow(),
         })
     return out

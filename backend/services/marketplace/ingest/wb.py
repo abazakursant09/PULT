@@ -37,6 +37,10 @@ from models.product import Product
 from models.product_placement import ProductPlacement
 from services.account_product_resolver import FOUND, AccountProductIndex
 from services.marketplace.wb_client import wb_client
+from services.source_policy.parent_link import (
+    backfill_children_product as _backfill_children_product,
+    resolve_parent_product as _resolve_parent_product,
+)
 
 MARKETPLACE = "wildberries"
 DATA_TYPES = ("card_content", "prices", "orders", "sales", "stocks", "finance")
@@ -247,6 +251,11 @@ async def _upsert_operation(db, state, *, external_operation_id: str, operation_
     `provider_dataset` records the feed this row came from (orders|sales|finance) so the source-policy
     money reader counts a sale from exactly one feed — WB reports the same sale in both sales and
     finance, and only one is the authoritative money source."""
+    # If this operation has no direct Product but names a parent (WB finance srid == the order op's
+    # external id), inherit the parent's Product — exact id match, same account, ambiguity-safe.
+    if product_id is None and parent:
+        product_id = await _resolve_parent_product(db, state.marketplace_account_id, parent)
+
     row = (await db.execute(
         select(MarketplaceOperation).where(
             MarketplaceOperation.marketplace_account_id == state.marketplace_account_id,
@@ -264,6 +273,10 @@ async def _upsert_operation(db, state, *, external_operation_id: str, operation_
     row.provider_operation_code = provider_code
     row.product_id = product_id
     row.occurred_at = occurred_at
+    # If THIS operation carries a Product, backfill any children that arrived before it (an order
+    # arriving after its finance rows fills those rows now).
+    if product_id is not None:
+        await _backfill_children_product(db, state.marketplace_account_id, external_operation_id, product_id)
     row.status = status
     row.quantity = quantity
     row.amount = amount
