@@ -192,6 +192,10 @@ class ProtectionEvaluation(Base):
     __tablename__ = "protection_evaluations"
 
     id                    = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    # 2.5B: idempotency of a runtime evaluation run. NULL for rows written before 2.5B; a runtime
+    # call passes a UUID and the partial UNIQUE(policy_id, product_id, evaluation_run_id) makes a
+    # repeated run for the same (policy, product) return the existing row instead of a duplicate.
+    evaluation_run_id     = Column(String(36), nullable=True)
     policy_id             = Column(String(36),
                                    ForeignKey("protection_policies.id", ondelete="SET NULL"),
                                    nullable=True)
@@ -219,9 +223,17 @@ class ProtectionEvaluation(Base):
                         name="ck_evaluation_economic_verdict"),
         CheckConstraint(f"actionability IS NULL OR {_in('actionability', ACTIONABILITIES)}",
                         name="ck_evaluation_actionability"),
+        # 2.5B: one Evaluation per (policy, product, run). NULL run_id (pre-2.5B / manual) is exempt,
+        # so history is never blocked; a store-wide policy shares one run_id across its products
+        # because product_id is part of the key.
+        Index("uq_evaluation_run", "policy_id", "product_id", "evaluation_run_id", unique=True,
+              sqlite_where=text("evaluation_run_id IS NOT NULL"),
+              postgresql_where=text("evaluation_run_id IS NOT NULL")),
         Index("ix_evaluation_policy", "policy_id"),
         Index("ix_evaluation_store_time", "marketplace_store_id", "evaluated_at"),
         Index("ix_evaluation_product", "product_id"),
+        # latest-Evaluation-per-(policy, product) lookup
+        Index("ix_evaluation_latest", "policy_id", "product_id", "evaluated_at"),
     )
 
 

@@ -295,6 +295,28 @@ def test_eval_results_are_independent(conn):
     assert r == ("complete", "emergency_zero_or_loss", "unsupported")
 
 
+def _eval_run(c, eid, *, run, product, policy="pol1", store="s1"):
+    c.execute(text(
+        "INSERT INTO protection_evaluations"
+        "(id,policy_id,marketplace_store_id,product_id,evaluation_run_id,verdict,"
+        " missing_fields,reasons,inputs_snapshot,evaluated_at) "
+        "VALUES(:id,:pol,:s,:p,:run,'incomplete','[]','[]','{}',CURRENT_TIMESTAMP)"),
+        {"id": eid, "pol": policy, "s": store, "p": product, "run": run})
+
+
+def test_evaluation_run_id_partial_unique(conn):
+    # 2.5B: one Evaluation per (policy, product, run); NULL run_id exempt (history)
+    _policy(conn, "pol1", "s1")
+    _eval_run(conn, "e1", run="rA", product="X")
+    with pytest.raises(IntegrityError):
+        _eval_run(conn, "e2", run="rA", product="X")        # duplicate run+product → blocked
+    _eval_run(conn, "e3", run="rA", product="Y")            # same run, different product (store-wide) OK
+    _eval_run(conn, "e4", run="rB", product="X")            # different run, same product (append-only) OK
+    _eval_run(conn, "e5", run=None, product="X")
+    _eval_run(conn, "e6", run=None, product="X")            # two NULL run_id rows OK (exempt)
+    assert conn.execute(text("SELECT count(*) FROM protection_evaluations")).scalar() == 5
+
+
 def test_eval_snapshot_preserved(conn):
     _policy(conn, "pol1", "s1")
     _eval(conn, "e1", econ="safe", act="manual_only", snapshot='{"formula_version": "contribution-A-1"}')
@@ -487,7 +509,7 @@ def test_single_alembic_head():
     from alembic.config import Config
     from alembic.script import ScriptDirectory
     heads = ScriptDirectory.from_config(Config("alembic.ini")).get_heads()
-    assert heads == ["pev1a2b3c4d01"], heads
+    assert heads == ["pev2a2b3c4d01"], heads
 
 
 # ── 23/24/25. feature stays OFF; stop_auto_promotion stays contained ─────────
