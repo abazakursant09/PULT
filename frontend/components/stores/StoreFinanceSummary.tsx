@@ -19,6 +19,7 @@ export function StoreFinanceSummary({ storeId }: { storeId: string }) {
   const [data, setData] = useState<StoreFinanceSummaryOut | null>(null)
   const [state, setState] = useState<'loading' | 'ready' | 'failed'>('loading')
   const [resolving, setResolving] = useState(false)
+  const [resolveError, setResolveError] = useState('')
 
   const load = useCallback(async () => {
     try {
@@ -34,10 +35,13 @@ export function StoreFinanceSummary({ storeId }: { storeId: string }) {
   // Resolve the revenue conflict by choosing a source. Nothing shows success until the PATCH AND the
   // re-read of the summary both come back — the seller sees the real, resolved number, never a guess.
   const choose = async (source: 'api' | 'csv') => {
-    setResolving(true)
+    setResolving(true); setResolveError('')
     try {
       await api.sourcePolicy.set(storeId, 'revenue', source)
       await load()
+    } catch {
+      // No false success: the conflict stays, the safe value stands, and the seller is told to retry.
+      setResolveError('Не удалось сохранить выбор источника. Повторите.')
     } finally {
       setResolving(false)
     }
@@ -73,14 +77,17 @@ export function StoreFinanceSummary({ storeId }: { storeId: string }) {
       <CompletenessNote completeness={data.completeness} missingFields={data.missing_fields} />
 
       {data.conflict && data.conflict_candidates && (
-        <ConflictBanner
-          metricLabel="Выручка"
-          apiValue={money(data.conflict_candidates.api)}
-          csvValue={money(data.conflict_candidates.csv)}
-          chosen={data.source}
-          busy={resolving}
-          onChoose={choose}
-        />
+        <>
+          <ConflictBanner
+            metricLabel="Выручка"
+            apiValue={money(data.conflict_candidates.api)}
+            csvValue={money(data.conflict_candidates.csv)}
+            chosen={data.source}
+            busy={resolving}
+            onChoose={choose}
+          />
+          {resolveError && <p className="l-src-note l-src-note--err" role="alert">{resolveError}</p>}
+        </>
       )}
     </div>
   )
