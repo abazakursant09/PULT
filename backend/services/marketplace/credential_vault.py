@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import logging
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -74,3 +75,22 @@ def decrypt(blob: bytes) -> str:
         return _cipher().decrypt(blob).decode()
     except InvalidToken as exc:
         raise ValueError("credential decryption failed (bad key or tampered)") from exc
+
+
+def fingerprint(secret: str) -> str:
+    """A keyed, non-reversible fingerprint of a token, ONLY to detect the SAME token being
+    reused across two connections (PULT-LAUNCH-1.4.5D, Wildberries).
+
+    HMAC, not a plain hash: a bare SHA-256 of a token is offline-guessable and, worse, would be
+    the same value in any system that hashed the same token — so it could correlate a seller's key
+    across services. Keying it with the vault secret (the same trust domain that already guards the
+    ciphertext, production-mandatory) means the fingerprint is meaningless without that secret and
+    cannot be recomputed by anyone who only sees the database.
+
+    This is an equality probe and NOTHING else: it never identifies a cabinet, is never returned by
+    the API, is never logged, and must never drive an automatic merge. Two connections sharing a
+    fingerprint means "the same key was entered twice" — the caller answers that with a safe 409,
+    not by joining anything.
+    """
+    key = _resolve_key()   # same production-mandatory secret that guards the token ciphertext
+    return hmac.new(key, secret.encode(), hashlib.sha256).hexdigest()

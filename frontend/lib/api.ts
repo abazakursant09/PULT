@@ -1172,6 +1172,9 @@ export interface ConnectionCreateBody {
   scope: string
   label?: string | null
   ozon_client_id?: string | null   // Ozon authenticates with a PAIR; the backend rejects it missing
+  // PULT-LAUNCH-1.4.5D: bind the key to a cabinet the seller already created. The backend attaches
+  // to THAT MarketplaceAccount and never mints a second one. Omitted = legacy Settings behaviour.
+  marketplace_account_id?: string | null
 }
 
 export interface VerifyOut {
@@ -1184,6 +1187,57 @@ export interface VerifyOut {
   connection_verification_status: string
   connection_verified_at: string | null
   retry_after_seconds?: number | null   // only when the marketplace supplied one — often null
+}
+
+// Yandex campaign (store) mapping (PULT-LAUNCH-1.4.5G). A safe projection — ids and a label, never an
+// internal UUID. `linked_store_id` is the PULT store already bound to this campaignId, or null.
+export interface CampaignOut {
+  campaign_id: string
+  business_id: string | null
+  label: string | null
+  placement_type: string | null
+  linked_store_id: string | null
+  link_state: 'linked' | 'unlinked'
+}
+export interface CampaignLinkBody {
+  campaign_id: string
+  store_id?: string          // link an EXISTING store …
+  new_store_label?: string   // … or create a new one. Exactly one.
+}
+export interface CampaignLinkOut {
+  campaign_id: string
+  linked_store_id: string
+  link_state: string
+  created_store: boolean
+}
+
+// Source policy (PULT-LAUNCH-1.4.5H). `preference` is the EFFECTIVE choice ('csv' when unset).
+export interface SourcePolicyMetric {
+  metric_type: string
+  preference: 'auto' | 'api' | 'csv'
+  api_supported: boolean
+  api_available: boolean
+  limitation: string | null   // yandex_finance_unsupported | manual_only_csv | api_unsupported
+}
+export interface SourcePolicyOut {
+  store_id: string
+  marketplace: string
+  metrics: SourcePolicyMetric[]
+}
+
+// Resolved financial total of one store (PULT-LAUNCH-1.4.5I-QA2). source/completeness/conflict
+// describe the store's REVENUE resolution (API vs CSV); net_profit is null (never 0) when it can't
+// be formed (an API-sourced store has no cost of goods).
+export interface StoreFinanceSummaryOut {
+  store_id:            string
+  revenue:            number
+  net_profit:         number | null
+  unassigned_revenue: number
+  source:             'api' | 'csv'
+  completeness:       'complete' | 'incomplete'
+  missing_fields:     string[]
+  conflict:           boolean
+  conflict_candidates: { api: number | null; csv: number | null } | null
 }
 
 export interface AutomationRuleOut {
@@ -1283,6 +1337,25 @@ export const api = {
     verify: (id: string, scope: string) =>
       req<VerifyOut>(`/api/connections/${id}/verify`, { method: 'POST', body: JSON.stringify({ scope }) }),
     remove: (id: string) => req<void>(`/api/connections/${id}`, { method: 'DELETE' }),
+    // Yandex campaign (store) mapping (PULT-LAUNCH-1.4.5G). The campaigns a verified Yandex key can
+    // reach, and binding one to a PULT store — an existing one or a new one. Never auto-linked by name.
+    campaigns: (id: string) => req<CampaignOut[]>(`/api/connections/${id}/campaigns`),
+    linkCampaign: (id: string, body: CampaignLinkBody) =>
+      req<CampaignLinkOut>(`/api/connections/${id}/campaigns/link`, {
+        method: 'POST', body: JSON.stringify(body),
+      }),
+  },
+
+  // Source policy (PULT-LAUNCH-1.4.5H): per (store, metric) which source feeds the numbers — API or
+  // CSV. Absent ⇒ effective CSV. The UI reads the effective policy and writes explicit choices; it
+  // never fabricates an 'auto' default on open.
+  sourcePolicy: {
+    get: (storeId: string) =>
+      req<SourcePolicyOut>(`/api/marketplace-stores/${storeId}/source-policy`),
+    set: (storeId: string, metricType: string, preference: 'auto' | 'api' | 'csv') =>
+      req<SourcePolicyMetric>(`/api/marketplace-stores/${storeId}/source-policy/${metricType}`, {
+        method: 'PATCH', body: JSON.stringify({ preference }),
+      }),
   },
 
   // AR-CONTROL: seller-controlled Auto Reviews. Backend is the single source of truth for state and
@@ -1660,17 +1733,82 @@ export const api = {
     },
   },
 
+  // ── Cabinets and stores (keyless, PULT-LAUNCH-1.4.1) ────────────────────────
+  // A cabinet is the seller's marketplace login; a store is what a CSV lands in. No API key is
+  // involved anywhere here — that is the connections API, a different thing entirely.
+  marketplaceAccounts: {
+    // include_stores is opt-in on the backend: without it `stores` comes back null, not empty.
+    list: (includeStores = false) =>
+      req<MarketplaceAccountOut[]>(
+        `/api/marketplace-accounts${includeStores ? '?include_stores=true' : ''}`),
+    // WB/Ozon get their single store created by the backend in the same transaction; Yandex
+    // gets none, and its stores are added one by one with createStore.
+    create: (body: { marketplace: string; label: string }) =>
+      req<MarketplaceAccountOut>('/api/marketplace-accounts', {
+        method: 'POST', body: JSON.stringify(body),
+      }),
+    createStore: (accountId: string, body: { label: string }) =>
+      req<MarketplaceStoreOut>(`/api/marketplace-accounts/${accountId}/stores`, {
+        method: 'POST', body: JSON.stringify(body),
+      }),
+    setStoreStatus: (storeId: string, status: 'active' | 'archived') =>
+      req<MarketplaceStoreOut>(`/api/marketplace-stores/${storeId}`, {
+        method: 'PATCH', body: JSON.stringify({ status }),
+      }),
+  },
+
+  // ── Read-only store catalog (PULT-LAUNCH-1.4.5B) ────────────────────────────
+  marketplaceStores: {
+    products: (storeId: string, params: { page?: number; page_size?: number; search?: string; status?: string } = {}) => {
+      const q = new URLSearchParams()
+      if (params.page)      q.set('page', String(params.page))
+      if (params.page_size) q.set('page_size', String(params.page_size))
+      if (params.search)    q.set('search', params.search)
+      if (params.status)    q.set('status', params.status)
+      const s = q.toString()
+      return req<StoreProductsPage>(`/api/marketplace-stores/${storeId}/products${s ? `?${s}` : ''}`)
+    },
+    imports: (storeId: string, params: { page?: number; page_size?: number; status?: string; import_type?: string } = {}) => {
+      const q = new URLSearchParams()
+      if (params.page)        q.set('page', String(params.page))
+      if (params.page_size)   q.set('page_size', String(params.page_size))
+      if (params.status)      q.set('status', params.status)
+      if (params.import_type) q.set('import_type', params.import_type)
+      const s = q.toString()
+      return req<StoreImportsPage>(`/api/marketplace-stores/${storeId}/imports${s ? `?${s}` : ''}`)
+    },
+    // Resolved financial total of one store (PULT-LAUNCH-1.4.5I-QA2): value + how it was sourced
+    // (API vs CSV), completeness, and an API-vs-CSV revenue conflict with both candidate values.
+    financeSummary: (storeId: string) =>
+      req<StoreFinanceSummaryOut>(`/api/marketplace-stores/${storeId}/finance-summary`),
+  },
+
   csvImport: {
-    upload: (file: File, marketplace?: string, importType?: string) => {
+    // marketplace_store_id is REQUIRED: since PULT-LAUNCH-1.4.2 the backend refuses an upload
+    // without it, and the marketplace is read from that store — never from the client. The
+    // import_type sent here is only a hint; the parser decides the real type from the file and
+    // returns it in the preview.
+    upload: (file: File, marketplaceStoreId: string, importType?: string) => {
       const form = new FormData()
       form.append('file', file)
-      if (marketplace) form.append('marketplace', marketplace)
-      if (importType)  form.append('import_type', importType)
+      form.append('marketplace_store_id', marketplaceStoreId)
+      if (importType) form.append('import_type', importType)
       return reqForm<ImportPreviewResponse>('/api/import/upload', form)
     },
     confirm: (importId: string, mode: 'new' | 'overwrite' = 'new') =>
       req<ImportConfirmResponse>(`/api/import/${importId}/confirm`, {
         method: 'POST', body: JSON.stringify({ mode }),
+      }),
+    conflicts: (importId: string) =>
+      req<ImportConflictRow[]>(`/api/import/${importId}/conflicts`),
+    // Only the three actions the backend implements. There is no per-row overwrite.
+    resolveConflict: (importId: string, body: {
+      row_id: string
+      action: 'link_existing' | 'create_new' | 'leave_unassigned'
+      product_id?: string
+    }) =>
+      req<ImportConflictResolution>(`/api/import/${importId}/conflicts/resolve`, {
+        method: 'POST', body: JSON.stringify(body),
       }),
     history: () => req<ImportHistoryItem[]>('/api/import/history'),
     templateUrl: (marketplace: string, importType: string) =>
@@ -2036,7 +2174,20 @@ export interface PromoStats {
 export interface ImportPreviewResponse {
   import_id:           string
   marketplace:         string | null
+  // The TYPE IS THE SERVER'S ANSWER, not the seller's choice: the parser reads the file's own
+  // columns and decides. Everything downstream (overwrite wording, confirm) must read it here.
   import_type:         string | null
+  marketplace_account_id?: string | null
+  marketplace_store_id?:   string | null
+  account_label?:      string | null
+  store_label?:        string | null
+  new_products?:       number
+  updates?:            number
+  conflicts?:          number
+  unassigned?:         number
+  // Exact number of already-stored csv rows the "replace" mode would delete, computed by the
+  // backend over the real overwrite scope. Never inferred on the client.
+  rows_to_replace?:    number
   total_rows:          number
   valid_rows:          number
   skipped_rows:        number
@@ -2055,6 +2206,106 @@ export interface ImportConfirmResponse {
   import_id:      string
   imported_count: number
   skipped_count:  number
+  linked?:        number
+  conflicts?:     number
+  unassigned?:    number
+  replaced?:      number
+}
+
+// ── Cabinets, stores and their read-only catalog (PULT-LAUNCH-1.4.1 / 1.4.5B) ──
+
+export interface MarketplaceStoreOut {
+  id:                     string
+  marketplace_account_id: string
+  marketplace:            string
+  label:                  string
+  status:                 string          // active | archived
+  placement_type:         string | null
+  external_store_id:      string | null
+  source:                 string
+}
+
+export interface MarketplaceAccountOut {
+  id:                  string
+  marketplace:         string
+  label:               string | null
+  identity_status:     string
+  external_account_id: string | null
+  has_connection:      boolean
+  stores:              MarketplaceStoreOut[] | null   // null unless include_stores was asked for
+}
+
+export interface StoreRef {
+  id:          string
+  label:       string
+  marketplace: string
+  status:      string
+}
+
+export interface StoreProductItem {
+  product_id:       string
+  sku:              string | null
+  name:             string
+  placement_status: string
+  placement_source: string
+  first_seen_at:    string
+  last_seen_at:     string
+}
+
+export interface StoreProductsPage {
+  store:     StoreRef
+  items:     StoreProductItem[]
+  page:      number
+  page_size: number
+  total:     number
+  pages:     number
+}
+
+export interface StoreImportItem {
+  import_id:                string
+  filename:                 string
+  import_type:              string
+  status:                   string
+  created_at:               string
+  confirmed_at:             string | null
+  total_rows:               number
+  imported_count:           number
+  skipped_rows:             number
+  conflicts:                number
+  unassigned:               number
+  has_unresolved_conflicts: boolean
+  source:                   string
+}
+
+export interface StoreImportsPage {
+  store:     StoreRef
+  items:     StoreImportItem[]
+  page:      number
+  page_size: number
+  total:     number
+  pages:     number
+}
+
+export interface ImportConflictCandidate {
+  product_id: string
+  sku:        string | null
+  name:       string | null
+}
+
+export interface ImportConflictRow {
+  row_type:             string
+  row_id:               string
+  sku:                  string | null
+  title:                string | null
+  marketplace:          string | null
+  marketplace_store_id: string | null
+  candidates:           ImportConflictCandidate[]
+}
+
+export interface ImportConflictResolution {
+  row_id:      string
+  link_status: string
+  product_id:  string | null
 }
 
 export interface ImportHistoryItem {

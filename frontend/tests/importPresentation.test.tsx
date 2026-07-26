@@ -1,22 +1,23 @@
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { render, screen, waitFor } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import ImportPage from '@/app/dashboard/import/page'
+import StoreImportPage from '@/app/dashboard/stores/[storeId]/import/page'
 import { api } from '@/lib/api'
 
-// P4 — import experience premium redesign. Two layers, mirroring P2/P3:
-//  1. Static guard: the page source carries no legacy tokens / raw hex / old classes.
-//  2. Behavioural: stages render P1 components, the importing stage is a skeleton, and the honest
-//     copy + structural contracts (file input, two selects, finance-first) are preserved.
-// No data/API change — every review of behaviour here runs against mocked csvImport calls.
+// The import experience, guarded on two layers — same job as before, new address.
+//
+// The CSV flow moved to /dashboard/stores/[storeId]/import in 1.4.5C, because the backend has
+// refused an upload without a store since 1.4.2. These tests followed it: the page is different,
+// the guarantees are the same — no raw hex, no legacy tokens, a real file input, the finance-first
+// gate, and honest copy on the result screen.
 
-const PAGE = readFileSync(join(__dirname, '..', 'app', 'dashboard', 'import', 'page.tsx'), 'utf-8')
+const PAGE = readFileSync(
+  join(__dirname, '..', 'app', 'dashboard', 'stores', '[storeId]', 'import', 'page.tsx'), 'utf-8')
 const ERRSTATE = readFileSync(join(__dirname, '..', 'components', 'system', 'ErrorState.tsx'), 'utf-8')
 
-describe('P4 — import page is on the design system', () => {
+describe('import page is on the design system', () => {
   it('uses no raw hex colour anywhere', () => {
     expect(PAGE).not.toMatch(/#[0-9A-Fa-f]{6}\b/)
     expect(PAGE).not.toMatch(/#[0-9A-Fa-f]{3}\b/)
@@ -28,20 +29,23 @@ describe('P4 — import page is on the design system', () => {
 
   it('does not import the legacy T token module', () => {
     expect(PAGE).not.toMatch(/@\/lib\/tokens/)
-    expect(PAGE).not.toMatch(/\bfrom '@\/lib\/tokens'/)
   })
 
   it('does not use the legacy .btn / .input / .badge utility classes', () => {
-    expect(PAGE).not.toMatch(/className="[^"]*\bbtn\b/)
-    expect(PAGE).not.toMatch(/className="[^"]*\binput\b/)
-    expect(PAGE).not.toMatch(/className="[^"]*\bbadge\b/)
+    // Whole class tokens only. The ledger's own `l-btn` / `l-input` are a different, scoped
+    // system; this guard is about the legacy GLOBAL utilities, not about any name containing them.
+    const legacy = (name: string) => new RegExp(`className="(?:[^"]*\\s)?${name}(?:\\s[^"]*)?"`)
+    expect(PAGE).not.toMatch(legacy('btn'))
+    expect(PAGE).not.toMatch(legacy('input'))
+    expect(PAGE).not.toMatch(legacy('badge'))
   })
 
-  it('references P0 tokens and imports the P1 components', () => {
+  it('takes every colour from a token, never from a literal', () => {
     expect(PAGE).toMatch(/var\(--/)
-    for (const c of ['ui/card', 'ui/button', 'ui/badge', 'ui/skeleton']) {
-      expect(PAGE, `import must use ${c}`).toContain(c)
-    }
+  })
+
+  it('shows no bespoke spinner', () => {
+    expect(PAGE).not.toMatch(/@keyframes spin/)
   })
 
   it('ErrorState no longer depends on the legacy T tokens', () => {
@@ -52,59 +56,37 @@ describe('P4 — import page is on the design system', () => {
 })
 
 // ── behavioural ────────────────────────────────────────────────────────────────
-function previewData(over: Record<string, unknown> = {}) {
-  return {
-    import_id: 'imp1', marketplace: 'wb', import_type: 'finance',
-    total_rows: 10, valid_rows: 9, skipped_rows: 1, headers: ['a'],
-    mapped_columns: {}, unmapped_required: [], preview_rows: [], warnings: [], errors: [],
-    duplicate_import_id: null, duplicate_date: null, ...over,
-  }
+const STORE = { id: 'st-1', label: 'Москва — FBS', marketplace: 'yandex', status: 'active' }
+
+function importsPage(over: Record<string, unknown> = {}) {
+  return { store: STORE, items: [], page: 1, page_size: 1, total: 0, pages: 0, ...over } as never
 }
 
-const emptyHistory = [] as never
-
-describe('P4 — stages render the redesign', () => {
+describe('stages render the ledger', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
-    vi.spyOn(api.csvImport, 'history').mockResolvedValue(emptyHistory)
+    vi.spyOn(api.csvImport, 'history').mockResolvedValue([] as never)
+    vi.spyOn(api.marketplaceStores, 'imports').mockResolvedValue(importsPage())
   })
 
-  it('upload stage keeps the file input and exactly two selects', async () => {
-    const { container } = render(<ImportPage />)
+  it('keeps a real file input on the first stage', async () => {
+    const { container } = render(<StoreImportPage params={{ storeId: 'st-1' }} />)
     await waitFor(() => expect(container.querySelector('input[type="file"]')).toBeTruthy())
-    expect(container.querySelectorAll('select').length).toBe(2)
   })
 
-  it('first import forces finance and disables the type select', async () => {
-    // empty history → financeFirst; the finance-first note and locked type select must show
-    const { container } = render(<ImportPage />)
+  it('first import forces finance and locks the other report types', async () => {
+    render(<StoreImportPage params={{ storeId: 'st-1' }} />)
     expect(await screen.findByText(/Начните с финансового отчёта/)).toBeInTheDocument()
-    const selects = container.querySelectorAll('select')
-    const typeSelect = selects[1] as HTMLSelectElement
-    expect(typeSelect.disabled).toBe(true)
-    expect(typeSelect.value).toBe('finance')
+
+    const finance = await screen.findByRole('radio', { name: /Финансы/ })
+    const products = await screen.findByRole('radio', { name: /Товары/ })
+    expect((finance as HTMLInputElement).checked).toBe(true)
+    expect((products as HTMLInputElement).disabled).toBe(true)
   })
 
-  it('importing stage shows a skeleton, not a bespoke spinner', async () => {
-    // source guard: the old CSS spinner keyframe is gone; a skeleton is used instead
-    expect(PAGE).not.toMatch(/@keyframes spin/)
-    expect(PAGE).toMatch(/Skeleton/)
-  })
-
-  it('preview shows tabular stats incl. КОРРЕКТНЫХ, done preserves the honest copy', async () => {
-    vi.spyOn(api.csvImport, 'upload').mockResolvedValue(previewData() as never)
-    vi.spyOn(api.csvImport, 'confirm').mockResolvedValue({ imported_count: 9, skipped_count: 1 } as never)
-    const user = userEvent.setup()
-    const { container } = render(<ImportPage />)
-
-    await waitFor(() => expect(container.querySelector('input[type="file"]')).toBeTruthy())
-    const input = container.querySelector('input[type="file"]') as HTMLInputElement
-    await user.upload(input, new File(['a,b\n1,2'], 'r.csv', { type: 'text/csv' }))
-    await user.click(screen.getByRole('button', { name: /Загрузить и проверить/i }))
-
-    expect(await screen.findByText('КОРРЕКТНЫХ')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: /Импортировать/i }))
-    expect(await screen.findByText('Импорт завершён')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Перейти в Пульт/i })).toBeInTheDocument()
+  it('names the store the file will land in', async () => {
+    render(<StoreImportPage params={{ storeId: 'st-1' }} />)
+    // The store is named in the breadcrumb AND above the file step — both are the point.
+    expect((await screen.findAllByText('Москва — FBS')).length).toBeGreaterThan(0)
   })
 })

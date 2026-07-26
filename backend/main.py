@@ -16,7 +16,7 @@ from services.sentry_setup import init_sentry
 init_sentry()
 
 from database import init_db
-from routers import auth, products, reviews, pricing, monitor, finance, legal, startup, assistant, chat, mfa, notifications, success_stories, telegram_settings, supplier_verification, suppliers_catalog, logistics, deals, supplier_reviews, promo, referrals, marking, ideas, payments, ai_image_service, csv_import, seo_projects, action_engine, rebuild_tracker, seo_intelligence, creative, events, connections, marketplace_accounts, execution, automation, advertising, seo_execution, product_graph, decisions, analytics, learning, seo, advertising_engine, review_engine, growth_engine, legal_engine, decision_outcome, decision_feed, decision_apply, promotion_activation, today, presentation
+from routers import auth, products, reviews, pricing, monitor, finance, legal, startup, assistant, chat, mfa, notifications, success_stories, telegram_settings, supplier_verification, suppliers_catalog, logistics, deals, supplier_reviews, promo, referrals, marking, ideas, payments, ai_image_service, csv_import, seo_projects, action_engine, rebuild_tracker, seo_intelligence, creative, events, connections, marketplace_accounts, store_catalog, source_policy, execution, automation, advertising, seo_execution, product_graph, decisions, analytics, learning, seo, advertising_engine, review_engine, growth_engine, legal_engine, decision_outcome, decision_feed, decision_apply, promotion_activation, today, presentation
 from routers.ai_image_service import queue_worker as ai_queue_worker
 from tasks.health_monitor import run_health_monitor
 from tasks.seed_catalog import seed_catalog
@@ -156,6 +156,10 @@ app.include_router(events.router,               prefix="/api",         tags=["ev
 # ── Marketplace Execution Layer (ME-1) ────────────────────────────────────────
 app.include_router(connections.router,           prefix="/api",         tags=["connections"])
 app.include_router(marketplace_accounts.router,  prefix="/api",         tags=["marketplace-accounts"])
+# Read-only store catalog (1.4.5B): products and import history of ONE store.
+app.include_router(store_catalog.router,          prefix="/api",         tags=["store-catalog"])
+# Source policy (1.4.5H): per (store, metric) API-vs-CSV preference. Backend contract for 1.4.5I.
+app.include_router(source_policy.router,          prefix="/api",         tags=["source-policy"])
 app.include_router(execution.router,             prefix="/api",         tags=["execution"])
 app.include_router(automation.router,            prefix="/api",         tags=["automation"])
 app.include_router(advertising.router,           prefix="/api",         tags=["advertising"])

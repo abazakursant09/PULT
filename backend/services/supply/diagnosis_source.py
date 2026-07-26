@@ -65,13 +65,22 @@ class SupplyDiagnosis:
         }
 
 
-async def latest_stock(db: AsyncSession, user_id: str, marketplace: str, sku: str) -> Optional[int]:
-    """Most recent observed on-hand stock for one (user, marketplace, sku). None if no row."""
+async def latest_stock(db: AsyncSession, user_id: str, marketplace: str, sku: str,
+                       *, source: str = "csv", store_id: str | None = None) -> Optional[int]:
+    """Most recent observed on-hand stock for one (user, marketplace, sku). None if no row.
+
+    Source-single (PULT-LAUNCH-1.4.5H): reads ONE `source` (default 'csv') so a CSV and an API stock
+    snapshot are never mixed into the same 'latest'. `store_id` scopes to one store."""
+    conds = [
+        ImportedProductRow.user_id == user_id,
+        ImportedProductRow.marketplace == marketplace,
+        ImportedProductRow.sku == sku,
+        ImportedProductRow.source == source,
+    ]
+    if store_id is not None:
+        conds.append(ImportedProductRow.marketplace_store_id == store_id)
     return (await db.execute(
-        select(ImportedProductRow.stock).where(
-            ImportedProductRow.user_id == user_id,
-            ImportedProductRow.marketplace == marketplace,
-            ImportedProductRow.sku == sku)
+        select(ImportedProductRow.stock).where(*conds)
         .order_by(ImportedProductRow.created_at.desc()).limit(1))).scalar()
 
 

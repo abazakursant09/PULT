@@ -1,0 +1,198 @@
+/* Executive Ledger — the visual language of the store screens (PULT-LAUNCH-1.4.5C).
+ *
+ * Scoped on purpose. Every token below is a REDEFINITION of a variable the shared UI components
+ * already read (--bg, --line, --text, --violet …), so `components/ui/*` renders in this language
+ * inside `.ledger` and stays exactly as it was everywhere else. Nothing here leaks: no :root, no
+ * element selectors outside `.ledger`, and styles/globals.css is untouched.
+ *
+ * The one bold element is the ledger itself — hairline rules, a serif name column, monospaced
+ * caps labels and tabular figures. Everything else stays quiet. */
+
+.ledger {
+  /* paper & ink */
+  --bg:          #FCFCFA;
+  --surface:     #FCFCFA;
+  --surface-h:   #F5F5F1;
+  --line:        #DBDBD3;
+  --rule-strong: #B9B9AE;
+  --text:        #15171B;
+  --text-2:      #4A4E56;
+  --text-3:      #83878F;
+
+  /* The accent slots the shared components use. The primary action is ink, not a colour: a
+   * ledger's emphasis comes from weight and rule, never from a bright fill. */
+  --violet:      #15171B;
+  --violet-h:    #2A2E36;
+  --violet-text: #2E5E4E;
+  --violet-dim:  #ECEEE9;
+
+  --ledger-green: #2E5E4E;   /* active, connected — the ledger's own green */
+  --ledger-oxide: #8A3B24;   /* archived, conflicts — an oxide red, never alarm-red */
+
+  --success:     #2E5E4E;
+  --success-dim: #E8EEEA;
+  --danger:      #8A3B24;
+  --danger-dim:  #F5EAE5;
+  --warning:     #8A6A1F;
+  --warning-dim: #F4EFE1;
+
+  /* A ledger has corners, not pills. */
+  --r-sm: 2px;
+
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ledger-sans), 'IBM Plex Sans', system-ui, sans-serif;
+}
+
+/* ── Type roles ──────────────────────────────────────────────────────────────
+ * serif = names (cabinets, stores, page titles) · caps = column heads, statuses,
+ * quiet actions · num = every figure, so columns line up. */
+.ledger .l-serif {
+  font-family: var(--font-ledger-serif), 'Source Serif 4', Palatino, serif;
+  font-weight: 400;
+  letter-spacing: -0.015em;
+}
+.ledger .l-caps {
+  font-family: var(--font-ledger-mono), 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.ledger .l-num {
+  font-family: var(--font-ledger-mono), 'IBM Plex Mono', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Page frame ────────────────────────────────────────────────────────────── */
+.ledger .l-page   { padding: 0 clamp(18px, 4vw, 40px) 96px; }
+.ledger .l-h1     { font-size: clamp(30px, 4vw, 44px); line-height: 1.02; margin: 0; }
+.ledger .l-h2     { font-size: 21px; line-height: 1.25; margin: 0; }
+.ledger .l-head   { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; padding: 44px 0 14px; }
+.ledger .l-rule   { border: 0; border-top: 2px solid var(--text); margin: 0; }
+.ledger .l-hair   { border: 0; border-top: 1px solid var(--line); margin: 0; }
+
+/* ── Rows ─────────────────────────────────────────────────────────────────────
+ * One grid shared by the head and every row, so the columns cannot drift apart. */
+.ledger .l-grid {
+  display: grid;
+  grid-template-columns: minmax(200px, 1fr) 168px 132px 210px;
+  align-items: center;
+  gap: 0 16px;
+}
+.ledger .l-colhead { color: var(--text-3); padding: 9px 0; border-bottom: 1px solid var(--line); }
+.ledger .l-row     { padding: 14px 0; border-bottom: 1px solid var(--line); }
+.ledger .l-row:last-child { border-bottom: 0; }
+.ledger .l-group   { border-top: 1px solid var(--rule-strong); }
+.ledger .l-group:first-child { border-top: 0; }
+.ledger .l-ledger  { border-bottom: 1px solid var(--rule-strong); }
+.ledger .l-indent  { padding-left: 26px; }
+.ledger .l-right   { text-align: right; }
+.ledger .l-acts    { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
+
+.ledger .l-green   { color: var(--ledger-green); }
+.ledger .l-oxide   { color: var(--ledger-oxide); }
+.ledger .l-muted   { color: var(--text-3); }
+.ledger .l-dim     { color: var(--text-3); }
+
+/* Long store names wrap instead of pushing the row sideways. */
+.ledger .l-wrap { overflow-wrap: anywhere; min-width: 0; }
+
+/* ── Controls ─────────────────────────────────────────────────────────────────
+ * Press feedback on every pressable thing (emil): transform only, 160ms, ease-out. */
+.ledger .l-btn,
+.ledger .l-link {
+  transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1), background-color 140ms ease, color 140ms ease;
+}
+.ledger .l-btn:active,
+.ledger .l-link:active { transform: scale(0.97); }
+
+.ledger .l-btn {
+  font-size: 13px; font-weight: 500; color: var(--text);
+  background: none; border: 1px solid var(--rule-strong);
+  padding: 6px 12px; cursor: pointer; white-space: nowrap;
+}
+.ledger .l-btn:hover:not(:disabled) { background: var(--surface-h); }
+.ledger .l-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.ledger .l-btn-ink {
+  font-size: 13.5px; font-weight: 500; color: var(--bg);
+  background: var(--text); border: 1px solid var(--text);
+  padding: 11px 20px; cursor: pointer;
+}
+.ledger .l-btn-ink:hover:not(:disabled) { background: var(--violet-h); }
+.ledger .l-btn-ink:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.ledger .l-link {
+  background: none; border: 0; padding: 0; cursor: pointer;
+  color: var(--text-2); text-align: left;
+}
+.ledger .l-link:hover { color: var(--text); }
+
+.ledger .l-input {
+  width: 100%; background: none; border: 0; border-bottom: 1px solid var(--rule-strong);
+  padding: 6px 0; font: inherit; font-size: 15px; color: var(--text); outline: none;
+  transition: border-color 140ms ease;
+}
+.ledger .l-input:focus { border-bottom-color: var(--text); }
+.ledger .l-input::placeholder { color: var(--text-3); }
+
+.ledger .l-chev { transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1); }
+.ledger .l-collapsed .l-chev { transform: rotate(-90deg); }
+
+/* ── Mobile: the ledger folds into readable stacked rows, never a sideways scroll ── */
+@media (max-width: 720px) {
+  .ledger { overflow-x: hidden; }
+  .ledger .l-grid { grid-template-columns: 1fr auto; row-gap: 8px; }
+  .ledger .l-colhead { display: none; }
+  .ledger .l-c1 { grid-column: 1; grid-row: 1; }
+  .ledger .l-c2 { grid-column: 1; grid-row: 2; }
+  .ledger .l-c3 { grid-column: 2; grid-row: 2; justify-self: end; }
+  .ledger .l-acts { grid-column: 1 / -1; grid-row: 3; justify-content: flex-start; }
+  .ledger .l-head { flex-direction: column; align-items: stretch; gap: 12px; padding-top: 22px; }
+  .ledger .l-btn-ink { width: 100%; padding: 13px 18px; font-size: 15px; }
+  .ledger .l-indent { padding-left: 16px; }
+}
+
+/* ── Источники данных (source policy, 1.4.5I) ─────────────────────────────────── */
+.ledger .l-src-group { padding: 8px 0 4px; }
+.ledger .l-src-group + .l-src-group { margin-top: 22px; border-top: 1px solid var(--rule); padding-top: 18px; }
+.ledger .l-src-group-title {
+  font-family: var(--serif, 'Source Serif 4', Georgia, serif);
+  font-size: 17px; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 4px;
+}
+.ledger .l-src-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap; padding: 11px 0; border-bottom: 1px solid var(--ledger-hair, #EEEDE7);
+}
+.ledger .l-src-label { display: flex; align-items: center; gap: 8px; font-size: 15px; min-width: 140px; }
+.ledger .l-src-tag {
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--ledger-green); border: 1px solid var(--ledger-green); border-radius: 5px; padding: 1px 5px;
+}
+.ledger .l-src-tag--dim { color: var(--text-3); border-color: var(--text-3); }
+.ledger .l-src-choices { display: inline-flex; border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; }
+.ledger .l-src-opt {
+  appearance: none; background: transparent; border: 0; cursor: pointer;
+  font: inherit; font-size: 13px; color: var(--text-2); padding: 7px 12px;
+  border-left: 1px solid var(--rule);
+  transition: background-color 150ms cubic-bezier(0.23, 1, 0.32, 1), color 150ms ease, transform 140ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+.ledger .l-src-opt:first-child { border-left: 0; }
+.ledger .l-src-opt:active:not(:disabled) { transform: scale(0.97); }
+.ledger .l-src-opt--on { background: var(--ledger-green); color: #fff; }
+.ledger .l-src-opt:disabled { opacity: 0.4; cursor: not-allowed; }
+.ledger .l-src-note { font-size: 12.5px; color: var(--text-3); margin: 6px 0 0; flex-basis: 100%; max-width: 60ch; }
+.ledger .l-src-note--group { margin: 0 0 8px; }
+.ledger .l-src-note--err { color: var(--ledger-oxide); }
+@media (hover: hover) and (pointer: fine) {
+  .ledger .l-src-opt:not(:disabled):not(.l-src-opt--on):hover { background: var(--violet-dim); }
+}
+
+/* ── Source conflict (1.4.5I §7) — distinct from an import/SKU conflict ─────────── */
+.ledger .l-conflict { border-left: 2px solid var(--ledger-oxide); padding: 12px 0 12px 14px; margin: 14px 0; }
+.ledger .l-conflict-title { font-weight: 600; font-size: 15px; margin: 0; }
+.ledger .l-conflict-vals { display: flex; gap: 18px; flex-wrap: wrap; font-size: 14px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ledger .l-btn, .ledger .l-link, .ledger .l-chev, .ledger .l-src-opt { transition: none; }
+}

@@ -44,6 +44,12 @@ from .imported_finance import ImportedFinanceRow
 from .imported_product import ImportedProductRow
 from .imported_return import ImportedReturnRow
 from .imported_card_content import ImportedCardContentRow
+# API ingestion cursor/schedule (PULT-LAUNCH-1.4.5E)
+from .api_sync_state import ApiSyncState
+# Normalized marketplace events — orders/sales/returns/finance (PULT-LAUNCH-1.4.5E2)
+from .marketplace_operation import MarketplaceOperation
+# Per (store, metric) source preference: API vs CSV (PULT-LAUNCH-1.4.5H)
+from .store_data_source_policy import StoreDataSourcePolicy
 from .marketplace_category import MarketplaceCategoryRow
 from .marketplace_category_attribute import MarketplaceCategoryAttributeRow
 from .returns_audit import ReturnsAudit

@@ -47,7 +47,7 @@ from schemas.marketplace import ConnectionCreate
 from services.marketplace import executor
 from services.workspace_resolver import WorkspaceMissing, resolve_workspace_id
 
-REV = "spl1a2b3c4d01"
+REV = "sdp1a2b3c4d01"
 PRIOR = "wsp1a2b3c4d01"
 TABLE = "marketplace_accounts"
 CONNS = "marketplace_connections"

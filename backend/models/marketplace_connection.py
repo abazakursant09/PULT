@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, String, DateTime, JSON, ForeignKey, Index, Integer, UniqueConstraint
+from sqlalchemy import Column, String, DateTime, JSON, ForeignKey, Index, Integer, UniqueConstraint, text
 from database import Base
 
 
@@ -63,6 +63,13 @@ class MarketplaceConnection(Base):
     # populates both; tightening to NOT NULL waits until every writer is proven to.
     workspace_id           = Column(String(36), ForeignKey("workspaces.id"), nullable=True)
     marketplace_account_id = Column(String(36), ForeignKey("marketplace_accounts.id"), nullable=True)
+    # Keyed fingerprint of the current token (PULT-LAUNCH-1.4.5D). Set ONLY for Wildberries, whose
+    # API exposes no stable seller id — so the fingerprint is WB's only way to notice the SAME token
+    # entered against a second cabinet. NULL for every other marketplace (Ozon/Yandex dedupe on the
+    # real external_account_id instead) and NULL until a token is stored. It is HMAC, never the token
+    # and never reversible; it is never returned by the API and never logged. It exists to answer one
+    # yes/no question — "is this same key already used elsewhere?" — and must never drive a merge.
+    credential_fingerprint = Column(String(64), nullable=True)
     created_at     = Column(DateTime, default=datetime.utcnow)
     updated_at     = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -74,4 +81,12 @@ class MarketplaceConnection(Base):
         # (a CSV-only cabinet has zero connections; a NOT NULL promotion is a later preflight-gated
         # step), and NULLs are distinct in both PostgreSQL and SQLite, so keyless rows never collide.
         UniqueConstraint("marketplace_account_id", name="uq_mp_conn_account"),
+        # One live token → one connection. A partial unique on the non-null fingerprint refuses the
+        # SAME Wildberries token on a second cabinet (a duplicate cabinet), while NULLs stay distinct
+        # in both engines so non-WB and tokenless rows never collide. A seller reconnecting their own
+        # cabinet reuses the SAME connection row, so the fingerprint does not change and this never
+        # fires against them.
+        Index("uq_mp_conn_fingerprint", "credential_fingerprint", unique=True,
+              sqlite_where=text("credential_fingerprint IS NOT NULL"),
+              postgresql_where=text("credential_fingerprint IS NOT NULL")),
     )

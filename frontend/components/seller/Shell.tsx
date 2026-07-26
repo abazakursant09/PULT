@@ -2,7 +2,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { createContext, useContext, useEffect, useState, useCallback } from 'react'
-import { Home, Upload, MessageSquare, Settings, User, Menu, X } from 'lucide-react'
+import { Home, Store, Upload, MessageSquare, Settings, User, Menu, X } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 
 // ── Shell responsive state (P5) ───────────────────────────────────────────────
@@ -52,6 +52,10 @@ interface NavItem { h: string; l: string; d: string }
 const NAV: { g: string; items: NavItem[] }[] = [
   { g: 'Обзор', items: [{ h: '/dashboard', l: 'Главная', d: 'home' }] },
   { g: 'Данные', items: [
+    // Stores come before the import on purpose: a CSV lands in ONE store (1.4.2), so the store is
+    // the thing that must exist first. "Товары" is NOT listed — the global products page is still
+    // a ComingSoon stub; a store's products live inside that store's page.
+    { h: '/dashboard/stores', l: 'Магазины', d: 'store' },
     { h: '/dashboard/import', l: 'Импорт данных', d: 'import' },
     { h: '/dashboard/reviews', l: 'Отзывы', d: 'chat' },
     // "Мониторинг" is NOT listed — its updates are invented news, a lie until it reports
@@ -69,6 +73,7 @@ const NAV: { g: string; items: NavItem[] }[] = [
 // lucide icons, consistent with the rest of the app (P4). Sized/coloured by the .s-nav CSS.
 const ICON: Record<string, React.ReactNode> = {
   home:   <Home size={17} />,
+  store:  <Store size={17} />,
   import: <Upload size={17} />,
   chat:   <MessageSquare size={17} />,
   gear:   <Settings size={17} />,
@@ -92,8 +97,11 @@ export function Rail() {
         <div key={i}>
           {sec.g && <div className="s-glabel">{sec.g}</div>}
           {sec.items.map(it => (
-            // close the drawer on navigation (mobile); a no-op on desktop where it is never open
-            <Link key={it.h} href={it.h} onClick={close} className={`s-nav${active(it.h) ? ' on' : ''}`}>
+            // close the drawer on navigation (mobile); a no-op on desktop where it is never open.
+            // On the Executive Ledger store routes the active accent is green (PULT-LAUNCH-1.4.5I),
+            // scoped to /dashboard/stores* only — every other section keeps the default accent.
+            <Link key={it.h} href={it.h} onClick={close}
+              className={`s-nav${active(it.h) ? ' on' : ''}${active(it.h) && it.h.startsWith('/dashboard/stores') ? ' s-nav--ledger' : ''}`}>
               <span className="s-nav-ic">{ICON[it.d]}</span>{it.l}
             </Link>
           ))}

@@ -29,6 +29,11 @@
 .s-nav-ic{display:inline-flex;flex:0 0 auto;opacity:.85}
 .s-nav-ic svg{width:17px;height:17px;stroke-width:1.7}
 .s-nav.on .s-nav-ic{color:var(--violet-text);opacity:1}
+/* Executive Ledger store routes only (PULT-LAUNCH-1.4.5I): green active accent, other sections keep
+   the default. Scoped by the s-nav--ledger modifier the Shell adds on /dashboard/stores*. */
+.s-nav.on.s-nav--ledger{background:rgba(46,94,78,.18);color:#fff}
+.s-nav.on.s-nav--ledger .s-nav-ic{color:#6FBF9B}
+.s-nav--ledger:focus-visible{outline:none;box-shadow:0 0 0 1px #2E5E4E}
 .s-foot{margin-top:auto;display:flex;align-items:center;gap:9px;padding:12px 8px 4px;border-top:1px solid var(--hair)}
 .s-foot .av{width:30px;height:30px;border-radius:50%;background:var(--panel-2);border:1px solid var(--hair-2);display:grid;place-items:center;font-size:12px;font-weight:600;color:var(--tx-2)}
 .s-foot .nm{font-size:12.5px;font-weight:550}.s-foot .pl{font-size:11px;color:var(--tx-3)}

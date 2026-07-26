@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import uuid
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -16,10 +17,10 @@ from typing import Literal
 from fastapi import (APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request,
                      UploadFile)
 from rate_limit import limit_import
-from fastapi.responses import PlainTextResponse, Response
+from fastapi.responses import Response
 from pydantic import BaseModel
-from sqlalchemy import delete, func, select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import delete, false as sa_false, func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
@@ -29,9 +30,14 @@ from models.imported_finance import ImportedFinanceRow
 from models.imported_product import ImportedProductRow
 from models.imported_return import ImportedReturnRow
 from models.imported_card_content import ImportedCardContentRow
+from models.marketplace_account import MarketplaceAccount
+from models.marketplace_store import MarketplaceStore
 from models.product import Product
+from models.product_placement import ProductPlacement
 from models.user import User
-from services.product_resolver import build_product_index, resolve, resolution_key
+from services.account_product_resolver import AMBIGUOUS, AccountProductIndex
+from services.marketplace.identity_normalize import to_parser_code
+from services.workspace_resolver import WorkspaceMissing, resolve_workspace_id
 from services.advisory_runtime.after_import import run_producers_for_user
 from tasks.csv_parser import parse_csv, get_template
 
@@ -53,8 +59,19 @@ _ORPHAN_TTL_SECONDS = 3600
 
 class PreviewResponse(BaseModel):
     import_id:          str
+    marketplace_account_id: Optional[str]
+    marketplace_store_id:   Optional[str]
+    account_label:      Optional[str]
+    store_label:        Optional[str]
     marketplace:        Optional[str]
     import_type:        Optional[str]
+    # Advisory dry-run counts (PULT-LAUNCH-1.4.4). Preview writes nothing; confirm re-runs the
+    # resolver inside the transaction, and confirm's result is the truth if state changed since.
+    new_products:       int = 0
+    updates:            int = 0
+    conflicts:          int = 0
+    unassigned:         int = 0
+    rows_to_replace:    int = 0
     total_rows:         int
     valid_rows:         int
     skipped_rows:       int
@@ -87,9 +104,42 @@ _ROW_MODEL = {
 
 
 class ConfirmResponse(BaseModel):
+    import_id:      str
     imported_count: int
     skipped_count:  int
-    import_id:      str
+    linked:         int = 0
+    conflicts:      int = 0
+    unassigned:     int = 0
+    replaced:       int = 0
+    failed:         int = 0
+
+
+class ConflictCandidate(BaseModel):
+    product_id: str
+    sku:        Optional[str]
+    name:       Optional[str]
+
+
+class ConflictRow(BaseModel):
+    row_type:    str
+    row_id:      str
+    sku:         Optional[str]
+    title:       Optional[str]
+    marketplace: Optional[str]
+    marketplace_store_id: Optional[str]
+    candidates:  list[ConflictCandidate]
+
+
+class ResolveRequest(BaseModel):
+    row_id:     str
+    action:     Literal["link_existing", "create_new", "leave_unassigned"]
+    product_id: Optional[str] = None      # required for link_existing; must be in the same account
+
+
+class ResolveResponse(BaseModel):
+    row_id:      str
+    link_status: str
+    product_id:  Optional[str]
 
 
 class FinanceSummaryResponse(BaseModel):
@@ -135,6 +185,35 @@ def _user_upload_dir(user_id: str) -> Path:
     return d
 
 
+async def _workspace_id(db: AsyncSession, user: User) -> str:
+    try:
+        return await resolve_workspace_id(db, str(user.id))
+    except WorkspaceMissing:
+        logger.error("workspace missing for authenticated user")
+        raise HTTPException(500, "Не удалось определить рабочее пространство")
+
+
+async def _owned_active_store(db: AsyncSession, user: User, store_id: str):
+    """Load the caller's ACTIVE store together with its cabinet, or raise.
+
+    Ownership is Store -> Account -> Workspace. marketplace and account_id are READ from the
+    DB here and never trusted from the client. A foreign or missing store returns the same 404.
+    """
+    workspace_id = await _workspace_id(db, user)
+    hit = (await db.execute(
+        select(MarketplaceStore, MarketplaceAccount)
+        .join(MarketplaceAccount, MarketplaceAccount.id == MarketplaceStore.marketplace_account_id)
+        .where(MarketplaceStore.id == store_id, MarketplaceAccount.workspace_id == workspace_id)
+    )).first()
+    if hit is None:
+        raise HTTPException(404, "Магазин не найден")
+    store, account = hit
+    if store.status != "active":
+        raise HTTPException(
+            409, "Магазин архивирован — импорт недоступен. Восстановите магазин или выберите другой.")
+    return store, account
+
+
 def _month_label(period: str) -> str:
     months = ["Январь","Февраль","Март","Апрель","Май","Июнь",
               "Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"]
@@ -151,7 +230,11 @@ def _month_label(period: str) -> str:
 async def upload_csv(
     request:      Request,
     file:         UploadFile = File(...),
-    marketplace:  str        = Form(""),
+    marketplace_store_id: str = Form(None),
+    # Legacy Form field. Kept so the OLD request shape does not 400 at validation, but it is NOT
+    # trusted: the marketplace and account are read from the chosen Store (see below). Form(None)
+    # so the cheap size/empty guards still fire before store validation.
+    marketplace:  str        = Form(None),
     import_type:  str        = Form(""),
     db:           AsyncSession = Depends(get_db),
     user:         User         = Depends(get_current_user),
@@ -185,21 +268,39 @@ async def upload_csv(
     if not raw.strip():
         raise HTTPException(400, "Файл пустой.")
 
-    # Parse
-    mp  = marketplace.strip() or None
-    itype = import_type.strip() or None
-    result = parse_csv(raw, mp, itype)
+    # Store binding (1.4.2): a CSV always lands in ONE chosen store. store_id is Form(None) so the
+    # cheap size/empty guards above still fire first; here we require it and trust ONLY the DB for
+    # the marketplace and account — never the client's `marketplace` form field.
+    if not marketplace_store_id:
+        raise HTTPException(422, "Выберите магазин перед загрузкой файла")
+    store, account = await _owned_active_store(db, user, marketplace_store_id)
 
-    # Duplicate check — same file_hash + user + confirmed
+    # Parse — the parser speaks short codes, so convert the store's full marketplace at the boundary.
+    itype = import_type.strip() or None
+    parser_code = to_parser_code(store.marketplace)
+    if parser_code is None:
+        raise HTTPException(422, "Маркетплейс магазина не поддерживается")
+    result = parse_csv(raw, parser_code, itype)
+
+    eff_type = result.import_type or itype or "unknown"
+
+    # Duplicate check — STORE-scoped (PULT-LAUNCH-1.4.4). The same file is a duplicate only within
+    # the same account + store + import_type + source=csv; the same file in a different store or a
+    # different account is NOT a duplicate. card_content is cabinet-level, so its scope omits the
+    # store (account + import_type + source + file_hash).
     dup_id, dup_date = None, None
-    dup = await db.execute(
-        select(ImportRecord).where(
-            ImportRecord.user_id   == str(user.id),
-            ImportRecord.file_hash == result.file_hash,
-            ImportRecord.status    == "confirmed",
-        ).order_by(ImportRecord.confirmed_at.desc()).limit(1)
-    )
-    dup_rec = dup.scalar_one_or_none()
+    dup_conds = [
+        ImportRecord.file_hash == result.file_hash,
+        ImportRecord.status == "confirmed",
+        ImportRecord.marketplace_account_id == account.id,
+        ImportRecord.import_type == eff_type,
+        ImportRecord.source == "csv",
+    ]
+    if eff_type != "card_content":
+        dup_conds.append(ImportRecord.marketplace_store_id == store.id)
+    dup_rec = (await db.execute(
+        select(ImportRecord).where(*dup_conds)
+        .order_by(ImportRecord.confirmed_at.desc()).limit(1))).scalar_one_or_none()
     if dup_rec:
         dup_id   = dup_rec.id
         dup_date = dup_rec.confirmed_at.strftime("%d.%m.%Y") if dup_rec.confirmed_at else None
@@ -217,10 +318,13 @@ async def upload_csv(
         user_id     = str(user.id),
         filename    = filename[:255],
         file_hash   = result.file_hash,
-        marketplace = result.marketplace or mp or "unknown",
-        import_type = result.import_type or itype or "unknown",
+        marketplace = store.marketplace,                 # FULL identity name, trusted from the store
+        import_type = eff_type,
         status      = "failed" if result.errors else "pending",
         temp_path   = temp_path,
+        marketplace_account_id = account.id,
+        marketplace_store_id   = store.id,
+        source      = "csv",
         total_rows  = result.total_rows,
         valid_rows  = result.valid_rows,
         skipped_rows = result.skipped_rows,
@@ -230,10 +334,24 @@ async def upload_csv(
     await db.commit()
     await db.refresh(rec)
 
+    # Advisory dry-run counts (read-only; nothing is created here).
+    pv = ({"new_products": 0, "updates": 0, "conflicts": 0, "unassigned": 0, "rows_to_replace": 0}
+          if result.errors else
+          await _preview_counts(db, account.id, store.id, eff_type, result))
+
     return PreviewResponse(
         import_id          = rec.id,
-        marketplace        = result.marketplace,
+        marketplace_account_id = account.id,
+        marketplace_store_id   = store.id,
+        account_label      = account.label,
+        store_label        = store.label,
+        marketplace        = store.marketplace,
         import_type        = result.import_type,
+        new_products       = pv["new_products"],
+        updates            = pv["updates"],
+        conflicts          = pv["conflicts"],
+        unassigned         = pv["unassigned"],
+        rows_to_replace    = pv["rows_to_replace"],
         total_rows         = result.total_rows,
         valid_rows         = result.valid_rows,
         skipped_rows       = result.skipped_rows,
@@ -251,281 +369,343 @@ async def upload_csv(
 
 # ── Confirm import ────────────────────────────────────────────────────────────
 
+def _sku_present(value) -> bool:
+    return bool((value or "").strip())
+
+
+@dataclass
+class _Counts:
+    imported: int = 0
+    linked: int = 0
+    conflict: int = 0
+    unassigned: int = 0
+    replaced: int = 0
+
+
+def _overwrite_conditions(import_type: str, account_id: str, store_id: str, result):
+    """Exact overwrite scope for a re-upload (PULT-LAUNCH-1.4.4). Returns (row_model, conditions)
+    or (None, None). Deletes ONLY csv metric rows in this cabinet — never a Product, a
+    ProductPlacement, an api-sourced row, another store, or another period.
+
+      finance / returns — account + store + source=csv + the dates present in the file
+      products          — account + store + source=csv (a store snapshot; ImportedProductRow has
+                          no period, so the whole store's csv snapshot is replaced)
+      card_content      — account + source=csv + the SKUs present in the file (cabinet-level, no
+                          store)
+    """
+    model = _ROW_MODEL.get(import_type)
+    if model is None:
+        return None, None
+    conds = [model.marketplace_account_id == account_id, model.source == "csv"]
+    if import_type in ("finance", "returns"):
+        conds.append(model.marketplace_store_id == store_id)
+        dates = sorted({r.get("date") for r in result.parsed_data if r.get("date")})
+        conds.append(model.date.in_(dates) if dates else sa_false())
+    elif import_type == "products":
+        conds.append(model.marketplace_store_id == store_id)
+    elif import_type == "card_content":
+        skus = sorted({(r.get("sku") or "").strip() for r in result.parsed_data
+                       if (r.get("sku") or "").strip()})
+        conds.append(model.sku.in_(skus) if skus else sa_false())
+    return model, conds
+
+
+async def _preview_counts(db: AsyncSession, account_id: str, store_id: str,
+                          import_type: str, result) -> dict:
+    """READ-ONLY advisory counts for preview (PULT-LAUNCH-1.4.4): new_products / updates / conflicts
+    / unassigned + rows_to_replace (the exact overwrite scope). Creates nothing; confirm re-runs the
+    resolver in the transaction and confirm's result wins if state changed."""
+    prods = (await db.execute(
+        select(Product).where(Product.marketplace_account_id == account_id))).scalars().all()
+    index = AccountProductIndex(prods, account_id)
+    new_products = updates = conflicts = unassigned = 0
+    for row in result.parsed_data:
+        res = index.resolve(sku=row.get("sku", ""))
+        if res.status == AMBIGUOUS:
+            conflicts += 1
+        elif res.product_id is not None:
+            updates += 1
+        elif import_type == "products" and _sku_present(row.get("sku", "")):
+            new_products += 1
+        else:
+            unassigned += 1
+    model, conds = _overwrite_conditions(import_type, account_id, store_id, result)
+    rows_to_replace = 0
+    if model is not None:
+        rows_to_replace = (await db.execute(
+            select(func.count()).select_from(model).where(*conds))).scalar() or 0
+    return {"new_products": new_products, "updates": updates, "conflicts": conflicts,
+            "unassigned": unassigned, "rows_to_replace": rows_to_replace}
+
+
+async def _reconcile_placements(db: AsyncSession, present: set, existing: dict,
+                                account_id: str, store_id: str, now: datetime) -> None:
+    """Ensure a ProductPlacement exists for every product PRESENT in this store per this import.
+
+    Idempotent: a product already placed keeps its first_seen_at and only bumps last_seen_at; a
+    new one is created. A concurrent import creating the same (store, product) races on the DB
+    UNIQUE — we swallow that IntegrityError (it now exists) rather than 500, and still bump
+    last_seen_at. Cross-cabinet placement is impossible: the composite FK (1.3) rejects it.
+    """
+    prior = [pid for pid in present if pid in existing]
+    for pid in [pid for pid in present if pid not in existing]:
+        try:
+            async with db.begin_nested():
+                db.add(ProductPlacement(
+                    id=str(uuid.uuid4()), product_id=pid, marketplace_store_id=store_id,
+                    marketplace_account_id=account_id, source="csv", status="active",
+                    first_seen_at=now, last_seen_at=now))
+                await db.flush()
+        except IntegrityError:
+            prior.append(pid)     # another writer created it first — treat as existing
+    if prior:
+        await db.execute(
+            update(ProductPlacement)
+            .where(ProductPlacement.marketplace_store_id == store_id,
+                   ProductPlacement.product_id.in_(prior))
+            .values(last_seen_at=now))
+
+
+async def _ensure_one_placement(db: AsyncSession, product_id: str, account_id: str,
+                                store_id: str) -> None:
+    """Create-or-touch a single ProductPlacement (used by conflict resolution). Idempotent; a race
+    on the (store, product) UNIQUE is swallowed."""
+    now = datetime.utcnow()
+    exists = (await db.execute(
+        select(ProductPlacement.id).where(
+            ProductPlacement.marketplace_store_id == store_id,
+            ProductPlacement.product_id == product_id))).scalar_one_or_none()
+    if exists:
+        await db.execute(update(ProductPlacement).where(ProductPlacement.id == exists)
+                         .values(last_seen_at=now))
+        return
+    try:
+        async with db.begin_nested():
+            db.add(ProductPlacement(
+                id=str(uuid.uuid4()), product_id=product_id, marketplace_store_id=store_id,
+                marketplace_account_id=account_id, source="csv", status="active",
+                first_seen_at=now, last_seen_at=now))
+            await db.flush()
+    except IntegrityError:
+        pass
+
+
+async def _persist_import_rows(db: AsyncSession, rec: ImportRecord, result, *, mode: str,
+                               user: User) -> _Counts:
+    """Insert the parsed rows store-aware with per-row conflict handling (PULT-LAUNCH-1.4.4).
+
+    Every row lands in the ImportRecord's cabinet + store. Products are resolved WITHIN the account:
+    a SKU that maps to >1 product is a CONFLICT — the row is saved with link_status='conflict' and
+    product_id NULL (never auto-picked), while every safe row still imports. Only products-import
+    creates a Product. card_content is cabinet-level (account_id, no store_id, no placement).
+    """
+    account_id = rec.marketplace_account_id
+    store_id   = rec.marketplace_store_id
+    now = datetime.utcnow()
+    c = _Counts()
+
+    # Safe overwrite: replace only this cabinet's csv rows in the exact scope (store/period/skus).
+    if mode == "overwrite":
+        model, conds = _overwrite_conditions(rec.import_type, account_id, store_id, result)
+        if model is not None:
+            # Serialize concurrent overwrite of the same scope: lock the store (card: the account).
+            # A real row lock on PostgreSQL; a no-op on SQLite, which already serializes writers.
+            if rec.import_type == "card_content":
+                await db.execute(select(MarketplaceAccount.id)
+                                 .where(MarketplaceAccount.id == account_id).with_for_update())
+            else:
+                await db.execute(select(MarketplaceStore.id)
+                                 .where(MarketplaceStore.id == store_id).with_for_update())
+            c.replaced = (await db.execute(
+                select(func.count()).select_from(model).where(*conds))).scalar() or 0
+            if c.replaced:
+                await db.execute(delete(model).where(*conds))
+
+    prods = (await db.execute(
+        select(Product).where(Product.marketplace_account_id == account_id))).scalars().all()
+    index = AccountProductIndex(prods, account_id)
+    existing_pl = dict((await db.execute(
+        select(ProductPlacement.product_id, ProductPlacement.id)
+        .where(ProductPlacement.marketplace_store_id == store_id))).all())
+    present: set = set()
+
+    def _classify(sku, *, may_create=False, title=None, price=None):
+        """Return (product_id, link_status). A row that resolves to >1 product is a conflict and is
+        NEVER auto-picked; may_create=True (products only) creates a Product for a missing SKU."""
+        res = index.resolve(sku=sku)
+        if res.status == AMBIGUOUS:
+            c.conflict += 1
+            return None, "conflict"
+        if res.product_id is not None:
+            c.linked += 1
+            present.add(res.product_id)
+            return res.product_id, "linked"
+        if may_create and _sku_present(sku):
+            new_p = Product(id=str(uuid.uuid4()), user_id=str(user.id),
+                            name=title or sku, marketplace=rec.marketplace, sku=sku, price=price,
+                            marketplace_account_id=account_id, external_product_id=None)
+            db.add(new_p)
+            index.add(new_p)
+            c.linked += 1
+            present.add(new_p.id)
+            return new_p.id, "linked"
+        c.unassigned += 1
+        return None, "unassigned"
+
+    to_insert: list = []
+
+    if rec.import_type == "finance":
+        for row in result.parsed_data:
+            pid, status = _classify(row.get("sku", ""))
+            to_insert.append(ImportedFinanceRow(
+                import_id=rec.id, user_id=str(user.id), marketplace=rec.marketplace,
+                date=row.get("date"), sku=row.get("sku", ""), title=row.get("title", ""),
+                revenue=row.get("revenue", 0.0), commission=row.get("commission", 0.0),
+                logistics=row.get("logistics", 0.0), ad_spend=row.get("ad_spend", 0.0),
+                net_profit=row.get("net_profit", 0.0), quantity=row.get("quantity", 0),
+                product_id=pid, marketplace_account_id=account_id,
+                marketplace_store_id=store_id, source="csv", fetched_at=now, link_status=status))
+
+    elif rec.import_type == "products":
+        for row in result.parsed_data:
+            pid, status = _classify(row.get("sku", ""), may_create=True,
+                                    title=row.get("title"), price=row.get("price"))
+            to_insert.append(ImportedProductRow(
+                import_id=rec.id, user_id=str(user.id), marketplace=rec.marketplace,
+                sku=row.get("sku", ""), title=row.get("title", ""), price=row.get("price"),
+                stock=row.get("stock"), rating=row.get("rating"),
+                reviews_count=row.get("reviews_count"), product_id=pid,
+                marketplace_account_id=account_id, marketplace_store_id=store_id,
+                source="csv", fetched_at=now, link_status=status))
+
+    elif rec.import_type == "returns":
+        for row in result.parsed_data:
+            pid, status = _classify(row.get("sku", ""))
+            to_insert.append(ImportedReturnRow(
+                import_id=rec.id, user_id=str(user.id), marketplace=rec.marketplace,
+                date=row.get("date"), sku=row.get("sku", ""),
+                returns_qty=row.get("returns_qty", 0), return_amount=row.get("return_amount", 0.0),
+                reason=row.get("reason"), product_id=pid,
+                marketplace_account_id=account_id, marketplace_store_id=store_id,
+                source="csv", fetched_at=now, link_status=status))
+
+    elif rec.import_type == "card_content":
+        for row in result.parsed_data:
+            pid, status = _classify(row.get("sku", ""))   # cabinet-level: no store, no placement
+            to_insert.append(ImportedCardContentRow(
+                import_id=rec.id, user_id=str(user.id), marketplace=rec.marketplace,
+                date=row.get("date"), sku=row.get("sku", ""), title=row.get("title"),
+                description=row.get("description"), brand=row.get("brand"),
+                category=row.get("category"), characteristics_json=row.get("characteristics_json"),
+                image_count=row.get("image_count"), image_urls_json=row.get("image_urls_json"),
+                product_id=pid, marketplace_account_id=account_id, source="csv",
+                fetched_at=now, link_status=status))
+
+    # Atomic write: all rows in one flush. Any DB error propagates → confirm rolls back → failed.
+    db.add_all(to_insert)
+    await db.flush()
+    c.imported = len(to_insert)
+
+    await _reconcile_placements(db, present, existing_pl, account_id, store_id, now)
+    return c
+
+
 @router.post("/import/{import_id}/confirm", response_model=ConfirmResponse)
 async def confirm_import(
     import_id: str,
     background_tasks: BackgroundTasks,
-    body: ConfirmRequest = ConfirmRequest(),
+    body: ConfirmRequest = ConfirmRequest(),   # only `mode`; account_id/store_id are NEVER accepted
     db:   AsyncSession = Depends(get_db),
     user: User         = Depends(get_current_user),
 ):
-    rec_q = await db.execute(
+    rec = (await db.execute(
         select(ImportRecord).where(
-            ImportRecord.id      == import_id,
-            ImportRecord.user_id == str(user.id),
-        )
-    )
-    rec: Optional[ImportRecord] = rec_q.scalar_one_or_none()
+            ImportRecord.id == import_id, ImportRecord.user_id == str(user.id))
+    )).scalar_one_or_none()
     if not rec:
         raise HTTPException(404, "Запись импорта не найдена")
     if rec.status == "confirmed":
         raise HTTPException(400, "Этот импорт уже подтверждён")
+    if rec.status == "processing":
+        raise HTTPException(409, "Импорт уже обрабатывается")
     if rec.status == "failed":
-        raise HTTPException(400, "Нельзя подтвердить импорт с ошибками")
+        raise HTTPException(400, "Импорт завершился ошибкой. Загрузите файл заново.")
+    # Legacy record predating store binding (1.4.2): the store is unknown and must never be guessed.
+    if not rec.marketplace_store_id:
+        raise HTTPException(400, "Этот импорт создан до выбора магазина. Загрузите файл заново.")
+    # Re-verify the store is still the caller's and active — it may have been archived since preview.
+    # This also re-proves ownership from the DB, so a body/query cannot redirect the import.
+    await _owned_active_store(db, user, rec.marketplace_store_id)
     if not rec.temp_path or not os.path.exists(rec.temp_path):
         raise HTTPException(400, "Временный файл недоступен. Загрузите файл заново.")
 
-    # Re-parse from temp file. The check above is not a guarantee: the scheduled sweep can delete
-    # this file between that line and this one, and the seller must be told to upload it again —
-    # the same thing the check says — rather than being handed a 500 with a traceback. The window
-    # is tiny and only opens for a file already past its retention window, but "rare" is not
-    # "impossible", and the difference is a clear instruction versus an unexplained error.
-    try:
-        with open(rec.temp_path, "rb") as f:
-            raw = f.read()
-    except FileNotFoundError:
-        raise HTTPException(400, "Временный файл недоступен. Загрузите файл заново.")
-    result = parse_csv(raw, rec.marketplace, rec.import_type)
-
-    if result.errors:
-        raise HTTPException(422, f"Ошибки при повторном разборе: {'; '.join(result.errors)}")
-
-    # An import that would write nothing must not be confirmable. The parser already refuses to
-    # produce a clean result with zero rows, so reaching this is a belt-and-braces guard: the rule
-    # lives on the server because a disabled button is a suggestion, not an enforcement.
-    if result.valid_rows == 0:
-        raise HTTPException(
-            422,
-            "В файле не распознано ни одной строки — импортировать нечего. "
-            "Проверьте, что колонки заполнены, и загрузите файл заново.",
-        )
-
-    # Overwrite: replace the previous copy of THIS file rather than appending a second one.
-    # Scope is exactly the rows of prior CONFIRMED imports with the same (user_id, file_hash),
-    # in the table for this import_type. Strictly this user's own data — the delete is filtered
-    # by user_id, so no other seller's rows can ever be touched. Done only after a clean re-parse
-    # so a bad new file never wipes good existing data. New rows are inserted below as usual.
-    if body.mode == "overwrite":
-        row_model = _ROW_MODEL.get(rec.import_type)
-        if row_model is not None:
-            prior_q = await db.execute(
-                select(ImportRecord.id).where(
-                    ImportRecord.user_id   == str(user.id),
-                    ImportRecord.file_hash == rec.file_hash,
-                    ImportRecord.status    == "confirmed",
-                    ImportRecord.id        != rec.id,
-                )
-            )
-            prior_ids = [r for (r,) in prior_q.all()]
-            if prior_ids:
-                await db.execute(
-                    delete(row_model).where(
-                        row_model.user_id   == str(user.id),
-                        row_model.import_id.in_(prior_ids),
-                    )
-                )
-
-    # Batch insert
-    imported = 0
-    failed   = 0
-    skipped  = 0
-    BATCH    = 200
-
-    # ── Product Spine (Step 1): resolve every row → canonical Product.id ──
-    # Finance rows: resolve only (no auto-create). Product rows: resolve, else
-    # auto-create a Product from the catalog row. Empty sku → product_id stays None.
-    _spine_res = await db.execute(
-        select(Product).where(Product.user_id == str(user.id)).order_by(Product.created_at)
+    # Atomically claim the record: only the request that flips pending -> processing may write rows.
+    # A concurrent confirm sees rowcount 0 and is refused, so two confirms can never both insert.
+    claim = await db.execute(
+        update(ImportRecord)
+        .where(ImportRecord.id == rec.id, ImportRecord.user_id == str(user.id),
+               ImportRecord.status == "pending")
+        .values(status="processing")
     )
-    product_index = build_product_index(_spine_res.scalars().all())
-
-    if rec.import_type == "finance":
-        rows_to_insert = []
-        for row in result.parsed_data:
-            rows_to_insert.append(ImportedFinanceRow(
-                import_id   = rec.id,
-                user_id     = str(user.id),
-                marketplace = rec.marketplace,
-                date        = row.get("date"),
-                sku         = row.get("sku", ""),
-                title       = row.get("title", ""),
-                revenue     = row.get("revenue", 0.0),
-                commission  = row.get("commission", 0.0),
-                logistics   = row.get("logistics", 0.0),
-                ad_spend    = row.get("ad_spend", 0.0),
-                net_profit  = row.get("net_profit", 0.0),
-                quantity    = row.get("quantity", 0),
-                product_id  = resolve(product_index, str(user.id), rec.marketplace, row.get("sku", "")),
-            ))
-            if len(rows_to_insert) >= BATCH:
-                try:
-                    async with db.begin_nested():
-                        db.add_all(rows_to_insert)
-                        await db.flush()
-                    imported += len(rows_to_insert)
-                except SQLAlchemyError as exc:
-                    logger.warning("batch_insert_failed", extra={"rows": len(rows_to_insert), "error": str(exc)})
-                    failed += len(rows_to_insert)
-                rows_to_insert = []
-        if rows_to_insert:
-            try:
-                async with db.begin_nested():
-                    db.add_all(rows_to_insert)
-                    await db.flush()
-                imported += len(rows_to_insert)
-            except SQLAlchemyError as exc:
-                logger.warning("batch_insert_failed", extra={"rows": len(rows_to_insert), "error": str(exc)})
-                failed += len(rows_to_insert)
-
-    elif rec.import_type == "products":
-        rows_to_insert = []
-        for row in result.parsed_data:
-            sku = row.get("sku", "")
-            pid = resolve(product_index, str(user.id), rec.marketplace, sku)
-            if pid is None:
-                key = resolution_key(str(user.id), rec.marketplace, sku)
-                if key is not None:                      # non-empty sku → auto-create Product
-                    new_p = Product(
-                        id          = str(uuid.uuid4()),   # set now: column default applies only at flush
-                        user_id     = str(user.id),
-                        name        = row.get("title") or sku,
-                        marketplace = rec.marketplace,
-                        sku         = sku,
-                        price       = row.get("price"),
-                    )
-                    db.add(new_p)
-                    product_index[key] = new_p.id        # reuse for later rows in this batch
-                    pid = new_p.id
-            rows_to_insert.append(ImportedProductRow(
-                import_id     = rec.id,
-                user_id       = str(user.id),
-                marketplace   = rec.marketplace,
-                sku           = sku,
-                title         = row.get("title", ""),
-                price         = row.get("price"),
-                stock         = row.get("stock"),
-                rating        = row.get("rating"),
-                reviews_count = row.get("reviews_count"),
-                product_id    = pid,
-            ))
-            if len(rows_to_insert) >= BATCH:
-                try:
-                    async with db.begin_nested():
-                        db.add_all(rows_to_insert)
-                        await db.flush()
-                    imported += len(rows_to_insert)
-                except SQLAlchemyError as exc:
-                    logger.warning("batch_insert_failed", extra={"rows": len(rows_to_insert), "error": str(exc)})
-                    failed += len(rows_to_insert)
-                rows_to_insert = []
-        if rows_to_insert:
-            try:
-                async with db.begin_nested():
-                    db.add_all(rows_to_insert)
-                    await db.flush()
-                imported += len(rows_to_insert)
-            except SQLAlchemyError as exc:
-                logger.warning("batch_insert_failed", extra={"rows": len(rows_to_insert), "error": str(exc)})
-                failed += len(rows_to_insert)
-
-    elif rec.import_type == "returns":
-        # Returns rows: resolve to a catalog Product only (no auto-create, like finance).
-        # A returns-only sku without a Product stays product_id=None. Ingestion only.
-        rows_to_insert = []
-        for row in result.parsed_data:
-            rows_to_insert.append(ImportedReturnRow(
-                import_id     = rec.id,
-                user_id       = str(user.id),
-                marketplace   = rec.marketplace,
-                date          = row.get("date"),
-                sku           = row.get("sku", ""),
-                returns_qty   = row.get("returns_qty", 0),
-                return_amount = row.get("return_amount", 0.0),
-                reason        = row.get("reason"),
-                product_id    = resolve(product_index, str(user.id), rec.marketplace, row.get("sku", "")),
-            ))
-            if len(rows_to_insert) >= BATCH:
-                try:
-                    async with db.begin_nested():
-                        db.add_all(rows_to_insert)
-                        await db.flush()
-                    imported += len(rows_to_insert)
-                except SQLAlchemyError as exc:
-                    logger.warning("batch_insert_failed", extra={"rows": len(rows_to_insert), "error": str(exc)})
-                    failed += len(rows_to_insert)
-                rows_to_insert = []
-        if rows_to_insert:
-            try:
-                async with db.begin_nested():
-                    db.add_all(rows_to_insert)
-                    await db.flush()
-                imported += len(rows_to_insert)
-            except SQLAlchemyError as exc:
-                logger.warning("batch_insert_failed", extra={"rows": len(rows_to_insert), "error": str(exc)})
-                failed += len(rows_to_insert)
-
-    elif rec.import_type == "card_content":
-        # Card-content rows (UPLOAD Evidence for SEO): resolve to a catalog Product only (no
-        # auto-create, like finance/returns). A card-only sku without a Product stays
-        # product_id=None. Ingestion only — no diagnosis, no marketplace API.
-        rows_to_insert = []
-        for row in result.parsed_data:
-            rows_to_insert.append(ImportedCardContentRow(
-                import_id            = rec.id,
-                user_id              = str(user.id),
-                marketplace          = rec.marketplace,
-                date                 = row.get("date"),
-                sku                  = row.get("sku", ""),
-                title                = row.get("title"),
-                description          = row.get("description"),
-                brand                = row.get("brand"),
-                category             = row.get("category"),
-                characteristics_json = row.get("characteristics_json"),
-                image_count          = row.get("image_count"),
-                image_urls_json      = row.get("image_urls_json"),
-                product_id           = resolve(product_index, str(user.id), rec.marketplace, row.get("sku", "")),
-            ))
-            if len(rows_to_insert) >= BATCH:
-                try:
-                    async with db.begin_nested():
-                        db.add_all(rows_to_insert)
-                        await db.flush()
-                    imported += len(rows_to_insert)
-                except SQLAlchemyError as exc:
-                    logger.warning("batch_insert_failed", extra={"rows": len(rows_to_insert), "error": str(exc)})
-                    failed += len(rows_to_insert)
-                rows_to_insert = []
-        if rows_to_insert:
-            try:
-                async with db.begin_nested():
-                    db.add_all(rows_to_insert)
-                    await db.flush()
-                imported += len(rows_to_insert)
-            except SQLAlchemyError as exc:
-                logger.warning("batch_insert_failed", extra={"rows": len(rows_to_insert), "error": str(exc)})
-                failed += len(rows_to_insert)
-
-    skipped = result.skipped_rows
-
-    # Update record — store temp_path before nulling for cleanup
-    path_to_delete     = rec.temp_path
-    rec.status         = "confirmed"
-    rec.imported_count = imported
-    rec.skipped_rows   = skipped
-    rec.confirmed_at   = datetime.utcnow()
-    rec.temp_path      = None
     await db.commit()
+    if claim.rowcount == 0:
+        fresh = (await db.execute(
+            select(ImportRecord.status).where(ImportRecord.id == rec.id))).scalar_one_or_none()
+        if fresh == "confirmed":
+            raise HTTPException(400, "Этот импорт уже подтверждён")
+        if fresh == "processing":
+            raise HTTPException(409, "Импорт уже обрабатывается")
+        raise HTTPException(409, "Импорт нельзя подтвердить в текущем состоянии")
 
-    # Delete temp file using path captured before nulling
+    # The record is now 'processing'. Everything below runs under a guard that leaves it 'failed'
+    # on ANY error — it can never become 'confirmed' with a partial write.
+    try:
+        try:
+            with open(rec.temp_path, "rb") as f:
+                raw = f.read()
+        except FileNotFoundError:
+            raise HTTPException(400, "Временный файл недоступен. Загрузите файл заново.")
+
+        result = parse_csv(raw, to_parser_code(rec.marketplace), rec.import_type)
+        if result.errors:
+            raise HTTPException(422, f"Ошибки при повторном разборе: {'; '.join(result.errors)}")
+        if result.valid_rows == 0:
+            raise HTTPException(
+                422,
+                "В файле не распознано ни одной строки — импортировать нечего. "
+                "Проверьте, что колонки заполнены, и загрузите файл заново.",
+            )
+
+        counts = await _persist_import_rows(db, rec, result, mode=body.mode, user=user)
+
+        path_to_delete     = rec.temp_path
+        rec.status         = "confirmed"      # conflicts do NOT fail the import; the file is processed
+        rec.imported_count = counts.imported
+        rec.skipped_rows   = result.skipped_rows
+        rec.confirmed_at   = datetime.utcnow()
+        rec.temp_path      = None
+        await db.commit()
+    except HTTPException:
+        # rollback expires `rec`; use the path param (a plain str), never rec.id, to avoid a lazy
+        # load outside the greenlet. Failed-status write is a separate transaction after rollback.
+        await db.rollback()
+        await db.execute(update(ImportRecord).where(ImportRecord.id == import_id).values(status="failed"))
+        await db.commit()
+        raise
+    except Exception:
+        await db.rollback()
+        await db.execute(update(ImportRecord).where(ImportRecord.id == import_id).values(status="failed"))
+        await db.commit()
+        logger.exception("import_confirm_failed", extra={"import_id": import_id})
+        raise HTTPException(500, "Не удалось завершить импорт")
+
+    # ── post-commit best-effort side effects (a failure here does NOT unconfirm the import) ──
     try:
         if path_to_delete:
             os.unlink(path_to_delete)
     except OSError:
         logger.warning("Could not delete temp file: %s", path_to_delete)
 
-    # Best-effort cleanup of THIS seller's orphans. Only reaches the seller who just confirmed,
-    # which is why tasks/uploads_cleanup.py sweeps every directory on a schedule: a seller who
-    # previews a file and never confirms would otherwise leave it behind for good.
     try:
         import time
         user_dir = _user_upload_dir(str(user.id))
@@ -536,20 +716,126 @@ async def confirm_import(
     except Exception:
         pass
 
-    logger.info(
-        "import_confirmed",
-        extra={"import_id": rec.id, "imported": imported, "failed": failed, "skipped": skipped},
-    )
+    logger.info("import_confirmed",
+                extra={"import_id": import_id, "imported": counts.imported,
+                       "linked": counts.linked, "conflicts": counts.conflict,
+                       "unassigned": counts.unassigned, "replaced": counts.replaced})
 
-    # Analyse THIS seller's newly-landed data now, instead of leaving them to wait for the
-    # scheduler's next due window (24h for most contours). Queued after the response so the
-    # upload does not block on it, using the same BackgroundTasks mechanism already used for
-    # competitor collection. Only runs when rows actually landed — analysing nothing would
-    # produce an empty run and tell the seller "разбор готовится" about no data at all.
-    if imported > 0:
+    if counts.imported > 0:
         background_tasks.add_task(run_producers_for_user, str(user.id))
 
-    return ConfirmResponse(import_id=rec.id, imported_count=imported, skipped_count=skipped)
+    return ConfirmResponse(
+        import_id=import_id, imported_count=counts.imported, skipped_count=result.skipped_rows,
+        linked=counts.linked, conflicts=counts.conflict, unassigned=counts.unassigned,
+        replaced=counts.replaced, failed=0)
+
+
+# ── Conflicts: view & resolve ─────────────────────────────────────────────────
+
+async def _owned_import(db: AsyncSession, import_id: str, user: User) -> ImportRecord:
+    rec = (await db.execute(
+        select(ImportRecord).where(
+            ImportRecord.id == import_id, ImportRecord.user_id == str(user.id))
+    )).scalar_one_or_none()
+    if rec is None:
+        raise HTTPException(404, "Запись импорта не найдена")
+    return rec
+
+
+@router.get("/import/{import_id}/conflicts", response_model=list[ConflictRow])
+async def import_conflicts(
+    import_id: str,
+    db:   AsyncSession = Depends(get_db),
+    user: User         = Depends(get_current_user),
+):
+    """Only THIS import's conflict rows, for the current user. Candidate products are recomputed
+    within the account — never another cabinet's data, never secrets or the whole CSV."""
+    rec = await _owned_import(db, import_id, user)
+    model = _ROW_MODEL.get(rec.import_type)
+    if model is None:
+        return []
+    rows = (await db.execute(
+        select(model).where(model.import_id == import_id,
+                            model.user_id == str(user.id),
+                            model.link_status == "conflict"))).scalars().all()
+    if not rows:
+        return []
+    prods = (await db.execute(
+        select(Product).where(Product.marketplace_account_id == rec.marketplace_account_id))).scalars().all()
+    index = AccountProductIndex(prods, rec.marketplace_account_id)
+    meta = {p.id: (p.sku, p.name) for p in prods}
+    out: list[ConflictRow] = []
+    for r in rows:
+        cands = [ConflictCandidate(product_id=pid, sku=meta.get(pid, (None, None))[0],
+                                   name=meta.get(pid, (None, None))[1])
+                 for pid in index.candidates(sku=r.sku)]
+        out.append(ConflictRow(
+            row_type=rec.import_type, row_id=r.id, sku=r.sku,
+            title=getattr(r, "title", None), marketplace=rec.marketplace,
+            marketplace_store_id=getattr(r, "marketplace_store_id", None), candidates=cands))
+    return out
+
+
+@router.post("/import/{import_id}/conflicts/resolve", response_model=ResolveResponse)
+async def resolve_conflict(
+    import_id: str,
+    body: ResolveRequest,
+    db:   AsyncSession = Depends(get_db),
+    user: User         = Depends(get_current_user),
+):
+    """Seller resolves ONE conflict row: link an existing Product (same account only), create a new
+    Product from the row's safe data, or leave it unassigned. Idempotent — an already-resolved row
+    is returned unchanged. Other rows of the import are never rewritten."""
+    rec = await _owned_import(db, import_id, user)
+    model = _ROW_MODEL.get(rec.import_type)
+    if model is None:
+        raise HTTPException(400, "Импорт неизвестного типа")
+    row = (await db.execute(
+        select(model).where(model.id == body.row_id, model.import_id == import_id,
+                            model.user_id == str(user.id)))).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(404, "Строка не найдена")
+
+    account_id = rec.marketplace_account_id
+    store_id = getattr(row, "marketplace_store_id", None)
+
+    # Idempotent: a row already resolved is returned as-is (no duplicate product, no re-link).
+    if row.link_status != "conflict":
+        return ResolveResponse(row_id=row.id, link_status=row.link_status, product_id=row.product_id)
+
+    if body.action == "leave_unassigned":
+        row.product_id = None
+        row.link_status = "unassigned"
+
+    elif body.action == "link_existing":
+        if not body.product_id:
+            raise HTTPException(422, "Не указан товар")
+        prod = (await db.execute(
+            select(Product).where(Product.id == body.product_id,
+                                  Product.marketplace_account_id == account_id))).scalar_one_or_none()
+        if prod is None:                                   # missing OR another cabinet's product
+            raise HTTPException(404, "Товар не найден в этом кабинете")
+        row.product_id = prod.id
+        row.link_status = "linked"
+        if store_id:
+            await _ensure_one_placement(db, prod.id, account_id, store_id)
+
+    elif body.action == "create_new":
+        if not _sku_present(row.sku):
+            raise HTTPException(422, "Недостаточно данных для создания товара")
+        new_p = Product(id=str(uuid.uuid4()), user_id=str(user.id),
+                        name=getattr(row, "title", None) or row.sku, marketplace=rec.marketplace,
+                        sku=row.sku, price=getattr(row, "price", None),
+                        marketplace_account_id=account_id, external_product_id=None)
+        db.add(new_p)
+        await db.flush()
+        row.product_id = new_p.id
+        row.link_status = "linked"
+        if store_id:
+            await _ensure_one_placement(db, new_p.id, account_id, store_id)
+
+    await db.commit()
+    return ResolveResponse(row_id=row.id, link_status=row.link_status, product_id=row.product_id)
 
 
 # ── Finance summary ───────────────────────────────────────────────────────────

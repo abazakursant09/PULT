@@ -66,6 +66,9 @@ async def read_net_profit(
             ImportedFinanceRow.user_id == user_id,
             ImportedFinanceRow.marketplace.in_(aliases),
             ImportedFinanceRow.sku == str(entity_id),
+            # net_profit is a CSV metric — API revenue must NOT be mixed into it (no cost of goods on
+            # the API side, 1.4.5H2). An API-only store has no CSV finance row → honest absence below.
+            ImportedFinanceRow.source == "csv",
             ImportedFinanceRow.date.isnot(None),
             ImportedFinanceRow.date >= date_from,
             ImportedFinanceRow.date <= date_to,
@@ -134,6 +137,7 @@ async def read_ad_cost_ratio(
             ImportedFinanceRow.user_id == user_id,
             ImportedFinanceRow.marketplace.in_(aliases),
             ImportedFinanceRow.sku == str(entity_id),
+            ImportedFinanceRow.source == "csv",   # CSV metric; never blend API (1.4.5H2)
             ImportedFinanceRow.date.isnot(None),
             ImportedFinanceRow.date >= date_from,
             ImportedFinanceRow.date <= date_to,

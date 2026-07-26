@@ -166,6 +166,45 @@ class WBClient:
             "POST", "/content/v2/cards/update", token=token, json=[card]
         )
 
+    async def list_cards(self, *, token: str, cursor: dict | None = None,
+                         limit: int = 100) -> dict:
+        """Read a page of the seller's product cards (PULT-LAUNCH-1.4.5E ingest).
+
+            POST /content/v2/get/cards/list   (Content category token)
+
+        Cursor pagination: the first request sends only {limit}; each next request copies
+        `updatedAt` + `nmID` from the previous response's `cursor` block. A page shorter than the
+        limit is the last one. Returns the raw {cards, cursor} object for the provider to normalize
+        and to persist the next cursor.
+        """
+        cur: dict = {"limit": int(limit)}
+        if cursor:
+            if cursor.get("updatedAt") is not None:
+                cur["updatedAt"] = cursor["updatedAt"]
+            if cursor.get("nmID") is not None:
+                cur["nmID"] = cursor["nmID"]
+        body = {"settings": {"cursor": cur, "filter": {"withPhoto": -1}}}
+        data = await self._content().request(
+            "POST", "/content/v2/get/cards/list", token=token, json=body)
+        if not isinstance(data, dict):
+            return {"cards": [], "cursor": {}}
+        return data
+
+    async def list_prices(self, *, token: str, offset: int = 0, limit: int = 1000) -> list[dict]:
+        """Read a page of the seller's prices (PULT-LAUNCH-1.4.5E ingest).
+
+            GET /api/v2/list/goods/filter?limit=&offset=   (Prices & Discounts category token)
+
+        Offset pagination: repeat with offset += limit until an empty list. Each item carries the
+        nmID and its price/discount. Returns the list of goods for this page.
+        """
+        data = await self._prices.request(
+            "GET", "/api/v2/list/goods/filter", token=token,
+            params={"limit": int(limit), "offset": int(offset)})
+        if isinstance(data, dict):
+            return ((data.get("data") or {}).get("listGoods")) or []
+        return data if isinstance(data, list) else []
+
     def _content(self) -> "BaseMarketplaceClient":
         if not hasattr(self, "_content_client"):
             self._content_client = BaseMarketplaceClient(settings.wb_content_base)
@@ -183,10 +222,69 @@ class WBClient:
         )
         return data if isinstance(data, list) else []
 
+    # ── Ingest reads (PULT-LAUNCH-1.4.5E2) ────────────────────────────────────
+    async def list_orders(self, *, token: str, date_from: str, flag: int = 0) -> list[dict]:
+        """WB Statistics: GET /api/v1/supplier/orders?dateFrom=&flag=. One row per order line;
+        `srid` is the stable order id, `lastChangeDate` drives incremental paging."""
+        data = await self._statistics().request(
+            "GET", "/api/v1/supplier/orders", token=token,
+            params={"dateFrom": date_from, "flag": flag})
+        return data if isinstance(data, list) else []
+
+    async def list_sales(self, *, token: str, date_from: str, flag: int = 0) -> list[dict]:
+        """WB Statistics: GET /api/v1/supplier/sales?dateFrom=&flag=. One row = one sale OR return;
+        `saleID` (S… sale / R… return) is the stable per-line id, `srid` links back to the order."""
+        return await self.get_sales(token=token, date_from=date_from, flag=flag)
+
+    async def create_warehouse_remains_report(self, *, token: str) -> str:
+        """WB Analytics: POST /api/v1/warehouse_remains → task id. The stocks snapshot is an async
+        report (create → poll → download); the current supplier/stocks sync method was retired."""
+        data = await self._analytics().request(
+            "POST", "/api/v1/warehouse_remains", token=token,
+            params={"groupByNm": "true"})
+        return str(((data or {}).get("data") or {}).get("taskId") or (data or {}).get("taskId") or "")
+
+    async def warehouse_remains_status(self, *, token: str, task_id: str) -> str:
+        """GET /api/v1/warehouse_remains/tasks/{id}/status → 'new'|'processing'|'done'|... ."""
+        data = await self._analytics().request(
+            "GET", f"/api/v1/warehouse_remains/tasks/{task_id}/status", token=token)
+        return str(((data or {}).get("data") or {}).get("status") or (data or {}).get("status") or "")
+
+    async def download_warehouse_remains(self, *, token: str, task_id: str) -> list[dict]:
+        """GET /api/v1/warehouse_remains/tasks/{id}/download → rows (nmId, warehouseName, quantity)."""
+        data = await self._analytics().request(
+            "GET", f"/api/v1/warehouse_remains/tasks/{task_id}/download", token=token)
+        if isinstance(data, list):
+            return data
+        return ((data or {}).get("data")) or [] if isinstance(data, dict) else []
+
+    async def finance_sales_report_detailed(self, *, token: str, date_from: str,
+                                            date_to: str) -> list[dict]:
+        """NEW WB Finance API (replaces the retired v5 reportDetailByPeriod):
+            POST /api/finance/v1/sales-reports/detailed  (Finance category token)
+        Each row carries rrd_id (stable finance row id), srid, supplier_oper_name, quantity and the
+        signed money components."""
+        data = await self._finance().request(
+            "POST", "/api/finance/v1/sales-reports/detailed", token=token,
+            json={"period": {"begin": date_from, "end": date_to}})
+        if isinstance(data, list):
+            return data
+        return ((data or {}).get("data")) or [] if isinstance(data, dict) else []
+
     def _statistics(self) -> "BaseMarketplaceClient":
         if not hasattr(self, "_statistics_client"):
             self._statistics_client = BaseMarketplaceClient(settings.wb_statistics_base)
         return self._statistics_client
+
+    def _analytics(self) -> "BaseMarketplaceClient":
+        if not hasattr(self, "_analytics_client"):
+            self._analytics_client = BaseMarketplaceClient(settings.wb_analytics_base)
+        return self._analytics_client
+
+    def _finance(self) -> "BaseMarketplaceClient":
+        if not hasattr(self, "_finance_client"):
+            self._finance_client = BaseMarketplaceClient(settings.wb_finance_base)
+        return self._finance_client
 
 
 wb_client = WBClient()

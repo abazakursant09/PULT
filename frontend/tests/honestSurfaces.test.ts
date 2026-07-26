@@ -50,13 +50,17 @@ function usages(name: string, definedIn: string): string[] {
 describe('honest surfaces', () => {
   it('allows api.connections ONLY in the surfaces that really connect a cabinet', () => {
     // Each entry earns its place by doing real, backend-enforced work:
-    //   AutoReviewsPanel        — per-connection Auto Reviews consent + enable/disable
-    //   ConnectionsSection      — lists connections, re-check / replace / disconnect
-    //   ConnectMarketplaceDialog — the one place a seller enters an API key
+    //   AutoReviewsPanel      — per-connection Auto Reviews consent + enable/disable
+    //   ConnectionsSection    — read-only status + re-check / disconnect (no create path since 1.4.5I)
+    //   ConnectApiDialog      — the Stores place a seller binds a key to a chosen cabinet (1.4.5D)
+    //   YandexCampaignMapping — reads campaigns + links them to stores after verify (1.4.5G/I)
+    // The old Settings ConnectMarketplaceDialog is gone (1.4.5I): it created a connection with no
+    // marketplace_account_id — the second, account-less path the store flow replaced.
     const ALLOW = [
       join('components', 'reviews', 'AutoReviewsPanel.tsx'),
       join('components', 'connections', 'ConnectionsSection.tsx'),
-      join('components', 'connections', 'ConnectMarketplaceDialog.tsx'),
+      join('components', 'stores', 'ConnectApiDialog.tsx'),
+      join('components', 'stores', 'YandexCampaignMapping.tsx'),
     ]
     const callers = RENDERED.filter((f) => /api\/connections|api\.connections/.test(read(f)))
     // Any OTHER file touching api.connections is still a promise the product cannot keep — a second
@@ -69,6 +73,17 @@ describe('honest surfaces', () => {
     for (const a of ALLOW) {
       expect(callers.some((f) => f.endsWith(a))).toBe(true)
     }
+  })
+
+  it('creates a connection ONLY through the single store flow (never account-less)', () => {
+    // PULT-LAUNCH-1.4.5I: every new connection is bound to a chosen cabinet. Only ConnectApiDialog,
+    // which requires a marketplace_account_id, may call connections.create — a guard against any file
+    // resurrecting the old Settings path that minted an account-less connection.
+    const CREATE_ALLOW = [join('components', 'stores', 'ConnectApiDialog.tsx')]
+    const creators = RENDERED.filter((f) => /connections\.create\b/.test(read(f)))
+    const unexpected = creators.filter((f) => !CREATE_ALLOW.some((a) => f.endsWith(a)))
+    expect(unexpected).toEqual([])
+    expect(creators.some((f) => f.endsWith(CREATE_ALLOW[0]))).toBe(true)
   })
 
   it('never promises a marketplace sync to a seller who has no data', () => {

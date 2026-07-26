@@ -99,6 +99,87 @@ class OzonClient:
             })
         return out
 
+    # ── Ingest reads (PULT-LAUNCH-1.4.5F) ─────────────────────────────────────
+    # All Seller-API reads share the same auth (Api-Key header + Client-Id header) and never commit.
+    async def _seller_get(self, path: str, *, token: str, client_id: str | None, body: dict) -> dict:
+        data = await self._seller.request(
+            "POST", path, token=token, auth_header="Api-Key",
+            extra_headers=self._headers(client_id), json=body)
+        return data if isinstance(data, dict) else {}
+
+    async def list_products(self, *, token: str, client_id: str | None,
+                            last_id: str = "", limit: int = 1000) -> dict:
+        """POST /v3/product/list → {result:{items:[{product_id, offer_id}], last_id, total}}.
+        Cursor pagination via last_id (empty on first page)."""
+        return await self._seller_get(
+            "/v3/product/list", token=token, client_id=client_id,
+            body={"filter": {"visibility": "ALL"}, "last_id": last_id, "limit": int(limit)})
+
+    async def product_info_list(self, *, token: str, client_id: str | None,
+                                product_ids: list) -> list[dict]:
+        """POST /v3/product/info/list → item details (name, offer_id, product_id, ...) for a batch."""
+        data = await self._seller_get(
+            "/v3/product/info/list", token=token, client_id=client_id,
+            body={"product_id": [int(p) for p in product_ids if str(p).isdigit()]})
+        items = (data.get("result") or {}).get("items") if isinstance(data.get("result"), dict) else data.get("items")
+        return items if isinstance(items, list) else []
+
+    async def product_prices(self, *, token: str, client_id: str | None,
+                             last_id: str = "", limit: int = 1000) -> dict:
+        """POST /v5/product/info/prices → {result:{items:[{product_id, offer_id, price:{price,...}}], last_id}}."""
+        return await self._seller_get(
+            "/v5/product/info/prices", token=token, client_id=client_id,
+            body={"filter": {"visibility": "ALL"}, "last_id": last_id, "limit": int(limit)})
+
+    async def product_stocks(self, *, token: str, client_id: str | None,
+                             last_id: str = "", limit: int = 1000) -> dict:
+        """POST /v4/product/info/stocks → {result:{items:[{product_id, offer_id, stocks:[{type,present}]}], last_id}}.
+        A row carries FBO and FBS stock entries; the provider sums each type ONCE (never twice)."""
+        return await self._seller_get(
+            "/v4/product/info/stocks", token=token, client_id=client_id,
+            body={"filter": {"visibility": "ALL"}, "last_id": last_id, "limit": int(limit)})
+
+    async def posting_fbo_list(self, *, token: str, client_id: str | None,
+                               since: str, to: str, offset: int = 0, limit: int = 1000) -> list[dict]:
+        """POST /v2/posting/fbo/list → FBO postings (posting_number, status, products, in_process_at)."""
+        data = await self._seller_get(
+            "/v2/posting/fbo/list", token=token, client_id=client_id,
+            body={"filter": {"since": since, "to": to}, "offset": int(offset), "limit": int(limit),
+                  "with": {"analytics_data": False, "financial_data": False}})
+        rows = data.get("result")
+        return rows if isinstance(rows, list) else []
+
+    async def posting_fbs_list(self, *, token: str, client_id: str | None,
+                               since: str, to: str, offset: int = 0, limit: int = 1000) -> list[dict]:
+        """POST /v3/posting/fbs/list → FBS postings. Confirmed current method."""
+        data = await self._seller_get(
+            "/v3/posting/fbs/list", token=token, client_id=client_id,
+            body={"filter": {"since": since, "to": to}, "offset": int(offset), "limit": int(limit),
+                  "with": {"analytics_data": False, "financial_data": False}})
+        result = data.get("result")
+        if isinstance(result, dict):
+            postings = result.get("postings")
+            return postings if isinstance(postings, list) else []
+        return result if isinstance(result, list) else []
+
+    async def finance_transactions(self, *, token: str, client_id: str | None,
+                                   date_from: str, date_to: str, page: int = 1,
+                                   page_size: int = 1000) -> dict:
+        """POST /v3/finance/transaction/list → {result:{operations:[{operation_id, operation_type,
+        amount, posting:{posting_number}, services:[{name, price}]}], page_count}}. page/page_size."""
+        return await self._seller_get(
+            "/v3/finance/transaction/list", token=token, client_id=client_id,
+            body={"filter": {"date": {"from": date_from, "to": date_to}, "operation_type": [],
+                             "posting_number": "", "transaction_type": "all"},
+                  "page": int(page), "page_size": int(page_size)})
+
+    async def returns_list(self, *, token: str, client_id: str | None,
+                           last_id: int = 0, limit: int = 1000) -> dict:
+        """POST /v1/returns/list → {returns:[{id, product:{sku,offer_id}, ...}], has_next}. Cursor last_id."""
+        return await self._seller_get(
+            "/v1/returns/list", token=token, client_id=client_id,
+            body={"filter": {}, "limit": int(limit), "last_id": int(last_id)})
+
     def _performance(self) -> "BaseMarketplaceClient":
         # lazy: Performance API base (separate from Seller API)
         if not hasattr(self, "_performance_client"):

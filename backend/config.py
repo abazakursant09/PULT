@@ -74,10 +74,23 @@ class Settings(BaseSettings):
     wb_content_base: str = "https://content-api.wildberries.ru"
     wb_advert_base: str = "https://advert-api.wildberries.ru"
     wb_statistics_base: str = "https://statistics-api.wildberries.ru"
+    wb_analytics_base: str = "https://seller-analytics-api.wildberries.ru"
+    wb_finance_base: str = "https://finance-api.wildberries.ru"
     ozon_seller_base: str = "https://api-seller.ozon.ru"
     ozon_performance_base: str = "https://api-performance.ozon.ru"
     yandex_partner_base: str = "https://api.partner.market.yandex.ru"
     marketplace_http_timeout: float = 15.0
+    # PULT-LAUNCH-1.4.5E: master switch for API data ingestion (WB provider + scheduler). OFF by
+    # default and NOT seller-controlled. While false, run_api_sync makes ZERO marketplace calls, so
+    # a verified connection stores no data yet — the honest state until the source policy (1.4.5H)
+    # decides how API and CSV data combine. Nothing tells a seller "данные синхронизированы" here.
+    api_data_sync_enabled: bool = False
+    # Freshness TTL (hours) for API SNAPSHOT metrics (price/stock/catalog/rating). A snapshot may be
+    # chosen as an API source only if its last successful sync is within this window; otherwise the
+    # source resolver falls back to CSV and flags the API data 'stale'. Period metrics
+    # (revenue/fees/returns) use ApiSyncState.coverage_complete instead, never this TTL. Operator
+    # setting, not seller-facing (PULT-LAUNCH-1.4.5H).
+    api_snapshot_freshness_hours: int = 48
     # Master switch for the L4 automation scheduler. Off by default — L4 actions
     # only fire when this is on AND a per-user AutomationRule is enabled.
     automation_enabled: bool = False

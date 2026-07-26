@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional, Any
+from typing import Optional
 from pydantic import BaseModel
 
 
@@ -10,6 +10,10 @@ class ConnectionCreate(BaseModel):
     token: str                            # raw API token — encrypted server-side, never returned
     scope: str                            # feedbacks | prices | advert | content | stocks | promotions
     ozon_client_id: Optional[str] = None
+    # PULT-LAUNCH-1.4.5D: bind this connection to a cabinet the seller already created (e.g. a
+    # CSV-only one). When given, the route attaches to THAT MarketplaceAccount and never mints a
+    # new one. Omitted = the legacy Settings path, which keeps its old find-or-create behaviour.
+    marketplace_account_id: Optional[str] = None
 
 
 class ScopeVerificationOut(BaseModel):
@@ -65,6 +69,55 @@ class ConnectionOut(BaseModel):
     review_sync_fail_count: int = 0                  # consecutive connection-level failures; 0 = healthy
 
     model_config = {"from_attributes": True}
+
+
+# ── Yandex campaign mapping (PULT-LAUNCH-1.4.5G) ─────────────────────────────────
+class CampaignOut(BaseModel):
+    """A Yandex campaign (store) the connection's key can reach. SAFE projection only — ids and a
+    display label, never the raw payload. `linked_store_id` is the MarketplaceStore already bound to
+    this campaignId (via Store.external_store_id), or None; the name is NEVER used to auto-link."""
+    campaign_id: str
+    business_id: Optional[str] = None
+    label: Optional[str] = None
+    placement_type: Optional[str] = None
+    linked_store_id: Optional[str] = None
+    link_state: str                       # linked | unlinked
+
+
+class CampaignLinkRequest(BaseModel):
+    """Bind one campaignId to a store of this connection's cabinet. Exactly one of:
+      * store_id  — link the campaign to an EXISTING store of the cabinet, or
+      * new_store_label — CREATE a new store and link it.
+    A store is never created silently; the caller states which shape it wants."""
+    campaign_id: str
+    store_id: Optional[str] = None
+    new_store_label: Optional[str] = None
+
+
+class CampaignLinkOut(BaseModel):
+    campaign_id: str
+    linked_store_id: str
+    link_state: str = "linked"
+    created_store: bool = False
+
+
+# ── Source policy (PULT-LAUNCH-1.4.5H) ───────────────────────────────────────────
+class SourcePolicyMetric(BaseModel):
+    metric_type: str
+    preference: str                       # EFFECTIVE preference (auto|api|csv); 'csv' when unset
+    api_supported: bool                   # can the API ever be an authoritative source for this metric
+    api_available: bool                   # supported AND currently synced/covered/fresh
+    limitation: Optional[str] = None      # e.g. yandex_finance_unsupported | manual_only_csv
+
+
+class SourcePolicyOut(BaseModel):
+    store_id: str
+    marketplace: str
+    metrics: list[SourcePolicyMetric] = []
+
+
+class SourcePolicyPatch(BaseModel):
+    preference: str                       # auto | api | csv
 
 
 # ── Execution ──────────────────────────────────────────────────────────────────
