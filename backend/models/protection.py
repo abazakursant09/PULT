@@ -73,7 +73,9 @@ class ProtectionPolicy(Base):
     emergency_abs        = Column(Numeric(18, 2), nullable=False, default=Decimal("0"), server_default="0")
     emergency_pct        = Column(Numeric(6, 3), nullable=True)
     target_margin_pct    = Column(Numeric(6, 3), nullable=False, default=Decimal("10"), server_default="10")
-    include_ad_spend     = Column(Boolean, nullable=False, default=True, server_default="1")
+    # 2.4: default OFF — advertising is only deducted when the seller explicitly opts in AND the
+    # ad spend is provably attributed to this product+store; a silent ON would understate cost.
+    include_ad_spend     = Column(Boolean, nullable=False, default=False, server_default="0")
     consent_at           = Column(DateTime, nullable=True)
     consent_version      = Column(String(16), nullable=True)
     consent_revoked_at   = Column(DateTime, nullable=True)

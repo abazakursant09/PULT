@@ -115,7 +115,7 @@ def test_policy_defaults(conn):
     assert row[0] == 0                     # enabled default false
     assert Decimal(str(row[1])) == Decimal("0")
     assert Decimal(str(row[2])) == Decimal("10")
-    assert row[3] == 1                     # include_ad_spend default true
+    assert row[3] == 0                     # 2.4: include_ad_spend default false (opt-in)
 
 
 # ── 4. one store-wide policy per store ───────────────────────────────────────
@@ -426,7 +426,7 @@ def test_single_alembic_head():
     from alembic.config import Config
     from alembic.script import ScriptDirectory
     heads = ScriptDirectory.from_config(Config("alembic.ini")).get_heads()
-    assert heads == ["plp1a2b3c4d01"], heads
+    assert heads == ["pad1a2b3c4d01"], heads
 
 
 # ── 23/24/25. feature stays OFF; stop_auto_promotion stays contained ─────────
