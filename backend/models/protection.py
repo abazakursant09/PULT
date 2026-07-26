@@ -33,6 +33,10 @@ TAX_MODES = ("none", "percent", "per_unit")
 TAX_APPLIED_TO = ("seller_sale_revenue", "contribution")
 COST_CALC_TYPES = ("per_unit", "percent_of_revenue")
 EVALUATION_VERDICTS = ("complete", "incomplete", "stale", "conflicting", "unsupported", "unknown")
+# 2.5A: the two OTHER results of the 2.4 engine, stored in their own validated columns (never in the
+# calculation-status `verdict`, never only in the JSON snapshot). NULL means "not recorded yet".
+ECONOMIC_VERDICTS = ("safe", "below_target_margin", "emergency_zero_or_loss")
+ACTIONABILITIES = ("executable", "manual_only", "unsupported")
 ACTION_STATES = (
     "detected", "data_check", "incomplete", "stale", "conflicting", "unsupported",
     "eligible", "emergency", "low_margin", "safe", "awaiting_seller",
@@ -197,7 +201,11 @@ class ProtectionEvaluation(Base):
     product_id            = Column(String(36), nullable=True)   # soft ref (evidence outlives placement)
     projected_contribution = Column(Numeric(18, 2), nullable=True)   # NULL, never 0, when unknown
     contribution_pct      = Column(Numeric(6, 3), nullable=True)
-    verdict               = Column(String(16), nullable=False)
+    verdict               = Column(String(16), nullable=False)   # = calculation_status (unchanged)
+    # 2.5A: the economic result and the actionability result — INDEPENDENT of calculation_status.
+    # NULL/NULL for any row written before this slice; no backfill, no guessing from inputs_snapshot.
+    economic_verdict      = Column(String(24), nullable=True)     # safe|below_target_margin|emergency_zero_or_loss
+    actionability         = Column(String(16), nullable=True)     # executable|manual_only|unsupported
     missing_fields        = Column(JSON, nullable=False, default=list)
     reasons               = Column(JSON, nullable=False, default=list)
     inputs_snapshot       = Column(JSON, nullable=False, default=dict)
@@ -205,6 +213,12 @@ class ProtectionEvaluation(Base):
 
     __table_args__ = (
         CheckConstraint(_in("verdict", EVALUATION_VERDICTS), name="ck_evaluation_verdict"),
+        # each new column validates its OWN dictionary or is NULL — the DB never enforces a
+        # cross-result rule (e.g. it must allow emergency + unsupported); consistency is a service job.
+        CheckConstraint(f"economic_verdict IS NULL OR {_in('economic_verdict', ECONOMIC_VERDICTS)}",
+                        name="ck_evaluation_economic_verdict"),
+        CheckConstraint(f"actionability IS NULL OR {_in('actionability', ACTIONABILITIES)}",
+                        name="ck_evaluation_actionability"),
         Index("ix_evaluation_policy", "policy_id"),
         Index("ix_evaluation_store_time", "marketplace_store_id", "evaluated_at"),
         Index("ix_evaluation_product", "product_id"),
