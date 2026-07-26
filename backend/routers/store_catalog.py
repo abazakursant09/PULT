@@ -37,9 +37,11 @@ from models.marketplace_store import MarketplaceStore
 from models.product import Product
 from models.product_placement import ProductPlacement
 from models.user import User
+from schemas.finance import RevenueConflictCandidates, StoreFinanceSummaryOut
 from schemas.store_catalog import (
     StoreImportItem, StoreImportsPage, StoreProductItem, StoreProductsPage, StoreRef,
 )
+from services.finance_aggregator import store_financial_totals
 from services.workspace_resolver import WorkspaceMissing, resolve_workspace_id
 
 import logging
@@ -239,6 +241,37 @@ async def store_imports(
             for rec in records
         ],
         page=page, page_size=page_size, total=total, pages=_pages(total, page_size),
+    )
+
+
+# ── Resolved financial total of one store (PULT-LAUNCH-1.4.5I-QA2) ─────────────
+@router.get("/marketplace-stores/{store_id}/finance-summary", response_model=StoreFinanceSummaryOut)
+async def store_finance_summary(
+    store_id: str,
+    db:   AsyncSession = Depends(get_db),
+    user: User         = Depends(get_current_user),
+):
+    """The store's resolved money total + how it was sourced.
+
+    Reuses finance_aggregator.store_financial_totals verbatim — no new calculation. `source`,
+    `completeness` and `conflict` describe the store's REVENUE resolution (API vs CSV); a conflict is
+    an API-vs-CSV revenue disagreement the seller resolves by choosing the revenue source, never a
+    claim about every metric. net_profit is null (never 0) when an API-sourced store lacks cost of
+    goods. Ownership is Store→Account→Workspace, and a foreign or missing store returns the SAME 404.
+    """
+    store = await _owned_store(db, user, store_id)
+    totals = await store_financial_totals(store.id, db)
+    cands = totals.get("conflict_candidates")
+    return StoreFinanceSummaryOut(
+        store_id=store.id,
+        revenue=totals["revenue"],
+        net_profit=totals["net_profit"],
+        unassigned_revenue=totals["unassigned_revenue"],
+        source=totals["source"],
+        completeness=totals["completeness"],
+        missing_fields=totals.get("missing_fields", []),
+        conflict=totals["conflict"],
+        conflict_candidates=(RevenueConflictCandidates(**cands) if cands else None),
     )
 
 

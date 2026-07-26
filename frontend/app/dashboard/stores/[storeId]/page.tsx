@@ -7,6 +7,7 @@ import { LedgerShell } from '@/components/stores/LedgerShell'
 import { StoreImportsTable } from '@/components/stores/StoreImportsTable'
 import { StoreProductsTable } from '@/components/stores/StoreProductsTable'
 import { SourcePolicySection } from '@/components/stores/SourcePolicySection'
+import { StoreFinanceSummary } from '@/components/stores/StoreFinanceSummary'
 import { marketplaceLabel } from '@/components/stores/CabinetGroup'
 
 // One store: what is in it, and what was loaded into it.
@@ -110,7 +111,10 @@ export default function StorePage({ params }: { params: { storeId: string } }) {
         </div>
       )}
 
-      <h2 className="l-serif l-h2" style={{ padding: '34px 0 10px' }}>Товары магазина</h2>
+      <h2 className="l-serif l-h2" style={{ padding: '34px 0 10px' }}>Финансовый итог</h2>
+      <StoreFinanceSummary storeId={storeId} />
+
+      <h2 className="l-serif l-h2" style={{ padding: '40px 0 10px' }}>Товары магазина</h2>
       <StoreProductsTable storeId={storeId} />
 
       <h2 className="l-serif l-h2" style={{ padding: '40px 0 10px' }}>Источники данных</h2>

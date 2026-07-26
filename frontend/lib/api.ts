@@ -1225,6 +1225,21 @@ export interface SourcePolicyOut {
   metrics: SourcePolicyMetric[]
 }
 
+// Resolved financial total of one store (PULT-LAUNCH-1.4.5I-QA2). source/completeness/conflict
+// describe the store's REVENUE resolution (API vs CSV); net_profit is null (never 0) when it can't
+// be formed (an API-sourced store has no cost of goods).
+export interface StoreFinanceSummaryOut {
+  store_id:            string
+  revenue:            number
+  net_profit:         number | null
+  unassigned_revenue: number
+  source:             'api' | 'csv'
+  completeness:       'complete' | 'incomplete'
+  missing_fields:     string[]
+  conflict:           boolean
+  conflict_candidates: { api: number | null; csv: number | null } | null
+}
+
 export interface AutomationRuleOut {
   id: string
   contour: string
@@ -1762,6 +1777,10 @@ export const api = {
       const s = q.toString()
       return req<StoreImportsPage>(`/api/marketplace-stores/${storeId}/imports${s ? `?${s}` : ''}`)
     },
+    // Resolved financial total of one store (PULT-LAUNCH-1.4.5I-QA2): value + how it was sourced
+    // (API vs CSV), completeness, and an API-vs-CSV revenue conflict with both candidate values.
+    financeSummary: (storeId: string) =>
+      req<StoreFinanceSummaryOut>(`/api/marketplace-stores/${storeId}/finance-summary`),
   },
 
   csvImport: {

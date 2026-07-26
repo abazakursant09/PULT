@@ -97,8 +97,11 @@ export function Rail() {
         <div key={i}>
           {sec.g && <div className="s-glabel">{sec.g}</div>}
           {sec.items.map(it => (
-            // close the drawer on navigation (mobile); a no-op on desktop where it is never open
-            <Link key={it.h} href={it.h} onClick={close} className={`s-nav${active(it.h) ? ' on' : ''}`}>
+            // close the drawer on navigation (mobile); a no-op on desktop where it is never open.
+            // On the Executive Ledger store routes the active accent is green (PULT-LAUNCH-1.4.5I),
+            // scoped to /dashboard/stores* only — every other section keeps the default accent.
+            <Link key={it.h} href={it.h} onClick={close}
+              className={`s-nav${active(it.h) ? ' on' : ''}${active(it.h) && it.h.startsWith('/dashboard/stores') ? ' s-nav--ledger' : ''}`}>
               <span className="s-nav-ic">{ICON[it.d]}</span>{it.l}
             </Link>
           ))}

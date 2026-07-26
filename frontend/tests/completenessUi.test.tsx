@@ -2,20 +2,13 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import { CompletenessNote, ConflictBanner, SourceTag } from '@/components/stores/Completeness'
+import { CompletenessNote, ConflictBanner } from '@/components/stores/Completeness'
 
 // PULT-LAUNCH-1.4.5I §7/§8/§9 — honest completeness + conflict. Missing data reads as "нет данных",
 // never 0; an exact profit is never shown while a required input is missing; a source conflict shows
 // both numbers and resolves via a real policy choice, never a sum.
 
 describe('completeness + conflict surfaces', () => {
-  it('names the source, never a raw value', () => {
-    const { rerender } = render(<SourceTag source="api" />)
-    expect(screen.getByText('Источник: API')).toBeInTheDocument()
-    rerender(<SourceTag source="csv" />)
-    expect(screen.getByText('Источник: CSV')).toBeInTheDocument()
-  })
-
   it('says cost of goods is missing and profit is not computed', () => {
     render(<CompletenessNote completeness="incomplete" missingFields={['cogs']} />)
     expect(screen.getByText(/Нет данных о себестоимости\. Прибыль и маржа не рассчитаны\./)).toBeInTheDocument()

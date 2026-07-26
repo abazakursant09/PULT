@@ -7,14 +7,7 @@
 // shown while a required input (cost of goods, ad spend) is missing. The conflict banner offers the
 // real resolution: choosing a source writes the source policy (a PATCH), it never sums the two.
 
-export type Source = 'api' | 'csv' | null
 export type Completeness = 'complete' | 'incomplete' | 'no_data'
-
-export function SourceTag({ source }: { source: Source }) {
-  if (source === 'api') return <span className="l-src-tag">Источник: API</span>
-  if (source === 'csv') return <span className="l-src-tag l-src-tag--dim">Источник: CSV</span>
-  return null
-}
 
 export function CompletenessNote({ completeness, missingFields = [] }: {
   completeness: Completeness

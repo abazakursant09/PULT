@@ -9,8 +9,9 @@ import { Rail, SellerBar, NavProvider, ShellFrame } from '@/components/seller/Sh
 // hamburger + overlay + Escape) plus static guards on the shell CSS/TSX (violet active, scoped
 // motion, ≥44px touch target). Presentation only — no routes, labels or hrefs change.
 
+const nav = vi.hoisted(() => ({ path: '/dashboard/import' }))
 vi.mock('next/navigation', () => ({
-  usePathname: () => '/dashboard/import',
+  usePathname: () => nav.path,
   useRouter: () => ({ push: vi.fn() }),
 }))
 
@@ -56,9 +57,40 @@ describe('P5 — navigation contents (unchanged)', () => {
   })
 
   it('marks the current route active', () => {
+    nav.path = '/dashboard/import'
     const { container } = renderShell()
     const active = container.querySelector('.s-nav.on')
     expect(active?.getAttribute('href')).toBe('/dashboard/import')
+  })
+})
+
+// PULT-LAUNCH-1.4.5I — the active accent is GREEN only on the Executive Ledger store routes; every
+// other section keeps the default accent.
+describe('1.4.5I — scoped green nav on store routes', () => {
+  it('a NON-store active route does not get the ledger green modifier', () => {
+    nav.path = '/dashboard/import'
+    const { container } = renderShell()
+    const active = container.querySelector('.s-nav.on')
+    expect(active?.getAttribute('href')).toBe('/dashboard/import')
+    expect(active?.className).not.toContain('s-nav--ledger')
+  })
+
+  it('the active store route carries the ledger green modifier', () => {
+    nav.path = '/dashboard/stores/abc'
+    const { container } = renderShell()
+    const active = container.querySelector('.s-nav.on')
+    expect(active?.getAttribute('href')).toBe('/dashboard/stores')
+    expect(active?.className).toContain('s-nav--ledger')
+    nav.path = '/dashboard/import'   // restore for other tests
+  })
+
+  it('the green accent is scoped to s-nav--ledger and the default stays violet', () => {
+    // default active stays the P0 violet …
+    expect(CSS.match(/\.s-nav\.on\{[^}]*\}/)?.[0] ?? '').toMatch(/var\(--violet/)
+    // … and the store-route override is a distinct green rule, never repainting other sections.
+    const green = CSS.match(/\.s-nav\.on\.s-nav--ledger\{[^}]*\}/)?.[0] ?? ''
+    expect(green).toMatch(/46,94,78|2E5E4E/)
+    expect(CSS).toMatch(/\.s-nav\.on\.s-nav--ledger \.s-nav-ic\{[^}]*(6FBF9B|2E5E4E)/)
   })
 })
 

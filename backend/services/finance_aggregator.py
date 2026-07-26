@@ -464,9 +464,12 @@ async def store_financial_totals(store_id: str, db: AsyncSession) -> dict:
     csv_rev, csv_net = float(row.revenue), float(row.net)
     out = {"revenue": round(csv_rev, 2), "net_profit": round(csv_net, 2),
            "unassigned_revenue": round(float(row.unassigned_revenue), 2),
-           "source": "csv", "completeness": "complete", "missing_fields": [], "conflict": False}
+           "source": "csv", "completeness": "complete", "missing_fields": [], "conflict": False,
+           "conflict_candidates": None}
 
-    # Resolve API vs CSV for this store's revenue (flag off ⇒ CSV, byte-identical to before).
+    # Resolve API vs CSV for this store's REVENUE only (flag off ⇒ CSV, byte-identical to before).
+    # `conflict` here is specifically an API-vs-CSV revenue disagreement, not a claim about every
+    # financial metric — the seller resolves it by choosing the revenue source.
     if settings.api_data_sync_enabled:
         store = await db.get(MarketplaceStore, store_id)
         marketplace = _canon_mp(store.marketplace) if store else None
@@ -479,6 +482,13 @@ async def store_financial_totals(store_id: str, db: AsyncSession) -> dict:
                                         csv_value=Decimal(str(csv_rev)))
             out["source"] = res.source or "csv"
             out["conflict"] = res.conflict
+            if res.conflict and res.conflict_candidates:
+                # Reuse the candidates the resolver already computed — never re-summed, never invented.
+                c = res.conflict_candidates
+                out["conflict_candidates"] = {
+                    "api": (float(c["api"]) if c.get("api") is not None else None),
+                    "csv": (float(c["csv"]) if c.get("csv") is not None else None),
+                }
             if res.source == "api":
                 out["revenue"] = round(float(res.value), 2) if res.value is not None else 0.0
                 # net profit follows the revenue source; API has no cost of goods → suppress exact.

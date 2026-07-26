@@ -39,9 +39,12 @@ function imports(over: Partial<StoreImportsPage> = {}): StoreImportsPage {
 describe('store page', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
-    // The store page now shows a source-policy section (1.4.5I); give it an honest empty policy so
-    // these product/upload tests exercise the catalog surfaces without a network error.
+    // The store page now shows a source-policy section + a finance summary (1.4.5I/QA2); give them
+    // honest empty/CSV data so these product/upload tests exercise the catalog surfaces cleanly.
     vi.spyOn(api.sourcePolicy, 'get').mockResolvedValue({ store_id: 'st-1', marketplace: 'wildberries', metrics: [] })
+    vi.spyOn(api.marketplaceStores, 'financeSummary').mockResolvedValue({
+      store_id: 'st-1', revenue: 0, net_profit: 0, unassigned_revenue: 0, source: 'csv',
+      completeness: 'complete', missing_fields: [], conflict: false, conflict_candidates: null })
   })
 
   it('lists the products of THIS store', async () => {
@@ -65,9 +68,11 @@ describe('store page', () => {
     const { container } = render(<StorePage params={{ storeId: 'st-1' }} />)
 
     expect(await screen.findByText('Без показателей')).toBeInTheDocument()
-    const text = container.textContent ?? ''
+    // The PRODUCTS table promises no per-product metric column (the store-level «Финансовый итог» is
+    // a separate, real section — 1.4.5I/QA2). Assert the products column header carries no metric.
+    const colhead = container.querySelector('.l-colhead')?.textContent ?? ''
     for (const promised of ['Выручка', 'Прибыль', 'Остаток', 'Рейтинг']) {
-      expect(text).not.toContain(promised)
+      expect(colhead).not.toContain(promised)
     }
   })
 
