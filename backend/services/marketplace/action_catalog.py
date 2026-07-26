@@ -155,22 +155,15 @@ def _validate_stop_auto_promotion(payload: dict) -> None:
 
 
 async def _dispatch_stop_auto_promotion(token: str, payload: dict, ctx: dict) -> dict:
-    mp = ctx.get("marketplace")
-    enabled = bool(payload.get("enabled", False))   # stop → disable participation
-    if mp == "wildberries":
-        resp = await wb_client.set_auto_promotion(
-            token=token, offer_id=str(payload["offer_id"]), enabled=enabled)
-    elif mp == "ozon":
-        resp = await ozon_client.set_auto_promotion(
-            token=token, client_id=ctx.get("ozon_client_id"),
-            offer_id=str(payload["offer_id"]), enabled=enabled)
-    else:
-        raise ExecutionError(ExecutionError.VALIDATION,
-                             f"stop_auto_promotion: unsupported marketplace {mp}")
-    return {
-        "api_request_id": (resp or {}).get("requestId") if isinstance(resp, dict) else None,
-        "offer_id": payload["offer_id"], "enabled": enabled,
-    }
+    # 2.1A CONTAINMENT — defense-in-depth belt. NEVER call a marketplace here. No wired provider
+    # path delivers a real auto-promotion EXIT: WB's /api/v1/promotions/participation is unconfirmed,
+    # Ozon's /v1/actions/products/deactivate is an ordinary-action opt-out (not Hot Sale / auto), and
+    # Yandex has no write API. The executor fail-closes this action before dispatch (0 provider
+    # calls); this raise guarantees that even a direct dispatch call cannot reach wb_client/ozon_client.
+    raise ExecutionError(
+        ExecutionError.CAPABILITY_NOT_SUPPORTED,
+        "stop_auto_promotion is contained (2.1A): automatic auto-promotion exit is not supported",
+    )
 
 
 def _revert_stop_auto_promotion(payload: dict, result: dict) -> tuple[str, dict]:

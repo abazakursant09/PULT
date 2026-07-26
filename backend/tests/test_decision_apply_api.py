@@ -18,7 +18,6 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from database import Base
-import models  # registers tables
 from models.decision import Decision
 from models.engine_signal_decision_link import EngineSignalDecisionLink
 from models.advertising_signal import AdvertisingSignal
@@ -33,7 +32,11 @@ from routers.decision_apply import (
     PreviewResponse, ConfirmResponse,
 )
 
-IKEY = "adv_ad_on_low_stock:wildberries:SKU1"
+# 2.1A: stop_auto_promotion is contained (non-executable). This suite exercises the GENERIC
+# apply-UX machinery, so it now rides a still-executable lever — reduce_discount (WB), payload
+# {offer_id, discount:0}, the same offer_id-only derivation, via the pricing_negative_margin signal.
+IKEY = "pricing_negative_margin:wildberries:SKU1"
+ACTION = "reduce_discount"
 
 
 def _run(c):
@@ -56,28 +59,29 @@ class _User:
 async def _seed(db, uid, *, with_listing=True, with_connection=True, mp="wildberries",
                 sku="SKU1", ikey=IKEY):
     did = str(uuid.uuid4())
-    db.add(Decision(id=did, user_id=uid, problem="adv", action_key="stop_auto_promotion",
+    db.add(Decision(id=did, user_id=uid, problem="pricing", action_key=ACTION,
                     insight_key=ikey, status="open"))
-    db.add(EngineSignalDecisionLink(user_id=uid, contour="advertising",
-           signal_table="advertising_signal", signal_id="sig1", insight_key=ikey,
-           action_key="stop_auto_promotion", decision_id=did, link_status="promoted",
+    db.add(EngineSignalDecisionLink(user_id=uid, contour="pricing",
+           signal_table="pricing_signal", signal_id="sig1", insight_key=ikey,
+           action_key=ACTION, decision_id=did, link_status="promoted",
            marketplace=mp, sku=sku))
     db.add(AdvertisingSignal(audit_id=str(uuid.uuid4()), user_id=uid,
-           signal_key="adv_ad_on_low_stock", problem_type="ad_on_low_stock",
+           signal_key="pricing_negative_margin", problem_type="negative_margin",
            insight_key=ikey, marketplace=mp, sku=sku, status="promoted_to_decision"))
     if with_listing:
         db.add(ProductListing(physical_product_id="ph1", user_id=uid, marketplace="wb", external_id=sku))
     if with_connection:
         db.add(MarketplaceConnection(user_id=uid, marketplace="wildberries", status="connected",
-                                     scopes=["promotions"]))
+                                     scopes=["promotions", "prices"]))
     await db.commit()
     return did
 
 
 def _fake_exec(ok=True, status="success", log_id="log1"):
     async def f(db, *, user_id, decision_id, marketplace, sku, dry_run, idempotency_key, now=None):
-        return BoundExecutionResult(ok=ok, decision_id=decision_id, action_key="stop_auto_promotion",
-                                    payload={"offer_id": sku}, execution_log_id=(log_id if ok else None),
+        return BoundExecutionResult(ok=ok, decision_id=decision_id, action_key=ACTION,
+                                    payload={"offer_id": sku, "discount": 0},
+                                    execution_log_id=(log_id if ok else None),
                                     status=status, reason=(None if ok else status))
     return f
 
@@ -91,7 +95,7 @@ def test_preview_applyable():
         r = await decision_apply_preview(did, marketplace="wildberries", sku="SKU1",
                                          current_user=_User(uid), db=db)
         assert isinstance(r, PreviewResponse) and r.applyable is True
-        assert r.action_key == "stop_auto_promotion" and r.payload == {"offer_id": "SKU1"}
+        assert r.action_key == ACTION and r.payload == {"offer_id": "SKU1", "discount": 0}
         assert r.capability_ok is True and r.safety_class == "manual_approval"
     _run(go())
 
@@ -115,7 +119,7 @@ def test_preview_unsupported_capability():
     async def go():
         db = await _engine(); uid = str(uuid.uuid4())
         did = await _seed(db, uid, mp="yandex", sku="SKU9",
-                          ikey="adv_ad_on_low_stock:yandex:SKU9", with_connection=False)
+                          ikey="pricing_negative_margin:yandex:SKU9", with_connection=False)
         r = await decision_apply_preview(did, marketplace="yandex", sku="SKU9",
                                          current_user=_User(uid), db=db)
         assert r.applyable is False and r.reason == "unsupported_capability" and r.capability_ok is False

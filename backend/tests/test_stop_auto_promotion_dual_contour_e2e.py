@@ -12,7 +12,6 @@ Locks the Learning Key Doctrine (docs/learning-key-doctrine.md) end-to-end:
 distinct Learning buckets, independent summaries, and both items in the Feed.
 """
 import asyncio
-import json
 import uuid
 from datetime import datetime
 
@@ -22,7 +21,6 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from database import Base
-import models  # registers tables
 from models.physical_product import PhysicalProduct
 from models.product_listing import ProductListing
 from models.advertising_signal import AdvertisingSignal
@@ -34,17 +32,9 @@ from models.imported_finance import ImportedFinanceRow
 
 from services.marketplace import credential_vault
 from services.marketplace.ozon_client import ozon_client
-from services.operations.signal_builder import build_operations_signal, SIGNAL_KEY as OPS_SIGNAL
-from services.decision_outcome.registry import BY_SIGNAL_KEY
+from services.operations.signal_builder import build_operations_signal
 from services.decision_outcome.promotion import promote_eligible_candidates
 from services.decision_outcome.decision_bridge import bridge_links_to_decisions
-from services.decision_outcome.effect_measurement import (
-    open_effect_measurement, close_effect_measurement, IMPROVED,
-)
-from services.action_binding.execution_bridge import execute_bound_decision
-from services.learning_os.registry import (
-    aggregate_learning_observations, get_action_learning_summary,
-)
 from services.decision_feed.builder import build_feed
 
 ADV_SIGNAL = "adv_ad_on_low_stock"
@@ -114,85 +104,51 @@ async def _decision_for(db, uid, insight_prefix):
     return next(d for d in rows if (d.insight_key or "").startswith(insight_prefix))
 
 
-async def _run_full_dual_loop(monkeypatch):
+# 2.1A: stop_auto_promotion is contained (capability unsupported). This suite proved the Learning-Key
+# doctrine (two buckets, never pooled) by DRIVING both contours through the executor; that doctrine
+# is now covered by direct-observation tests in test_learning_os.py. Here we prove containment: both
+# contours still surface their DIAGNOSTIC, but neither promotes to an executable Decision and neither
+# touches the marketplace.
+async def _seed_and_bridge(monkeypatch):
     db = await _engine(); uid = str(uuid.uuid4()); calls = []
     await _seed(db, uid)
     _patch_executor(monkeypatch, calls)
-
-    # promote + bridge → TWO decisions, both stop_auto_promotion, different insights
     await promote_eligible_candidates(db, user_id=uid); await db.commit()
     await bridge_links_to_decisions(db, user_id=uid); await db.commit()
-    adv_d = await _decision_for(db, uid, ADV_SIGNAL)
-    ops_d = await _decision_for(db, uid, OPS_SIGNAL)
-    assert adv_d.action_key == ACTION and ops_d.action_key == ACTION       # (1) same action_key
-    assert BY_SIGNAL_KEY[ADV_SIGNAL].default_metric_key == ADV_METRIC      # (3)
-    assert BY_SIGNAL_KEY[OPS_SIGNAL].default_metric_key == OPS_METRIC      # (4)
-    assert ADV_METRIC != OPS_METRIC                                        # (2) metric differs
-
-    # apply both
-    for d, sku in ((adv_d, ADV_SKU), (ops_d, OPS_SKU)):
-        res = await execute_bound_decision(db, user_id=uid, decision_id=d.id,
-                                           marketplace="ozon", sku=sku, dry_run=False)
-        assert res.ok and res.status == "success"
-    assert sorted(calls) == sorted([(ADV_SKU, False), (OPS_SKU, False)])
-
-    # open + close measurement for BOTH (loss → profit on each)
-    await open_effect_measurement(db, user_id=uid, window_days=14, now=T0); await db.commit()
-    await _fin(db, uid, sku=ADV_SKU, date="2026-06-20", net_profit=500.0)
-    await _fin(db, uid, sku=OPS_SKU, date="2026-06-20", net_profit=500.0)
-    await db.commit()
-    await close_effect_measurement(db, user_id=uid, now=T1); await db.commit()
-    return db, uid
+    return db, uid, calls
 
 
-# ── (5) two distinct Learning buckets, split on metric_key ────────────────────
+# ── (5) neither contour promotes the contained action to an executable Decision ─
 
 def test_distinct_learning_buckets(monkeypatch):
     async def go():
-        db, uid = await _run_full_dual_loop(monkeypatch)
-        obs = (await db.execute(select(EngineEffectObservation))).scalars().all()
-        metrics = {o.metric_key for o in obs}
-        assert metrics == {ADV_METRIC, OPS_METRIC}                 # (3)+(4)
-        assert all(o.effect_band == IMPROVED for o in obs)
-
-        buckets = await aggregate_learning_observations(db, user_id=uid)
-        keys = {(b.marketplace, b.action_key, b.metric_key) for b in buckets}
-        assert ("ozon", ACTION, ADV_METRIC) in keys
-        assert ("ozon", ACTION, OPS_METRIC) in keys                # (5) two buckets
-        assert len([b for b in buckets if b.action_key == ACTION]) == 2
+        db, uid, calls = await _seed_and_bridge(monkeypatch)
+        decisions = (await db.execute(
+            select(Decision).where(Decision.user_id == uid))).scalars().all()
+        assert [d for d in decisions if d.action_key == ACTION] == []   # contained: not promoted
+        assert calls == []                                              # 0 marketplace calls
     _run(go())
 
 
-# ── (6) per-metric summaries stay independent (ranking independence) ──────────
+# ── (6) no effect observations exist for a contained action ───────────────────
 
 def test_summaries_independent(monkeypatch):
     async def go():
-        db, uid = await _run_full_dual_loop(monkeypatch)
-        adv = await get_action_learning_summary(db, user_id=uid, marketplace="ozon",
-                                                action_key=ACTION, metric_key=ADV_METRIC)
-        ops = await get_action_learning_summary(db, user_id=uid, marketplace="ozon",
-                                                action_key=ACTION, metric_key=OPS_METRIC)
-        assert adv.improved_count == 1 and adv.metric_key == ADV_METRIC
-        assert ops.improved_count == 1 and ops.metric_key == OPS_METRIC
-        # each bucket counts ONLY its own metric's single observation — no pooling
-        assert adv.total_count == 1 and ops.total_count == 1
+        db, uid, calls = await _seed_and_bridge(monkeypatch)
+        obs = (await db.execute(select(EngineEffectObservation))).scalars().all()
+        assert obs == []                                              # nothing executed → nothing measured
+        assert calls == []
     _run(go())
 
 
-# ── (7) Feed shows BOTH scenarios, no frontend change ─────────────────────────
+# ── (7) both diagnostics still surface in the Feed, without an executable button ─
 
 def test_feed_shows_both(monkeypatch):
     async def go():
-        db, uid = await _run_full_dual_loop(monkeypatch)
+        db, uid, calls = await _seed_and_bridge(monkeypatch)
         items = await build_feed(db, user_id=uid, include_resolved=True)
-        # both ride the generic decision_outcome feed path (not _ENGINES); the origin
-        # problem is carried by the canonical insight_key (group_key) + sku, not contour.
-        # (Engine signal rows now also carry action_key from the registry, so scope to
-        # the decision_outcome effect items this assertion is about.)
-        action_items = [it for it in items
-                        if it.action_key == ACTION and it.contour == "decision_outcome"]
-        groups = " ".join(it.group_key or "" for it in action_items)
-        assert ADV_SIGNAL in groups and OPS_SIGNAL in groups       # both scenarios present
-        assert {ADV_SKU, OPS_SKU} <= {it.sku for it in action_items}
-        assert all(it.effect_band == IMPROVED for it in action_items)
+        action_items = [it for it in items if it.action_key == ACTION]
+        assert action_items, "the advised action still shows as diagnostic"
+        assert all(it.source_context.get("decision_id") is None for it in action_items)
+        assert calls == []
     _run(go())

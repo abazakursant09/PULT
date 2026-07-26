@@ -2,10 +2,11 @@
 Canonical Alternatives Foundation — one Signal → several Candidates → several
 Decisions, one per admissible action_key, all under the same insight_key.
 
-No new schema, no new marketplace action, no Effect/Learning change. The two
-existing advertising levers (ad_set_state, stop_auto_promotion) are used as the two
-alternatives via a registry monkeypatch — proving the fan-out without adding
-reduce_discount. Single-action signals behave exactly as before.
+No new schema, no new marketplace action, no Effect/Learning change. Two existing
+WB/Ozon-capable levers (ad_set_state, set_price) are used as the two alternatives via a
+registry monkeypatch — proving the fan-out. (2.1A: stop_auto_promotion is contained and
+no longer capability-supported, so it cannot serve as an executable alternative here.)
+Single-action signals behave exactly as before.
 """
 import asyncio
 import dataclasses
@@ -17,7 +18,6 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from database import Base
-import models  # registers tables
 from models.advertising_signal import AdvertisingSignal
 from models.decision import Decision
 from models.engine_signal_decision_link import EngineSignalDecisionLink
@@ -31,7 +31,7 @@ from services.decision_outcome.promotion import promote_eligible_candidates
 from services.decision_outcome.decision_bridge import bridge_links_to_decisions, PROMOTED
 
 SIG = "adv_ad_destroying_profit"
-ALT_A, ALT_B = "ad_set_state", "stop_auto_promotion"   # two existing levers
+ALT_A, ALT_B = "ad_set_state", "set_price"   # two WB/Ozon-capable levers (2.1A: not stop_auto_promotion)
 
 
 def _run(c):

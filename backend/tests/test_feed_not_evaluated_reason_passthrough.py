@@ -11,7 +11,6 @@ import asyncio
 import uuid
 from datetime import datetime
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -21,8 +20,11 @@ import models  # registers tables
 from models.physical_product import PhysicalProduct
 from models.product_listing import ProductListing
 from models.imported_finance import ImportedFinanceRow
+from models.pricing_signal import PricingSignal
 
-from services.operations.signal_builder import build_operations_signal, SIGNAL_KEY
+# 2.1A: the former promoted vehicle (operations auto-promo → stop_auto_promotion) is contained; the
+# not-evaluated passthrough is action-agnostic, so it rides a live net_profit lever instead.
+SIGNAL_KEY = "pricing_price_below_floor"
 from services.decision_outcome.promotion import promote_eligible_candidates
 from services.decision_outcome.decision_bridge import bridge_links_to_decisions
 from services.decision_outcome.effect_measurement import (
@@ -54,8 +56,10 @@ async def _seed_promoted(db, uid, *, with_baseline_finance: bool):
     phys = str(uuid.uuid4())
     db.add(PhysicalProduct(id=phys, user_id=uid, title="товар", cogs=50.0, cogs_source="manual"))
     db.add(ProductListing(physical_product_id=phys, user_id=uid, marketplace="ozon", external_id=SKU))
-    await build_operations_signal(db, user_id=uid, marketplace="ozon", sku=SKU,
-                                  net_profit=-100.0, in_auto_promotion=True)
+    db.add(PricingSignal(user_id=uid, signal_key=SIGNAL_KEY,
+           insight_key=f"{SIGNAL_KEY}:ozon:{SKU}", problem_type="price_below_floor",
+           category="pricing", marketplace="ozon", sku=SKU, what="x", why="y", meaning="m",
+           what_to_do="w", expected_effect="z", priority_level="critical", status="active"))
     if with_baseline_finance:
         db.add(ImportedFinanceRow(import_id=str(uuid.uuid4()), user_id=uid, marketplace="ozon",
                                   date="2026-06-01", sku=SKU, revenue=10000.0, net_profit=-200.0))
@@ -67,7 +71,7 @@ async def _seed_promoted(db, uid, *, with_baseline_finance: bool):
 async def _ops_feed_item(db, uid):
     items = await build_feed(db, user_id=uid, include_resolved=True)
     return next(it for it in items
-                if it.action_key == "stop_auto_promotion" and (it.group_key or "").startswith(SIGNAL_KEY))
+                if it.action_key == "set_price" and (it.group_key or "").startswith(SIGNAL_KEY))
 
 
 # ── (1) not_evaluated → reason=insufficient_data + missing=no_finance_rows ─────
@@ -97,8 +101,8 @@ def test_not_measured_yet_reason_survives_effect_summary():
         # open with no finance at all → baseline unavailable, measured_at stays None
         await open_effect_measurement(db, user_id=uid, window_days=14, now=T0); await db.commit()
 
-        summaries = await build_effect_summaries(db, user_id=uid, contour="operations")
-        s = next(x for x in summaries if x.action_key == "stop_auto_promotion")
+        summaries = await build_effect_summaries(db, user_id=uid, contour="pricing")
+        s = next(x for x in summaries if x.action_key == "set_price")
         assert s.effect_status == "not_measured_yet"
         assert s.evidence.get("reason") == "no_finance_rows"   # observed cause, passed through
     _run(go())

@@ -29,7 +29,6 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from database import Base
-import models  # registers tables
 from models.decision import Decision
 from models.engine_signal_decision_link import EngineSignalDecisionLink
 from models.advertising_signal import AdvertisingSignal
@@ -40,14 +39,17 @@ from models.execution_log import ExecutionLog
 from models.engine_effect_observation import EngineEffectObservation
 from models.decision_apply_intent import DecisionApplyIntent
 
-from services.marketplace import credential_vault, action_catalog, executor
+from services.marketplace import credential_vault, action_catalog
 from services.marketplace.errors import ExecutionError
 from services.decision_apply_ux.preview import build_apply_preview
 from services.decision_apply_ux.confirm import confirm_and_apply_decision
 from services.action_binding.execution_bridge import execute_bound_decision
-from services.decision_apply import apply_decision
 
-IKEY = "adv_ad_on_low_stock:wildberries:SKU1"
+# 2.1A: stop_auto_promotion is contained (non-executable). This integration test drives the REAL
+# executor with only the marketplace network stubbed, so it rides a still-executable lever —
+# reduce_discount (WB), payload {offer_id, discount:0}, via the pricing_negative_margin signal.
+IKEY = "pricing_negative_margin:wildberries:SKU1"
+ACTION = "reduce_discount"
 
 
 def _run(c):
@@ -65,23 +67,23 @@ async def _engine():
 async def _seed(db, uid, *, mp="wildberries", sku="SKU1", ikey=IKEY,
                 with_listing=True, with_connection=True):
     did = str(uuid.uuid4())
-    db.add(Decision(id=did, user_id=uid, problem="adv", action_key="stop_auto_promotion",
+    db.add(Decision(id=did, user_id=uid, problem="pricing", action_key=ACTION,
                     insight_key=ikey, status="open"))
-    db.add(EngineSignalDecisionLink(user_id=uid, contour="advertising",
-           signal_table="advertising_signal", signal_id="sig1", insight_key=ikey,
-           action_key="stop_auto_promotion", decision_id=did, link_status="promoted",
+    db.add(EngineSignalDecisionLink(user_id=uid, contour="pricing",
+           signal_table="pricing_signal", signal_id="sig1", insight_key=ikey,
+           action_key=ACTION, decision_id=did, link_status="promoted",
            marketplace=mp, sku=sku))
     db.add(AdvertisingSignal(audit_id=str(uuid.uuid4()), user_id=uid,
-           signal_key="adv_ad_on_low_stock", problem_type="ad_on_low_stock",
+           signal_key="pricing_negative_margin", problem_type="negative_margin",
            insight_key=ikey, marketplace=mp, sku=sku, status="promoted_to_decision"))
     if with_listing:
         db.add(ProductListing(physical_product_id="ph1", user_id=uid, marketplace="wb",
                               external_id=sku))
     if with_connection:
         cn = MarketplaceConnection(id=str(uuid.uuid4()), user_id=uid, marketplace=mp,
-                                   status="connected", scopes=["promotions"])
+                                   status="connected", scopes=["prices"])
         db.add(cn)
-        db.add(ApiCredential(id=str(uuid.uuid4()), connection_id=cn.id, scope="promotions",
+        db.add(ApiCredential(id=str(uuid.uuid4()), connection_id=cn.id, scope="prices",
                              secret_enc=credential_vault.encrypt("t")))
     await db.commit()
     return did
@@ -92,13 +94,13 @@ async def _count(db, model):
 
 
 def _stub_wb(monkeypatch, *, calls=None, raise_error=False):
-    async def fake(*, token, offer_id, enabled):
+    async def fake(*, token, offer_id, discount):
         if calls is not None:
-            calls.append({"offer_id": offer_id, "enabled": enabled})
+            calls.append({"offer_id": offer_id, "discount": discount})
         if raise_error:
             raise ExecutionError(ExecutionError.VALIDATION, "stubbed marketplace failure")
         return {"requestId": "wb-req-1"}
-    monkeypatch.setattr(action_catalog.wb_client, "set_auto_promotion", fake)
+    monkeypatch.setattr(action_catalog.wb_client, "set_discount", fake)
 
 
 # ── 1. preview does not execute ──────────────────────────────────────────────
@@ -137,7 +139,7 @@ def test_confirm_executes_exactly_once(monkeypatch):
                                              idempotency_key="idem-once")
         assert r.ok is True and r.status == "success"
         assert len(calls) == 1                                  # dispatched exactly once
-        assert calls[0] == {"offer_id": "SKU1", "enabled": False}
+        assert calls[0] == {"offer_id": "SKU1", "discount": 0}
         logs = (await db.execute(select(ExecutionLog.status))).scalars().all()
         assert logs == ["success"]                              # one success log
         intent = (await db.execute(select(DecisionApplyIntent))).scalars().one()
@@ -153,7 +155,7 @@ def test_missing_capability_blocks(monkeypatch):
     async def go():
         db = await _engine(); uid = str(uuid.uuid4())
         did = await _seed(db, uid, mp="yandex", sku="SKU9",
-                          ikey="adv_ad_on_low_stock:yandex:SKU9")
+                          ikey="pricing_negative_margin:yandex:SKU9")
         r = await confirm_and_apply_decision(db, user_id=uid, decision_id=did,
                                              marketplace="yandex", sku="SKU9",
                                              idempotency_key="idem-y")
@@ -197,7 +199,7 @@ def test_executor_failure_recorded_honestly(monkeypatch):
                                              idempotency_key="idem-f")
         assert r.ok is False and r.status == "failed"          # honest failure
         log = (await db.execute(select(ExecutionLog))).scalars().one()
-        assert log.status == "failed" and log.action_type == "stop_auto_promotion"
+        assert log.status == "failed" and log.action_type == "reduce_discount"
         assert r.measurement_opened is False                   # no measurement on failure
         assert await _count(db, EngineEffectObservation) == 0
         intent = (await db.execute(select(DecisionApplyIntent))).scalars().one()

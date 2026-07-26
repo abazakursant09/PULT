@@ -12,7 +12,6 @@ to net_profit instead of no_metric). Everything else rides the generic spine.
 No forecast / AI / competitor / compute_recommendation / fabricated payload.
 """
 import asyncio
-import json
 import uuid
 from datetime import datetime
 
@@ -32,18 +31,14 @@ from models.marketplace_connection import MarketplaceConnection
 from models.api_credential import ApiCredential
 from models.imported_finance import ImportedFinanceRow
 
-from services.marketplace import credential_vault
+from services.marketplace import credential_vault, executor
 from services.marketplace.ozon_client import ozon_client
 from services.operations.signal_builder import build_operations_signal, SIGNAL_KEY
 from services.decision_outcome.registry import BY_SIGNAL_KEY
 from services.action_binding.registry import BY_SIGNAL_TYPE
 from services.decision_outcome.promotion import promote_eligible_candidates
 from services.decision_outcome.decision_bridge import bridge_links_to_decisions
-from services.decision_outcome.effect_measurement import (
-    open_effect_measurement, close_effect_measurement, IMPROVED, WORSENED, NOT_EVALUATED,
-)
-from services.decision_apply_ux.preview import build_apply_preview
-from services.action_binding.execution_bridge import execute_bound_decision
+from services.decision_outcome.effect_measurement import open_effect_measurement
 from services.learning_os.registry import get_action_learning_summary
 
 T0 = datetime(2026, 6, 1)
@@ -89,114 +84,75 @@ def _patch_executor(monkeypatch, calls):
     monkeypatch.setattr(ozon_client, "set_auto_promotion", fake)
 
 
-async def _fin_after(db, uid, *, sku, net_profit):
-    db.add(ImportedFinanceRow(import_id=str(uuid.uuid4()), user_id=uid, marketplace="ozon",
-                              date="2026-06-20", sku=sku, revenue=10000.0, net_profit=net_profit))
-    await db.commit()
-
-
 async def _promote(db, uid):
     await promote_eligible_candidates(db, user_id=uid); await db.commit()
     await bridge_links_to_decisions(db, user_id=uid); await db.commit()
 
 
-async def _loop_until_apply(monkeypatch, db, uid, calls):
-    """Signal already seeded → promote → bridge → preview → apply."""
-    await _promote(db, uid)
-    decision = (await db.execute(select(Decision))).scalars().one()
-    assert decision.action_key == "stop_auto_promotion"
-    assert BY_SIGNAL_KEY[SIGNAL_KEY].default_metric_key == "net_profit"
-    assert BY_SIGNAL_TYPE[SIGNAL_KEY].safety_class == "manual_approval"
-
-    p = await build_apply_preview(db, user_id=uid, decision_id=decision.id,
-                                  marketplace="ozon", sku=SKU)
-    assert p.applyable is True and p.action_key == "stop_auto_promotion"
-    assert p.payload == {"offer_id": SKU}
-    assert calls == []                         # dry-run preview: no marketplace call
-
-    res = await execute_bound_decision(db, user_id=uid, decision_id=decision.id,
-                                       marketplace="ozon", sku=SKU, dry_run=False)
-    assert res.ok and res.status == "success"
-    assert calls == [(SKU, False)]             # stop → enabled=false, exactly once
-    return decision
+# 2.1A: stop_auto_promotion is contained. The operations auto-promo margin-drain signal stays a
+# DIAGNOSTIC — it never promotes to an executable Decision, its execution fail-closes, and no
+# marketplace call is ever made. The generic measure→learn machinery (improved/worsened/
+# not_evaluated + learning buckets) is proven for a still-executable lever in
+# test_decision_outcome_measurement.py (pricing_price_below_floor → set_price, net_profit) and the
+# real-execution path in test_decision_apply_execution_loop.py (reduce_discount).
 
 
-# ── (1) full loop → improved ─────────────────────────────────────────────────
+# ── (1) the operations signal is a diagnostic — never an executable Decision ──
 
-def test_ozon_full_loop_improved(monkeypatch):
+def test_signal_diagnostic_not_promoted(monkeypatch):
     async def go():
         db = await _engine(); uid = str(uuid.uuid4()); calls = []
         await _seed(db, uid)
         _patch_executor(monkeypatch, calls)
-        await _loop_until_apply(monkeypatch, db, uid, calls)
+        await _promote(db, uid)
+        assert BY_SIGNAL_KEY[SIGNAL_KEY].default_metric_key == "net_profit"
+        assert BY_SIGNAL_TYPE[SIGNAL_KEY].safety_class == "manual_approval"
+        # the contained action never promotes to a Decision (no false button)
+        assert (await db.execute(select(Decision))).scalars().all() == []
+        sig = (await db.execute(select(OperationsSignal))).scalars().one()
+        assert sig.status == "active"            # stays a diagnostic
+        assert calls == []                       # 0 marketplace calls
+    _run(go())
 
+
+# ── (2) direct execution of the contained action fail-closes, 0 calls ─────────
+
+def test_direct_execute_contained(monkeypatch):
+    async def go():
+        db = await _engine(); uid = str(uuid.uuid4()); calls = []
+        await _seed(db, uid)
+        _patch_executor(monkeypatch, calls)
+        res = await executor.execute(db=db, user_id=uid, action_type="stop_auto_promotion",
+                                     payload={"marketplace": "ozon", "offer_id": SKU})
+        assert res.status == "rejected" and not res.ok        # server-side fail-closed
+        assert calls == []                                    # 0 marketplace calls
+    _run(go())
+
+
+# ── (3) nothing executed → no measurement for the contained action ────────────
+
+def test_no_measurement_without_execution(monkeypatch):
+    async def go():
+        db = await _engine(); uid = str(uuid.uuid4()); calls = []
+        await _seed(db, uid)
+        _patch_executor(monkeypatch, calls)
+        await _promote(db, uid)
         await open_effect_measurement(db, user_id=uid, window_days=14, now=T0); await db.commit()
-        obs = (await db.execute(select(EngineEffectObservation))).scalars().one()
-        assert obs.metric_key == "net_profit"          # the _MODELS registration works
-        assert json.loads(obs.evidence)["baseline"] == -200.0
+        assert (await db.execute(select(EngineEffectObservation))).scalars().all() == []
+        assert calls == []
+    _run(go())
 
-        await _fin_after(db, uid, sku=SKU, net_profit=500.0)   # loss → profit
-        await close_effect_measurement(db, user_id=uid, now=T1); await db.commit()
-        obs = (await db.execute(select(EngineEffectObservation))).scalars().one()
-        assert obs.effect_band == IMPROVED
 
+# ── (4) no learning bucket forms for the contained action ─────────────────────
+
+def test_no_learning_bucket_for_contained(monkeypatch):
+    async def go():
+        db = await _engine(); uid = str(uuid.uuid4()); calls = []
+        await _seed(db, uid)
+        _patch_executor(monkeypatch, calls)
+        await _promote(db, uid)
         summ = await get_action_learning_summary(db, user_id=uid, marketplace="ozon",
                                                  action_key="stop_auto_promotion")
-        assert summ.improved_count == 1 and summ.marketplace == "ozon"
-        assert summ.metric_key == "net_profit"
-    _run(go())
-
-
-# ── (2) worse after → worsened ───────────────────────────────────────────────
-
-def test_ozon_full_loop_worsened(monkeypatch):
-    async def go():
-        db = await _engine(); uid = str(uuid.uuid4()); calls = []
-        await _seed(db, uid)
-        _patch_executor(monkeypatch, calls)
-        await _loop_until_apply(monkeypatch, db, uid, calls)
-
-        await open_effect_measurement(db, user_id=uid, window_days=14, now=T0); await db.commit()
-        await _fin_after(db, uid, sku=SKU, net_profit=-500.0)   # deeper loss
-        await close_effect_measurement(db, user_id=uid, now=T1); await db.commit()
-        obs = (await db.execute(select(EngineEffectObservation))).scalars().one()
-        assert obs.effect_band == WORSENED
-    _run(go())
-
-
-# ── (3) no after finance → not_evaluated, never a fabricated number ───────────
-
-def test_no_after_finance_not_evaluated(monkeypatch):
-    async def go():
-        db = await _engine(); uid = str(uuid.uuid4()); calls = []
-        await _seed(db, uid)
-        _patch_executor(monkeypatch, calls)
-        await _loop_until_apply(monkeypatch, db, uid, calls)
-
-        await open_effect_measurement(db, user_id=uid, window_days=14, now=T0); await db.commit()
-        await close_effect_measurement(db, user_id=uid, now=T1); await db.commit()   # no after row
-        obs = (await db.execute(select(EngineEffectObservation))).scalars().one()
-        assert obs.effect_band == NOT_EVALUATED
-        assert "after" not in json.loads(obs.evidence)        # no fabricated value
-        summ = await get_action_learning_summary(db, user_id=uid, marketplace="ozon",
-                                                 action_key="stop_auto_promotion")
-        assert summ.not_evaluated_count == 1 and summ.improved_count == 0
-    _run(go())
-
-
-# ── (4) marketplace isolation — ozon outcome never leaks to wb ────────────────
-
-def test_learning_marketplace_isolation(monkeypatch):
-    async def go():
-        db = await _engine(); uid = str(uuid.uuid4()); calls = []
-        await _seed(db, uid)
-        _patch_executor(monkeypatch, calls)
-        await _loop_until_apply(monkeypatch, db, uid, calls)
-        await open_effect_measurement(db, user_id=uid, window_days=14, now=T0); await db.commit()
-        await _fin_after(db, uid, sku=SKU, net_profit=500.0)
-        await close_effect_measurement(db, user_id=uid, now=T1); await db.commit()
-
-        wb = await get_action_learning_summary(db, user_id=uid, marketplace="wb",
-                                               action_key="stop_auto_promotion")
-        assert wb is None or wb.total_count == 0
+        assert summ is None or summ.total_count == 0
+        assert calls == []
     _run(go())

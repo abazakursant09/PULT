@@ -8,7 +8,6 @@ append-only ledger. The gate decisions come from the existing execution bridge.
 import asyncio
 import dataclasses
 import uuid
-from datetime import datetime
 
 from sqlalchemy import select, func, inspect as sa_inspect
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
@@ -50,27 +49,36 @@ async def _engine():
 
 
 async def _seed(db, uid, *, action_key="stop_auto_promotion", mp="wildberries",
-                sku="SKU1", with_listing=True, with_link=True, with_connection=False, ikey=IKEY):
+                sku="SKU1", with_listing=True, with_link=True, with_connection=False, ikey=IKEY,
+                link_action="stop_auto_promotion", contour="advertising",
+                signal_key="adv_ad_on_low_stock", problem_type="ad_on_low_stock"):
     did = str(uuid.uuid4())
     db.add(Decision(id=did, user_id=uid, problem="adv", action_key=action_key,
                     insight_key=ikey, status="open"))
     if with_connection:
-        # active marketplace connection with the promotions scope → dry_run can pass
+        # active marketplace connection with both write scopes → dry_run can pass for any lever
         db.add(MarketplaceConnection(user_id=uid, marketplace="wildberries", status="connected",
-                                     scopes=["promotions"]))
+                                     scopes=["promotions", "prices"]))
     if with_link:
-        db.add(EngineSignalDecisionLink(user_id=uid, contour="advertising",
-               signal_table="advertising_signal", signal_id="sig1", insight_key=ikey,
-               action_key="stop_auto_promotion", decision_id=did, link_status="promoted",
+        db.add(EngineSignalDecisionLink(user_id=uid, contour=contour,
+               signal_table=f"{contour}_signal", signal_id="sig1", insight_key=ikey,
+               action_key=link_action, decision_id=did, link_status="promoted",
                marketplace=mp, sku=sku))
         db.add(AdvertisingSignal(audit_id=str(uuid.uuid4()), user_id=uid,
-               signal_key="adv_ad_on_low_stock", problem_type="ad_on_low_stock",
+               signal_key=signal_key, problem_type=problem_type,
                insight_key=ikey, marketplace=mp, sku=sku, status="promoted_to_decision"))
     if with_listing:
         db.add(ProductListing(physical_product_id="ph1", user_id=uid, marketplace="wb",
                               external_id=sku))
     await db.commit()
     return did
+
+
+# 2.1A: stop_auto_promotion is contained; the applyable-preview cases ride a live lever instead —
+# reduce_discount (WB), payload {offer_id, discount:0}, via the pricing_negative_margin signal.
+_LIVE = dict(action_key="reduce_discount", link_action="reduce_discount",
+             ikey="pricing_negative_margin:wildberries:SKU1", contour="pricing",
+             signal_key="pricing_negative_margin", problem_type="negative_margin")
 
 
 async def _count(db, model):
@@ -82,12 +90,12 @@ async def _count(db, model):
 def test_preview_bound_applyable():
     async def go():
         db = await _engine(); uid = str(uuid.uuid4())
-        did = await _seed(db, uid, with_connection=True)
+        did = await _seed(db, uid, with_connection=True, **_LIVE)
         p = await build_apply_preview(db, user_id=uid, decision_id=did,
                                       marketplace="wildberries", sku="SKU1")
         assert isinstance(p, ApplyPreview)
-        assert p.applyable is True and p.action_key == "stop_auto_promotion"
-        assert p.payload == {"offer_id": "SKU1"} and p.capability_ok is True
+        assert p.applyable is True and p.action_key == "reduce_discount"
+        assert p.payload == {"offer_id": "SKU1", "discount": 0} and p.capability_ok is True
         assert p.payload_status == PAYLOAD_OK and p.dry_run_status is not None
         assert p.safety_class == "manual_approval" and p.reason is None
     _run(go())
@@ -98,7 +106,7 @@ def test_preview_bound_applyable():
 def test_preview_payload_not_derivable():
     async def go():
         db = await _engine(); uid = str(uuid.uuid4())
-        did = await _seed(db, uid, with_listing=False)
+        did = await _seed(db, uid, with_listing=False, **_LIVE)
         p = await build_apply_preview(db, user_id=uid, decision_id=did,
                                       marketplace="wildberries", sku="SKU1")
         assert p.applyable is False and p.reason == PAYLOAD_NOT_DERIVABLE
@@ -201,8 +209,8 @@ def test_intent_append_only_roundtrip():
     async def go():
         db = await _engine(); uid = str(uuid.uuid4())
         did = await _seed(db, uid)
-        row = await record_apply_intent(db, user_id=uid, decision_id=did,
-                                        action_key="stop_auto_promotion", intent_status="previewed",
+        await record_apply_intent(db, user_id=uid, decision_id=did,
+                                  action_key="stop_auto_promotion", intent_status="previewed",
                                         dry_run_status="dry_run_ok", marketplace="wildberries")
         await db.commit()
         got = (await db.execute(select(DecisionApplyIntent))).scalars().one()

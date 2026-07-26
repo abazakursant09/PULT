@@ -17,7 +17,7 @@ from sqlalchemy.pool import StaticPool
 
 from database import Base
 import models  # registers tables
-from models.advertising_signal import AdvertisingSignal
+from models.pricing_signal import PricingSignal
 from models.imported_finance import ImportedFinanceRow
 from models.execution_log import ExecutionLog
 from models.engine_signal_decision_link import EngineSignalDecisionLink
@@ -46,12 +46,14 @@ async def _engine():
     return sessionmaker(e, class_=AsyncSession, expire_on_commit=False)()
 
 
+# 2.1A: the former vehicle (adv_ad_on_low_stock → stop_auto_promotion) is contained. Measurement
+# machinery is action-agnostic, so it now rides a still-executable lever with the SAME net_profit
+# metric — pricing_price_below_floor → set_price (measured on net_profit).
 async def _promote_adv(db, uid, *, mp="wildberries", sku="SKU1"):
-    db.add(AdvertisingSignal(audit_id=str(uuid.uuid4()), user_id=uid,
-           signal_key="adv_ad_on_low_stock", problem_type="ad_on_low_stock",
-           insight_key=f"adv_ad_on_low_stock:{mp}:{sku}", marketplace=mp, sku=sku,
-           status="active", what="x", why="y", expected_effect="z", what_to_do="w",
-           priority_level="critical"))
+    db.add(PricingSignal(user_id=uid, signal_key="pricing_price_below_floor",
+           insight_key=f"pricing_price_below_floor:{mp}:{sku}", problem_type="price_below_floor",
+           category="pricing", marketplace=mp, sku=sku, what="x", why="y", meaning="m",
+           what_to_do="w", expected_effect="z", priority_level="critical", status="active"))
     await db.commit()
     await promote_eligible_candidates(db, user_id=uid); await db.commit()
     await bridge_links_to_decisions(db, user_id=uid); await db.commit()
@@ -95,7 +97,7 @@ def test_open_creates_baseline():
         assert r.opened == 1
         obs = (await _obs(db, uid))[0]
         assert obs.baseline_captured_at == T0 and obs.measured_at is None
-        assert obs.effect_band == NOT_EVALUATED and obs.metric_key == "ad_profit_impact"
+        assert obs.effect_band == NOT_EVALUATED and obs.metric_key == "net_profit"
         assert (await _link(db, uid)).link_status == "promoted"   # not measured until close
     _run(go())
 

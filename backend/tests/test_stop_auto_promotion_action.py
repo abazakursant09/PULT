@@ -50,37 +50,45 @@ def test_registration():
 
 
 def test_capability_matrix():
+    # 2.1A: no marketplace exposes a provider-verified auto-promotion EXIT. WB endpoint unconfirmed
+    # (impossible), Ozon deactivate is an ordinary-action opt-out (verdict api but pult_supported
+    # false), Yandex has no write API (impossible). None is AVAILABLE to execute.
     assert executor.capability_for_action("stop_auto_promotion") == "promotions.write"
-    assert capability_registry.verdict("promotions.write", "wb") == "api"
-    assert capability_registry.verdict("promotions.write", "ozon") == "api"
+    assert capability_registry.verdict("promotions.write", "wb") == "impossible"
     assert capability_registry.verdict("promotions.write", "yandex") == "impossible"
+    for mp in ("wb", "ozon", "yandex"):
+        assert capability_registry.availability("promotions.write", mp)["available"] is False
 
 
-def test_wb_execution(monkeypatch):
-    seen = {}
+def test_wb_execution_contained(monkeypatch):
+    called = {"n": 0}
     async def fake(*, token, offer_id, enabled):
-        seen.update(offer_id=offer_id, enabled=enabled); return {"requestId": "wb1"}
+        called["n"] += 1; return {"requestId": "wb1"}
     monkeypatch.setattr(action_catalog.wb_client, "set_auto_promotion", fake)
     async def go():
         db = await _engine(); uid = str(uuid.uuid4())
         await _conn(db, uid, "wildberries")
         res = await executor.execute(db=db, user_id=uid, action_type="stop_auto_promotion",
                                      payload={"marketplace": "wildberries", "offer_id": "123"})
-        assert res.status == "success" and seen == {"offer_id": "123", "enabled": False}
+        # 2.1A: contained → rejected, the unconfirmed WB endpoint is never called
+        assert res.status == "rejected" and res.error["code"] == ExecutionError.CAPABILITY_NOT_SUPPORTED
+        assert called["n"] == 0
     _run(go())
 
 
-def test_ozon_execution(monkeypatch):
-    seen = {}
+def test_ozon_execution_contained(monkeypatch):
+    called = {"n": 0}
     async def fake(*, token, client_id, offer_id, enabled):
-        seen.update(offer_id=offer_id, enabled=enabled); return {"requestId": "oz1"}
+        called["n"] += 1; return {"requestId": "oz1"}
     monkeypatch.setattr(action_catalog.ozon_client, "set_auto_promotion", fake)
     async def go():
         db = await _engine(); uid = str(uuid.uuid4())
         await _conn(db, uid, "ozon")
         res = await executor.execute(db=db, user_id=uid, action_type="stop_auto_promotion",
                                      payload={"marketplace": "ozon", "offer_id": "OF1"})
-        assert res.status == "success" and seen == {"offer_id": "OF1", "enabled": False}
+        # 2.1A: contained → rejected, the ordinary-action deactivate is never called as a Hot Sale exit
+        assert res.status == "rejected" and res.error["code"] == ExecutionError.CAPABILITY_NOT_SUPPORTED
+        assert called["n"] == 0
     _run(go())
 
 

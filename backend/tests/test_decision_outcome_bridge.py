@@ -19,7 +19,6 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from database import Base
-import models  # registers tables
 from models.advertising_signal import AdvertisingSignal
 from models.review_signal import ReviewSignal
 from models.decision import Decision
@@ -32,7 +31,7 @@ from services.decision_outcome.registry import BY_SIGNAL_KEY
 from services.decision_outcome.promotion import promote_eligible_candidates
 from services.decision_outcome.decision_bridge import (
     bridge_links_to_decisions, capability_supported, BridgeResult,
-    PROMOTED, SKIPPED_NO_ACTION, SKIPPED_NO_CAPABILITY,
+    SKIPPED_NO_ACTION, SKIPPED_NO_CAPABILITY,
 )
 
 T0 = datetime(2026, 6, 21)
@@ -72,9 +71,14 @@ async def _link(db, uid):
 # ── capability gate unit ─────────────────────────────────────────────────────
 
 def test_capability_gate():
-    assert capability_supported("stop_auto_promotion", "wildberries") is True
-    assert capability_supported("stop_auto_promotion", "ozon") is True
-    assert capability_supported("stop_auto_promotion", "yandex") is False   # gated impossible
+    # 2.1A: stop_auto_promotion is contained — not capability-supported on ANY marketplace, so the
+    # bridge never promotes it to an executable Decision (no false button). A still-supported
+    # no-marketplace action stays supported on WB/Ozon.
+    assert capability_supported("stop_auto_promotion", "wildberries") is False
+    assert capability_supported("stop_auto_promotion", "ozon") is False
+    assert capability_supported("stop_auto_promotion", "yandex") is False
+    assert capability_supported("set_price", "wildberries") is True
+    assert capability_supported("set_price", "ozon") is True
     assert capability_supported(None, "wildberries") is False
     assert capability_supported("not_a_real_action", "wildberries") is False
 

@@ -9,7 +9,6 @@ import asyncio
 import uuid
 from datetime import datetime
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -19,9 +18,13 @@ import models  # registers tables
 from models.physical_product import PhysicalProduct
 from models.product_listing import ProductListing
 from models.imported_finance import ImportedFinanceRow
+from models.pricing_signal import PricingSignal
+
+# 2.1A: the former promoted vehicle (operations auto-promo → stop_auto_promotion) is contained;
+# these freshness cases now ride a live net_profit-metric lever (pricing_price_below_floor → set_price).
+_LIVE_SIGNAL = "pricing_price_below_floor"
 
 from services.marketplace.finance_freshness import finance_freshness
-from services.operations.signal_builder import build_operations_signal, SIGNAL_KEY
 from services.decision_outcome.promotion import promote_eligible_candidates
 from services.decision_outcome.decision_bridge import bridge_links_to_decisions
 from services.decision_outcome.effect_measurement import (
@@ -137,8 +140,10 @@ async def _seed_promoted(db, uid, *, with_baseline: bool):
     phys = str(uuid.uuid4())
     db.add(PhysicalProduct(id=phys, user_id=uid, title="товар", cogs=50.0, cogs_source="manual"))
     db.add(ProductListing(physical_product_id=phys, user_id=uid, marketplace="ozon", external_id=SKU))
-    await build_operations_signal(db, user_id=uid, marketplace="ozon", sku=SKU,
-                                  net_profit=-100.0, in_auto_promotion=True)
+    db.add(PricingSignal(user_id=uid, signal_key=_LIVE_SIGNAL,
+           insight_key=f"{_LIVE_SIGNAL}:ozon:{SKU}", problem_type="price_below_floor",
+           category="pricing", marketplace="ozon", sku=SKU, what="x", why="y", meaning="m",
+           what_to_do="w", expected_effect="z", priority_level="critical", status="active"))
     if with_baseline:
         await _fin(db, uid, date="2026-06-01", net_profit=-200.0,
                    created_at=datetime(2026, 6, 2, 9, 0))
@@ -155,8 +160,8 @@ def test_not_evaluated_feed_item_gets_freshness():
         await close_effect_measurement(db, user_id=uid, now=NOW); await db.commit()  # no after → not_evaluated
 
         items = await build_feed(db, user_id=uid, include_resolved=True, now=NOW)
-        it = next(i for i in items if i.action_key == "stop_auto_promotion"
-                  and (i.group_key or "").startswith(SIGNAL_KEY))
+        it = next(i for i in items if i.action_key == "set_price"
+                  and (i.group_key or "").startswith(_LIVE_SIGNAL))
         assert it.effect_status == "not_evaluated"
         fr = it.source_context.get("freshness")
         assert fr is not None
@@ -171,8 +176,8 @@ def test_not_measured_yet_summary_gets_freshness():
         await _seed_promoted(db, uid, with_baseline=False)
         await open_effect_measurement(db, user_id=uid, window_days=14, now=datetime(2026, 6, 1)); await db.commit()
 
-        sums = await build_effect_summaries(db, user_id=uid, contour="operations", now=NOW)
-        s = next(x for x in sums if x.action_key == "stop_auto_promotion")
+        sums = await build_effect_summaries(db, user_id=uid, contour="pricing", now=NOW)
+        s = next(x for x in sums if x.action_key == "set_price")
         assert s.effect_status == "not_measured_yet"
         assert s.evidence.get("freshness") is not None
     _run(go())
@@ -189,8 +194,8 @@ def test_measured_effect_has_no_freshness():
         await _fin(db, uid, date="2026-06-18", net_profit=900.0); await db.commit()
         await close_effect_measurement(db, user_id=uid, now=NOW); await db.commit()
 
-        sums = await build_effect_summaries(db, user_id=uid, contour="operations", now=NOW)
-        s = next(x for x in sums if x.action_key == "stop_auto_promotion")
+        sums = await build_effect_summaries(db, user_id=uid, contour="pricing", now=NOW)
+        s = next(x for x in sums if x.action_key == "set_price")
         assert s.effect_status == "proven_improved"
         assert "freshness" not in s.evidence            # v1: only unmeasured statuses
     _run(go())

@@ -11,7 +11,6 @@ import ast
 import asyncio
 import inspect
 import uuid
-from datetime import datetime
 
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
@@ -19,7 +18,6 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from database import Base
-import models  # registers tables
 from models.decision import Decision
 from models.engine_signal_decision_link import EngineSignalDecisionLink
 from models.advertising_signal import AdvertisingSignal
@@ -35,7 +33,11 @@ import services.decision_apply_ux.confirm as confirm_mod
 from services.decision_apply_ux.confirm import confirm_and_apply_decision, ApplyConfirmResult
 from services.action_binding.execution_bridge import BoundExecutionResult
 
-IKEY = "adv_ad_on_low_stock:wildberries:SKU1"  # stop_auto_promotion path (A2.2-bind: overspend moved to ad_set_state)
+# 2.1A: stop_auto_promotion is contained (non-executable). This suite exercises the GENERIC
+# confirm→measurement machinery, so it rides a still-executable lever — reduce_discount (WB,
+# payload {offer_id, discount:0}), via the pricing_negative_margin signal (offer_id-only derivation).
+IKEY = "pricing_negative_margin:wildberries:SKU1"
+ACTION = "reduce_discount"
 
 
 def _run(c):
@@ -52,18 +54,18 @@ async def _engine():
 
 async def _seed_applyable(db, uid):
     did = str(uuid.uuid4())
-    db.add(Decision(id=did, user_id=uid, problem="adv", action_key="stop_auto_promotion",
+    db.add(Decision(id=did, user_id=uid, problem="pricing", action_key=ACTION,
                     insight_key=IKEY, status="open"))
-    db.add(EngineSignalDecisionLink(user_id=uid, contour="advertising",
-           signal_table="advertising_signal", signal_id="sig1", insight_key=IKEY,
-           action_key="stop_auto_promotion", decision_id=did, link_status="promoted",
+    db.add(EngineSignalDecisionLink(user_id=uid, contour="pricing",
+           signal_table="pricing_signal", signal_id="sig1", insight_key=IKEY,
+           action_key=ACTION, decision_id=did, link_status="promoted",
            marketplace="wildberries", sku="SKU1"))
     db.add(AdvertisingSignal(audit_id=str(uuid.uuid4()), user_id=uid,
-           signal_key="adv_ad_on_low_stock", problem_type="ad_on_low_stock",
+           signal_key="pricing_negative_margin", problem_type="negative_margin",
            insight_key=IKEY, marketplace="wildberries", sku="SKU1", status="promoted_to_decision"))
     db.add(ProductListing(physical_product_id="ph1", user_id=uid, marketplace="wb", external_id="SKU1"))
     db.add(MarketplaceConnection(user_id=uid, marketplace="wildberries", status="connected",
-                                 scopes=["promotions"]))
+                                 scopes=["promotions", "prices"]))
     await db.commit()
     return did
 
@@ -85,8 +87,9 @@ def _fake_exec(ok=True, status="success", log_id="log1", calls=None):
     async def f(db, *, user_id, decision_id, marketplace, sku, dry_run, idempotency_key, now=None):
         if calls is not None:
             calls.append({"dry_run": dry_run, "idempotency_key": idempotency_key})
-        return BoundExecutionResult(ok=ok, decision_id=decision_id, action_key="stop_auto_promotion",
-                                    payload={"offer_id": sku}, execution_log_id=(log_id if ok else None),
+        return BoundExecutionResult(ok=ok, decision_id=decision_id, action_key=ACTION,
+                                    payload={"offer_id": sku, "discount": 0},
+                                    execution_log_id=(log_id if ok else None),
                                     status=status, reason=(None if ok else status))
     return f
 

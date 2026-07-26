@@ -30,7 +30,6 @@ margin drain is the sanctioned Ozon executable use-case).
 import asyncio
 import inspect
 import uuid
-from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
@@ -175,25 +174,23 @@ def test_candidate_link_has_action_key():
     _run(go())
 
 
-# ── (9) promotion creates a Decision ─────────────────────────────────────────
+# ── (9) 2.1A: promotion is CONTAINED — no executable Decision ─────────────────
 
-def test_promotion_creates_decision():
+def test_promotion_contained_no_decision():
     async def go():
         db = await _engine(); uid = str(uuid.uuid4())
         await _produce(db, uid)
         await promote_eligible_candidates(db, user_id=uid); await db.commit()
         res = await bridge_links_to_decisions(db, user_id=uid); await db.commit()
-        assert res.promoted == 1
-        ds = (await db.execute(select(Decision))).scalars().all()
-        assert len(ds) == 1
-        assert ds[0].insight_key == f"{SIGNAL_KEY}:ozon:SKU1"
-        assert ds[0].action_key == "stop_auto_promotion"
+        # stop_auto_promotion is contained → the bridge never promotes it to an executable Decision
+        assert res.promoted == 0
+        assert (await db.execute(select(Decision))).scalars().all() == []
         sig = (await db.execute(select(OperationsSignal))).scalars().one()
-        assert sig.status == "promoted_to_decision" and sig.decision_id == ds[0].id
+        assert sig.status == "active" and sig.decision_id is None   # stays a diagnostic
     _run(go())
 
 
-# ── (10) repeated promotion does not duplicate the Decision ──────────────────
+# ── (10) the producer stays idempotent; still no Decision on repeat ───────────
 
 def test_promotion_idempotent():
     async def go():
@@ -201,14 +198,14 @@ def test_promotion_idempotent():
         await _produce(db, uid)
         await promote_eligible_candidates(db, user_id=uid); await db.commit()
         await bridge_links_to_decisions(db, user_id=uid); await db.commit()
-        # second full pass — no new signal (idempotent producer), no new Decision
+        # second full pass — no new signal (idempotent producer), and still no Decision (contained)
         again = await build_operations_signal(
             db, user_id=uid, marketplace="ozon", sku="SKU1", net_profit=-100.0,
             in_auto_promotion=True); await db.commit()
         await promote_eligible_candidates(db, user_id=uid); await db.commit()
         await bridge_links_to_decisions(db, user_id=uid); await db.commit()
         assert len(await _signals(db)) == 1
-        assert len((await db.execute(select(Decision))).scalars().all()) == 1
+        assert (await db.execute(select(Decision))).scalars().all() == []   # contained: never promoted
         assert again is not None   # returns the existing active row, not a duplicate
     _run(go())
 
