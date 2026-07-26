@@ -241,6 +241,67 @@ def test_evaluation_verdict_check(conn):
             "VALUES('e1','pol1','s1','bogus','[]','[]','{}',CURRENT_TIMESTAMP)"))
 
 
+# ── 2.5A: economic_verdict + actionability are stored in their OWN validated columns ─────────
+def _eval(c, eid, *, verdict="complete", econ=None, act=None, snapshot="{}", policy="pol1", store="s1"):
+    c.execute(text(
+        "INSERT INTO protection_evaluations"
+        "(id,policy_id,marketplace_store_id,verdict,economic_verdict,actionability,"
+        " missing_fields,reasons,inputs_snapshot,evaluated_at) "
+        "VALUES(:id,:pol,:s,:v,:e,:a,'[]','[]',:snap,CURRENT_TIMESTAMP)"),
+        {"id": eid, "pol": policy, "s": store, "v": verdict, "e": econ, "a": act, "snap": snapshot})
+
+
+def test_eval_all_economic_verdicts_allowed(conn):
+    _policy(conn, "pol1", "s1")
+    for i, ev in enumerate(("safe", "below_target_margin", "emergency_zero_or_loss")):
+        _eval(conn, f"e{i}", econ=ev, act="manual_only")
+    assert conn.execute(text("SELECT count(*) FROM protection_evaluations")).scalar() == 3
+
+
+def test_eval_all_actionabilities_allowed(conn):
+    _policy(conn, "pol1", "s1")
+    for i, a in enumerate(("executable", "manual_only", "unsupported")):
+        _eval(conn, f"e{i}", econ="safe", act=a)
+    assert conn.execute(text("SELECT count(*) FROM protection_evaluations")).scalar() == 3
+
+
+def test_eval_null_null_allowed_for_old_row(conn):
+    _policy(conn, "pol1", "s1")
+    _eval(conn, "e1", econ=None, act=None)         # a pre-2.5A row keeps NULL/NULL
+    row = conn.execute(text("SELECT economic_verdict,actionability FROM protection_evaluations "
+                            "WHERE id='e1'")).fetchone()
+    assert row[0] is None and row[1] is None
+
+
+def test_eval_bad_economic_verdict_rejected(conn):
+    _policy(conn, "pol1", "s1")
+    with pytest.raises(IntegrityError):
+        _eval(conn, "e1", econ="bogus", act="manual_only")
+
+
+def test_eval_bad_actionability_rejected(conn):
+    _policy(conn, "pol1", "s1")
+    with pytest.raises(IntegrityError):
+        _eval(conn, "e1", econ="safe", act="bogus")
+
+
+def test_eval_results_are_independent(conn):
+    # calculation_status (verdict) stays separate; the DB enforces NO cross-result rule
+    _policy(conn, "pol1", "s1")
+    _eval(conn, "e1", verdict="complete", econ="emergency_zero_or_loss", act="unsupported")  # proven loss, no action
+    _eval(conn, "e2", verdict="incomplete", econ=None, act="manual_only")                     # incomplete → no economic
+    r = conn.execute(text("SELECT verdict,economic_verdict,actionability FROM protection_evaluations "
+                          "WHERE id='e1'")).fetchone()
+    assert r == ("complete", "emergency_zero_or_loss", "unsupported")
+
+
+def test_eval_snapshot_preserved(conn):
+    _policy(conn, "pol1", "s1")
+    _eval(conn, "e1", econ="safe", act="manual_only", snapshot='{"formula_version": "contribution-A-1"}')
+    snap = conn.execute(text("SELECT inputs_snapshot FROM protection_evaluations WHERE id='e1'")).scalar()
+    assert "contribution-A-1" in snap             # inputs_snapshot untouched, still the evidence
+
+
 # ── 15/16/17. action uniqueness incl. NULL promo, terminal history ───────────
 def test_idempotency_unique(conn):
     _policy(conn, "pol1", "s1")
@@ -426,7 +487,7 @@ def test_single_alembic_head():
     from alembic.config import Config
     from alembic.script import ScriptDirectory
     heads = ScriptDirectory.from_config(Config("alembic.ini")).get_heads()
-    assert heads == ["pad1a2b3c4d01"], heads
+    assert heads == ["pev1a2b3c4d01"], heads
 
 
 # ── 23/24/25. feature stays OFF; stop_auto_promotion stays contained ─────────
