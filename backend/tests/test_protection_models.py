@@ -84,14 +84,15 @@ def _policy(c, pid, store, product=None, **over):
         c.execute(text(f"UPDATE protection_policies SET {k}=:v WHERE id=:id"), {"v": v, "id": pid})
 
 
-def _action(c, aid, store, product, *, promo=None, promo_key=None, state="detected", idem=None):
+def _action(c, aid, store, product, *, policy="pol1", promo=None, promo_key=None,
+            state="detected", idem=None):
     if promo_key is None:
         promo_key = promo if promo is not None else PROMO_KEY_SENTINEL
     c.execute(text(
         "INSERT INTO protection_action_states"
         "(id,policy_id,marketplace_store_id,product_id,promo_id,promo_key,state,idempotency_key) "
-        "VALUES(:id,'pol1',:s,:p,:promo,:pk,:st,:idem)"),
-        {"id": aid, "s": store, "p": product, "promo": promo, "pk": promo_key,
+        "VALUES(:id,:pol,:s,:p,:promo,:pk,:st,:idem)"),
+        {"id": aid, "pol": policy, "s": store, "p": product, "promo": promo, "pk": promo_key,
          "st": state, "idem": idem or aid})
 
 
@@ -265,10 +266,59 @@ def test_second_active_action_blocked(conn):
 def test_terminal_history_allows_new_active(conn):
     _policy(conn, "pol1", "s1")
     _action(conn, "a1", "s1", "p1", promo="PR1", state="verified_success", idem="k1")  # terminal
-    _action(conn, "a2", "s1", "p1", promo="PR1", state="cooldown", idem="k2")          # cooldown exempt
+    _action(conn, "a2", "s1", "p1", promo="PR1", state="rejected", idem="k2")          # terminal
     _action(conn, "a3", "s1", "p1", promo="PR1", state="detected", idem="k3")          # new active OK
     n = conn.execute(text("SELECT count(*) FROM protection_action_states")).scalar()
     assert n == 3
+
+
+# ── cooldown blocks a second command; monitoring continues via Evaluation ────
+def test_cooldown_blocks_second_active(conn):
+    _policy(conn, "pol1", "s1")
+    _action(conn, "a1", "s1", "p1", promo="PR1", state="cooldown", idem="k1")          # cooling down
+    with pytest.raises(IntegrityError):
+        _action(conn, "a2", "s1", "p1", promo="PR1", state="detected", idem="k2")      # blocked
+
+
+def test_cooldown_allows_new_evaluation(conn):
+    _policy(conn, "pol1", "s1")
+    _action(conn, "a1", "s1", "p1", promo="PR1", state="cooldown", idem="k1")
+    # monitoring during cooldown = an append-only evaluation, NOT a second action row
+    conn.execute(text(
+        "INSERT INTO protection_evaluations"
+        "(id,policy_id,marketplace_store_id,product_id,verdict,missing_fields,reasons,"
+        " inputs_snapshot,evaluated_at) "
+        "VALUES('e1','pol1','s1','p1','complete','[]','[]','{}',CURRENT_TIMESTAMP)"))
+    assert conn.execute(text("SELECT count(*) FROM protection_evaluations")).scalar() == 1
+
+
+# ── action scope: store, cabinet and placement are DB-enforced ───────────────
+def test_action_policy_store_mismatch_blocked(conn):
+    _policy(conn, "pol1", "s1")            # policy lives on s1
+    with pytest.raises(IntegrityError):    # action claims store s2 → (pol1,s2) not a policy key
+        _action(conn, "a1", "s2", "pO", policy="pol1", promo="PR1", idem="k1")
+
+
+def test_action_foreign_store_product_blocked(conn):
+    _policy(conn, "pol1", "s1")
+    with pytest.raises(IntegrityError):    # pO is placed in s2, not s1 → (s1,pO) not a placement
+        _action(conn, "a1", "s1", "pO", policy="pol1", promo="PR1", idem="k1")
+
+
+def test_action_unplaced_product_blocked(conn):
+    _policy(conn, "pol1", "s1")
+    with pytest.raises(IntegrityError):    # p2 exists but is not placed in s1
+        _action(conn, "a1", "s1", "p2", policy="pol1", promo="PR1", idem="k1")
+
+
+def test_action_valid_for_placed_product(conn):
+    # a store-wide policy on s1 may spawn an action ONLY for a product really placed in s1
+    _policy(conn, "polWide", "s1")
+    _action(conn, "a1", "s1", "p1", policy="polWide", promo="PR1", idem="k1")   # p1 placed in s1 → OK
+    # a product-scoped policy's action matches the same store/product
+    _policy(conn, "polP", "s1", "p1")
+    _action(conn, "a2", "s1", "p1", policy="polP", promo="PR2", idem="k2")      # OK
+    assert conn.execute(text("SELECT count(*) FROM protection_action_states")).scalar() == 2
 
 
 def test_promo_key_check(conn):

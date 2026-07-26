@@ -40,7 +40,7 @@ _ACTION_STATES = (
     "action_requested", "marketplace_processing", "verified_success",
     "rejected", "ambiguous", "reappeared", "cooldown", "manual_attention",
 )
-_ACTION_TERMINAL = ("verified_success", "rejected", "manual_attention", "cooldown")
+_ACTION_TERMINAL = ("verified_success", "rejected", "manual_attention")   # cooldown is NOT terminal
 _PROMO_SENTINEL = "__none__"
 
 
@@ -71,6 +71,7 @@ def upgrade() -> None:
             ["product_placements.marketplace_store_id", "product_placements.product_id"],
             ondelete="CASCADE", name="fk_protection_policy_placement"),
         sa.UniqueConstraint("marketplace_store_id", "product_id", name="uq_protection_store_product"),
+        sa.UniqueConstraint("id", "marketplace_store_id", name="uq_protection_id_store"),
         sa.CheckConstraint("emergency_pct IS NULL OR (emergency_pct >= -100 AND emergency_pct <= 100)",
                            name="ck_protection_emergency_pct_range"),
         sa.CheckConstraint("target_margin_pct >= 0 AND target_margin_pct <= 100",
@@ -161,10 +162,8 @@ def upgrade() -> None:
     op.create_table(
         _ACTION,
         sa.Column("id", sa.String(length=36), primary_key=True),
-        sa.Column("policy_id", sa.String(length=36),
-                  sa.ForeignKey("protection_policies.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("marketplace_store_id", sa.String(length=36),
-                  sa.ForeignKey("marketplace_stores.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("policy_id", sa.String(length=36), nullable=False),
+        sa.Column("marketplace_store_id", sa.String(length=36), nullable=False),
         sa.Column("product_id", sa.String(length=36), nullable=False),
         sa.Column("promo_id", sa.String(length=128), nullable=True),
         sa.Column("promo_key", sa.String(length=128), nullable=False),
@@ -177,6 +176,14 @@ def upgrade() -> None:
         sa.Column("reappear_count", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("created_at", sa.DateTime(), nullable=True),
         sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.ForeignKeyConstraint(
+            ["policy_id", "marketplace_store_id"],
+            ["protection_policies.id", "protection_policies.marketplace_store_id"],
+            ondelete="CASCADE", name="fk_action_policy_store"),
+        sa.ForeignKeyConstraint(
+            ["marketplace_store_id", "product_id"],
+            ["product_placements.marketplace_store_id", "product_placements.product_id"],
+            ondelete="CASCADE", name="fk_action_placement"),
         sa.CheckConstraint(f"state IN ({_quoted(_ACTION_STATES)})", name="ck_action_state"),
         sa.CheckConstraint("reappear_count >= 0", name="ck_action_reappear_nonneg"),
         sa.CheckConstraint(

@@ -39,9 +39,11 @@ ACTION_STATES = (
     "action_requested", "marketplace_processing", "verified_success",
     "rejected", "ambiguous", "reappeared", "cooldown", "manual_attention",
 )
-# States that DO NOT hold an in-flight action — a new active row may coexist with any
-# number of these (terminal history + cooldown, where monitoring still continues).
-_ACTION_TERMINAL = ("verified_success", "rejected", "manual_attention", "cooldown")
+# Terminal states — a new active row may coexist with any number of these (history only).
+# cooldown is deliberately NOT terminal: a cooling-down row still BLOCKS a second command for the
+# same (store, product, promo). Monitoring during cooldown continues via ProtectionEvaluation
+# (append-only, no uniqueness), never by creating a second ProtectionActionState.
+_ACTION_TERMINAL = ("verified_success", "rejected", "manual_attention")
 # Materialized value used for promo_key when the marketplace promo id is unknown, so a
 # NULL promo_id can never bypass the active-uniqueness index.
 PROMO_KEY_SENTINEL = "__none__"
@@ -89,6 +91,9 @@ class ProtectionPolicy(Base):
         # one product policy per (store, product); NULLs are DISTINCT so store-wide rows
         # are NOT constrained here — they are capped by the partial index below.
         UniqueConstraint("marketplace_store_id", "product_id", name="uq_protection_store_product"),
+        # composite-FK target for protection_action_states(policy_id, marketplace_store_id): an
+        # action can never bind a policy from one store to a different store.
+        UniqueConstraint("id", "marketplace_store_id", name="uq_protection_id_store"),
         # exactly one store-wide policy per store.
         Index("uq_protection_store_wide", "marketplace_store_id", unique=True,
               sqlite_where=text("product_id IS NULL"),
@@ -218,10 +223,13 @@ class ProtectionActionState(Base):
     __tablename__ = "protection_action_states"
 
     id                   = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    policy_id            = Column(String(36), ForeignKey("protection_policies.id", ondelete="CASCADE"),
-                                  nullable=False)
-    marketplace_store_id = Column(String(36), ForeignKey("marketplace_stores.id", ondelete="CASCADE"),
-                                  nullable=False)
+    # policy_id + marketplace_store_id feed ONE composite FK to the policy, and
+    # marketplace_store_id + product_id feed ANOTHER to product_placements — so the action's store
+    # MUST equal its policy's store AND the (store, product) MUST be a real placement (same cabinet).
+    # Three independent per-column FKs could not express that: they would allow a policy from store A,
+    # a store_id of store B and a product from store C.
+    policy_id            = Column(String(36), nullable=False)
+    marketplace_store_id = Column(String(36), nullable=False)
     product_id           = Column(String(36), nullable=False)
     promo_id             = Column(String(128), nullable=True)
     promo_key            = Column(String(128), nullable=False)   # promo_id or PROMO_KEY_SENTINEL
@@ -236,6 +244,17 @@ class ProtectionActionState(Base):
     updated_at           = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     __table_args__ = (
+        # action.store == policy.store (composite FK to the policy's (id, store) unique key)
+        ForeignKeyConstraint(
+            ["policy_id", "marketplace_store_id"],
+            ["protection_policies.id", "protection_policies.marketplace_store_id"],
+            ondelete="CASCADE", name="fk_action_policy_store"),
+        # action.(store, product) is a REAL placement (same cabinet, placed) — foreign store,
+        # other cabinet, or unplaced product are all rejected by the DB
+        ForeignKeyConstraint(
+            ["marketplace_store_id", "product_id"],
+            ["product_placements.marketplace_store_id", "product_placements.product_id"],
+            ondelete="CASCADE", name="fk_action_placement"),
         CheckConstraint(_in("state", ACTION_STATES), name="ck_action_state"),
         CheckConstraint("reappear_count >= 0", name="ck_action_reappear_nonneg"),
         # promo_key is always the materialized promo_id, or the sentinel when promo_id is NULL —
