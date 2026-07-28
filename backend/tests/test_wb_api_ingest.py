@@ -442,4 +442,4 @@ def test_one_connection_failure_does_not_stop_another(monkeypatch):
 def test_alembic_single_head():
     from alembic.config import Config
     from alembic.script import ScriptDirectory
-    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["pev2a2b3c4d01"]
+    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["mpo1a2b3c4d01"]

@@ -58,6 +58,10 @@ from .protection import (
     ProtectionPolicy, ProtectionTaxSetting, ProtectionAdditionalCost,
     ProtectionEvaluation, ProtectionActionState,
 )
+# Proven price/currency storage for loss-promotion protection (PULT-LAUNCH-2.5C) — schema/provenance
+# only, append-only, feature OFF (no ingest/runtime/scheduler). Composite-FKs marketplace_stores and
+# product_placements, so both must be registered before it loads.
+from .marketplace_price_observation import MarketplacePriceObservation
 from .marketplace_category import MarketplaceCategoryRow
 from .marketplace_category_attribute import MarketplaceCategoryAttributeRow
 from .returns_audit import ReturnsAudit
