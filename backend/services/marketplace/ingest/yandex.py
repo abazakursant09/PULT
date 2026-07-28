@@ -42,15 +42,20 @@ from models.imported_card_content import ImportedCardContentRow
 from models.imported_product import ImportedProductRow
 from models.marketplace_account import MarketplaceAccount
 from models.marketplace_operation import MarketplaceOperation
+from models.marketplace_price_observation import MarketplacePriceObservation, PROMO_KEY_SENTINEL
 from models.marketplace_store import MarketplaceStore
 from models.product import Product
 from models.product_placement import ProductPlacement
 from services.account_product_resolver import FOUND, AccountProductIndex
+from services.marketplace.errors import ExecutionError
 from services.marketplace.yandex_client import yandex_client
 
 MARKETPLACE = "yandex"
 # 'finance' is listed so it gets a visible, honest ApiSyncState, but it is UNSUPPORTED (below).
-DATA_TYPES = ("products", "cards", "prices", "stocks", "orders", "returns", "finance")
+# PULT-LAUNCH-2.5D-Yandex-A adds 'price_observations' — proven campaign price EVIDENCE into
+# MarketplacePriceObservation. Read-only; reached only through run_api_sync_once (0 calls while OFF).
+DATA_TYPES = ("products", "cards", "prices", "stocks", "orders", "returns", "finance",
+              "price_observations")
 UNSUPPORTED = frozenset({"finance"})
 UNSUPPORTED_REASON = "yandex_finance_async_report_schema_unconfirmed"
 
@@ -95,6 +100,22 @@ def _dt(value) -> Optional[datetime]:
     return None
 
 
+# ISO 4217 canonicalization for the ONLY legacy code Yandex uses: `RUR` is Yandex's historical code
+# for the Russian ruble; the current ISO 4217 code is `RUB` (what WB/Ozon observations store). This is
+# an EXPLICIT, tested mapping — never a hidden substitution inside the writer. Any other well-formed
+# 3-letter code passes through verbatim; an absent/malformed code is unknown (None).
+_ISO_4217_ALIAS = {"RUR": "RUB"}
+
+
+def _iso_currency(value) -> tuple[Optional[str], str]:
+    """(currency, status). Proven only when the provider gives a well-formed 3-letter code; `RUR` is
+    canonicalized to the current ISO 4217 `RUB`. Absent/malformed → (None, 'unknown'); never a default."""
+    s = _s(value)
+    if not (s and len(s) == 3 and s.isalpha()):
+        return None, "unknown"
+    return _ISO_4217_ALIAS.get(s.upper(), s.upper()), "proven"
+
+
 # ── Sync gating (Yandex-specific; the scheduler asks the provider, never branches itself) ─────────
 def sync_gate(account: Optional[MarketplaceAccount], store: MarketplaceStore) -> tuple[bool, Optional[str]]:
     """A Yandex store syncs only when BOTH ids are known: the cabinet's businessId
@@ -134,6 +155,15 @@ async def _resolve(db, index: AccountProductIndex, ext: Optional[str], sku: Opti
         return None
     res = index.resolve(external_product_id=ext, sku=sku)
     return res.product_id if res.status == FOUND else None
+
+
+async def _placed_in_store(db, store_id: str, product_id: str) -> bool:
+    """True iff the product has a ProductPlacement in THIS campaign store — the store-scoped guard a
+    catalog observation needs before it may claim a resolved product_id."""
+    row = (await db.execute(select(ProductPlacement.id).where(
+        ProductPlacement.marketplace_store_id == store_id,
+        ProductPlacement.product_id == product_id))).first()
+    return row is not None
 
 
 async def _ensure_placement(db, product_id: str, account_id: str, store_id: str) -> None:
@@ -206,6 +236,8 @@ async def fetch_and_persist_page(db, state, token: str, client_id: Optional[str]
         return await _page_offer_mappings(db, state, token, kind=state.data_type)
     if state.data_type == "prices":
         return await _page_prices(db, state, token)
+    if state.data_type == "price_observations":
+        return await _page_price_observations(db, state, token)
     if state.data_type == "stocks":
         return await _page_stocks(db, state, token)
     if state.data_type == "orders":
@@ -423,3 +455,158 @@ async def _page_returns(db, state, token) -> dict:
     done = not returns or not next_token
     state.cursor = None if done else json.dumps({"page_token": next_token})
     return {"done": done, "count": len(returns), "defer": False}
+
+
+# ── Price OBSERVATIONS (PULT-LAUNCH-2.5D-Yandex-A) ───────────────────────────────
+# Append-only, immutable CAMPAIGN price evidence into MarketplacePriceObservation. Idempotency is the
+# table's run-uniqueness key (store, external product, KIND, promotion, source, ingest_run_id): the
+# ingest_run_id is minted once per full sync pass (kept in the cursor) so re-processing a page UPSERTs
+# the same row, while the next pass writes fresh rows. Store-scoped: the campaignId queried is THIS
+# store's external_store_id, and every row carries state.marketplace_store_id — a campaign's price is
+# never copied to another campaign. Money is Decimal, never float; unknown = NULL, never 0. Revenue,
+# subsidy, commission-base, promo and club prices are NEVER inferred here.
+
+
+async def _upsert_observation(db, state, *, run_id: str, ext: str, product_id: Optional[str],
+                              now: datetime, **fields) -> None:
+    row = (await db.execute(select(MarketplacePriceObservation).where(
+        MarketplacePriceObservation.marketplace_store_id == state.marketplace_store_id,
+        MarketplacePriceObservation.external_product_id == ext,
+        MarketplacePriceObservation.observation_kind == "catalog",
+        MarketplacePriceObservation.promotion_key == PROMO_KEY_SENTINEL,
+        MarketplacePriceObservation.source == "api",
+        MarketplacePriceObservation.ingest_run_id == run_id))).scalars().first()
+    if row is None:
+        row = MarketplacePriceObservation(
+            id=str(uuid.uuid4()), ingest_run_id=run_id,
+            marketplace_account_id=state.marketplace_account_id,
+            marketplace_store_id=state.marketplace_store_id,
+            external_product_id=ext, observation_kind="catalog",
+            promotion_key=PROMO_KEY_SENTINEL, source="api")
+        db.add(row)
+    # A resolved row MUST carry a product_id (placement FK + resolution CHECK); an unassigned row never
+    # borrows another product — product_id stays NULL (never the first fuzzy match, never by title).
+    row.product_id = product_id
+    row.resolution_status = "resolved" if product_id else "unassigned"
+    row.fetched_at = now
+    for key, value in fields.items():
+        setattr(row, key, value)
+
+
+# Hard fail-closed ceiling on total pages in ONE pass (far past any real catalog). A cursor that never
+# terminates would otherwise walk forever across scheduler ticks.
+_MAX_PRICE_OBS_PAGES = 10000
+
+
+def _schema_error(reason: str) -> ExecutionError:
+    """A structural provider-response error. The reason is SAFE (no payload, no offerId, no ids) — it
+    describes only the shape that was violated, so a broken page is never mistaken for an empty one."""
+    return ExecutionError(ExecutionError.MARKETPLACE_5XX, f"yandex offer-prices schema invalid: {reason}")
+
+
+async def _page_price_observations(db, state, token) -> dict:
+    """Yandex-A campaign price EVIDENCE from GET /v2/campaigns/{campaignId}/offer-prices →
+    observation_kind='catalog'. price.value→buyer_price, price.discountBase→catalog_price,
+    price.currencyId→currency (proven only, RUR→RUB via _iso_currency, never a default). All other
+    money and every flag stay NULL/unknown. Absent values → NULL + named in missing_fields.
+
+    A REAL empty page (result present, offers=[], no nextPageToken) ends the pass successfully. A
+    BROKEN page (missing container, offers not an array, paging/nextPageToken of the wrong type) is a
+    schema error that fails closed — never turned into an empty catalog. A row whose identity cannot be
+    determined is skipped (skipped_rows_count++), and coverage_complete is claimed ONLY when the whole
+    pass parsed cleanly with zero skipped rows. Positive rows from clean pages are kept (honest
+    partial), matching the existing per-page-commit ingest model; a schema error rolls back its page."""
+    now = datetime.utcnow()
+    campaign_id = await _campaign_id(db, state)
+    if not campaign_id:
+        # Store not yet mapped to a campaignId — nothing to observe, never guessed onto a campaign.
+        state.cursor = None
+        return {"done": True, "count": 0, "defer": False}
+    cur = json.loads(state.cursor) if state.cursor else {}
+    fresh = "run_id" not in cur
+    run_id = cur.get("run_id") or str(uuid.uuid4())
+    page_token = cur.get("page_token")
+    seen = list(cur.get("seen") or [])
+    if fresh:
+        # A new pass starts honest: coverage not yet proven, no rows skipped yet.
+        state.coverage_complete = False
+        state.skipped_rows_count = 0
+
+    data = await yandex_client.campaign_prices(token=token, campaign_id=campaign_id, page_token=page_token)
+
+    # ── Distinguish a VALID empty page from a BROKEN one (schema error → fail closed). ──
+    if not isinstance(data, dict):
+        raise _schema_error("response is not an object")
+    result = data.get("result")
+    if not isinstance(result, dict):
+        raise _schema_error("missing or non-object result container")
+    offers = result.get("offers")
+    if not isinstance(offers, list):
+        raise _schema_error("offers missing or not an array")   # empty [] is valid; absent/other is not
+    paging = result.get("paging")
+    if paging is None:
+        paging = {}
+    if not isinstance(paging, dict):
+        raise _schema_error("paging is not an object")
+    next_token = paging.get("nextPageToken")
+    if next_token is not None and (not isinstance(next_token, str) or not next_token.strip()):
+        raise _schema_error("nextPageToken is not a non-empty string")
+
+    index = await _index(db, state.marketplace_account_id)
+    for o in offers:
+        if not isinstance(o, dict):
+            state.skipped_rows_count = (state.skipped_rows_count or 0) + 1   # corrupt row, no identity
+            continue
+        offer_id = _s(o.get("id") or o.get("offerId"))
+        market_sku = _s(o.get("marketSku"))
+        ext = offer_id or market_sku
+        if ext is None:
+            state.skipped_rows_count = (state.skipped_rows_count or 0) + 1   # identity undeterminable
+            continue
+        price_obj = o.get("price") if isinstance(o.get("price"), dict) else {}
+        buyer_price = _dec(price_obj.get("value"))          # current price → buyer_price
+        catalog_price = _dec(price_obj.get("discountBase"))  # зачёркнутая → catalog_price
+        currency, currency_status = _iso_currency(price_obj.get("currencyId"))
+        missing = []
+        if buyer_price is None:
+            missing.append("value")
+        if catalog_price is None:
+            missing.append("discountBase")
+        if currency is None:
+            missing.append("currencyId")
+        # Resolution is store-scoped: a Product resolved at the account level counts ONLY if it is
+        # actually placed in THIS campaign store. A product placed in a DIFFERENT campaign of the same
+        # cabinet must stay unassigned here — never attributed to a store where it has no placement
+        # (which the placement composite FK would reject anyway).
+        product_id = await _resolve(db, index, market_sku, offer_id)
+        if product_id is not None and not await _placed_in_store(db, state.marketplace_store_id, product_id):
+            product_id = None
+        await _upsert_observation(
+            db, state, run_id=run_id, ext=ext, product_id=product_id, now=now,
+            promotion_id=None, promotion_type=None, participation_status=None,
+            catalog_price=catalog_price, buyer_price=buyer_price,
+            seller_promo_price=None, club_buyer_price=None, provider_min_price=None,
+            auto_action_enabled=None,
+            currency=currency, currency_status=currency_status,
+            # never inferred from a buyer-facing price:
+            expected_seller_revenue=None, seller_revenue_status="unknown",
+            commission_base=None, commission_base_status="unknown",
+            marketplace_subsidy=None, subsidy_status="unknown",
+            provider_dataset="prices", missing_fields=missing)
+
+    # ── Token cycle detection: reject A→A, A→B→A and any longer loop, and a bounded page ceiling. ──
+    if next_token is not None and (next_token == page_token or next_token in seen):
+        raise _schema_error("pageToken cycle detected")
+    if page_token is not None:
+        seen.append(page_token)     # remember every token actually walked in THIS pass
+    if len(seen) >= _MAX_PRICE_OBS_PAGES:
+        raise _schema_error("page limit exceeded")
+
+    done = next_token is None       # the token is the sole authority for end-of-list
+    if done:
+        # A pass is complete ONLY when every page parsed cleanly with zero skipped rows.
+        state.coverage_complete = (state.skipped_rows_count or 0) == 0
+        state.cursor = None
+    else:
+        state.cursor = json.dumps({"run_id": run_id, "page_token": next_token, "seen": seen})
+    return {"done": done, "count": len(offers), "defer": False}
