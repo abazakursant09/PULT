@@ -398,7 +398,7 @@ def test_active_and_ended_are_separate_immutable_rows(conn):
 # ── MIGRATION / SCHEMA ──────────────────────────────────────────────────────────
 def test_single_alembic_head():
     heads = ScriptDirectory.from_config(Config("alembic.ini")).get_heads()
-    assert heads == ["ozp1a2b3c4d01"], heads
+    assert heads == ["wcb1a2b3c4d01"], heads
 
 
 def test_old_tables_preserved(conn):
@@ -432,8 +432,9 @@ def test_observation_writer_is_flag_gated_and_unscheduled():
         src = open(path, encoding="utf-8").read()
         if "MarketplacePriceObservation" in src or "marketplace_price_observations" in src:
             refs.append(rel)
-    # The ONLY production reference is the single ingest writer.
-    assert refs == ["services/marketplace/ingest/ozon.py"], refs
+    # The ONLY production references are the per-marketplace ingest writers.
+    assert sorted(refs) == ["services/marketplace/ingest/ozon.py",
+                            "services/marketplace/ingest/wb.py"], refs
 
     from config import settings
     assert settings.api_data_sync_enabled is False        # master switch OFF by default

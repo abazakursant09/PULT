@@ -133,6 +133,18 @@ class _StubWB:
     async def download_warehouse_remains(self, *, token, task_id):
         return []
 
+    # PULT-LAUNCH-2.5D-WB — calendar reads default to empty so existing full-run tests stay neutral.
+    async def list_promotions(self, *, token, start_date_time, end_date_time,
+                              all_promo=False, limit=1000, offset=0):
+        return []
+
+    async def promotion_details(self, *, token, promotion_ids):
+        return []
+
+    async def promotion_nomenclatures(self, *, token, promotion_id, in_action=True,
+                                     limit=1000, offset=0):
+        return []
+
 
 def _use_stub(monkeypatch, stub):
     monkeypatch.setattr(wb_ingest, "wb_client", stub)
@@ -388,6 +400,9 @@ def test_auth_error_pauses_connection(monkeypatch):
             raise ExecutionError(ExecutionError.AUTH, "auth")
         async def create_warehouse_remains_report(self, *, token):
             raise ExecutionError(ExecutionError.AUTH, "auth")
+        async def list_promotions(self, *, token, start_date_time, end_date_time,
+                                  all_promo=False, limit=1000, offset=0):
+            raise ExecutionError(ExecutionError.AUTH, "auth")
     monkeypatch.setattr(api_sync.wb_ingest, "wb_client", _Auth())
     _run(api_sync.run_api_sync_once(db))
     states = _run(db.execute(select(ApiSyncState))).scalars().all()
@@ -442,4 +457,4 @@ def test_one_connection_failure_does_not_stop_another(monkeypatch):
 def test_alembic_single_head():
     from alembic.config import Config
     from alembic.script import ScriptDirectory
-    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["ozp1a2b3c4d01"]
+    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["wcb1a2b3c4d01"]

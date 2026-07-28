@@ -210,6 +210,48 @@ class WBClient:
             self._content_client = BaseMarketplaceClient(settings.wb_content_base)
         return self._content_client
 
+    # ── Календарь акций READ (PULT-LAUNCH-2.5D-WB-B) ───────────────────────────
+    # Read-only, evidence-only. On the dp-calendar-api host (Цены и скидки token). These NEVER change
+    # a product's promotion state — entering an action is the separate write /promotions/upload path,
+    # which is out of scope and never called here.
+    def _calendar(self) -> "BaseMarketplaceClient":
+        if not hasattr(self, "_calendar_client"):
+            self._calendar_client = BaseMarketplaceClient(settings.wb_calendar_base)
+        return self._calendar_client
+
+    async def list_promotions(self, *, token: str, start_date_time: str, end_date_time: str,
+                              all_promo: bool = False, limit: int = 1000, offset: int = 0) -> list[dict]:
+        """GET /api/v1/calendar/promotions → data.promotions[] ({id, name, startDateTime, endDateTime,
+        type, ...}). all_promo=false = акции, доступные для участия. limit/offset pagination; `id` is
+        the ONLY promotion identity — the title is never identity."""
+        data = await self._calendar().request(
+            "GET", "/api/v1/calendar/promotions", token=token,
+            params={"startDateTime": start_date_time, "endDateTime": end_date_time,
+                    "allPromo": "true" if all_promo else "false", "limit": int(limit), "offset": int(offset)})
+        proms = (data.get("data") or {}).get("promotions") if isinstance(data, dict) else None
+        return proms if isinstance(proms, list) else []
+
+    async def promotion_details(self, *, token: str, promotion_ids: list) -> list[dict]:
+        """GET /api/v1/calendar/promotions/details?promotionIDs=..&.. → data.promotions[] with the
+        proven start/end window and `type` per promotion."""
+        params = [("promotionIDs", int(p)) for p in promotion_ids if str(p).isdigit()]
+        data = await self._calendar().request(
+            "GET", "/api/v1/calendar/promotions/details", token=token, params=params)
+        proms = (data.get("data") or {}).get("promotions") if isinstance(data, dict) else None
+        return proms if isinstance(proms, list) else []
+
+    async def promotion_nomenclatures(self, *, token: str, promotion_id, in_action: bool = True,
+                                      limit: int = 1000, offset: int = 0) -> list[dict]:
+        """GET /api/v1/calendar/promotions/nomenclatures → data.nomenclatures[] ({id(nmID), inAction,
+        price, currencyCode, planPrice, discount, planDiscount}). inAction=true ⇒ actually participating;
+        false ⇒ candidate. Неприменим для автоакций — never call for a type='auto' promotion."""
+        data = await self._calendar().request(
+            "GET", "/api/v1/calendar/promotions/nomenclatures", token=token,
+            params={"promotionID": int(promotion_id), "inAction": "true" if in_action else "false",
+                    "limit": int(limit), "offset": int(offset)})
+        noms = (data.get("data") or {}).get("nomenclatures") if isinstance(data, dict) else None
+        return noms if isinstance(noms, list) else []
+
     # ── Statistics (read side, Metric Catalog) ────────────────────────────────
     async def get_sales(self, *, token: str, date_from: str, flag: int = 0) -> list[dict]:
         """

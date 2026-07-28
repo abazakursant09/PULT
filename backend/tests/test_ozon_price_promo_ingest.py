@@ -49,7 +49,7 @@ from services.marketplace.ingest import ozon as oz
 from services.marketplace.ozon_client import ozon_client
 import tasks.api_sync as api_sync
 
-REV = "ozp1a2b3c4d01"
+REV = "wcb1a2b3c4d01"
 PRIOR = "mpo1a2b3c4d01"
 
 _LOOP = asyncio.new_event_loop()
@@ -556,7 +556,7 @@ def test_client_action_candidates_posts_candidates(monkeypatch):
     assert calls[0]["method"] == "POST" and calls[0]["path"] == "/v1/actions/candidates"
 
 
-# ══ MIGRATION ozp1a2b3c4d01 ══════════════════════════════════════════════════════
+# ══ MIGRATION wcb1a2b3c4d01 ══════════════════════════════════════════════════════
 
 def _cfg(monkeypatch):
     tmp = os.path.join(tempfile.mkdtemp(), "ozp_test.db")
