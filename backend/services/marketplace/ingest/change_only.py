@@ -28,7 +28,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional, Sequence
 
@@ -67,16 +67,29 @@ _PROMO_SEMANTIC = (
 )
 
 
+# ── UTC normalization (one contract, used by both the fingerprint and the 24h bump) ─────────────────
+def _to_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    """Canonical naive-UTC form of a datetime. An AWARE value is converted to UTC (astimezone), never
+    merely stripped of its offset; a NAIVE value is treated as already-UTC per the project contract
+    (every writer stamps datetime.utcnow()). Returns a naive UTC datetime so aware/naive values are
+    directly comparable and hash-identical (12:00+03:00 and 09:00Z collapse to the same instant)."""
+    if dt is None:
+        return None
+    if dt.tzinfo is not None:
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
+
+
 # ── canonical fingerprint ───────────────────────────────────────────────────────────────────────────
 def _canon(value):
-    """Deterministic JSON-ready form: Decimal→fixed-scale string, datetime→ISO(sec), lists SORTED,
+    """Deterministic JSON-ready form: Decimal→fixed-scale string, datetime→UTC ISO(sec), lists SORTED,
     NULL preserved (never coerced to 0/''). bool is kept as bool (checked before int)."""
     if value is None or isinstance(value, bool) or isinstance(value, str):
         return value
     if isinstance(value, Decimal):
         return format(value, ".2f")                       # column scale Numeric(18, 2): 100 → "100.00"
     if isinstance(value, datetime):
-        return value.replace(microsecond=0).isoformat()   # provider-declared window; NULL stays None
+        return _to_utc(value).replace(microsecond=0).isoformat()   # UTC-normalized; NULL stays None
     if isinstance(value, (list, tuple)):
         items = [_canon(v) for v in value]
         return sorted(items, key=lambda x: json.dumps(x, sort_keys=True, ensure_ascii=False))
@@ -93,18 +106,22 @@ def evidence_fingerprint(payload: dict) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
-def price_fingerprint(*, resolution_status: str, observation_kind: str, promotion_key: str,
-                      fields: dict) -> str:
-    payload = {"resolution_status": resolution_status, "observation_kind": observation_kind,
-               "promotion_key": promotion_key}
+def price_fingerprint(*, resolution_status: str, product_id: Optional[str], observation_kind: str,
+                      promotion_key: str, fields: dict) -> str:
+    # product_id (the local product this observation is bound to) IS semantic: a re-mapping
+    # NULL→A / A→B is a real change of the evidence and MUST create a new version, so the internal
+    # UUID goes into the fingerprint (never emitted anywhere but the hash).
+    payload = {"resolution_status": resolution_status, "product_id": product_id,
+               "observation_kind": observation_kind, "promotion_key": promotion_key}
     for key in _PRICE_SEMANTIC:
         payload.setdefault(key, fields.get(key))
     return evidence_fingerprint(payload)
 
 
-def promo_fingerprint(*, resolution_status: str, fields: dict,
-                      child_set: Sequence[Sequence[str]]) -> str:
-    payload = {"resolution_status": resolution_status, "children": [list(c) for c in child_set]}
+def promo_fingerprint(*, resolution_status: str, product_id: Optional[str], fields: dict,
+                      child_set: Sequence[Sequence]) -> str:
+    payload = {"resolution_status": resolution_status, "product_id": product_id,
+               "children": [list(c) for c in child_set]}
     for key in _PROMO_SEMANTIC:
         payload[key] = fields.get(key)
     return evidence_fingerprint(payload)
@@ -112,16 +129,12 @@ def promo_fingerprint(*, resolution_status: str, fields: dict,
 
 # ── last_verified bump (shared) ─────────────────────────────────────────────────────────────────────
 def _maybe_bump(row, now: datetime) -> None:
-    """Refresh last_verified_at ONLY when it is already ≥ 24h stale. Coerce a tz-aware value (Postgres
-    DateTime(timezone=True)) to naive-UTC before subtracting the naive `now`, so the comparison never
-    raises across SQLite (naive) and PostgreSQL (aware)."""
-    lv = row.last_verified_at
-    if lv is None:
-        row.last_verified_at = now
-        return
-    if lv.tzinfo is not None:
-        lv = lv.replace(tzinfo=None)
-    if now - lv >= _VERIFY_BUMP:
+    """Refresh last_verified_at ONLY when it is already ≥ 24h stale. Both sides are normalized to UTC
+    first (via _to_utc), so a tz-aware value read back from PostgreSQL and the naive `now` are compared
+    on ONE UTC scale and the 24h boundary is exact regardless of the stored offset."""
+    lv = _to_utc(row.last_verified_at)
+    now_utc = _to_utc(now)
+    if lv is None or now_utc - lv >= _VERIFY_BUMP:
         row.last_verified_at = now
 
 
@@ -133,8 +146,8 @@ async def observe_price(db, *, run_id: str, account_id: str, store_id: str, ext:
     series (store, external product, KIND, promotion, source); inserts a new append-only version only
     when the evidence changed (or the latest carries no fingerprint), else bumps last_verified_at."""
     resolution_status = "resolved" if product_id else "unassigned"
-    fp = price_fingerprint(resolution_status=resolution_status, observation_kind=observation_kind,
-                           promotion_key=promotion_key, fields=fields)
+    fp = price_fingerprint(resolution_status=resolution_status, product_id=product_id,
+                           observation_kind=observation_kind, promotion_key=promotion_key, fields=fields)
 
     latest = (await db.execute(select(MarketplacePriceObservation).where(
         MarketplacePriceObservation.marketplace_store_id == store_id,
@@ -174,11 +187,13 @@ async def observe_promotion(db, *, run_id: str, account_id: str, offer_id: str, 
     the evidence is unchanged: no new parent, children NOT recreated, only a possible last_verified
     bump. When it changed: a NEW parent + ALL its children are inserted atomically in this transaction."""
     resolution_status = "resolved" if product_id else "unassigned"
-    # Canonical child set: sorted [external_store_id, mapping_status] (marketplace_store_id — an internal
-    # UUID — is NEVER in the fingerprint; mapping_status carries mapped↔unmapped).
-    child_set = [[ext_store, ("mapped" if store_id else "unmapped")]
+    # Canonical child set: sorted [external_store_id, mapping_status, marketplace_store_id]. The bound
+    # store IS semantic — unmapped vs mapped→A vs mapped→B are DIFFERENT evidence and must version — so
+    # the internal store UUID goes INTO the fingerprint (hash only; never emitted to a log or the API).
+    child_set = [[ext_store, ("mapped" if store_id else "unmapped"), store_id]
                  for (ext_store, store_id) in child_evidence]
-    fp = promo_fingerprint(resolution_status=resolution_status, fields=fields, child_set=child_set)
+    fp = promo_fingerprint(resolution_status=resolution_status, product_id=product_id,
+                           fields=fields, child_set=child_set)
 
     latest = (await db.execute(select(MarketplacePromotionObservation).where(
         MarketplacePromotionObservation.marketplace_account_id == account_id,

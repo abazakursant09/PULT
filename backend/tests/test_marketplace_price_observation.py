@@ -152,6 +152,14 @@ def test_unassigned_without_product_allowed(conn):
     assert _count(conn) == 1
 
 
+def test_last_verified_at_is_required(conn):
+    # PULT-LAUNCH-2.5E-1: last_verified_at is NOT NULL with no default → omitting it is an IntegrityError,
+    # never a silent sentinel date.
+    values = {k: v for k, v in _row().items() if k != "last_verified_at"}
+    with pytest.raises(IntegrityError):
+        conn.execute(T.insert().values(**values))
+
+
 # ── LENGTHS (PostgreSQL VARCHAR guard; SQLite does not enforce) ─────────────────
 def test_enum_values_fit_column_length():
     mapping = {

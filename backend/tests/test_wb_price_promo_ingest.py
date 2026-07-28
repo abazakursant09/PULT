@@ -596,10 +596,11 @@ def _insert_min(sync_url, *, club):
                 "INSERT INTO marketplace_price_observations "
                 "(id, ingest_run_id, marketplace_account_id, marketplace_store_id, external_product_id, "
                 " resolution_status, observation_kind, promotion_key, currency_status, seller_revenue_status, "
-                " commission_base_status, subsidy_status, source, fetched_at, missing_fields, created_at, "
-                " club_buyer_price) "
+                " commission_base_status, subsidy_status, source, fetched_at, last_verified_at, "
+                " missing_fields, created_at, club_buyer_price) "
                 "VALUES (:id,:run,'a','s','E','unassigned','catalog','__none__','unknown','unknown',"
-                " 'unknown','unknown','api','2026-07-28 00:00:00','[]','2026-07-28 00:00:00',:club)"),
+                " 'unknown','unknown','api','2026-07-28 00:00:00','2026-07-28 00:00:00','[]',"
+                " '2026-07-28 00:00:00',:club)"),
                 {"id": str(uuid.uuid4()), "run": str(uuid.uuid4()), "club": club})
     finally:
         eng.dispose()

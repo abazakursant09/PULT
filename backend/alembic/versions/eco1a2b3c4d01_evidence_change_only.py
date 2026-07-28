@@ -34,22 +34,19 @@ _PROMO = "marketplace_promotion_observations"
 
 
 def _add_change_only(table: str) -> None:
-    # last_verified_at is NOT NULL; evidence_fingerprint stays nullable. Both parent tables are EMPTY on
-    # every real/CI database (the feature has never run), so "backfill = fetched_at" is a vacuous no-op.
-    #
-    # The NOT NULL is added WITHOUT rebuilding the table. A batch/recreate would reflect the peer
-    # migration's COLUMN-INLINE checks (e.g. wcb's ck_price_obs_club_nonneg on club_buyer_price) back as
-    # TABLE-LEVEL constraints, which then breaks that migration's own SQLite `DROP COLUMN` downgrade.
+    # last_verified_at ends NOT NULL with NO server default (both dialects, matching the model);
+    # evidence_fingerprint stays nullable. Both parent tables are EMPTY at migration time on every
+    # real/CI database (the feature has never run), so the "backfill = fetched_at" step touches 0 rows.
     dialect = op.get_bind().dialect.name
     op.add_column(table, sa.Column("evidence_fingerprint", sa.String(length=64), nullable=True))
     if dialect == "sqlite":
-        # SQLite cannot ALTER a column to NOT NULL, and a NOT NULL ADD COLUMN needs a non-NULL DEFAULT.
-        # Add it NOT NULL with an inline sentinel DEFAULT (native ADD COLUMN, no table rebuild), then
-        # backfill = fetched_at. The sentinel never applies (the tables are empty and the writer always
-        # sets last_verified_at); it exists only to satisfy SQLite's ADD COLUMN rule.
-        op.execute(
-            f"ALTER TABLE {table} ADD COLUMN last_verified_at DATETIME "
-            f"NOT NULL DEFAULT '1970-01-01 00:00:00'")
+        # SQLite cannot ALTER a column to NOT NULL. But an empty table DOES accept a NOT NULL ADD COLUMN
+        # without a DEFAULT, so the column ends NOT NULL with NO server default and WITHOUT rebuilding the
+        # table — leaving every peer COLUMN-INLINE CHECK (e.g. wcb's ck_price_obs_club_nonneg on
+        # club_buyer_price) intact, so that migration's own SQLite `DROP COLUMN` downgrade still works.
+        # A rebuild would reflect those inline CHECKs back as TABLE-LEVEL and break it. The backfill runs
+        # anyway (0 rows) to state intent; a non-empty table would (correctly) reject this ADD COLUMN.
+        op.execute(f"ALTER TABLE {table} ADD COLUMN last_verified_at DATETIME NOT NULL")
         op.execute(f"UPDATE {table} SET last_verified_at = fetched_at")
     else:
         op.add_column(table, sa.Column("last_verified_at", sa.DateTime(timezone=True), nullable=True))
