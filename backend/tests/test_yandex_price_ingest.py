@@ -41,7 +41,7 @@ from services.marketplace.ingest import yandex as yx
 from services.marketplace.yandex_client import yandex_client
 import tasks.api_sync as api_sync
 
-HEAD = "ypo1a2b3c4d01"
+HEAD = "eco1a2b3c4d01"
 
 _LOOP = asyncio.new_event_loop()
 
@@ -291,6 +291,15 @@ def test_repeat_within_run_no_duplicate(monkeypatch):
     st.cursor = json.dumps({"run_id": run_id, "page_token": None}); _run(db.commit())   # rewind same run
     _use(monkeypatch, _Stub({"111": _prices([_offer("111", "1500", "2000")])}))
     _run(yx.fetch_and_persist_page(db, st, "tok")); _run(db.commit())
+    assert _run(db.execute(select(func.count()).select_from(MPO))).scalar_one() == 1
+
+
+def test_change_only_unchanged_run_dedups(monkeypatch):
+    # PULT-LAUNCH-2.5E-1: an identical second pass writes no new row (change-only wiring).
+    db = _run(_new_db()); uid, acc, stores, conn = _run(_seed(db))
+    st = _run(_state(db, conn, stores["111"]))
+    _drain(db, st, monkeypatch, _Stub({"111": _prices([_offer("111", "1500", "2000")])}))
+    _drain(db, st, monkeypatch, _Stub({"111": _prices([_offer("111", "1500", "2000")])}))
     assert _run(db.execute(select(func.count()).select_from(MPO))).scalar_one() == 1
 
 

@@ -33,11 +33,12 @@ from sqlalchemy import select
 from models.imported_card_content import ImportedCardContentRow
 from models.imported_product import ImportedProductRow
 from models.marketplace_operation import MarketplaceOperation
-from models.marketplace_price_observation import MarketplacePriceObservation, PROMO_KEY_SENTINEL
+from models.marketplace_price_observation import PROMO_KEY_SENTINEL
 from models.product import Product
 from models.product_placement import ProductPlacement
 from services.account_product_resolver import FOUND, AccountProductIndex
 from services.marketplace.errors import ExecutionError
+from services.marketplace.ingest.change_only import observe_price
 from services.marketplace.wb_client import wb_client
 from services.source_policy.parent_link import (
     backfill_children_product as _backfill_children_product,
@@ -46,7 +47,7 @@ from services.source_policy.parent_link import (
 
 MARKETPLACE = "wildberries"
 DATA_TYPES = ("card_content", "prices", "orders", "sales", "stocks", "finance",
-              # PULT-LAUNCH-2.5D-WB — proven price/promotion EVIDENCE into MarketplacePriceObservation.
+              # PULT-LAUNCH-2.5D-WB — proven price/promotion EVIDENCE (change-only, via change_only).
               # Read-only; reached only through run_api_sync_once (ZERO calls while the flag is OFF).
               "price_observations", "promotions")
 
@@ -540,12 +541,12 @@ async def _page_prices(db, state, token: str) -> dict:
     return {"done": done, "count": len(goods)}
 
 
-# ── Price / promotion OBSERVATIONS (PULT-LAUNCH-2.5D-WB) ─────────────────────────
-# Append-only, immutable evidence into MarketplacePriceObservation. Idempotency is the table's
-# run-uniqueness key (store, external product, KIND, promotion, source, ingest_run_id): the
-# ingest_run_id is minted once per full sync pass (kept in the cursor) so re-processing a page UPSERTs
-# the same row, while the next pass writes fresh rows. A value is stored ONLY when WB proves it; else
-# it stays NULL and its name is recorded in missing_fields (unknown is never 0). Revenue, subsidy and
+# ── Price / promotion OBSERVATIONS (PULT-LAUNCH-2.5D-WB; change-only 2.5E-1) ──────
+# Assembles proven price/promotion evidence and delegates the write to change_only.observe_price, which
+# appends a new immutable version ONLY when the evidence differs from the immediate latest of the series
+# (else a ≥24h last_verified_at bump). ingest_run_id is minted once per full sync pass (kept in the
+# cursor) so re-processing a page never double-writes. A value is stored ONLY when WB proves it; else it
+# stays NULL and its name is recorded in missing_fields (unknown is never 0). Revenue, subsidy and
 # commission-base are NEVER inferred. Money is Decimal, never float.
 
 
@@ -569,28 +570,13 @@ def _obs_prices(good: dict) -> tuple[Optional[Decimal], Optional[Decimal], Optio
 async def _upsert_observation(db, state, *, run_id: str, ext: str, observation_kind: str,
                               promotion_key: str, product_id: Optional[str], now: datetime,
                               **fields) -> None:
-    row = (await db.execute(select(MarketplacePriceObservation).where(
-        MarketplacePriceObservation.marketplace_store_id == state.marketplace_store_id,
-        MarketplacePriceObservation.external_product_id == ext,
-        MarketplacePriceObservation.observation_kind == observation_kind,
-        MarketplacePriceObservation.promotion_key == promotion_key,
-        MarketplacePriceObservation.source == "api",
-        MarketplacePriceObservation.ingest_run_id == run_id))).scalars().first()
-    if row is None:
-        row = MarketplacePriceObservation(
-            id=str(uuid.uuid4()), ingest_run_id=run_id,
-            marketplace_account_id=state.marketplace_account_id,
-            marketplace_store_id=state.marketplace_store_id,
-            external_product_id=ext, observation_kind=observation_kind,
-            promotion_key=promotion_key, source="api")
-        db.add(row)
-    # A resolved row MUST carry a product_id (placement FK + resolution CHECK); an unassigned row never
-    # borrows another product — product_id stays NULL (never the first fuzzy match, never by title).
-    row.product_id = product_id
-    row.resolution_status = "resolved" if product_id else "unassigned"
-    row.fetched_at = now
-    for key, value in fields.items():
-        setattr(row, key, value)
+    # PULT-LAUNCH-2.5E-1 — change-only: a new append-only row is written ONLY when the evidence differs
+    # from the immediate latest of the series; an unchanged repeat bumps last_verified_at (≥24h) instead.
+    # A resolved row carries product_id (placement FK + resolution CHECK); unassigned stays NULL.
+    await observe_price(
+        db, run_id=run_id, account_id=state.marketplace_account_id,
+        store_id=state.marketplace_store_id, ext=ext, observation_kind=observation_kind,
+        promotion_key=promotion_key, product_id=product_id, source="api", now=now, fields=fields)
 
 
 async def _page_price_observations(db, state, token: str) -> dict:

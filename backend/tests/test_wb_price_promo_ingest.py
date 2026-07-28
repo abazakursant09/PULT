@@ -48,7 +48,7 @@ from services.marketplace.ingest import wb as wb_ingest
 from services.marketplace.wb_client import wb_client
 import tasks.api_sync as api_sync
 
-REV = "ypo1a2b3c4d01"
+REV = "eco1a2b3c4d01"
 PRIOR = "ozp1a2b3c4d01"
 
 _LOOP = asyncio.new_event_loop()
@@ -184,6 +184,23 @@ def test_catalog_three_price_mapping(monkeypatch):
     assert r.currency == "RUB" and r.currency_status == "proven"
     assert r.resolution_status == "resolved" and r.product_id is not None
     assert r.missing_fields == []
+
+
+def test_change_only_unchanged_run_dedups(monkeypatch):
+    # PULT-LAUNCH-2.5E-1: a second identical WB pass must NOT append a row (change-only wiring).
+    db = _run(_new_db()); uid, acc, store, conn = _run(_seed(db, nm="111"))
+    st = _run(_state(db, conn, store, "price_observations"))
+    _drain(db, st, monkeypatch, _Stub(prices=[_good(111, "1500.50", "1200", "1100")]), kind="prices")
+    _drain(db, st, monkeypatch, _Stub(prices=[_good(111, "1500.50", "1200", "1100")]), kind="prices")
+    assert len(_obs(db, observation_kind="catalog")) == 1
+
+
+def test_change_only_changed_run_appends(monkeypatch):
+    db = _run(_new_db()); uid, acc, store, conn = _run(_seed(db, nm="111"))
+    st = _run(_state(db, conn, store, "price_observations"))
+    _drain(db, st, monkeypatch, _Stub(prices=[_good(111, "1500.50", "1200", "1100")]), kind="prices")
+    _drain(db, st, monkeypatch, _Stub(prices=[_good(111, "1500.50", "1190", "1100")]), kind="prices")
+    assert len(_obs(db, observation_kind="catalog")) == 2
 
 
 def test_catalog_money_is_decimal_not_float(monkeypatch):
@@ -482,7 +499,8 @@ def test_catalog_and_promotion_coexist_one_run_id():
                 external_product_id="111", resolution_status="unassigned", source="api",
                 currency_status="unknown", seller_revenue_status="unknown",
                 commission_base_status="unknown", subsidy_status="unknown",
-                fetched_at=datetime(2026, 7, 28), missing_fields=[], created_at=datetime(2026, 7, 28))
+                fetched_at=datetime(2026, 7, 28), last_verified_at=datetime(2026, 7, 28),
+                missing_fields=[], created_at=datetime(2026, 7, 28))
     c.execute(MPO.__table__.insert().values(
         id="c1", ingest_run_id="RUN", observation_kind="catalog", promotion_id=None,
         promotion_key="__none__", promotion_type=None, participation_status=None, **base))

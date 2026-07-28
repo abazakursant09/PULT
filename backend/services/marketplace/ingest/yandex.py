@@ -42,14 +42,13 @@ from models.imported_card_content import ImportedCardContentRow
 from models.imported_product import ImportedProductRow
 from models.marketplace_account import MarketplaceAccount
 from models.marketplace_operation import MarketplaceOperation
-from models.marketplace_price_observation import MarketplacePriceObservation, PROMO_KEY_SENTINEL
-from models.marketplace_promotion_observation import (
-    MarketplacePromotionObservation, MarketplacePromotionStoreEvidence)
+from models.marketplace_price_observation import PROMO_KEY_SENTINEL
 from models.marketplace_store import MarketplaceStore
 from models.product import Product
 from models.product_placement import ProductPlacement
 from services.account_product_resolver import FOUND, AccountProductIndex
 from services.marketplace.errors import ExecutionError
+from services.marketplace.ingest.change_only import observe_price, observe_promotion
 from services.marketplace.yandex_client import yandex_client
 
 MARKETPLACE = "yandex"
@@ -490,40 +489,24 @@ async def _page_returns(db, state, token) -> dict:
     return {"done": done, "count": len(returns), "defer": False}
 
 
-# ── Price OBSERVATIONS (PULT-LAUNCH-2.5D-Yandex-A) ───────────────────────────────
-# Append-only, immutable CAMPAIGN price evidence into MarketplacePriceObservation. Idempotency is the
-# table's run-uniqueness key (store, external product, KIND, promotion, source, ingest_run_id): the
-# ingest_run_id is minted once per full sync pass (kept in the cursor) so re-processing a page UPSERTs
-# the same row, while the next pass writes fresh rows. Store-scoped: the campaignId queried is THIS
-# store's external_store_id, and every row carries state.marketplace_store_id — a campaign's price is
-# never copied to another campaign. Money is Decimal, never float; unknown = NULL, never 0. Revenue,
-# subsidy, commission-base, promo and club prices are NEVER inferred here.
+# ── Price OBSERVATIONS (PULT-LAUNCH-2.5D-Yandex-A; change-only 2.5E-1) ────────────
+# CAMPAIGN price evidence assembled here and written via change_only.observe_price, which appends a new
+# immutable version ONLY when the evidence differs from the immediate latest of the series (else a ≥24h
+# last_verified_at bump). ingest_run_id is minted once per full sync pass (kept in the cursor) so
+# re-processing a page never double-writes. Store-scoped: the campaignId queried is THIS store's
+# external_store_id, and every row carries state.marketplace_store_id — a campaign's price is never
+# copied to another campaign. Money is Decimal, never float; unknown = NULL, never 0. Revenue, subsidy,
+# commission-base, promo and club prices are NEVER inferred here.
 
 
 async def _upsert_observation(db, state, *, run_id: str, ext: str, product_id: Optional[str],
                               now: datetime, **fields) -> None:
-    row = (await db.execute(select(MarketplacePriceObservation).where(
-        MarketplacePriceObservation.marketplace_store_id == state.marketplace_store_id,
-        MarketplacePriceObservation.external_product_id == ext,
-        MarketplacePriceObservation.observation_kind == "catalog",
-        MarketplacePriceObservation.promotion_key == PROMO_KEY_SENTINEL,
-        MarketplacePriceObservation.source == "api",
-        MarketplacePriceObservation.ingest_run_id == run_id))).scalars().first()
-    if row is None:
-        row = MarketplacePriceObservation(
-            id=str(uuid.uuid4()), ingest_run_id=run_id,
-            marketplace_account_id=state.marketplace_account_id,
-            marketplace_store_id=state.marketplace_store_id,
-            external_product_id=ext, observation_kind="catalog",
-            promotion_key=PROMO_KEY_SENTINEL, source="api")
-        db.add(row)
-    # A resolved row MUST carry a product_id (placement FK + resolution CHECK); an unassigned row never
-    # borrows another product — product_id stays NULL (never the first fuzzy match, never by title).
-    row.product_id = product_id
-    row.resolution_status = "resolved" if product_id else "unassigned"
-    row.fetched_at = now
-    for key, value in fields.items():
-        setattr(row, key, value)
+    # PULT-LAUNCH-2.5E-1 — change-only catalog price evidence: a new append-only row only when the
+    # evidence differs from the immediate latest of the series, else a ≥24h last_verified_at bump.
+    await observe_price(
+        db, run_id=run_id, account_id=state.marketplace_account_id,
+        store_id=state.marketplace_store_id, ext=ext, observation_kind="catalog",
+        promotion_key=PROMO_KEY_SENTINEL, product_id=product_id, source="api", now=now, fields=fields)
 
 
 # Hard fail-closed ceiling on total pages in ONE pass (far past any real catalog). A cursor that never
@@ -645,11 +628,12 @@ async def _page_price_observations(db, state, token) -> dict:
     return {"done": done, "count": len(offers), "defer": False}
 
 
-# ── Account-level promotion EVIDENCE (PULT-LAUNCH-2.5D-Yandex-B3) ─────────────────
+# ── Account-level promotion EVIDENCE (PULT-LAUNCH-2.5D-Yandex-B3; change-only 2.5E-1) ─
 # Business-level: a promo participation status belongs to the cabinet (businessId), not one campaign
-# store. The parent (MarketplacePromotionObservation) carries the verbatim provider_status + a
-# normalized triple; the child (MarketplacePromotionStoreEvidence) carries the PROVEN campaignIds of a
-# PARTIALLY_AUTO row (mapped to a store of this cabinet or kept unmapped). AUTO/MANUAL are account_wide/
+# store. This assembles the parent evidence (verbatim provider_status + normalized triple) and the
+# PROVEN PARTIALLY_AUTO campaignIds (mapped to a store of this cabinet or kept unmapped), then delegates
+# to change_only.observe_promotion — which writes a NEW parent + all children atomically ONLY when the
+# evidence (incl. the child set) changed, else a ≥24h last_verified bump. AUTO/MANUAL are account_wide/
 # unresolved — never fanned out to a store. The "PARTIALLY_AUTO ⇒ ≥1 child" rule is a TRANSACTIONAL
 # WRITER invariant (parent + all children written in one page transaction, or none). Money is Decimal.
 #
@@ -672,44 +656,6 @@ async def _account_stores(db, account_id: str) -> dict:
         if ext is not None:
             out.setdefault(ext, st)
     return out
-
-
-async def _upsert_promo_parent(db, state, *, run_id, offer_id, promo_id, product_id, now,
-                               **fields) -> MarketplacePromotionObservation:
-    row = (await db.execute(select(MarketplacePromotionObservation).where(
-        MarketplacePromotionObservation.marketplace_account_id == state.marketplace_account_id,
-        MarketplacePromotionObservation.external_product_id == offer_id,
-        MarketplacePromotionObservation.promotion_id == promo_id,
-        MarketplacePromotionObservation.source == "api",
-        MarketplacePromotionObservation.ingest_run_id == run_id))).scalars().first()
-    if row is None:
-        row = MarketplacePromotionObservation(
-            id=str(uuid.uuid4()), ingest_run_id=run_id,
-            marketplace_account_id=state.marketplace_account_id, marketplace=MARKETPLACE,
-            external_product_id=offer_id, promotion_id=promo_id,
-            promotion_type="yandex_promo", source="api", provider_dataset="promos")
-        db.add(row)
-    row.product_id = product_id
-    row.resolution_status = "resolved" if product_id else "unassigned"
-    row.fetched_at = now
-    for key, value in fields.items():
-        setattr(row, key, value)
-    await db.flush()   # materialize row.id for children
-    return row
-
-
-async def _upsert_promo_child(db, *, parent_id, account_id, external_store_id, store_id, now) -> None:
-    existing = (await db.execute(select(MarketplacePromotionStoreEvidence).where(
-        MarketplacePromotionStoreEvidence.promotion_observation_id == parent_id,
-        MarketplacePromotionStoreEvidence.external_store_id == external_store_id))).scalars().first()
-    if existing is not None:
-        existing.marketplace_store_id = store_id
-        existing.mapping_status = "mapped" if store_id else "unmapped"
-        return
-    db.add(MarketplacePromotionStoreEvidence(
-        id=str(uuid.uuid4()), promotion_observation_id=parent_id, marketplace_account_id=account_id,
-        external_store_id=external_store_id, marketplace_store_id=store_id,
-        mapping_status="mapped" if store_id else "unmapped", created_at=now))
 
 
 async def _page_promotions(db, state, token) -> dict:
@@ -846,17 +792,20 @@ async def _page_promotions(db, state, token) -> dict:
                 currency, currency_status = "RUB", "proven"
 
         product_id = await _resolve(db, index, None, offer_id)   # offerId is the seller SKU
-        parent = await _upsert_promo_parent(
-            db, state, run_id=run_id, offer_id=offer_id, promo_id=promo_id, product_id=product_id, now=now,
-            provider_status=provider_status, participation_status=participation,
-            auto_participation=auto, attribution_status=attribution,
-            pre_promo_price=pre, promo_buyer_price=promo, promo_max_price=mx,
-            currency=currency, currency_status=currency_status,
-            promotion_start_at=_dt(vf), promotion_end_at=_dt(vt), missing_fields=missing)
-        for cid in campaign_ids:
-            store = stores.get(cid)
-            await _upsert_promo_child(db, parent_id=parent.id, account_id=state.marketplace_account_id,
-                                      external_store_id=cid, store_id=(store.id if store else None), now=now)
+        # Change-only (2.5E-1): the child campaign set is part of the parent's semantic identity, so it
+        # is fully assembled BEFORE the fingerprint. A new parent + all children are written atomically
+        # only when the evidence changed; an unchanged repeat never recreates children.
+        child_evidence = [(cid, (stores[cid].id if cid in stores else None)) for cid in campaign_ids]
+        await observe_promotion(
+            db, run_id=run_id, account_id=state.marketplace_account_id, offer_id=offer_id,
+            promo_id=promo_id, product_id=product_id, now=now,
+            fields={"provider_status": provider_status, "participation_status": participation,
+                    "auto_participation": auto, "attribution_status": attribution,
+                    "pre_promo_price": pre, "promo_buyer_price": promo, "promo_max_price": mx,
+                    "currency": currency, "currency_status": currency_status,
+                    "promotion_start_at": _dt(vf), "promotion_end_at": _dt(vt),
+                    "missing_fields": missing},
+            child_evidence=child_evidence)
         count += 1
 
     # ── token cycle + page ceiling ──

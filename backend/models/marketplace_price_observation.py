@@ -111,6 +111,12 @@ class MarketplacePriceObservation(Base):
     provider_valid_from    = Column(DateTime, nullable=True)        # provider-declared promo window
     provider_valid_to      = Column(DateTime, nullable=True)
     fetched_at             = Column(DateTime, nullable=False)       # when PULT observed the state
+    # PULT-LAUNCH-2.5E-1 — change-only bookkeeping (feature OFF). last_verified_at is the latest run
+    # that re-observed this EXACT evidence (fetched_at stays pinned to first-observed); evidence_
+    # fingerprint is the SHA-256 of the semantic fields (NULL only on hypothetical pre-fingerprint
+    # rows → change-only treats NULL as "always differ" and inserts, never a false dedupe).
+    last_verified_at       = Column(DateTime(timezone=True), nullable=False)
+    evidence_fingerprint   = Column(String(64), nullable=True)
     # DB default '[]' (portable: SQLite stores the text, PostgreSQL casts the literal to json), so a
     # raw INSERT omitting the column still yields []. Python `default=list` (a callable, never a shared
     # literal) gives each ORM row its own list.
@@ -214,4 +220,10 @@ class MarketplacePriceObservation(Base):
         # ── lookups ─────────────────────────────────────────────────────────────────────────────
         Index("ix_price_obs_latest", "marketplace_store_id", "product_id", "promotion_key", "fetched_at"),
         Index("ix_price_obs_account", "marketplace_account_id"),
+        # PULT-LAUNCH-2.5E-1 — change-only latest-of-series lookup, keyed by the SERIES identity
+        # (external_product_id, not the resolved internal product_id; observation_kind + source
+        # included) with fetched_at last so MAX is a range scan. last_verified_at / evidence_
+        # fingerprint are deliberately NOT indexed (the fingerprint is compared, never searched).
+        Index("ix_price_obs_series", "marketplace_store_id", "external_product_id",
+              "observation_kind", "promotion_key", "source", "fetched_at"),
     )
