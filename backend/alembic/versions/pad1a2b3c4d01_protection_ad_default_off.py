@@ -26,11 +26,15 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 _T = "protection_policies"
+# A minimal table handle so the backfill UPDATE renders a PORTABLE boolean literal. A bare `= 0`
+# is an integer and PostgreSQL rejects it for a boolean column (SQLite has no strict boolean type
+# and silently accepts it); sa.false() renders the dialect-correct boolean on both.
+_policies = sa.table(_T, sa.column("include_ad_spend", sa.Boolean()))
 
 
 def upgrade() -> None:
     # backfill existing rows to false (feature OFF, no real settings yet), then flip the default
-    op.execute(sa.text(f"UPDATE {_T} SET include_ad_spend = 0"))
+    op.execute(_policies.update().values(include_ad_spend=sa.false()))
     with op.batch_alter_table(_T, schema=None) as b:
         b.alter_column("include_ad_spend", server_default="0")
 
