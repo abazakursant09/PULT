@@ -333,15 +333,83 @@ def test_repeat_token_fails_closed(monkeypatch):
         _run(yx.fetch_and_persist_page(db, st, "tok"))                   # page2: STUCK == STUCK
 
 
-def test_malformed_payload_no_crash_no_rows(monkeypatch):
+def _fixed(payload):
+    """A stub whose campaign_prices always returns the SAME raw payload (for schema-shape tests)."""
+    class _Fixed(_Stub):
+        async def campaign_prices(self, *, token, campaign_id, page_token=None, limit=500):
+            return payload
+    return _Fixed({})
+
+
+@pytest.mark.parametrize("payload,reason", [
+    ({}, "missing result container"),
+    ({"result": {}}, "offers missing"),
+    ({"result": {"offers": "not-a-list"}}, "offers not a list"),
+    ({"result": {"offers": [], "paging": "nope"}}, "paging not an object"),
+    ({"result": {"offers": [], "paging": {"nextPageToken": 123}}}, "nextPageToken wrong type"),
+    ({"result": {"offers": [], "paging": {"nextPageToken": ""}}}, "nextPageToken empty"),
+])
+def test_broken_schema_fails_closed(monkeypatch, payload, reason):
     db = _run(_new_db()); uid, acc, stores, conn = _run(_seed(db))
     st = _run(_state(db, conn, stores["111"]))
-
-    class _Bad(_Stub):
-        async def campaign_prices(self, *, token, campaign_id, page_token=None, limit=500):
-            return {"result": {"offers": "not-a-list"}}   # malformed
-    _drain(db, st, monkeypatch, _Bad({}))
+    _use(monkeypatch, _fixed(payload))
+    with pytest.raises(ExecutionError):        # a broken page is NEVER treated as an empty catalog
+        _run(yx.fetch_and_persist_page(db, st, "tok"))
+    assert st.coverage_complete is False
     assert _obs(db, observation_kind="catalog") == []
+
+
+def test_valid_empty_page_completes_successfully(monkeypatch):
+    db = _run(_new_db()); uid, acc, stores, conn = _run(_seed(db))
+    st = _run(_state(db, conn, stores["111"]))
+    res = _drain(db, st, monkeypatch, _Stub({"111": _prices([])}))   # result present, offers=[], no token
+    assert res["done"] is True and _obs(db, observation_kind="catalog") == []
+    assert st.coverage_complete is True        # a real empty page IS a clean, complete pass
+
+
+def test_malformed_identity_row_skipped_partial(monkeypatch):
+    db = _run(_new_db()); uid, acc, stores, conn = _run(_seed(db, products=(("111", "GOOD"),)))
+    st = _run(_state(db, conn, stores["111"]))
+    # one good row + one identity-less row (no id/offerId/marketSku) + one non-dict row
+    page = {"result": {"offers": [_offer("GOOD", "10", "20"),
+                                  {"price": {"value": "5"}}, "junk"], "paging": {}}}
+    _drain(db, st, monkeypatch, _fixed(page))
+    assert len(_obs(db, observation_kind="catalog")) == 1        # only the identifiable row is kept
+    assert st.skipped_rows_count == 2                            # two rows skipped, not silently ok
+    assert st.coverage_complete is False                        # a pass with skipped rows is not complete
+
+
+def test_token_cycle_a_b_a_detected(monkeypatch):
+    db = _run(_new_db()); uid, acc, stores, conn = _run(_seed(db))
+    st = _run(_state(db, conn, stores["111"]))
+    # page1 → T1, page2 → T2, page3 → T1 (A→B→A) must fail closed, never loop
+    _use(monkeypatch, _Stub({"111": [
+        _prices([_offer("111", "1", "2")], next_token="T1"),
+        _prices([_offer("111", "1", "2")], next_token="T2"),
+        _prices([_offer("111", "1", "2")], next_token="T1"),
+    ]}))
+    _run(yx.fetch_and_persist_page(db, st, "tok")); _run(db.commit())   # None -> T1
+    _run(yx.fetch_and_persist_page(db, st, "tok")); _run(db.commit())   # T1 -> T2
+    with pytest.raises(ExecutionError):
+        _run(yx.fetch_and_persist_page(db, st, "tok"))                   # T2 -> T1 (cycle)
+    assert st.coverage_complete is False
+
+
+def test_prior_observations_survive_schema_error(monkeypatch):
+    db = _run(_new_db()); uid, acc, stores, conn = _run(_seed(db))
+    # run 1 — clean
+    st = _run(_state(db, conn, stores["111"]))
+    _drain(db, st, monkeypatch, _Stub({"111": _prices([_offer("111", "1500", "2000")])}))
+    assert len(_obs(db, observation_kind="catalog")) == 1
+    # run 2 — broken schema; append-only keeps the prior proven row, run not complete
+    st.cursor = None; _run(db.commit())
+    _use(monkeypatch, _fixed({"result": {"offers": "broken"}}))
+    with pytest.raises(ExecutionError):
+        _run(yx.fetch_and_persist_page(db, st, "tok"))
+    _run(db.rollback())
+    # Append-only: the broken run rolls back its own page and NEVER deletes prior evidence. (A broken
+    # pass also never reaches the done-branch, so it can never CLAIM coverage_complete for itself.)
+    assert len(_obs(db, observation_kind="catalog")) == 1
 
 
 def test_mid_run_error_keeps_prior_observations(monkeypatch):

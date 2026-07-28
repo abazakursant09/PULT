@@ -493,11 +493,29 @@ async def _upsert_observation(db, state, *, run_id: str, ext: str, product_id: O
         setattr(row, key, value)
 
 
+# Hard fail-closed ceiling on total pages in ONE pass (far past any real catalog). A cursor that never
+# terminates would otherwise walk forever across scheduler ticks.
+_MAX_PRICE_OBS_PAGES = 10000
+
+
+def _schema_error(reason: str) -> ExecutionError:
+    """A structural provider-response error. The reason is SAFE (no payload, no offerId, no ids) — it
+    describes only the shape that was violated, so a broken page is never mistaken for an empty one."""
+    return ExecutionError(ExecutionError.MARKETPLACE_5XX, f"yandex offer-prices schema invalid: {reason}")
+
+
 async def _page_price_observations(db, state, token) -> dict:
     """Yandex-A campaign price EVIDENCE from GET /v2/campaigns/{campaignId}/offer-prices →
     observation_kind='catalog'. price.value→buyer_price, price.discountBase→catalog_price,
     price.currencyId→currency (proven only, RUR→RUB via _iso_currency, never a default). All other
-    money and every flag stay NULL/unknown. Absent values → NULL + named in missing_fields."""
+    money and every flag stay NULL/unknown. Absent values → NULL + named in missing_fields.
+
+    A REAL empty page (result present, offers=[], no nextPageToken) ends the pass successfully. A
+    BROKEN page (missing container, offers not an array, paging/nextPageToken of the wrong type) is a
+    schema error that fails closed — never turned into an empty catalog. A row whose identity cannot be
+    determined is skipped (skipped_rows_count++), and coverage_complete is claimed ONLY when the whole
+    pass parsed cleanly with zero skipped rows. Positive rows from clean pages are kept (honest
+    partial), matching the existing per-page-commit ingest model; a schema error rolls back its page."""
     now = datetime.utcnow()
     campaign_id = await _campaign_id(db, state)
     if not campaign_id:
@@ -505,20 +523,45 @@ async def _page_price_observations(db, state, token) -> dict:
         state.cursor = None
         return {"done": True, "count": 0, "defer": False}
     cur = json.loads(state.cursor) if state.cursor else {}
+    fresh = "run_id" not in cur
     run_id = cur.get("run_id") or str(uuid.uuid4())
     page_token = cur.get("page_token")
+    seen = list(cur.get("seen") or [])
+    if fresh:
+        # A new pass starts honest: coverage not yet proven, no rows skipped yet.
+        state.coverage_complete = False
+        state.skipped_rows_count = 0
+
     data = await yandex_client.campaign_prices(token=token, campaign_id=campaign_id, page_token=page_token)
-    result = (data or {}).get("result") or {}
+
+    # ── Distinguish a VALID empty page from a BROKEN one (schema error → fail closed). ──
+    if not isinstance(data, dict):
+        raise _schema_error("response is not an object")
+    result = data.get("result")
+    if not isinstance(result, dict):
+        raise _schema_error("missing or non-object result container")
     offers = result.get("offers")
-    offers = offers if isinstance(offers, list) else []
+    if not isinstance(offers, list):
+        raise _schema_error("offers missing or not an array")   # empty [] is valid; absent/other is not
+    paging = result.get("paging")
+    if paging is None:
+        paging = {}
+    if not isinstance(paging, dict):
+        raise _schema_error("paging is not an object")
+    next_token = paging.get("nextPageToken")
+    if next_token is not None and (not isinstance(next_token, str) or not next_token.strip()):
+        raise _schema_error("nextPageToken is not a non-empty string")
+
     index = await _index(db, state.marketplace_account_id)
     for o in offers:
         if not isinstance(o, dict):
+            state.skipped_rows_count = (state.skipped_rows_count or 0) + 1   # corrupt row, no identity
             continue
         offer_id = _s(o.get("id") or o.get("offerId"))
         market_sku = _s(o.get("marketSku"))
         ext = offer_id or market_sku
         if ext is None:
+            state.skipped_rows_count = (state.skipped_rows_count or 0) + 1   # identity undeterminable
             continue
         price_obj = o.get("price") if isinstance(o.get("price"), dict) else {}
         buyer_price = _dec(price_obj.get("value"))          # current price → buyer_price
@@ -550,11 +593,20 @@ async def _page_price_observations(db, state, token) -> dict:
             commission_base=None, commission_base_status="unknown",
             marketplace_subsidy=None, subsidy_status="unknown",
             provider_dataset="prices", missing_fields=missing)
-    next_token = ((result.get("paging") or {}).get("nextPageToken")) or None
-    if next_token is not None and next_token == page_token:
-        # Yandex returned the SAME token we just requested with → it is not advancing. Fail closed:
-        # never loop, never finalize; the rollback keeps prior runs intact and coverage is not claimed.
-        raise ExecutionError(ExecutionError.MARKETPLACE_5XX, "yandex prices pageToken did not advance")
-    done = not offers or not next_token
-    state.cursor = None if done else json.dumps({"run_id": run_id, "page_token": next_token})
+
+    # ── Token cycle detection: reject A→A, A→B→A and any longer loop, and a bounded page ceiling. ──
+    if next_token is not None and (next_token == page_token or next_token in seen):
+        raise _schema_error("pageToken cycle detected")
+    if page_token is not None:
+        seen.append(page_token)     # remember every token actually walked in THIS pass
+    if len(seen) >= _MAX_PRICE_OBS_PAGES:
+        raise _schema_error("page limit exceeded")
+
+    done = next_token is None       # the token is the sole authority for end-of-list
+    if done:
+        # A pass is complete ONLY when every page parsed cleanly with zero skipped rows.
+        state.coverage_complete = (state.skipped_rows_count or 0) == 0
+        state.cursor = None
+    else:
+        state.cursor = json.dumps({"run_id": run_id, "page_token": next_token, "seen": seen})
     return {"done": done, "count": len(offers), "defer": False}
