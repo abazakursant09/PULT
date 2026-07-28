@@ -33,24 +33,50 @@ _PRICE = "marketplace_price_observations"
 _PROMO = "marketplace_promotion_observations"
 
 
+def _sqlite_enforce_last_verified_notnull(table: str) -> None:
+    """Rebuild `table` on SQLite so last_verified_at becomes NOT NULL with NO server default, preserving
+    EVERY existing column / FK / UNIQUE / CHECK / index / server default AND all rows.
+
+    The rebuild copies the LITERAL stored DDL (only injecting NOT NULL on the one column) rather than a
+    reflected schema: reflection re-emits a peer migration's COLUMN-INLINE CHECK (wcb's
+    ck_price_obs_club_nonneg on club_buyer_price) as a TABLE-LEVEL constraint, which then breaks that
+    migration's own SQLite `DROP COLUMN` downgrade. legacy_alter_table=ON keeps the RENAME from
+    rewriting child foreign-key references to the temp name."""
+    bind = op.get_bind()
+    create_sql = bind.exec_driver_sql(
+        f"SELECT sql FROM sqlite_master WHERE type='table' AND name='{table}'").scalar()
+    index_sqls = [r[0] for r in bind.exec_driver_sql(
+        f"SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name='{table}' "
+        f"AND sql IS NOT NULL").fetchall()]
+    cols = [r[1] for r in bind.exec_driver_sql(f"PRAGMA table_info('{table}')").fetchall()]
+
+    new_sql = create_sql.replace("last_verified_at DATETIME", "last_verified_at DATETIME NOT NULL", 1)
+    if "last_verified_at DATETIME NOT NULL" not in new_sql:
+        raise RuntimeError(f"eco: could not locate last_verified_at column in {table} DDL")
+    tmp = f"{table}__eco_rebuild"
+    collist = ", ".join(f'"{c}"' for c in cols)
+
+    op.execute("PRAGMA legacy_alter_table=ON")
+    op.execute(f'ALTER TABLE "{table}" RENAME TO "{tmp}"')
+    op.execute(new_sql)                                                    # new {table}: club stays inline
+    op.execute(f'INSERT INTO "{table}" ({collist}) SELECT {collist} FROM "{tmp}"')
+    op.execute(f'DROP TABLE "{tmp}"')
+    op.execute("PRAGMA legacy_alter_table=OFF")
+    for isql in index_sqls:                                                # recreate the pre-existing indexes
+        op.execute(isql)
+
+
 def _add_change_only(table: str) -> None:
     # last_verified_at ends NOT NULL with NO server default (both dialects, matching the model);
-    # evidence_fingerprint stays nullable. Both parent tables are EMPTY at migration time on every
-    # real/CI database (the feature has never run), so the "backfill = fetched_at" step touches 0 rows.
+    # evidence_fingerprint stays nullable. The migration supports EXISTING rows: last_verified_at is
+    # added nullable, backfilled = fetched_at, THEN made NOT NULL (SQLite via a literal-DDL rebuild).
     dialect = op.get_bind().dialect.name
     op.add_column(table, sa.Column("evidence_fingerprint", sa.String(length=64), nullable=True))
+    op.add_column(table, sa.Column("last_verified_at", sa.DateTime(timezone=True), nullable=True))
+    op.execute(f"UPDATE {table} SET last_verified_at = fetched_at WHERE last_verified_at IS NULL")
     if dialect == "sqlite":
-        # SQLite cannot ALTER a column to NOT NULL. But an empty table DOES accept a NOT NULL ADD COLUMN
-        # without a DEFAULT, so the column ends NOT NULL with NO server default and WITHOUT rebuilding the
-        # table — leaving every peer COLUMN-INLINE CHECK (e.g. wcb's ck_price_obs_club_nonneg on
-        # club_buyer_price) intact, so that migration's own SQLite `DROP COLUMN` downgrade still works.
-        # A rebuild would reflect those inline CHECKs back as TABLE-LEVEL and break it. The backfill runs
-        # anyway (0 rows) to state intent; a non-empty table would (correctly) reject this ADD COLUMN.
-        op.execute(f"ALTER TABLE {table} ADD COLUMN last_verified_at DATETIME NOT NULL")
-        op.execute(f"UPDATE {table} SET last_verified_at = fetched_at")
+        _sqlite_enforce_last_verified_notnull(table)
     else:
-        op.add_column(table, sa.Column("last_verified_at", sa.DateTime(timezone=True), nullable=True))
-        op.execute(f"UPDATE {table} SET last_verified_at = fetched_at WHERE last_verified_at IS NULL")
         op.alter_column(table, "last_verified_at",
                         existing_type=sa.DateTime(timezone=True), nullable=False)
 

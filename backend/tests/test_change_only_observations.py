@@ -361,6 +361,143 @@ def test_migration_last_verified_notnull_no_default(monkeypatch, tmp_path):
         c.close()
 
 
+# ── seed helpers for the NON-EMPTY migration regression ─────────────────────────
+_SEED = """
+INSERT INTO users(id,email,name,hashed_password) VALUES('u1','a@b.c','A','x');
+INSERT INTO workspaces(id,owner_user_id,created_at) VALUES('ws1','u1',CURRENT_TIMESTAMP);
+INSERT INTO marketplace_accounts(id,workspace_id,marketplace,identity_status)
+  VALUES('accY','ws1','yandex','verified');
+INSERT INTO marketplace_stores(id,marketplace_account_id,marketplace,store_key,external_store_id,label,source,status,created_at,updated_at)
+  VALUES('sY','accY','yandex','sY','c1','S','api','active',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);
+INSERT INTO products(id,user_id,name,marketplace,sku,marketplace_account_id)
+  VALUES('pY','u1','N','yandex','OF-1','accY');
+INSERT INTO product_placements(id,product_id,marketplace_store_id,marketplace_account_id,status,source,first_seen_at,last_seen_at)
+  VALUES('pp','pY','sY','accY','active','api',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);
+-- MPO P1: resolved (pY placed in sY), fetched_at A
+INSERT INTO marketplace_price_observations
+  (id,ingest_run_id,marketplace_account_id,marketplace_store_id,product_id,external_product_id,
+   resolution_status,observation_kind,promotion_key,currency_status,seller_revenue_status,
+   commission_base_status,subsidy_status,source,fetched_at,missing_fields,created_at)
+  VALUES('P1','r','accY','sY','pY','E','resolved','catalog','__none__','unknown','unknown',
+         'unknown','unknown','api','2026-05-01 10:00:00','[]','2026-05-01 10:00:00');
+-- PO Q1: unassigned, fetched_at B
+INSERT INTO marketplace_promotion_observations
+  (id,ingest_run_id,marketplace_account_id,marketplace,product_id,external_product_id,resolution_status,
+   promotion_id,promotion_type,provider_status,participation_status,attribution_status,currency_status,
+   source,provider_dataset,fetched_at,missing_fields,created_at)
+  VALUES('Q1','r','accY','yandex',NULL,'OF','unassigned','PR1','yandex_promo','AUTO','active',
+         'account_wide','unknown','api','promos','2026-06-15 08:30:00','[]','2026-06-15 08:30:00');
+-- PO Q2: PARTIALLY_AUTO exact_stores + a child, fetched_at C
+INSERT INTO marketplace_promotion_observations
+  (id,ingest_run_id,marketplace_account_id,marketplace,product_id,external_product_id,resolution_status,
+   promotion_id,promotion_type,provider_status,participation_status,attribution_status,currency_status,
+   source,provider_dataset,fetched_at,missing_fields,created_at)
+  VALUES('Q2','r','accY','yandex',NULL,'OF','unassigned','PR2','yandex_promo','PARTIALLY_AUTO','active',
+         'exact_stores','unknown','api','promos','2026-07-01 00:00:00','[]','2026-07-01 00:00:00');
+INSERT INTO marketplace_promotion_store_evidence
+  (id,promotion_observation_id,marketplace_account_id,external_store_id,marketplace_store_id,mapping_status,created_at)
+  VALUES('SE1','Q2','accY','c1','sY','mapped',CURRENT_TIMESTAMP);
+"""
+
+_MPO_COLS = ("id,ingest_run_id,marketplace_account_id,marketplace_store_id,product_id,external_product_id,"
+             "resolution_status,observation_kind,promotion_key,currency_status,seller_revenue_status,"
+             "commission_base_status,subsidy_status,source,fetched_at,last_verified_at,missing_fields,created_at")
+_MPO_VALS = ("'{id}','{run}','accY','sY',{pid},'{ext}','{res}','catalog','__none__','unknown','unknown',"
+             "'unknown','unknown','api','2026-08-01 00:00:00',{lv},'[]','2026-08-01 00:00:00'{extra}")
+
+
+def test_migration_nonempty_sqlite_backfill_preserve_and_constraints(monkeypatch, tmp_path):
+    """PULT-LAUNCH-2.5E-1 (final): the SQLite upgrade must migrate a NON-EMPTY table — backfill existing
+    rows, end NOT NULL with no default, and preserve every column / FK / UNIQUE / CHECK / index / row."""
+    import sqlite3
+    from alembic import command
+    dbfile = tmp_path / "eco_nonempty.db"
+    monkeypatch.setenv("ALEMBIC_DATABASE_URL", f"sqlite+aiosqlite:///{dbfile.as_posix()}")
+    import db_migrations as dbm
+    cfg = dbm._alembic_config()
+
+    command.upgrade(cfg, "ypo1a2b3c4d01")
+    con = sqlite3.connect(str(dbfile))
+    con.execute("PRAGMA foreign_keys=ON")
+    con.executescript(_SEED)
+    con.commit()
+    con.close()
+
+    # ── the migration under test ──
+    command.upgrade(cfg, "eco1a2b3c4d01")
+
+    con = sqlite3.connect(str(dbfile))
+    con.execute("PRAGMA foreign_keys=ON")
+    try:
+        # backfill last_verified_at = fetched_at (distinct per row); fingerprint of old rows is NULL
+        p = con.execute("SELECT fetched_at, last_verified_at, evidence_fingerprint "
+                        "FROM marketplace_price_observations WHERE id='P1'").fetchone()
+        assert p[0] == p[1] == "2026-05-01 10:00:00" and p[2] is None
+        q = con.execute("SELECT fetched_at, last_verified_at, evidence_fingerprint "
+                        "FROM marketplace_promotion_observations WHERE id='Q1'").fetchone()
+        assert q[0] == q[1] == "2026-06-15 08:30:00" and q[2] is None
+        # all rows preserved (P1 + Q1 + Q2 + the child SE1) — nothing lost in the rebuild
+        assert con.execute("SELECT COUNT(*) FROM marketplace_price_observations").fetchone()[0] == 1
+        assert con.execute("SELECT COUNT(*) FROM marketplace_promotion_observations").fetchone()[0] == 2
+        assert con.execute("SELECT promotion_observation_id FROM marketplace_promotion_store_evidence "
+                           "WHERE id='SE1'").fetchone()[0] == "Q2"   # child FK survived the parent rebuild
+
+        # NOT NULL, no default (PRAGMA)
+        for t in ("marketplace_price_observations", "marketplace_promotion_observations"):
+            info = {r[1]: (r[3], r[4]) for r in con.execute(f"PRAGMA table_info({t})")}
+            assert info["last_verified_at"] == (1, None)
+        # new series indexes exist
+        for name in ("ix_price_obs_series", "ix_promo_obs_series"):
+            assert con.execute("SELECT 1 FROM sqlite_master WHERE type='index' AND name=?",
+                               (name,)).fetchone() is not None
+
+        def _mpo(**kw):
+            for k, v in (("id", str(uuid.uuid4())), ("run", str(uuid.uuid4())), ("pid", "NULL"),
+                         ("ext", "Z"), ("res", "unassigned"), ("lv", "'2026-08-01 00:00:00'"),
+                         ("extra", "")):
+                kw.setdefault(k, v)
+            con.execute(f"INSERT INTO marketplace_price_observations({_MPO_COLS}) "
+                        f"VALUES({_MPO_VALS.format(**kw)})")
+
+        # last_verified_at is required — omitting it is an IntegrityError, not a sentinel
+        with pytest.raises(sqlite3.IntegrityError):
+            con.execute("INSERT INTO marketplace_price_observations "
+                        "(id,ingest_run_id,marketplace_account_id,marketplace_store_id,external_product_id,"
+                        " resolution_status,observation_kind,promotion_key,currency_status,"
+                        " seller_revenue_status,commission_base_status,subsidy_status,source,fetched_at,"
+                        " missing_fields,created_at) VALUES('X','x','accY','sY','Z','unassigned','catalog',"
+                        " '__none__','unknown','unknown','unknown','unknown','api','2026-08-01 00:00:00',"
+                        " '[]','2026-08-01 00:00:00')")
+        # CHECK still blocks: resolved with product_id NULL
+        with pytest.raises(sqlite3.IntegrityError):
+            _mpo(res="resolved", pid="NULL")
+        # FK still blocks: resolved with an unplaced product
+        with pytest.raises(sqlite3.IntegrityError):
+            _mpo(res="resolved", pid="'pGHOST'")
+        # UNIQUE still blocks: a duplicate run-key of the existing P1 row
+        with pytest.raises(sqlite3.IntegrityError):
+            _mpo(id="dup", run="r", ext="E")                       # same (store, ext, kind, promo_key, source, run)
+        # club CHECK survived as a WORKING COLUMN-INLINE constraint (negative rejected)
+        with pytest.raises(sqlite3.IntegrityError):
+            con.execute(f"INSERT INTO marketplace_price_observations({_MPO_COLS},club_buyer_price) "
+                        f"VALUES({_MPO_VALS.format(id='cn', run='cn', pid='NULL', ext='CN', res='unassigned', lv=chr(39)+'2026-08-01 00:00:00'+chr(39), extra='')},-1)")
+    finally:
+        con.close()
+
+    # downgrade removes ONLY the new fields, keeps the old data
+    command.downgrade(cfg, "ypo1a2b3c4d01")
+    con = sqlite3.connect(str(dbfile))
+    try:
+        cols = {r[1] for r in con.execute("PRAGMA table_info(marketplace_price_observations)")}
+        assert "last_verified_at" not in cols and "evidence_fingerprint" not in cols
+        assert con.execute("SELECT external_product_id FROM marketplace_price_observations "
+                           "WHERE id='P1'").fetchone()[0] == "E"      # old row + old column intact
+        assert con.execute("SELECT COUNT(*) FROM marketplace_promotion_store_evidence").fetchone()[0] == 1
+    finally:
+        con.close()
+    command.upgrade(cfg, "eco1a2b3c4d01")                            # re-upgrade succeeds
+
+
 # ══ SCHEMA GUARDS ════════════════════════════════════════════════════════════════
 def test_price_series_index_exact_composition():
     idx = {i.name: [c.name for c in i.columns] for i in MPO.__table__.indexes}
@@ -392,62 +529,118 @@ def test_column_nullability_length_and_no_default():
         assert model.__table__.c.evidence_fingerprint.type.length == 64
 
 
-# ══ INDEX EXPLAIN GATE — REAL PostgreSQL (SQLite EXPLAIN never substituted) ═══════
-# This is a MANDATORY gate: it runs in a dedicated CI job with a PostgreSQL service container that sets
-# PULT_TEST_PG_URL. A skip means the gate did NOT run — it is NOT a passing state for 2.5E-1. Locally,
-# with no PostgreSQL, it skips loudly (BLOCKED_ENVIRONMENT); a SQLite EXPLAIN is never accepted as proof.
-def _pg_url():
+# ══ REAL PostgreSQL: Alembic migration + EXPLAIN GATE (SQLite EXPLAIN never substituted) ══════════════
+# A MANDATORY gate, run in the dedicated `postgres-explain` CI job (PostgreSQL service container). It
+# applies the REAL Alembic migration chain up to ypo1a2b3c4d01, seeds NON-EMPTY parent tables, then
+# runs the change-only migration eco1a2b3c4d01 and proves on PostgreSQL: backfill (last_verified_at =
+# fetched_at), NOT NULL, NO column default — and finally that the latest-of-series lookup uses
+# ix_price_obs_series / ix_promo_obs_series (incl. product_id IS NULL). No create_all: this exercises
+# the migration's PostgreSQL branch. A skip (no PostgreSQL) is NOT a passing state for 2.5E-1; a SQLite
+# EXPLAIN is never accepted. If the old-migration chain itself fails on PostgreSQL, that is reported as
+# a failure — never masked by falling back to create_all.
+def _pg_sync_url():
     return os.environ.get("PULT_TEST_PG_URL") or os.environ.get("PULT_PG_URL")
 
 
-def test_explain_uses_series_index_or_blocked_environment():
-    url = _pg_url()
-    if not url or not (url.startswith("postgresql") or url.startswith("postgres:")):
+def _pg_alembic_url():
+    # Alembic's env uses an ASYNC driver; derive an asyncpg URL from the sync one if not given.
+    explicit = os.environ.get("PULT_TEST_PG_ALEMBIC_URL")
+    if explicit:
+        return explicit
+    sync = _pg_sync_url() or ""
+    return sync.replace("+psycopg2", "+asyncpg").replace("postgresql://", "postgresql+asyncpg://")
+
+
+def test_pg_alembic_migration_nonempty_and_explain(monkeypatch):
+    sync_url = _pg_sync_url()
+    if not sync_url or not sync_url.startswith("postgres"):
         pytest.skip("BLOCKED_ENVIRONMENT: no PostgreSQL available (PULT_TEST_PG_URL unset). A SQLite "
-                    "EXPLAIN is NOT accepted as proof of index use. The mandatory proof runs in the "
-                    "'postgres-explain' CI job against a real PostgreSQL service container.")
+                    "EXPLAIN is NOT accepted; the mandatory proof runs in the 'postgres-explain' CI job.")
     import sqlalchemy as sa
-    eng = sa.create_engine(url)
+    from alembic import command
+    monkeypatch.setenv("ALEMBIC_DATABASE_URL", _pg_alembic_url())
+    import db_migrations as dbm
+    cfg = dbm._alembic_config()
+
+    eng = sa.create_engine(sync_url)
     try:
+        # clean slate so the real migration chain owns the schema (never create_all)
         with eng.begin() as c:
-            Base.metadata.create_all(c.engine)
-            # FK triggers off so we can bulk-seed synthetic rows without real parents (superuser).
+            c.exec_driver_sql("DROP SCHEMA public CASCADE; CREATE SCHEMA public")
+
+        # ── REAL migration chain up to the pre-change-only head ──
+        command.upgrade(cfg, "ypo1a2b3c4d01")
+
+        # seed NON-EMPTY parent tables with distinct fetched_at (FK triggers off; synthetic rows)
+        with eng.begin() as c:
             c.exec_driver_sql("SET session_replication_role = replica")
-
-            # background rows: one per distinct series → the target series is highly selective.
-            price_rows, promo_rows = [], []
-            for i in range(4000):
-                price_rows.append({"id": f"p{i}", "run": f"r{i}", "acc": "a", "st": "s",
-                                   "ext": f"E{i}", "fa": f"2026-01-01 00:00:{i % 60:02d}"})
-                promo_rows.append({"id": f"q{i}", "run": f"r{i}", "acc": "a",
-                                   "ext": f"OF{i}", "pr": f"PR{i}", "fa": f"2026-01-01 00:00:{i % 60:02d}"})
-            # the target series: many change-points, product_id NULL (unassigned) — the case to prove.
-            for j in range(300):
-                price_rows.append({"id": f"pt{j}", "run": f"rt{j}", "acc": "a", "st": "s",
-                                   "ext": "E-TARGET", "fa": f"2026-02-01 00:{j // 60:02d}:{j % 60:02d}"})
-                promo_rows.append({"id": f"qt{j}", "run": f"rt{j}", "acc": "a",
-                                   "ext": "OF-TARGET", "pr": "PR-T", "fa": f"2026-02-01 00:{j // 60:02d}:{j % 60:02d}"})
-
             c.exec_driver_sql(
                 "INSERT INTO marketplace_price_observations "
-                "(id, ingest_run_id, marketplace_account_id, marketplace_store_id, product_id, "
-                " external_product_id, resolution_status, observation_kind, promotion_key, "
-                " currency_status, seller_revenue_status, commission_base_status, subsidy_status, "
-                " source, fetched_at, last_verified_at, missing_fields, created_at) VALUES "
-                "(%(id)s,%(run)s,%(acc)s,%(st)s,NULL,%(ext)s,'unassigned','catalog','__none__',"
-                " 'unknown','unknown','unknown','unknown','api',%(fa)s,%(fa)s,'[]',%(fa)s)", price_rows)
+                "(id,ingest_run_id,marketplace_account_id,marketplace_store_id,product_id,"
+                " external_product_id,resolution_status,observation_kind,promotion_key,currency_status,"
+                " seller_revenue_status,commission_base_status,subsidy_status,source,fetched_at,"
+                " missing_fields,created_at) VALUES "
+                "('P1','r','a','s',NULL,'E','unassigned','catalog','__none__','unknown','unknown',"
+                " 'unknown','unknown','api','2026-05-01 10:00:00','[]','2026-05-01 10:00:00')")
             c.exec_driver_sql(
                 "INSERT INTO marketplace_promotion_observations "
-                "(id, ingest_run_id, marketplace_account_id, marketplace, product_id, external_product_id, "
-                " resolution_status, promotion_id, promotion_type, provider_status, participation_status, "
-                " attribution_status, currency_status, source, provider_dataset, fetched_at, "
-                " last_verified_at, missing_fields, created_at) VALUES "
-                "(%(id)s,%(run)s,%(acc)s,'yandex',NULL,%(ext)s,'unassigned',%(pr)s,'yandex_promo','AUTO',"
-                " 'active','account_wide','unknown','api','promos',%(fa)s,%(fa)s,'[]',%(fa)s)", promo_rows)
+                "(id,ingest_run_id,marketplace_account_id,marketplace,product_id,external_product_id,"
+                " resolution_status,promotion_id,promotion_type,provider_status,participation_status,"
+                " attribution_status,currency_status,source,provider_dataset,fetched_at,missing_fields,"
+                " created_at) VALUES ('Q1','r','a','yandex',NULL,'OF','unassigned','PR','yandex_promo',"
+                " 'AUTO','active','account_wide','unknown','api','promos','2026-06-15 08:30:00','[]',"
+                " '2026-06-15 08:30:00')")
 
+        # ── the migration under test, on PostgreSQL ──
+        command.upgrade(cfg, "eco1a2b3c4d01")
+
+        with eng.connect() as c:
+            # backfill on the pre-existing rows
+            assert c.exec_driver_sql("SELECT last_verified_at = fetched_at AND evidence_fingerprint IS NULL "
+                                     "FROM marketplace_price_observations WHERE id='P1'").scalar() is True
+            assert c.exec_driver_sql("SELECT last_verified_at = fetched_at AND evidence_fingerprint IS NULL "
+                                     "FROM marketplace_promotion_observations WHERE id='Q1'").scalar() is True
+            # NOT NULL + NO default (information_schema)
+            for t in ("marketplace_price_observations", "marketplace_promotion_observations"):
+                nn, dflt = c.exec_driver_sql(
+                    "SELECT is_nullable, column_default FROM information_schema.columns "
+                    f"WHERE table_name='{t}' AND column_name='last_verified_at'").fetchone()
+                assert nn == "NO" and dflt is None, (t, nn, dflt)
+
+        # ── seed for planner selectivity, ANALYZE, then EXPLAIN ──
+        with eng.begin() as c:
+            c.exec_driver_sql("SET session_replication_role = replica")
+            price_rows, promo_rows = [], []
+            for i in range(4000):
+                price_rows.append({"id": f"p{i}", "run": f"r{i}", "ext": f"E{i}",
+                                   "fa": f"2026-01-01 00:00:{i % 60:02d}"})
+                promo_rows.append({"id": f"q{i}", "run": f"r{i}", "ext": f"OF{i}", "pr": f"PR{i}",
+                                   "fa": f"2026-01-01 00:00:{i % 60:02d}"})
+            for j in range(300):     # target series: many change-points, product_id NULL (unassigned)
+                price_rows.append({"id": f"pt{j}", "run": f"rt{j}", "ext": "E-TARGET",
+                                   "fa": f"2026-02-01 00:{j // 60:02d}:{j % 60:02d}"})
+                promo_rows.append({"id": f"qt{j}", "run": f"rt{j}", "ext": "OF-TARGET", "pr": "PR-T",
+                                   "fa": f"2026-02-01 00:{j // 60:02d}:{j % 60:02d}"})
+            c.exec_driver_sql(
+                "INSERT INTO marketplace_price_observations "
+                "(id,ingest_run_id,marketplace_account_id,marketplace_store_id,product_id,"
+                " external_product_id,resolution_status,observation_kind,promotion_key,currency_status,"
+                " seller_revenue_status,commission_base_status,subsidy_status,source,fetched_at,"
+                " last_verified_at,missing_fields,created_at) VALUES "
+                "(%(id)s,%(run)s,'a','s',NULL,%(ext)s,'unassigned','catalog','__none__','unknown',"
+                " 'unknown','unknown','unknown','api',%(fa)s,%(fa)s,'[]',%(fa)s)", price_rows)
+            c.exec_driver_sql(
+                "INSERT INTO marketplace_promotion_observations "
+                "(id,ingest_run_id,marketplace_account_id,marketplace,product_id,external_product_id,"
+                " resolution_status,promotion_id,promotion_type,provider_status,participation_status,"
+                " attribution_status,currency_status,source,provider_dataset,fetched_at,last_verified_at,"
+                " missing_fields,created_at) VALUES "
+                "(%(id)s,%(run)s,'a','yandex',NULL,%(ext)s,'unassigned',%(pr)s,'yandex_promo','AUTO',"
+                " 'active','account_wide','unknown','api','promos',%(fa)s,%(fa)s,'[]',%(fa)s)", promo_rows)
             c.exec_driver_sql("ANALYZE marketplace_price_observations")
             c.exec_driver_sql("ANALYZE marketplace_promotion_observations")
 
+        with eng.connect() as c:
             price_plan = "\n".join(str(r[0]) for r in c.exec_driver_sql(
                 "EXPLAIN SELECT * FROM marketplace_price_observations "
                 "WHERE marketplace_store_id='s' AND external_product_id='E-TARGET' "
