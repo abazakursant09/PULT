@@ -119,6 +119,16 @@ class _StubOzon:
     async def returns_list(self, *, token, client_id, last_id=0, limit=1000):
         return self._returns
 
+    # PULT-LAUNCH-2.5D — promotion reads default to empty so existing full-run tests stay neutral.
+    async def list_actions(self, *, token, client_id):
+        return []
+
+    async def action_products(self, *, token, client_id, action_id, last_id=0, limit=1000):
+        return {"result": {"products": [], "last_id": ""}}
+
+    async def action_candidates(self, *, token, client_id, action_id, last_id=0, limit=1000):
+        return {"result": {"products": [], "last_id": ""}}
+
 
 def _use(monkeypatch, stub):
     monkeypatch.setattr(oz, "ozon_client", stub)
@@ -423,6 +433,10 @@ def test_auth_pauses_ozon(monkeypatch):
             raise ExecutionError(ExecutionError.AUTH, "auth")
         async def returns_list(self, *, token, client_id, last_id=0, limit=1000):
             raise ExecutionError(ExecutionError.AUTH, "auth")
+        async def list_actions(self, *, token, client_id):
+            raise ExecutionError(ExecutionError.AUTH, "auth")
+        async def action_products(self, *, token, client_id, action_id, last_id=0, limit=1000):
+            raise ExecutionError(ExecutionError.AUTH, "auth")
     monkeypatch.setattr(api_sync.ozon_ingest, "ozon_client", _Auth())
     _run(api_sync.run_api_sync_once(db))
     states = _run(db.execute(select(ApiSyncState))).scalars().all()
@@ -456,4 +470,4 @@ def test_ozon_failure_does_not_stop_other_connection(monkeypatch):
 def test_alembic_single_head():
     from alembic.config import Config
     from alembic.script import ScriptDirectory
-    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["mpo1a2b3c4d01"]
+    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["ozp1a2b3c4d01"]

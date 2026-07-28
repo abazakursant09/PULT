@@ -33,7 +33,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
-    Column, String, DateTime, Numeric, JSON, text,
+    Column, String, DateTime, Numeric, Boolean, JSON, text,
     ForeignKeyConstraint, UniqueConstraint, CheckConstraint, Index,
 )
 from database import Base
@@ -84,6 +84,15 @@ class MarketplacePriceObservation(Base):
     marketplace_subsidy     = Column(Numeric(18, 2), nullable=True)  # never derived by subtraction
     expected_seller_revenue = Column(Numeric(18, 2), nullable=True)  # provider-only
     commission_base         = Column(Numeric(18, 2), nullable=True)
+
+    # PULT-LAUNCH-2.5D — two raw, PROVEN Ozon /v5/product/info/prices fields. Each stands alone:
+    #   * provider_min_price is the provider's declared `min_price` verbatim — NOT the seller's
+    #     revenue, NOT a promo/marketing price, NOT a margin, NOT an emergency floor. It is evidence,
+    #     never a computed economic verdict.
+    #   * auto_action_enabled is the provider's declared auto-promotion flag. NULL means Ozon gave no
+    #     proven value; NULL is never coerced to False (absence of proof ≠ proof of absence).
+    provider_min_price      = Column(Numeric(18, 2), nullable=True)  # raw Ozon min_price; 0 is a real value
+    auto_action_enabled     = Column(Boolean, nullable=True)         # NULL = provider did not prove it
 
     currency               = Column(String(3), nullable=True)       # no default; proven from provider only
     currency_status        = Column(String(8),  nullable=False, default="unknown", server_default="unknown")

@@ -36,15 +36,22 @@ from sqlalchemy import select
 from models.imported_card_content import ImportedCardContentRow
 from models.imported_product import ImportedProductRow
 from models.marketplace_operation import MarketplaceOperation
+from models.marketplace_price_observation import MarketplacePriceObservation, PROMO_KEY_SENTINEL
 from models.product import Product
 from models.product_placement import ProductPlacement
 from services.account_product_resolver import FOUND, AccountProductIndex
+from services.marketplace.errors import ExecutionError
 from services.marketplace.ozon_client import ozon_client
 
 MARKETPLACE = "ozon"
-DATA_TYPES = ("products", "prices", "stocks", "fbo_postings", "fbs_postings", "finance", "returns")
+DATA_TYPES = ("products", "prices", "stocks", "fbo_postings", "fbs_postings", "finance", "returns",
+              # PULT-LAUNCH-2.5D — proven price/promo EVIDENCE into MarketplacePriceObservation. These
+              # only ever WRITE observations; they never change a product's promotion state. Reached
+              # only through run_api_sync_once, which makes ZERO calls while the feature flag is OFF.
+              "price_observations", "promotions")
 
 _PAGE = 1000
+_ACTION_PAGE = 1000
 _EPOCH = "2019-06-20T00:00:00.000Z"
 
 
@@ -81,6 +88,21 @@ def _dt(value) -> Optional[datetime]:
         except ValueError:
             continue
     return None
+
+
+def _cur(value) -> tuple[Optional[str], str]:
+    """A currency is PROVEN only when the provider gives a well-formed 3-letter code. Anything else is
+    unknown → (None, 'unknown'); we never substitute RUB or any default."""
+    s = _s(value)
+    if s and len(s) == 3 and s.isalpha():
+        return s.upper(), "proven"
+    return None, "unknown"
+
+
+def _bool(value) -> Optional[bool]:
+    """A provider flag is proven only when it is an actual boolean. Absent/other → None (unknown);
+    NULL is never coerced to False."""
+    return value if isinstance(value, bool) else None
 
 
 async def _index(db, account_id: str) -> AccountProductIndex:
@@ -160,6 +182,10 @@ async def fetch_and_persist_page(db, state, token: str, client_id: Optional[str]
         return await _page_finance(db, state, **kw)
     if state.data_type == "returns":
         return await _page_returns(db, state, **kw)
+    if state.data_type == "price_observations":
+        return await _page_price_observations(db, state, **kw)
+    if state.data_type == "promotions":
+        return await _page_promotions(db, state, **kw)
     raise ValueError(f"unsupported Ozon data_type: {state.data_type}")
 
 
@@ -419,3 +445,201 @@ async def _page_returns(db, state, *, token, client_id) -> dict:
     done = not bool(data.get("has_next"))
     state.cursor = None if done else json.dumps({"last_id": max_id})
     return {"done": done, "count": len(rows), "defer": False}
+
+
+# ── Price / promotion OBSERVATIONS (PULT-LAUNCH-2.5D) ────────────────────────────
+# These write append-only, immutable evidence into MarketplacePriceObservation. Idempotency is by the
+# table's run-uniqueness key (store, external product, KIND, promotion, source, ingest_run_id): the
+# ingest_run_id is minted once per full sync pass (stored in the cursor) so re-processing a page inside
+# the SAME pass UPSERTs the same row, while the NEXT pass mints a new id and writes fresh rows. A value
+# is stored ONLY when the provider proves it; otherwise it stays NULL and its name is recorded in
+# missing_fields (unknown is never 0). Revenue, subsidy and commission-base are NEVER inferred here.
+
+
+async def _upsert_observation(db, state, *, run_id: str, ext: str, observation_kind: str,
+                              promotion_key: str, product_id: Optional[str], now: datetime,
+                              **fields) -> None:
+    row = (await db.execute(select(MarketplacePriceObservation).where(
+        MarketplacePriceObservation.marketplace_store_id == state.marketplace_store_id,
+        MarketplacePriceObservation.external_product_id == ext,
+        MarketplacePriceObservation.observation_kind == observation_kind,
+        MarketplacePriceObservation.promotion_key == promotion_key,
+        MarketplacePriceObservation.source == "api",
+        MarketplacePriceObservation.ingest_run_id == run_id))).scalars().first()
+    if row is None:
+        row = MarketplacePriceObservation(
+            id=str(uuid.uuid4()), ingest_run_id=run_id,
+            marketplace_account_id=state.marketplace_account_id,
+            marketplace_store_id=state.marketplace_store_id,
+            external_product_id=ext, observation_kind=observation_kind,
+            promotion_key=promotion_key, source="api")
+        db.add(row)
+    # A resolved row MUST carry a product_id (the placement FK + the resolution CHECK); an unassigned
+    # row never borrows another product — product_id stays NULL (never the first fuzzy match).
+    row.product_id = product_id
+    row.resolution_status = "resolved" if product_id else "unassigned"
+    row.fetched_at = now
+    for key, value in fields.items():
+        setattr(row, key, value)
+
+
+async def _page_price_observations(db, state, *, token, client_id) -> dict:
+    """Catalog price EVIDENCE from POST /v5/product/info/prices → observation_kind='catalog'.
+
+    Proven-field mapping (2.5D §2): price→buyer_price, old_price→catalog_price,
+    marketing_seller_price→seller_promo_price, min_price→provider_min_price,
+    auto_action_enabled→auto_action_enabled, currency_code→currency (proven only). marketing_price is
+    IGNORED (removed from v5). commissions are not stored as a proven base. Every absent value stays
+    NULL and is named in missing_fields."""
+    now = datetime.utcnow()
+    cur = json.loads(state.cursor) if state.cursor else {}
+    run_id = cur.get("run_id") or str(uuid.uuid4())
+    last_id = cur.get("last_id") or ""
+    page = await ozon_client.product_prices(token=token, client_id=client_id, last_id=last_id or "")
+    result = page.get("result") if isinstance(page.get("result"), dict) else {}
+    items = result.get("items") or []
+    index = await _index(db, state.marketplace_account_id)
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        ext = _s(it.get("product_id"))
+        if ext is None:
+            continue
+        p = it.get("price") if isinstance(it.get("price"), dict) else {}
+        buyer_price = _dec(p.get("price"))
+        catalog_price = _dec(p.get("old_price"))
+        seller_promo_price = _dec(p.get("marketing_seller_price"))
+        provider_min_price = _dec(p.get("min_price"))
+        auto_action_enabled = _bool(p.get("auto_action_enabled"))
+        currency, currency_status = _cur(p.get("currency_code") or it.get("currency_code"))
+        missing = []
+        if buyer_price is None:
+            missing.append("price")
+        if catalog_price is None:
+            missing.append("old_price")
+        if seller_promo_price is None:
+            missing.append("marketing_seller_price")
+        if provider_min_price is None:
+            missing.append("min_price")
+        if auto_action_enabled is None:
+            missing.append("auto_action_enabled")
+        if currency is None:
+            missing.append("currency_code")
+        product_id = await _resolve(db, index, ext, _s(it.get("offer_id")))
+        await _upsert_observation(
+            db, state, run_id=run_id, ext=ext, observation_kind="catalog",
+            promotion_key=PROMO_KEY_SENTINEL, product_id=product_id, now=now,
+            promotion_id=None, promotion_type=None, participation_status=None,
+            catalog_price=catalog_price, buyer_price=buyer_price,
+            seller_promo_price=seller_promo_price, provider_min_price=provider_min_price,
+            auto_action_enabled=auto_action_enabled,
+            currency=currency, currency_status=currency_status,
+            # never inferred from a buyer-facing price:
+            expected_seller_revenue=None, seller_revenue_status="unknown",
+            commission_base=None, commission_base_status="unknown",
+            marketplace_subsidy=None, subsidy_status="unknown",
+            provider_dataset="prices", missing_fields=missing)
+    next_last = result.get("last_id")
+    done = not items or not next_last
+    state.cursor = None if done else json.dumps({"run_id": run_id, "last_id": next_last})
+    return {"done": done, "count": len(items), "defer": False}
+
+
+async def _page_promotions(db, state, *, token, client_id) -> dict:
+    """Promotion PARTICIPATION evidence. GET /v1/actions enumerates the seller's actions; only
+    POST /v1/actions/products proves a product is ACTIVELY in a given action_id (participation_status
+    ='active'). The action_id is the sole identity — a title is never used. Candidates are NOT fetched
+    here: an eligible candidate is not a participant and would be a false observation.
+
+    Positive-only: this writer NEVER records not_participating (its store-catalog reconciliation is out
+    of scope). Absence of an active row is not proof of non-participation. Append-only means a partial
+    or failed pass leaves every prior run's proven participation untouched. coverage_complete is set
+    true ONLY after every action has been walked to its last page with no failure."""
+    now = datetime.utcnow()
+    cur = json.loads(state.cursor) if state.cursor else {}
+    run_id = cur.get("run_id") or str(uuid.uuid4())
+
+    # First page of the pass: enumerate the actions and pin their order for the rest of the pass.
+    if "aids" not in cur:
+        actions = await ozon_client.list_actions(token=token, client_id=client_id)
+        aids: list[str] = []
+        for a in actions:
+            if isinstance(a, dict):
+                aid = _s(a.get("id"))
+                if aid and aid not in aids:
+                    aids.append(aid)
+        state.coverage_complete = False
+        if not aids:
+            state.coverage_complete = True     # an empty action set IS a complete, clean coverage
+            state.cursor = None
+            return {"done": True, "count": 0, "defer": False}
+        state.cursor = json.dumps({"run_id": run_id, "aids": aids, "ai": 0, "lid": 0})
+        return {"done": False, "count": 0, "defer": False}
+
+    aids = cur.get("aids") or []
+    ai = cur.get("ai", 0)
+    lid = cur.get("lid", 0)
+    if ai >= len(aids):
+        state.coverage_complete = True         # every action fully traversed with no failure
+        state.cursor = None
+        return {"done": True, "count": 0, "defer": False}
+
+    action_id = aids[ai]
+    # The action window (identity is the id, never the title).
+    actions = await ozon_client.list_actions(token=token, client_id=client_id)
+    meta = next((a for a in actions if isinstance(a, dict) and _s(a.get("id")) == action_id), {})
+    vf, vt = _dt(meta.get("date_start")), _dt(meta.get("date_end"))
+
+    page = await ozon_client.action_products(
+        token=token, client_id=client_id, action_id=action_id, last_id=lid, limit=_ACTION_PAGE)
+    result = page.get("result") if isinstance(page.get("result"), dict) else {}
+    products = result.get("products") or []
+    index = await _index(db, state.marketplace_account_id)
+    count = 0
+    for p in products:
+        if not isinstance(p, dict):
+            continue
+        ext = _s(p.get("id"))
+        if ext is None:
+            continue
+        promo_price = _dec(p.get("action_price"))
+        missing = []
+        if promo_price is None:
+            missing.append("action_price")
+        missing.append("currency_code")        # actions/products carries no proven currency
+        product_id = await _resolve(db, index, ext, _s(p.get("offer_id")))
+        await _upsert_observation(
+            db, state, run_id=run_id, ext=ext, observation_kind="promotion",
+            promotion_key=action_id, product_id=product_id, now=now,
+            promotion_id=action_id, promotion_type="ozon_action",
+            participation_status="active",      # proven ONLY by /v1/actions/products
+            seller_promo_price=promo_price,
+            catalog_price=None, buyer_price=None, provider_min_price=None,
+            auto_action_enabled=None,
+            currency=None, currency_status="unknown",
+            expected_seller_revenue=None, seller_revenue_status="unknown",
+            commission_base=None, commission_base_status="unknown",
+            marketplace_subsidy=None, subsidy_status="unknown",
+            provider_valid_from=vf, provider_valid_to=vt,
+            provider_dataset="actions", missing_fields=missing)
+        count += 1
+
+    next_last = result.get("last_id")
+    if next_last not in (None, "", 0) and next_last != lid:
+        # a real, advancing cursor token → keep walking THIS action
+        state.cursor = json.dumps({"run_id": run_id, "aids": aids, "ai": ai, "lid": next_last})
+        return {"done": False, "count": count, "defer": False}
+    if next_last is not None and next_last == lid and products:
+        # the cursor repeated on a non-empty page → fail closed. Rolling back keeps prior runs intact;
+        # coverage_complete stays false and no negative is ever written.
+        raise ExecutionError(ExecutionError.MARKETPLACE_5XX, "ozon actions cursor did not advance")
+    if next_last is None and len(products) >= _ACTION_PAGE:
+        # no cursor token but a full page → offset fallback; guard against a non-advancing offset.
+        new_lid = (lid or 0) + len(products)
+        if new_lid == lid:
+            raise ExecutionError(ExecutionError.MARKETPLACE_5XX, "ozon actions page did not advance")
+        state.cursor = json.dumps({"run_id": run_id, "aids": aids, "ai": ai, "lid": new_lid})
+        return {"done": False, "count": count, "defer": False}
+    # this action is exhausted → advance to the next action, resetting the intra-action cursor
+    state.cursor = json.dumps({"run_id": run_id, "aids": aids, "ai": ai + 1, "lid": 0})
+    return {"done": False, "count": count, "defer": False}

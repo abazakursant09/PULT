@@ -59,6 +59,7 @@ _CADENCE_MIN = {                              # gap after a successful full sync
     "orders": 60, "sales": 60, "stocks": 60, "finance": 6 * 60,
     # Ozon
     "products": 6 * 60, "fbo_postings": 60, "fbs_postings": 60, "returns": 60,
+    "price_observations": 60, "promotions": 6 * 60,
     # Yandex
     "cards": 6 * 60,
 }
