@@ -49,6 +49,7 @@ from models.physical_product import PhysicalProduct
 from models.imported_product import ImportedProductRow
 from models.imported_finance import ImportedFinanceRow
 from models.imported_return import ImportedReturnRow
+from models.marketplace_operation import MarketplaceOperation
 
 from services.protection.contribution import (
     ContributionInputs, Thresholds, CostLine, ReturnsStats, compute,
@@ -56,6 +57,8 @@ from services.protection.contribution import (
 )
 from services.source_policy.resolver import resolve_source
 from services.source_policy.product_money_reader import api_product_count
+from services.source_policy.money_reader import _period_filter
+from services.source_policy import dataset_authority as da
 from services.protection.cost_map import resolve_metric_money, MONEY_METRICS
 
 WINDOW_DAYS = DEFAULT_RETURN_WINDOW_DAYS   # 90
@@ -189,10 +192,44 @@ async def _csv_units(db, *, store_id, product_id, period) -> int:
     return int(total or 0)
 
 
-async def _api_units(db, *, store_id, product_id, marketplace, period) -> Optional[int]:
-    """API units (orders) for ONE store+product+window, or None when the API is not a source."""
-    return await api_product_count(db, store_id=store_id, product_id=product_id,
-                                   marketplace=marketplace, metric_type="orders", period=period)
+# ── real freshness provenance (MAX fetched_at of the CHOSEN source only) ─────────────────────────
+async def _csv_fin_fetched_at(db, *, store_id, product_id, period) -> Optional[datetime]:
+    return (await db.execute(select(func.max(ImportedFinanceRow.fetched_at)).where(
+        ImportedFinanceRow.marketplace_store_id == store_id,
+        ImportedFinanceRow.product_id == product_id,
+        ImportedFinanceRow.source == "csv",
+        ImportedFinanceRow.date >= period[0], ImportedFinanceRow.date <= period[1]))).scalar()
+
+
+async def _api_op_fetched_at(db, *, store_id, product_id, marketplace, metric_type, period) -> Optional[datetime]:
+    auth = da.authoritative(marketplace, metric_type)
+    if auth is None:
+        return None
+    return (await db.execute(select(func.max(MarketplaceOperation.fetched_at)).where(
+        MarketplaceOperation.marketplace_store_id == store_id,
+        MarketplaceOperation.product_id == product_id,
+        MarketplaceOperation.source == "api",
+        MarketplaceOperation.provider_dataset.in_(list(auth.datasets)),
+        MarketplaceOperation.operation_type.in_(list(auth.operation_types)),
+        *_period_filter(period)))).scalar()
+
+
+async def _csv_returns_fetched_at(db, *, store_id, product_id, period) -> Optional[datetime]:
+    return (await db.execute(select(func.max(ImportedReturnRow.fetched_at)).where(
+        ImportedReturnRow.marketplace_store_id == store_id,
+        ImportedReturnRow.product_id == product_id,
+        ImportedReturnRow.source == "csv",
+        ImportedReturnRow.date >= period[0], ImportedReturnRow.date <= period[1]))).scalar()
+
+
+def _freshness_note(source, fetched_at, now, reason) -> dict:
+    """Per-metric freshness with the REAL fetched_at of the chosen source. A chosen value whose
+    fetched_at cannot be proven is freshness_unknown (age stays null — never a fabricated age)."""
+    note = _fresh(source, fetched_at, now)
+    note["reason"] = reason
+    if source is not None and fetched_at is None:
+        note["freshness"] = "freshness_unknown"
+    return note
 
 
 # ── taxes ───────────────────────────────────────────────────────────────────────────────────────
@@ -269,18 +306,47 @@ async def _additional_lines(db, policy_id, price, now) -> Tuple[list, set]:
 
 
 # ── returns ──────────────────────────────────────────────────────────────────────────────────────
-async def _returns(db, *, store_id, product_id, period) -> ReturnsStats:
-    """sold and returned units for ONE store+product, one window, one source (CSV). Returned units
-    come from the returns feed only (cancellations are a different feed, never counted here). API sold
-    is never paired with CSV returns. cost_per_return is NOT provable on master → cost_proven=False."""
-    sold = await _csv_units(db, store_id=store_id, product_id=product_id, period=period)
-    returned = int((await db.execute(select(func.coalesce(func.sum(ImportedReturnRow.returns_qty), 0)).where(
+async def _returns(db, *, store_id, product_id, marketplace, period, now) -> Tuple[Optional[ReturnsStats], dict, bool]:
+    """Returns follow the SAME source policy as every metric (metric_type='returns').
+
+      * CSV candidate: sold=CSV finance units, returned=CSV returns feed (cancellations excluded).
+      * API candidate: returned=API returns count; the API sold denominator is UNAVAILABLE (orders are
+        not sales), so an API-sourced return rate cannot be formed — NO CSV sold fallback.
+      * preference=csv → the CSV pair; preference=api → API returned with no sold denom = incomplete;
+        auto → the resolver, conflict preserved. No hidden CSV for a non-CSV marketplace.
+
+    cost_per_return stays unconfirmed on master, so a complete calculation never arises here."""
+    csv_sold = await _csv_units(db, store_id=store_id, product_id=product_id, period=period)
+    csv_returned = int((await db.execute(select(func.coalesce(func.sum(ImportedReturnRow.returns_qty), 0)).where(
         ImportedReturnRow.marketplace_store_id == store_id,
         ImportedReturnRow.product_id == product_id,
         ImportedReturnRow.source == "csv",
         ImportedReturnRow.date >= period[0], ImportedReturnRow.date <= period[1]))).scalar() or 0)
-    return ReturnsStats(sold_units=sold, returned_units=returned, cost_per_return=None,
-                        cost_proven=False, window_days=WINDOW_DAYS)
+    # csv_returned is the CSV pair's numerator (0 real returns is DATA, not absence) whenever CSV sales
+    # exist — so a CSV preference forms a real (sold, returned) pair instead of collapsing to no_data.
+    api_returned = await api_product_count(db, store_id=store_id, product_id=product_id,
+                                           marketplace=marketplace, metric_type="returns", period=period)
+    res = await resolve_source(db, store_id=store_id, marketplace=marketplace, metric_type="returns",
+                               period=period, api_value=api_returned, csv_value=csv_returned, now=now)
+    if res.source == "csv":
+        stats = ReturnsStats(sold_units=csv_sold, returned_units=csv_returned, cost_per_return=None,
+                             cost_proven=False, window_days=WINDOW_DAYS)
+        fetched = await _csv_returns_fetched_at(db, store_id=store_id, product_id=product_id, period=period)
+        note = _freshness_note("csv", fetched, now, res.reason or "returns_csv")
+    elif res.source == "api":
+        # API returned, but NO compatible API sold denominator (orders ≠ sales) → cannot form a rate,
+        # and NEVER a CSV sold fallback. Recorded as incomplete with the honest reason.
+        stats = ReturnsStats(sold_units=0, returned_units=int(api_returned or 0), cost_per_return=None,
+                             cost_proven=False, window_days=WINDOW_DAYS)
+        fetched = await _api_op_fetched_at(db, store_id=store_id, product_id=product_id,
+                                           marketplace=marketplace, metric_type="returns", period=period)
+        note = _freshness_note("api", fetched, now, "api_sale_quantity_unavailable")
+    else:
+        stats = ReturnsStats(sold_units=0, returned_units=0, cost_per_return=None,
+                             cost_proven=False, window_days=WINDOW_DAYS)
+        note = _freshness_note(None, None, now, res.reason or "returns_no_data")
+    note["returns_source"] = res.source
+    return stats, note, bool(res.conflict)
 
 
 # ── gather ───────────────────────────────────────────────────────────────────────────────────────
@@ -293,40 +359,57 @@ async def _gather(db, *, policy: ProtectionPolicy, store: MarketplaceStore, prod
         db, store_id=store.id, product_id=product.id, marketplace=marketplace, now=now)
 
     csv_units = await _csv_units(db, store_id=store.id, product_id=product.id, period=period)
-    api_units = await _api_units(db, store_id=store.id, product_id=product.id,
-                                 marketplace=marketplace, period=period)
 
     cost_lines: list[CostLine] = []
     conflicts: list[str] = []
-    freshness: dict = {
-        "candidate_price": _fresh(price_source, price_fetched, now,
-                                  {"currency_unconfirmed": True, "warning_only": True}),
-    }
+    pf = _fresh(price_source, price_fetched, now, {"currency_unconfirmed": True, "warning_only": True})
+    if price_source is not None and price_fetched is None:
+        pf["freshness"] = "freshness_unknown"
+    freshness: dict = {"candidate_price": pf}
     if price_conflict:
         conflicts.append("price")
+    # The sale currency of the catalog price cannot be proven (no stored currency anywhere), so the
+    # ECONOMIC result must be blocked: a currency_unconfirmed conflict forces calculation_status to
+    # conflict → economic_verdict / projected_contribution stay NULL and the price is warning-only.
+    if price is not None:
+        conflicts.append("currency_unconfirmed")
 
-    # money metrics — each divided by a SOURCE-CONSISTENT denominator (API money ⇒ API units, CSV
-    # money ⇒ CSV units). No blending: a mismatch makes the metric MISSING, never a guessed rate.
+    # money metrics — a per-unit cost needs the money magnitude AND a proven SALE-quantity denominator
+    # from a COMPATIBLE source. CSV money ⇒ CSV finance units (same finance source). API money has NO
+    # proven sale denominator (orders are operational, not sales; an order may be cancelled or unbought)
+    # → MISSING (api_sale_quantity_unavailable). Never orders-as-sales, never API money ÷ CSV units.
     for metric_type, (cost_key, _csv) in MONEY_METRICS.items():
         mm = await resolve_metric_money(db, store_id=store.id, product_id=product.id,
                                         marketplace=marketplace, metric_type=metric_type,
                                         period=period, now=now)
-        denom = csv_units if mm.source == "csv" else api_units if mm.source == "api" else None
-        note = {"source": mm.source, "reason": mm.reason,
-                "denominator_source": mm.source, "denominator_units": denom,
-                "evaluated_at": now.isoformat(), "fetched_at": None,
-                "age_seconds": None, "threshold_seconds": None}
+        if mm.source == "csv":
+            fetched = await _csv_fin_fetched_at(db, store_id=store.id, product_id=product.id, period=period)
+        elif mm.source == "api":
+            fetched = await _api_op_fetched_at(db, store_id=store.id, product_id=product.id,
+                                               marketplace=marketplace, metric_type=metric_type, period=period)
+        else:
+            fetched = None
+
         if mm.conflict:
             conflicts.append(cost_key)
             cost_lines.append(CostLine(cost_key, MISSING, source=mm.source))
+            reason = "source_conflict"
         elif mm.amount is None:
             cost_lines.append(CostLine(cost_key, MISSING, source=mm.source))
-        elif not denom or denom <= 0:
-            note["reason"] = "no_source_consistent_quantity"
-            cost_lines.append(CostLine(cost_key, MISSING, source=mm.source))
-        else:
-            per_unit = (mm.amount / Decimal(denom)).quantize(Decimal("0.01"))
-            cost_lines.append(CostLine(cost_key, PROVIDER_OP, per_unit, source=mm.source))
+            reason = mm.reason or "no_data"
+        elif mm.source == "csv":
+            if not csv_units or csv_units <= 0:
+                cost_lines.append(CostLine(cost_key, MISSING, source="csv"))
+                reason = "no_source_consistent_quantity"
+            else:
+                per_unit = (mm.amount / Decimal(csv_units)).quantize(Decimal("0.01"))
+                cost_lines.append(CostLine(cost_key, PROVIDER_OP, per_unit, source="csv"))
+                reason = mm.reason or "csv"
+        else:   # api money — no proven sale-quantity denominator
+            cost_lines.append(CostLine(cost_key, MISSING, source="api"))
+            reason = "api_sale_quantity_unavailable"
+        note = _freshness_note(mm.source, fetched, now, reason)
+        note["denominator_source"] = "csv" if mm.source == "csv" else None
         freshness[metric_type] = note
 
     # storage / acquiring / last_mile: only from a seller additional cost; else MISSING (never 0)
@@ -352,17 +435,22 @@ async def _gather(db, *, policy: ProtectionPolicy, store: MarketplaceStore, prod
         cost_lines.append(CostLine("advertising", MISSING))   # attribution unproven on master
 
     cogs = await _cogs_line(db, product)
-    returns = await _returns(db, store_id=store.id, product_id=product.id, period=period)
+    returns, ret_note, ret_conflict = await _returns(
+        db, store_id=store.id, product_id=product.id, marketplace=marketplace, period=period, now=now)
+    freshness["returns"] = ret_note
+    if ret_conflict:
+        conflicts.append("returns")
 
-    # currency is PROVEN from confirmed manual costs, never defaulted. One unanimous currency ⇒ that;
-    # none ⇒ None; several different ⇒ None here and the engine raises currency_mismatch from the
-    # per-line currencies. The catalog price is currency_unconfirmed and never forces RUB.
-    manual_currencies = {ln.currency for ln in add_lines if ln.currency}
-    currency = next(iter(manual_currencies)) if len(manual_currencies) == 1 else None
+    # provenance (NOT marketplace freshness) for seller-confirmed inputs
+    freshness["cogs"] = {"source": "manual", "provenance": "physical_product_cogs",
+                         "evaluated_at": now.isoformat(), "threshold_seconds": None}
+    freshness["taxes"]["provenance"] = "seller_confirmed_tax_setting"
 
+    # currency of the SALE is never inferred — not from a manual-cost currency, not a default RUB.
+    # It is unprovable on master (see currency_unconfirmed conflict above), so it stays None.
     return ContributionInputs(
         marketplace=marketplace, store_id=store.id, product_id=product.id, promo_id=None,
-        candidate_buyer_price=price, promo_price_proven=False, currency=currency,
+        candidate_buyer_price=price, promo_price_proven=False, currency=None,
         cogs=cogs, cost_lines=cost_lines, commission_official_tariff=False,
         returns=returns, include_ad_spend=policy.include_ad_spend,
         source_conflicts=conflicts, provider_capability_confirmed=False,

@@ -71,7 +71,7 @@ async def _session():
 
 async def _seed(s, *, store_status="active", placement_status="active", enabled=True,
                 consent=True, revoked=False, store_wide=False, with_cogs=True, with_price=True,
-                with_money=True, sold=1, extra_products=()):
+                with_money=True, sold=1, extra_products=(), fin_fetched=NOW):
     uid = str(uuid.uuid4())
     s.add(models.user.User(id=uid, email=f"{uid}@x.c", name="A", hashed_password="x"))
     from models.workspace import Workspace
@@ -101,7 +101,8 @@ async def _seed(s, *, store_status="active", placement_status="active", enabled=
             s.add(ImportedFinanceRow(id=f"fin-{pid}", import_id="imp", user_id=uid,
                                      marketplace="wildberries", date="2026-07-01", sku=sku,
                                      revenue=1000.0, commission=150.0, logistics=100.0, quantity=sold,
-                                     product_id=pid, marketplace_store_id="s1", source="csv"))
+                                     product_id=pid, marketplace_store_id="s1", source="csv",
+                                     fetched_at=fin_fetched))
 
     await _product("p1", "SKU1")
     for pid, sku in extra_products:
@@ -119,7 +120,7 @@ async def _seed(s, *, store_status="active", placement_status="active", enabled=
 
 async def _add_second_store(s, uid, *, account_id, store_id, marketplace="wildberries",
                             store_key="primary", commission=0.0, logistics=0.0, sold=0,
-                            returns_qty=0, product_id="p1", sku="SKU1"):
+                            returns_qty=0, product_id="p1", sku="SKU1", fin_fetched=None):
     """A DIFFERENT store (another account, or another keyless store) carrying rows for the SAME
     product_id. Correct isolation must NEVER count these when evaluating store s1."""
     s.add(MarketplaceAccount(id=account_id, workspace_id="ws", marketplace=marketplace,
@@ -132,7 +133,7 @@ async def _add_second_store(s, uid, *, account_id, store_id, marketplace="wildbe
                                  marketplace=marketplace, date="2026-07-02", sku=sku,
                                  revenue=1.0, commission=commission, logistics=logistics,
                                  quantity=sold, product_id=product_id,
-                                 marketplace_store_id=store_id, source="csv"))
+                                 marketplace_store_id=store_id, source="csv", fetched_at=fin_fetched))
     if returns_qty:
         s.add(ImportedReturnRow(id=f"retB-{store_id}", import_id="impB", user_id=uid,
                                 marketplace=marketplace, date="2026-07-02", sku=sku,
@@ -177,9 +178,10 @@ def test_product_policy_one_incomplete_evaluation():
         assert len(out) == 1
         ev = out[0]
         assert isinstance(ev, ProtectionEvaluation)
-        assert ev.verdict == "incomplete"
+        # a catalog price with an unprovable sale currency blocks the economic result → conflicting
+        assert ev.verdict == "conflicting"
         assert ev.actionability != "executable"
-        assert ev.economic_verdict is None
+        assert ev.economic_verdict is None and ev.projected_contribution is None
         assert ev.evaluation_run_id == R1 and ev.product_id == "p1"
         assert "storage_unconfirmed" in ev.missing_fields
         assert "acquiring_unconfirmed" in ev.missing_fields
@@ -191,7 +193,7 @@ def test_return_cost_unconfirmed_with_enough_sample():
     async def go():
         s = await _session(); await _seed(s, sold=30)
         ev = (await evaluate_policy(s, policy_id="pol1", evaluation_run_id=R1, now=NOW))[0]
-        assert ev.verdict == "incomplete"
+        assert ev.verdict == "conflicting"   # currency-unconfirmed conflict outranks; still no complete
         assert "return_cost_unconfirmed" in ev.missing_fields
         assert "returns_history_insufficient" not in ev.missing_fields
     _run(go())
@@ -376,12 +378,19 @@ def test_api_money_not_blended_with_csv_units():
                            covered_from="2026-01-01", covered_to="2026-12-31",
                            last_success_at=NOW))
         await s.commit()
+        # also seed API orders — to prove orders are NOT used as a sales denominator
+        s.add(MarketplaceOperation(id="ord1", marketplace_account_id="acc", marketplace_store_id="s1",
+                                   product_id="p1", marketplace="wildberries", source="api",
+                                   external_operation_id="srid1", operation_type="order",
+                                   provider_dataset="orders", quantity=40,
+                                   occurred_at=datetime(2026, 7, 1)))
+        await s.commit()
         ev = (await evaluate_policy(s, policy_id="pol1", evaluation_run_id=R1, now=NOW))[0]
         cl = _line(ev.inputs_snapshot, "commission")
-        assert cl["origin"] == "missing"                       # NOT a per-unit number
+        assert cl["origin"] == "missing"                       # NOT a per-unit number (orders ignored)
         assert "commission_unconfirmed" in ev.missing_fields
         fr = ev.inputs_snapshot["freshness_ages"]["marketplace_fees"]
-        assert fr["reason"] == "no_source_consistent_quantity"
+        assert fr["reason"] == "api_sale_quantity_unavailable"
     _run(go())
 
 
@@ -516,6 +525,153 @@ def test_freshness_gate_unconfigured_and_per_metric_ages():
     _run(go())
 
 
+# ── §1 CURRENCY BLOCK: unprovable sale currency blocks the economic result ───
+def test_currency_unconfirmed_blocks_economic():
+    async def go():
+        s = await _session(); await _seed(s, sold=30)   # priced; currency never provable on master
+        ev = (await evaluate_policy(s, policy_id="pol1", evaluation_run_id=R1, now=NOW))[0]
+        assert ev.verdict == "conflicting"
+        assert ev.economic_verdict is None
+        assert ev.projected_contribution is None
+        assert ev.actionability != "executable"
+        assert any("currency_unconfirmed" in r for r in ev.reasons)
+        # the catalog price survives ONLY as a warning candidate
+        assert ev.inputs_snapshot["promo_price_proven"] is False
+        assert ev.inputs_snapshot["currency"] is None
+    _run(go())
+
+
+# ── §2 REAL FRESHNESS PROVENANCE ─────────────────────────────────────────────
+def test_csv_metric_real_age_seconds():
+    async def go():
+        s = await _session(); await _seed(s, sold=30, fin_fetched=NOW - timedelta(seconds=3600))
+        fa = (await evaluate_policy(s, policy_id="pol1", evaluation_run_id=R1, now=NOW))[0] \
+            .inputs_snapshot["freshness_ages"]
+        assert fa["marketplace_fees"]["source"] == "csv"
+        assert fa["marketplace_fees"]["age_seconds"] == 3600     # real, from MAX(fetched_at)
+    _run(go())
+
+
+def test_api_metric_real_age_seconds():
+    async def go():
+        s = await _session(); await _seed(s, sold=30)
+        s.add(StoreDataSourcePolicy(marketplace_store_id="s1", metric_type="marketplace_fees",
+                                    preference="api"))
+        s.add(MarketplaceOperation(id="op1", marketplace_account_id="acc", marketplace_store_id="s1",
+                                   product_id="p1", marketplace="wildberries", source="api",
+                                   external_operation_id="rrd1", operation_type="commission",
+                                   provider_dataset="finance", amount=D("-500.00"),
+                                   occurred_at=datetime(2026, 7, 1), fetched_at=NOW - timedelta(seconds=7200)))
+        s.add(ApiSyncState(id="ss1", marketplace_connection_id="cx", marketplace_account_id="acc",
+                           marketplace_store_id="s1", data_type="finance", status="synced",
+                           coverage_complete=True, skipped_rows_count=0,
+                           covered_from="2026-01-01", covered_to="2026-12-31", last_success_at=NOW))
+        await s.commit()
+        fa = (await evaluate_policy(s, policy_id="pol1", evaluation_run_id=R1, now=NOW))[0] \
+            .inputs_snapshot["freshness_ages"]
+        assert fa["marketplace_fees"]["source"] == "api"
+        assert fa["marketplace_fees"]["age_seconds"] == 7200     # from API MAX(fetched_at)
+    _run(go())
+
+
+def test_other_store_not_in_fetched_at_max():
+    async def go():
+        s = await _session(); await _seed(s, sold=30, fin_fetched=NOW - timedelta(seconds=3600))
+        # store B has a NEWER fetched_at for the same product — must NOT lift store A's MAX
+        await _add_second_store(s, (await _uid(s)), account_id="accB", store_id="s2",
+                                commission=1.0, sold=1, fin_fetched=NOW)
+        fa = (await evaluate_policy(s, policy_id="pol1", evaluation_run_id=R1, now=NOW))[0] \
+            .inputs_snapshot["freshness_ages"]
+        assert fa["marketplace_fees"]["age_seconds"] == 3600     # store B's NOW excluded
+    _run(go())
+
+
+def test_missing_timestamp_is_freshness_unknown():
+    async def go():
+        s = await _session(); await _seed(s, sold=30, fin_fetched=None)   # CSV value, but no timestamp
+        fa = (await evaluate_policy(s, policy_id="pol1", evaluation_run_id=R1, now=NOW))[0] \
+            .inputs_snapshot["freshness_ages"]
+        assert fa["marketplace_fees"]["freshness"] == "freshness_unknown"
+        assert fa["marketplace_fees"]["age_seconds"] is None     # never a fabricated age
+    _run(go())
+
+
+# ── §4 RETURNS FOLLOW SOURCE POLICY ──────────────────────────────────────────
+def _api_returns(s, qty, *, fetched=NOW):
+    s.add(MarketplaceOperation(id=f"ret-op-{qty}", marketplace_account_id="acc",
+                               marketplace_store_id="s1", product_id="p1", marketplace="wildberries",
+                               source="api", external_operation_id=f"sale{qty}", operation_type="return",
+                               provider_dataset="sales", quantity=qty,
+                               occurred_at=datetime(2026, 7, 1), fetched_at=fetched))
+    s.add(ApiSyncState(id="ss-ret", marketplace_connection_id="cx", marketplace_account_id="acc",
+                       marketplace_store_id="s1", data_type="sales", status="synced",
+                       coverage_complete=True, skipped_rows_count=0,
+                       covered_from="2026-01-01", covered_to="2026-12-31", last_success_at=NOW))
+
+
+def test_returns_preference_csv_uses_csv_pair():
+    async def go():
+        s = await _session(); await _seed(s, sold=30)
+        s.add(ImportedReturnRow(id="retA", import_id="imp", user_id=(await _uid(s)),
+                                marketplace="wildberries", date="2026-07-03", sku="SKU1",
+                                returns_qty=4, product_id="p1", marketplace_store_id="s1", source="csv"))
+        s.add(StoreDataSourcePolicy(marketplace_store_id="s1", metric_type="returns", preference="csv"))
+        await s.commit()
+        rm = (await evaluate_policy(s, policy_id="pol1", evaluation_run_id=R1, now=NOW))[0] \
+            .inputs_snapshot["returns_model"]
+        assert rm["sold_units"] == 30 and rm["returned_units"] == 4
+    _run(go())
+
+
+def test_returns_preference_api_no_csv_fallback():
+    async def go():
+        s = await _session(); await _seed(s, sold=30)   # CSV sold=30 exists
+        # CSV returns exist too, but the seller chose API → NO CSV pair may be used
+        s.add(ImportedReturnRow(id="retA", import_id="imp", user_id=(await _uid(s)),
+                                marketplace="wildberries", date="2026-07-03", sku="SKU1",
+                                returns_qty=4, product_id="p1", marketplace_store_id="s1", source="csv"))
+        _api_returns(s, 5)
+        s.add(StoreDataSourcePolicy(marketplace_store_id="s1", metric_type="returns", preference="api"))
+        await s.commit()
+        snap = (await evaluate_policy(s, policy_id="pol1", evaluation_run_id=R1, now=NOW))[0].inputs_snapshot
+        assert snap["freshness_ages"]["returns"]["returns_source"] == "api"
+        assert snap["returns_model"]["sold_units"] == 0        # NO CSV sold fallback (not 30)
+        assert snap["returns_model"]["returned_units"] == 5
+    _run(go())
+
+
+def test_returns_auto_conflict_preserved():
+    async def go():
+        s = await _session(); await _seed(s, sold=30)
+        s.add(ImportedReturnRow(id="retA", import_id="imp", user_id=(await _uid(s)),
+                                marketplace="wildberries", date="2026-07-03", sku="SKU1",
+                                returns_qty=2, product_id="p1", marketplace_store_id="s1", source="csv"))
+        _api_returns(s, 9)   # API says 9, CSV says 2 → disagreement under auto
+        s.add(StoreDataSourcePolicy(marketplace_store_id="s1", metric_type="returns", preference="auto"))
+        await s.commit()
+        ev = (await evaluate_policy(s, policy_id="pol1", evaluation_run_id=R1, now=NOW))[0]
+        assert any("returns" in r for r in ev.reasons)          # returns conflict surfaced
+    _run(go())
+
+
+def test_api_returns_and_orders_not_a_compatible_pair():
+    async def go():
+        s = await _session(); await _seed(s, sold=30)
+        _api_returns(s, 6)
+        s.add(MarketplaceOperation(id="ord9", marketplace_account_id="acc", marketplace_store_id="s1",
+                                   product_id="p1", marketplace="wildberries", source="api",
+                                   external_operation_id="srid9", operation_type="order",
+                                   provider_dataset="orders", quantity=50,
+                                   occurred_at=datetime(2026, 7, 1)))
+        s.add(StoreDataSourcePolicy(marketplace_store_id="s1", metric_type="returns", preference="api"))
+        await s.commit()
+        rm = (await evaluate_policy(s, policy_id="pol1", evaluation_run_id=R1, now=NOW))[0] \
+            .inputs_snapshot["returns_model"]
+        assert rm["sold_units"] == 0        # API orders are NOT a sold denominator for a return rate
+        assert rm["returned_units"] == 6
+    _run(go())
+
+
 # ── evidence + honesty ───────────────────────────────────────────────────────
 def test_evidence_shape_and_no_secrets():
     async def go():
@@ -537,7 +693,7 @@ def test_missing_cogs_incomplete():
     async def go():
         s = await _session(); await _seed(s, with_cogs=False)
         ev = (await evaluate_policy(s, policy_id="pol1", evaluation_run_id=R1, now=NOW))[0]
-        assert ev.verdict == "incomplete" and "no_cogs" in ev.missing_fields
+        assert ev.verdict == "conflicting" and "no_cogs" in ev.missing_fields   # priced → currency block
     _run(go())
 
 
