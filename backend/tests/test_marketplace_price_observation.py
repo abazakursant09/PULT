@@ -434,7 +434,8 @@ def test_observation_writer_is_flag_gated_and_unscheduled():
             refs.append(rel)
     # The ONLY production references are the per-marketplace ingest writers.
     assert sorted(refs) == ["services/marketplace/ingest/ozon.py",
-                            "services/marketplace/ingest/wb.py"], refs
+                            "services/marketplace/ingest/wb.py",
+                            "services/marketplace/ingest/yandex.py"], refs
 
     from config import settings
     assert settings.api_data_sync_enabled is False        # master switch OFF by default

@@ -466,15 +466,18 @@ def test_auth_pauses_and_isolation(monkeypatch):
             return {"orders": [], "paging": {}}
         async def campaign_returns(self, *, token, campaign_id, page_token=None, limit=50):
             return {"result": {"returns": [], "paging": {}}}
+    # Capture the campaignId→store.id mapping while the ORM rows are LIVE: run_api_sync_once rolls
+    # back on the AUTH-paused campaign, which expires the seeded `stores`, so reading their attributes
+    # afterwards would trigger an async lazy-load (MissingGreenlet). Ids captured here are plain str.
+    store_id_by_cid = {s.external_store_id: s.id for s in stores}
     _sched_stub(monkeypatch, _Split())
     _run(api_sync.run_api_sync_once(db))
     # campaign 222 prices synced despite 111 prices AUTH-paused
-    store_by_cid = {s.external_store_id: s for s in stores}
     paused = _run(db.execute(select(ApiSyncState).where(
-        ApiSyncState.marketplace_store_id == store_by_cid["111"].id,
+        ApiSyncState.marketplace_store_id == store_id_by_cid["111"],
         ApiSyncState.data_type == "prices"))).scalars().first()
     ok = _run(db.execute(select(ApiSyncState).where(
-        ApiSyncState.marketplace_store_id == store_by_cid["222"].id,
+        ApiSyncState.marketplace_store_id == store_id_by_cid["222"],
         ApiSyncState.data_type == "prices"))).scalars().first()
     assert paused.status == "paused" and paused.last_safe_error_code == "AUTH"
     assert ok.status == "synced"
