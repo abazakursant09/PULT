@@ -48,7 +48,7 @@ from services.marketplace.ingest import wb as wb_ingest
 from services.marketplace.wb_client import wb_client
 import tasks.api_sync as api_sync
 
-REV = "wcb1a2b3c4d01"
+REV = "ypo1a2b3c4d01"
 PRIOR = "ozp1a2b3c4d01"
 
 _LOOP = asyncio.new_event_loop()
@@ -529,7 +529,7 @@ def test_client_details_path(monkeypatch):
     assert calls[0]["method"] == "GET" and calls[0]["path"] == "/api/v1/calendar/promotions/details"
 
 
-# ══ MIGRATION wcb1a2b3c4d01 ══════════════════════════════════════════════════════
+# ══ MIGRATION ypo1a2b3c4d01 ══════════════════════════════════════════════════════
 
 def _cfg(monkeypatch):
     tmp = os.path.join(tempfile.mkdtemp(), "wcb_test.db")

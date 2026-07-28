@@ -113,6 +113,13 @@ class _StubYx:
     async def list_campaigns(self, *, token):
         return []
 
+    # PULT-LAUNCH-2.5D-Yandex-B3 — promo reads default to empty so existing full-run tests stay neutral.
+    async def list_promos(self, *, token, business_id):
+        return []
+
+    async def list_promo_offers(self, *, token, business_id, promo_id, page_token=None, limit=500):
+        return {"result": {"offers": [], "paging": {}}}
+
 
 def _use(monkeypatch, stub):
     monkeypatch.setattr(yx, "yandex_client", stub)
@@ -507,4 +514,4 @@ def test_wb_ozon_regression_registry():
 def test_alembic_single_head():
     from alembic.config import Config
     from alembic.script import ScriptDirectory
-    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["wcb1a2b3c4d01"]
+    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["ypo1a2b3c4d01"]

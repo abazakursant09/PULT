@@ -204,6 +204,30 @@ class YandexClient:
         return await self._get(f"/v2/campaigns/{campaign_id}/returns",
                                token=token, params=params)
 
+    # ── Promotions READ (PULT-LAUNCH-2.5D-Yandex-B3) ──────────────────────────
+    # BUSINESS-level, read-only, evidence-only. These NEVER change a product's promotion state —
+    # adding/removing a product from a promo is the separate updatePromoOffers/deletePromoOffers write
+    # path, which is out of scope and never called here.
+    async def list_promos(self, *, token: str, business_id: str) -> list[dict]:
+        """POST /v2/businesses/{businessId}/promos → data.promotions[] ({id, name, mechanicsInfo.type,
+        participating, period{dateTimeFrom,dateTimeTo}, ...}). Market promos only (not seller-created)."""
+        data = await self._post(f"/v2/businesses/{business_id}/promos", token=token, json={})
+        proms = ((data or {}).get("data") or {}).get("promotions")
+        return proms if isinstance(proms, list) else []
+
+    async def list_promo_offers(self, *, token: str, business_id: str, promo_id: str,
+                                page_token: str | None = None, limit: int = 500) -> dict:
+        """POST /v2/businesses/{businessId}/promos/offers → {result? / data:{offers[] {offerId, status,
+        params.discountParams.{price,promoPrice,maxPromoPrice}, autoParticipatingDetails.campaignIds}},
+        paging.nextPageToken}. status ∈ AUTO|PARTIALLY_AUTO|MANUAL|NOT_PARTICIPATING|… ; only
+        PARTIALLY_AUTO carries campaignIds. limit≤500 + pageToken. Returns the raw dict (the ingest
+        layer validates the shape and fails closed on a broken page)."""
+        params: dict = {"limit": int(limit)}
+        if page_token:
+            params["pageToken"] = page_token
+        return await self._post(f"/v2/businesses/{business_id}/promos/offers",
+                                token=token, json={"promoId": str(promo_id)}, params=params)
+
 
 def _s(value) -> str | None:
     if value is None:
