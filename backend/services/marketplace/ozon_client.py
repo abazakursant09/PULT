@@ -180,6 +180,35 @@ class OzonClient:
             "/v1/returns/list", token=token, client_id=client_id,
             body={"filter": {}, "limit": int(limit), "last_id": int(last_id)})
 
+    # ── Promotions READ (PULT-LAUNCH-2.5D-B) ──────────────────────────────────
+    # Read-only, evidence-only. These NEVER change a product's promotion state — entering/leaving an
+    # action is the separate set_auto_promotion write path (A3, contained). Parsing is defensive: a
+    # missing/renamed field surfaces as None (never a guess), the same honesty as the ingest layer.
+    async def list_actions(self, *, token: str, client_id: str | None) -> list[dict]:
+        """GET /v1/actions → the seller's available Ozon actions. Returns the raw action dicts
+        (id is the ONLY promotion identity; the title is never identity)."""
+        data = await self._seller.request(
+            "GET", "/v1/actions", token=token, auth_header="Api-Key",
+            extra_headers=self._headers(client_id))
+        rows = data.get("result") if isinstance(data, dict) else data
+        return rows if isinstance(rows, list) else []
+
+    async def action_products(self, *, token: str, client_id: str | None,
+                              action_id, last_id=0, limit: int = 1000) -> dict:
+        """POST /v1/actions/products → {result:{products:[{id, action_price, ...}], total}}. This is the
+        ONLY method that proves a product is ACTIVELY participating in `action_id`. last_id paginates."""
+        return await self._seller_get(
+            "/v1/actions/products", token=token, client_id=client_id,
+            body={"action_id": action_id, "limit": int(limit), "last_id": last_id})
+
+    async def action_candidates(self, *, token: str, client_id: str | None,
+                                action_id, last_id=0, limit: int = 1000) -> dict:
+        """POST /v1/actions/candidates → products ELIGIBLE to be added to `action_id`. A candidate is
+        NOT a participant; the ingest layer never turns this into a participation observation."""
+        return await self._seller_get(
+            "/v1/actions/candidates", token=token, client_id=client_id,
+            body={"action_id": action_id, "limit": int(limit), "last_id": last_id})
+
     def _performance(self) -> "BaseMarketplaceClient":
         # lazy: Performance API base (separate from Seller API)
         if not hasattr(self, "_performance_client"):

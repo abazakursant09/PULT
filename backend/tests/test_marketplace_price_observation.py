@@ -398,7 +398,7 @@ def test_active_and_ended_are_separate_immutable_rows(conn):
 # ── MIGRATION / SCHEMA ──────────────────────────────────────────────────────────
 def test_single_alembic_head():
     heads = ScriptDirectory.from_config(Config("alembic.ini")).get_heads()
-    assert heads == ["mpo1a2b3c4d01"], heads
+    assert heads == ["ozp1a2b3c4d01"], heads
 
 
 def test_old_tables_preserved(conn):
@@ -414,17 +414,29 @@ def test_model_has_no_raw_payload_or_secret_columns():
         assert not any(bad in c for c in cols), bad
 
 
-def test_no_ingest_runtime_or_scheduler_writer_exists():
-    """Retention pre-enable gate: NO writer of the observation exists in this slice — no ingest, no
-    runtime, no scheduler references the model or its table outside models/ + migration + tests."""
+def test_observation_writer_is_flag_gated_and_unscheduled():
+    """Retention pre-enable gate (post PULT-LAUNCH-2.5D). A writer now EXISTS — the Ozon price/promotion
+    observation ingest — but the gate is preserved another way: the writer lives in exactly ONE ingest
+    module, is reached only through run_api_sync_once (which makes ZERO calls while
+    api_data_sync_enabled is False, the default), and NO scheduler tick invokes it. A periodic 15-min
+    collector must not appear until retention/compaction ships."""
+    import inspect
+
     here = os.path.dirname(__file__)
     backend = os.path.dirname(here)
-    hits = []
+    refs = []
     for path in glob.glob(os.path.join(backend, "**", "*.py"), recursive=True):
         rel = os.path.relpath(path, backend).replace("\\", "/")
         if rel.startswith(("models/", "tests/")) or "alembic/versions/" in rel:
             continue
         src = open(path, encoding="utf-8").read()
         if "MarketplacePriceObservation" in src or "marketplace_price_observations" in src:
-            hits.append(rel)
-    assert hits == [], f"unexpected writer/reference outside schema slice: {hits}"
+            refs.append(rel)
+    # The ONLY production reference is the single ingest writer.
+    assert refs == ["services/marketplace/ingest/ozon.py"], refs
+
+    from config import settings
+    assert settings.api_data_sync_enabled is False        # master switch OFF by default
+
+    import tasks.scheduler as scheduler
+    assert "run_api_sync_once" not in inspect.getsource(scheduler)   # nothing schedules the ingest
