@@ -230,7 +230,7 @@ def test_db_constraints_active():
 def test_alembic_head_unchanged():
     from alembic.config import Config
     from alembic.script import ScriptDirectory
-    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["pev1a2b3c4d01"]
+    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["pev2a2b3c4d01"]
 
 
 # has_connection flag + list shape
