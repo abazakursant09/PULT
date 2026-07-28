@@ -43,6 +43,8 @@ from models.imported_product import ImportedProductRow
 from models.marketplace_account import MarketplaceAccount
 from models.marketplace_operation import MarketplaceOperation
 from models.marketplace_price_observation import MarketplacePriceObservation, PROMO_KEY_SENTINEL
+from models.marketplace_promotion_observation import (
+    MarketplacePromotionObservation, MarketplacePromotionStoreEvidence)
 from models.marketplace_store import MarketplaceStore
 from models.product import Product
 from models.product_placement import ProductPlacement
@@ -52,11 +54,40 @@ from services.marketplace.yandex_client import yandex_client
 
 MARKETPLACE = "yandex"
 # 'finance' is listed so it gets a visible, honest ApiSyncState, but it is UNSUPPORTED (below).
-# PULT-LAUNCH-2.5D-Yandex-A adds 'price_observations' — proven campaign price EVIDENCE into
-# MarketplacePriceObservation. Read-only; reached only through run_api_sync_once (0 calls while OFF).
+# PULT-LAUNCH-2.5D-Yandex-A adds 'price_observations'; -B3 adds 'promotions' — account-level promo
+# participation EVIDENCE. Read-only; reached only through run_api_sync_once (0 calls while OFF).
 DATA_TYPES = ("products", "cards", "prices", "stocks", "orders", "returns", "finance",
-              "price_observations")
+              "price_observations", "promotions")
 UNSUPPORTED = frozenset({"finance"})
+
+_PROMO_OFFERS_PAGE = 500
+_MAX_PROMO_PAGES = 10000
+
+# Explicit status normalization (no guessing): provider_status → (participation, auto, attribution).
+# A status NOT in this table is unknown — kept verbatim, normalized to 'unknown', coverage_complete=false.
+_PROMO_STATUS_NORM = {
+    "AUTO":               ("active", True, "account_wide"),
+    "PARTIALLY_AUTO":     ("active", True, "exact_stores"),
+    "MANUAL":             ("active", False, "unresolved"),
+    "NOT_PARTICIPATING":  ("not_participating", None, "unresolved"),
+    "RENEWED":            ("active", True, "unresolved"),
+    "RENEW_FAILED":       ("unknown", None, "unresolved"),
+    "MINIMUM_FOR_PROMOS": ("active", False, "unresolved"),
+}
+
+
+def _promo_schema_error(reason: str) -> ExecutionError:
+    """A structural provider-response error (safe reason only — no payload / offerId / campaignId /
+    businessId), so a broken page is never mistaken for an empty one."""
+    return ExecutionError(ExecutionError.MARKETPLACE_5XX, f"yandex promos schema invalid: {reason}")
+
+
+def _normalize_promo_status(provider_status: str) -> tuple[str, Optional[bool], str, bool]:
+    """(participation_status, auto_participation, attribution_status, known). Unknown/future → unknown."""
+    norm = _PROMO_STATUS_NORM.get(provider_status)
+    if norm is None:
+        return "unknown", None, "unresolved", False
+    return norm[0], norm[1], norm[2], True
 UNSUPPORTED_REASON = "yandex_finance_async_report_schema_unconfirmed"
 
 # Sellable stock buckets. FBS/Express warehouses report AVAILABLE; FBY warehouses report FIT. The
@@ -238,6 +269,8 @@ async def fetch_and_persist_page(db, state, token: str, client_id: Optional[str]
         return await _page_prices(db, state, token)
     if state.data_type == "price_observations":
         return await _page_price_observations(db, state, token)
+    if state.data_type == "promotions":
+        return await _page_promotions(db, state, token)
     if state.data_type == "stocks":
         return await _page_stocks(db, state, token)
     if state.data_type == "orders":
@@ -610,3 +643,235 @@ async def _page_price_observations(db, state, token) -> dict:
     else:
         state.cursor = json.dumps({"run_id": run_id, "page_token": next_token, "seen": seen})
     return {"done": done, "count": len(offers), "defer": False}
+
+
+# ── Account-level promotion EVIDENCE (PULT-LAUNCH-2.5D-Yandex-B3) ─────────────────
+# Business-level: a promo participation status belongs to the cabinet (businessId), not one campaign
+# store. The parent (MarketplacePromotionObservation) carries the verbatim provider_status + a
+# normalized triple; the child (MarketplacePromotionStoreEvidence) carries the PROVEN campaignIds of a
+# PARTIALLY_AUTO row (mapped to a store of this cabinet or kept unmapped). AUTO/MANUAL are account_wide/
+# unresolved — never fanned out to a store. The "PARTIALLY_AUTO ⇒ ≥1 child" rule is a TRANSACTIONAL
+# WRITER invariant (parent + all children written in one page transaction, or none). Money is Decimal.
+#
+# NOTE: promotions is business-level but the scheduler serves it per campaign store; each store's pass
+# is an independent account-level observation (own run_id/fetched_at). Redundant across stores of one
+# cabinet (an account-level schedule would remove that) but always correct: idempotent within a run
+# (run-uniqueness key), append-only across runs, children resolved against ALL of the cabinet's stores.
+
+
+async def _account_stores(db, account_id: str) -> dict:
+    """{external_store_id: MarketplaceStore} for ACTIVE, mapped stores of this cabinet. An archived
+    store (or an unmapped campaign) is never a mapped target — its campaignId is kept as unmapped
+    evidence instead."""
+    rows = (await db.execute(select(MarketplaceStore).where(
+        MarketplaceStore.marketplace_account_id == account_id,
+        MarketplaceStore.status == "active"))).scalars().all()
+    out: dict = {}
+    for st in rows:
+        ext = _s(st.external_store_id)
+        if ext is not None:
+            out.setdefault(ext, st)
+    return out
+
+
+async def _upsert_promo_parent(db, state, *, run_id, offer_id, promo_id, product_id, now,
+                               **fields) -> MarketplacePromotionObservation:
+    row = (await db.execute(select(MarketplacePromotionObservation).where(
+        MarketplacePromotionObservation.marketplace_account_id == state.marketplace_account_id,
+        MarketplacePromotionObservation.external_product_id == offer_id,
+        MarketplacePromotionObservation.promotion_id == promo_id,
+        MarketplacePromotionObservation.source == "api",
+        MarketplacePromotionObservation.ingest_run_id == run_id))).scalars().first()
+    if row is None:
+        row = MarketplacePromotionObservation(
+            id=str(uuid.uuid4()), ingest_run_id=run_id,
+            marketplace_account_id=state.marketplace_account_id, marketplace=MARKETPLACE,
+            external_product_id=offer_id, promotion_id=promo_id,
+            promotion_type="yandex_promo", source="api", provider_dataset="promos")
+        db.add(row)
+    row.product_id = product_id
+    row.resolution_status = "resolved" if product_id else "unassigned"
+    row.fetched_at = now
+    for key, value in fields.items():
+        setattr(row, key, value)
+    await db.flush()   # materialize row.id for children
+    return row
+
+
+async def _upsert_promo_child(db, *, parent_id, account_id, external_store_id, store_id, now) -> None:
+    existing = (await db.execute(select(MarketplacePromotionStoreEvidence).where(
+        MarketplacePromotionStoreEvidence.promotion_observation_id == parent_id,
+        MarketplacePromotionStoreEvidence.external_store_id == external_store_id))).scalars().first()
+    if existing is not None:
+        existing.marketplace_store_id = store_id
+        existing.mapping_status = "mapped" if store_id else "unmapped"
+        return
+    db.add(MarketplacePromotionStoreEvidence(
+        id=str(uuid.uuid4()), promotion_observation_id=parent_id, marketplace_account_id=account_id,
+        external_store_id=external_store_id, marketplace_store_id=store_id,
+        mapping_status="mapped" if store_id else "unmapped", created_at=now))
+
+
+async def _page_promotions(db, state, token) -> dict:
+    """Yandex-B3 account-level promotion evidence from POST /v2/businesses/{businessId}/promos +
+    /promos/offers. Parent per (offer, promo); child per campaignId ONLY for PARTIALLY_AUTO. A broken
+    page fails closed; a real empty end is a clean pass; a row-level contract violation (unknown status,
+    empty/too-long status, PARTIALLY_AUTO without campaignIds, no identity) is skipped
+    (skipped_rows_count++) and marks the pass not-complete; positive parents from clean rows are kept."""
+    now = datetime.utcnow()
+    business_id = await _business_id(db, state)
+    if not business_id:
+        state.cursor = None
+        return {"done": True, "count": 0, "defer": False}
+    cur = json.loads(state.cursor) if state.cursor else {}
+    fresh = "run_id" not in cur
+    run_id = cur.get("run_id") or str(uuid.uuid4())
+    if fresh:
+        state.coverage_complete = False
+        state.skipped_rows_count = 0
+
+    if "pids" not in cur:
+        proms = await yandex_client.list_promos(token=token, business_id=business_id)
+        if not isinstance(proms, list):
+            raise _promo_schema_error("promotions is not an array")
+        pids: list[str] = []
+        for p in proms:
+            if isinstance(p, dict):
+                pid = _s(p.get("id"))
+                if pid and pid not in pids:
+                    pids.append(pid)
+        state.coverage_complete = False
+        if not pids:
+            state.coverage_complete = True     # no promos = clean, complete coverage
+            state.cursor = None
+            return {"done": True, "count": 0, "defer": False}
+        state.cursor = json.dumps({"run_id": run_id, "pids": pids, "pidx": 0, "ptok": None,
+                                   "seen": [], "wpx": -1, "cov": True})
+        return {"done": False, "count": 0, "defer": False}
+
+    pids = cur.get("pids") or []
+    pidx = cur.get("pidx", 0)
+    ptok = cur.get("ptok")
+    seen = list(cur.get("seen") or [])
+    wpx = cur.get("wpx", -1)
+    vf, vt = cur.get("vf"), cur.get("vt")
+    cov = cur.get("cov", True)
+    if pidx >= len(pids):
+        state.coverage_complete = bool(cov) and (state.skipped_rows_count or 0) == 0
+        state.cursor = None
+        return {"done": True, "count": 0, "defer": False}
+
+    promo_id = pids[pidx]
+    if wpx != pidx:      # the promo window (id is identity; a title is never used)
+        proms = await yandex_client.list_promos(token=token, business_id=business_id)
+        meta = next((p for p in proms if isinstance(p, dict) and _s(p.get("id")) == promo_id), {})
+        period = meta.get("period") if isinstance(meta.get("period"), dict) else {}
+        vf, vt = _s(period.get("dateTimeFrom")), _s(period.get("dateTimeTo"))
+        wpx = pidx
+
+    data = await yandex_client.list_promo_offers(
+        token=token, business_id=business_id, promo_id=promo_id, page_token=ptok, limit=_PROMO_OFFERS_PAGE)
+    # ── VALID empty page vs BROKEN page (schema error → fail closed) ──
+    if not isinstance(data, dict):
+        raise _promo_schema_error("response is not an object")
+    container = data.get("result") if isinstance(data.get("result"), dict) else data.get("data")
+    if not isinstance(container, dict):
+        raise _promo_schema_error("missing or non-object result/data container")
+    offers = container.get("offers")
+    if not isinstance(offers, list):
+        raise _promo_schema_error("offers missing or not an array")
+    paging = data.get("paging") if data.get("paging") is not None else container.get("paging")
+    if paging is None:
+        paging = {}
+    if not isinstance(paging, dict):
+        raise _promo_schema_error("paging is not an object")
+    next_token = paging.get("nextPageToken")
+    if next_token is not None and (not isinstance(next_token, str) or not next_token.strip()):
+        raise _promo_schema_error("nextPageToken is not a non-empty string")
+
+    index = await _index(db, state.marketplace_account_id)
+    stores = await _account_stores(db, state.marketplace_account_id)
+    count = 0
+    for o in offers:
+        if not isinstance(o, dict):
+            state.skipped_rows_count = (state.skipped_rows_count or 0) + 1
+            cov = False
+            continue
+        offer_id = _s(o.get("offerId"))
+        provider_status = _s(o.get("status"))
+        # identity + portable status guard (empty / whitespace-padded stripped by _s / too long)
+        if offer_id is None or provider_status is None or len(provider_status) > 64:
+            state.skipped_rows_count = (state.skipped_rows_count or 0) + 1
+            cov = False
+            continue
+        participation, auto, attribution, known = _normalize_promo_status(provider_status)
+        if participation == "unknown":
+            # unknown/future status AND documented-but-non-actionable RENEW_FAILED both normalize to
+            # 'unknown' → the pass is not a complete, trustworthy coverage of participation.
+            cov = False
+
+        disc = o.get("params") if isinstance(o.get("params"), dict) else {}
+        disc = disc.get("discountParams") if isinstance(disc.get("discountParams"), dict) else {}
+        campaign_ids: list[str] = []
+        if attribution == "exact_stores":                 # PARTIALLY_AUTO
+            apd = o.get("autoParticipatingDetails") if isinstance(o.get("autoParticipatingDetails"), dict) else {}
+            raw = apd.get("campaignIds") if isinstance(apd.get("campaignIds"), list) else []
+            for c in raw:
+                cs = _s(c)
+                if cs and cs not in campaign_ids:
+                    campaign_ids.append(cs)               # dedupe
+            if not campaign_ids:
+                # PARTIALLY_AUTO MUST carry campaignIds — provider-contract violation for THIS offer:
+                # no parent, no child; the pass is not complete.
+                state.skipped_rows_count = (state.skipped_rows_count or 0) + 1
+                cov = False
+                continue
+
+        pre = promo = mx = None
+        currency, currency_status = None, "unknown"
+        missing: list[str] = []
+        if participation == "active":
+            pre = _dec(disc.get("price"))          # price → pre_promo_price
+            promo = _dec(disc.get("promoPrice"))   # promoPrice → promo_buyer_price
+            mx = _dec(disc.get("maxPromoPrice"))   # maxPromoPrice → promo_max_price (порог, NOT a min)
+            if pre is None:
+                missing.append("price")
+            if promo is None:
+                missing.append("promoPrice")
+            if mx is None:
+                missing.append("maxPromoPrice")
+            if pre is not None or promo is not None or mx is not None:
+                # Official contract for promo offers: prices are "указываются в рублях" → RUB is proven
+                # by documentation for THIS dataset only (never a silent default elsewhere).
+                currency, currency_status = "RUB", "proven"
+
+        product_id = await _resolve(db, index, None, offer_id)   # offerId is the seller SKU
+        parent = await _upsert_promo_parent(
+            db, state, run_id=run_id, offer_id=offer_id, promo_id=promo_id, product_id=product_id, now=now,
+            provider_status=provider_status, participation_status=participation,
+            auto_participation=auto, attribution_status=attribution,
+            pre_promo_price=pre, promo_buyer_price=promo, promo_max_price=mx,
+            currency=currency, currency_status=currency_status,
+            promotion_start_at=_dt(vf), promotion_end_at=_dt(vt), missing_fields=missing)
+        for cid in campaign_ids:
+            store = stores.get(cid)
+            await _upsert_promo_child(db, parent_id=parent.id, account_id=state.marketplace_account_id,
+                                      external_store_id=cid, store_id=(store.id if store else None), now=now)
+        count += 1
+
+    # ── token cycle + page ceiling ──
+    if next_token is not None and (next_token == ptok or next_token in seen):
+        raise _promo_schema_error("pageToken cycle detected")
+    if ptok is not None:
+        seen.append(ptok)
+    if len(seen) >= _MAX_PROMO_PAGES:
+        raise _promo_schema_error("page limit exceeded")
+
+    if next_token is not None:                             # more pages for THIS promo
+        state.cursor = json.dumps({"run_id": run_id, "pids": pids, "pidx": pidx, "ptok": next_token,
+                                   "seen": seen, "wpx": wpx, "vf": vf, "vt": vt, "cov": cov})
+        return {"done": False, "count": count, "defer": False}
+    # this promo exhausted → next promo, reset intra-promo cursor
+    state.cursor = json.dumps({"run_id": run_id, "pids": pids, "pidx": pidx + 1, "ptok": None,
+                               "seen": seen, "wpx": wpx, "vf": vf, "vt": vt, "cov": cov})
+    return {"done": False, "count": count, "defer": False}
