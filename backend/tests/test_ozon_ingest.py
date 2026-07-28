@@ -470,4 +470,4 @@ def test_ozon_failure_does_not_stop_other_connection(monkeypatch):
 def test_alembic_single_head():
     from alembic.config import Config
     from alembic.script import ScriptDirectory
-    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["ozp1a2b3c4d01"]
+    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["wcb1a2b3c4d01"]

@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Optional
 
@@ -33,9 +33,11 @@ from sqlalchemy import select
 from models.imported_card_content import ImportedCardContentRow
 from models.imported_product import ImportedProductRow
 from models.marketplace_operation import MarketplaceOperation
+from models.marketplace_price_observation import MarketplacePriceObservation, PROMO_KEY_SENTINEL
 from models.product import Product
 from models.product_placement import ProductPlacement
 from services.account_product_resolver import FOUND, AccountProductIndex
+from services.marketplace.errors import ExecutionError
 from services.marketplace.wb_client import wb_client
 from services.source_policy.parent_link import (
     backfill_children_product as _backfill_children_product,
@@ -43,10 +45,17 @@ from services.source_policy.parent_link import (
 )
 
 MARKETPLACE = "wildberries"
-DATA_TYPES = ("card_content", "prices", "orders", "sales", "stocks", "finance")
+DATA_TYPES = ("card_content", "prices", "orders", "sales", "stocks", "finance",
+              # PULT-LAUNCH-2.5D-WB — proven price/promotion EVIDENCE into MarketplacePriceObservation.
+              # Read-only; reached only through run_api_sync_once (ZERO calls while the flag is OFF).
+              "price_observations", "promotions")
 
 _CARD_PAGE = 100
 _PRICE_PAGE = 1000
+_OBS_PAGE = 1000
+_PROMO_LIST_PAGE = 1000
+_MAX_PROMO_LIST_PAGES = 50       # defensive cap on the promotions-list scan (one run)
+_PROMO_WINDOW_DAYS = 120         # forward window for "available for participation" promotions
 
 # WB financial operation name → normalized operation_type. Anything not here is kept as 'other'
 # with the official name in provider_operation_code, so a new WB operation is never lost.
@@ -94,6 +103,15 @@ def _s(value) -> Optional[str]:
         return None
     s = str(value).strip()
     return s or None
+
+
+def _cur(value) -> tuple[Optional[str], str]:
+    """Currency is PROVEN only when the provider gives a well-formed 3-letter code — else
+    (None, 'unknown'). We never substitute RUB or any default."""
+    s = _s(value)
+    if s and len(s) == 3 and s.isalpha():
+        return s.upper(), "proven"
+    return None, "unknown"
 
 
 async def _load_index(db, account_id: str) -> AccountProductIndex:
@@ -305,6 +323,10 @@ async def fetch_and_persist_page(db, state, token: str, client_id=None) -> dict:
         return await _page_stocks(db, state, token)
     if state.data_type == "finance":
         return await _page_finance(db, state, token)
+    if state.data_type == "price_observations":
+        return await _page_price_observations(db, state, token)
+    if state.data_type == "promotions":
+        return await _page_promotions(db, state, token)
     raise ValueError(f"unsupported WB data_type: {state.data_type}")
 
 
@@ -516,3 +538,222 @@ async def _page_prices(db, state, token: str) -> dict:
     done = len(goods) < _PRICE_PAGE
     state.cursor = None if done else json.dumps({"offset": offset + len(goods)})
     return {"done": done, "count": len(goods)}
+
+
+# ── Price / promotion OBSERVATIONS (PULT-LAUNCH-2.5D-WB) ─────────────────────────
+# Append-only, immutable evidence into MarketplacePriceObservation. Idempotency is the table's
+# run-uniqueness key (store, external product, KIND, promotion, source, ingest_run_id): the
+# ingest_run_id is minted once per full sync pass (kept in the cursor) so re-processing a page UPSERTs
+# the same row, while the next pass writes fresh rows. A value is stored ONLY when WB proves it; else
+# it stays NULL and its name is recorded in missing_fields (unknown is never 0). Revenue, subsidy and
+# commission-base are NEVER inferred. Money is Decimal, never float.
+
+
+def _obs_prices(good: dict) -> tuple[Optional[Decimal], Optional[Decimal], Optional[Decimal]]:
+    """The three WB prices for ONE product, read coherently from the first size (top-level fallback):
+    price→catalog, discountedPrice→buyer, clubDiscountedPrice→club. Decimal or None; never 0."""
+    sizes = [s for s in (good.get("sizes") or []) if isinstance(s, dict)]
+    first = sizes[0] if sizes else {}
+    catalog = _dec(first.get("price"))
+    if catalog is None:
+        catalog = _dec(good.get("price"))
+    buyer = _dec(first.get("discountedPrice"))
+    if buyer is None:
+        buyer = _dec(good.get("discountedPrice"))
+    club = _dec(first.get("clubDiscountedPrice"))
+    if club is None:
+        club = _dec(good.get("clubDiscountedPrice"))
+    return catalog, buyer, club
+
+
+async def _upsert_observation(db, state, *, run_id: str, ext: str, observation_kind: str,
+                              promotion_key: str, product_id: Optional[str], now: datetime,
+                              **fields) -> None:
+    row = (await db.execute(select(MarketplacePriceObservation).where(
+        MarketplacePriceObservation.marketplace_store_id == state.marketplace_store_id,
+        MarketplacePriceObservation.external_product_id == ext,
+        MarketplacePriceObservation.observation_kind == observation_kind,
+        MarketplacePriceObservation.promotion_key == promotion_key,
+        MarketplacePriceObservation.source == "api",
+        MarketplacePriceObservation.ingest_run_id == run_id))).scalars().first()
+    if row is None:
+        row = MarketplacePriceObservation(
+            id=str(uuid.uuid4()), ingest_run_id=run_id,
+            marketplace_account_id=state.marketplace_account_id,
+            marketplace_store_id=state.marketplace_store_id,
+            external_product_id=ext, observation_kind=observation_kind,
+            promotion_key=promotion_key, source="api")
+        db.add(row)
+    # A resolved row MUST carry a product_id (placement FK + resolution CHECK); an unassigned row never
+    # borrows another product — product_id stays NULL (never the first fuzzy match, never by title).
+    row.product_id = product_id
+    row.resolution_status = "resolved" if product_id else "unassigned"
+    row.fetched_at = now
+    for key, value in fields.items():
+        setattr(row, key, value)
+
+
+async def _page_price_observations(db, state, token: str) -> dict:
+    """WB-A catalog price EVIDENCE from GET /api/v2/list/goods/filter → observation_kind='catalog'.
+
+    Proven mapping: price→catalog_price, discountedPrice→buyer_price,
+    clubDiscountedPrice→club_buyer_price, currencyIsoCode4217→currency (proven only, never RUB
+    default). seller_promo_price / subsidy / expected_seller_revenue / commission_base /
+    provider_min_price / auto_action_enabled stay NULL/unknown. Absent values → NULL + missing_fields."""
+    now = datetime.utcnow()
+    cur = json.loads(state.cursor) if state.cursor else {}
+    run_id = cur.get("run_id") or str(uuid.uuid4())
+    offset = int(cur.get("offset") or 0)
+    prev_first = cur.get("pfirst")
+    goods = await wb_client.list_prices(token=token, offset=offset, limit=_OBS_PAGE)
+    if offset > 0 and goods and _s(goods[0].get("nmID")) == prev_first:
+        # WB ignored the offset and returned the same page → fail closed, never loop.
+        raise ExecutionError(ExecutionError.MARKETPLACE_5XX, "wb prices page did not advance")
+    index = await _load_index(db, state.marketplace_account_id)
+    for good in goods:
+        if not isinstance(good, dict):
+            continue
+        nm = _s(good.get("nmID"))
+        if nm is None:
+            continue
+        catalog, buyer, club = _obs_prices(good)
+        currency, currency_status = _cur(good.get("currencyIsoCode4217"))
+        missing = []
+        if catalog is None:
+            missing.append("price")
+        if buyer is None:
+            missing.append("discountedPrice")
+        if club is None:
+            missing.append("clubDiscountedPrice")
+        if currency is None:
+            missing.append("currencyIsoCode4217")
+        product_id = await _resolve_product(db, index, state, nm)
+        await _upsert_observation(
+            db, state, run_id=run_id, ext=nm, observation_kind="catalog",
+            promotion_key=PROMO_KEY_SENTINEL, product_id=product_id, now=now,
+            promotion_id=None, promotion_type=None, participation_status=None,
+            catalog_price=catalog, buyer_price=buyer, club_buyer_price=club,
+            seller_promo_price=None, provider_min_price=None, auto_action_enabled=None,
+            currency=currency, currency_status=currency_status,
+            expected_seller_revenue=None, seller_revenue_status="unknown",
+            commission_base=None, commission_base_status="unknown",
+            marketplace_subsidy=None, subsidy_status="unknown",
+            provider_dataset="prices", missing_fields=missing)
+    done = len(goods) < _OBS_PAGE
+    first = _s(goods[0].get("nmID")) if goods else None
+    state.cursor = None if done else json.dumps(
+        {"run_id": run_id, "offset": offset + len(goods), "pfirst": first})
+    return {"done": done, "count": len(goods), "defer": False}
+
+
+async def _page_promotions(db, state, token: str) -> dict:
+    """WB-B participation EVIDENCE, ONLY for regular (non-auto) promotions.
+
+    Phase 1 (LIST): GET /api/v1/calendar/promotions (allPromo=false) — collect promotion ids, dropping
+    every type='auto' (автоакции excluded entirely: their товары/upload are officially unavailable).
+    Phase 2 (NOMS): per promotion, GET …/nomenclatures?inAction=true — only inAction=true proves
+    participation → observation_kind='promotion', participation_status='active', promotion_type
+    ='wb_calendar', planPrice→buyer_price, seller_promo_price=NULL. Identity is the numeric promotion
+    `id`, never the name. Candidates (inAction=false) are NEVER written; not_participating is NEVER
+    written; a partial/failed pass leaves prior runs' proven participation untouched (append-only) and
+    coverage_complete stays false."""
+    now = datetime.utcnow()
+    cur = json.loads(state.cursor) if state.cursor else {}
+    run_id = cur.get("run_id") or str(uuid.uuid4())
+
+    if cur.get("phase") is None:
+        start = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+        end = (now + timedelta(days=_PROMO_WINDOW_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        pids: list[str] = []
+        offset = 0
+        for _ in range(_MAX_PROMO_LIST_PAGES):
+            proms = await wb_client.list_promotions(
+                token=token, start_date_time=start, end_date_time=end,
+                all_promo=False, limit=_PROMO_LIST_PAGE, offset=offset)
+            if not proms:
+                break
+            for p in proms:
+                if not isinstance(p, dict):
+                    continue
+                if _s(p.get("type")) == "auto":     # автоакции полностью исключены
+                    continue
+                pid = _s(p.get("id"))
+                if pid and pid not in pids:
+                    pids.append(pid)
+            if len(proms) < _PROMO_LIST_PAGE:
+                break
+            offset += len(proms)
+        state.coverage_complete = False
+        if not pids:
+            state.coverage_complete = True       # no regular promotions = complete, clean coverage
+            state.cursor = None
+            return {"done": True, "count": 0, "defer": False}
+        state.cursor = json.dumps({"run_id": run_id, "phase": "noms", "pids": pids,
+                                   "pidx": 0, "noff": 0, "wpx": -1})
+        return {"done": False, "count": 0, "defer": False}
+
+    pids = cur.get("pids") or []
+    pidx = cur.get("pidx", 0)
+    noff = cur.get("noff", 0)
+    wpx = cur.get("wpx", -1)
+    vf, vt = cur.get("vf"), cur.get("vt")
+    prev_first = cur.get("pfirst")
+    if pidx >= len(pids):
+        state.coverage_complete = True           # every regular promotion traversed with no failure
+        state.cursor = None
+        return {"done": True, "count": 0, "defer": False}
+
+    pid = pids[pidx]
+    if wpx != pidx:      # proven window per promotion (id is identity, never the name)
+        det = await wb_client.promotion_details(token=token, promotion_ids=[pid])
+        meta = next((d for d in det if isinstance(d, dict) and _s(d.get("id")) == pid), {})
+        vf, vt = _s(meta.get("startDateTime")), _s(meta.get("endDateTime"))
+        wpx = pidx
+
+    noms = await wb_client.promotion_nomenclatures(
+        token=token, promotion_id=pid, in_action=True, limit=_OBS_PAGE, offset=noff)
+    if noff > 0 and noms and _s(noms[0].get("id")) == prev_first:
+        raise ExecutionError(ExecutionError.MARKETPLACE_5XX, "wb nomenclatures page did not advance")
+    index = await _load_index(db, state.marketplace_account_id)
+    count = 0
+    for n in noms:
+        if not isinstance(n, dict):
+            continue
+        if n.get("inAction") is not True:        # ONLY inAction=true proves participation
+            continue                             # candidate/false → never a participation row
+        nm = _s(n.get("id"))
+        if nm is None:
+            continue
+        plan = _dec(n.get("planPrice"))
+        currency, currency_status = _cur(n.get("currencyCode"))
+        missing = []
+        if plan is None:
+            missing.append("planPrice")
+        if currency is None:
+            missing.append("currencyCode")
+        product_id = await _resolve_product(db, index, state, nm)
+        await _upsert_observation(
+            db, state, run_id=run_id, ext=nm, observation_kind="promotion",
+            promotion_key=pid, product_id=product_id, now=now,
+            promotion_id=pid, promotion_type="wb_calendar", participation_status="active",
+            buyer_price=plan,                    # WB: planPrice → buyer_price
+            seller_promo_price=None,             # not the WB promo slot
+            catalog_price=None, club_buyer_price=None, provider_min_price=None, auto_action_enabled=None,
+            currency=currency, currency_status=currency_status,
+            expected_seller_revenue=None, seller_revenue_status="unknown",
+            commission_base=None, commission_base_status="unknown",
+            marketplace_subsidy=None, subsidy_status="unknown",
+            provider_valid_from=_dt(vf), provider_valid_to=_dt(vt),
+            provider_dataset="promotions", missing_fields=missing)
+        count += 1
+
+    first = _s(noms[0].get("id")) if noms else None
+    if len(noms) >= _OBS_PAGE:                    # more pages for THIS promotion
+        state.cursor = json.dumps({"run_id": run_id, "phase": "noms", "pids": pids, "pidx": pidx,
+                                   "noff": noff + len(noms), "wpx": wpx, "vf": vf, "vt": vt,
+                                   "pfirst": first})
+        return {"done": False, "count": count, "defer": False}
+    # this promotion is exhausted → next promotion, reset intra-promotion cursor
+    state.cursor = json.dumps({"run_id": run_id, "phase": "noms", "pids": pids, "pidx": pidx + 1,
+                               "noff": 0, "wpx": wpx, "vf": vf, "vt": vt})
+    return {"done": False, "count": count, "defer": False}

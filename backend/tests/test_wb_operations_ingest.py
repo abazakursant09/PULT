@@ -178,7 +178,7 @@ def test_no_pii_columns():
 def test_alembic_single_head():
     from alembic.config import Config
     from alembic.script import ScriptDirectory
-    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["ozp1a2b3c4d01"]
+    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["wcb1a2b3c4d01"]
 
 
 # ── Orders ──────────────────────────────────────────────────────────────────────
@@ -465,6 +465,9 @@ def test_auth_pauses_all_types(monkeypatch):
         async def finance_sales_report_detailed(self, *, token, date_from, date_to):
             raise ExecutionError(ExecutionError.AUTH, "auth")
         async def create_warehouse_remains_report(self, *, token):
+            raise ExecutionError(ExecutionError.AUTH, "auth")
+        async def list_promotions(self, *, token, start_date_time, end_date_time,
+                                  all_promo=False, limit=1000, offset=0):
             raise ExecutionError(ExecutionError.AUTH, "auth")
     monkeypatch.setattr(api_sync.wb_ingest, "wb_client", _Auth())
     _run(api_sync.run_api_sync_once(db))

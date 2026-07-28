@@ -143,7 +143,7 @@ def test_coverage_defaults():
 def test_single_alembic_head():
     from alembic.config import Config
     from alembic.script import ScriptDirectory
-    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["ozp1a2b3c4d01"]
+    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["wcb1a2b3c4d01"]
 
 
 # ── 4: migration roundtrip ───────────────────────────────────────────────────────

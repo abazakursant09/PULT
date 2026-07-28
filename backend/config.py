@@ -76,6 +76,9 @@ class Settings(BaseSettings):
     wb_statistics_base: str = "https://statistics-api.wildberries.ru"
     wb_analytics_base: str = "https://seller-analytics-api.wildberries.ru"
     wb_finance_base: str = "https://finance-api.wildberries.ru"
+    # PULT-LAUNCH-2.5D-WB-B — Календарь акций lives on its OWN host (dp-calendar-api), not
+    # discounts-prices-api; the promotion reads use it. Same "Цены и скидки" token category.
+    wb_calendar_base: str = "https://dp-calendar-api.wildberries.ru"
     ozon_seller_base: str = "https://api-seller.ozon.ru"
     ozon_performance_base: str = "https://api-performance.ozon.ru"
     yandex_partner_base: str = "https://api.partner.market.yandex.ru"

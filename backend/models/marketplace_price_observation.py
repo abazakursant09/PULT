@@ -94,6 +94,11 @@ class MarketplacePriceObservation(Base):
     provider_min_price      = Column(Numeric(18, 2), nullable=True)  # raw Ozon min_price; 0 is a real value
     auto_action_enabled     = Column(Boolean, nullable=True)         # NULL = provider did not prove it
 
+    # PULT-LAUNCH-2.5D-WB — WB Club (WB Кошелёк) buyer-facing price, a SEPARATE proven buyer price for
+    # club members (clubDiscountedPrice). It is a buyer price, NOT the seller's revenue; the gap vs
+    # buyer_price is NEVER treated as a subsidy (funding is not proven by the API). 0 is a real value.
+    club_buyer_price        = Column(Numeric(18, 2), nullable=True)
+
     currency               = Column(String(3), nullable=True)       # no default; proven from provider only
     currency_status        = Column(String(8),  nullable=False, default="unknown", server_default="unknown")
     seller_revenue_status  = Column(String(24), nullable=False, default="unknown", server_default="unknown")
@@ -197,6 +202,8 @@ class MarketplacePriceObservation(Base):
         # ── money / currency / validity ─────────────────────────────────────────────────────────
         CheckConstraint(" AND ".join(f"({c} IS NULL OR {c} >= 0)" for c in _MONEY_COLS),
                         name="ck_price_obs_money_nonneg"),
+        CheckConstraint("club_buyer_price IS NULL OR club_buyer_price >= 0",
+                        name="ck_price_obs_club_nonneg"),
         CheckConstraint("currency IS NULL OR (currency = upper(currency) AND length(currency) = 3)",
                         name="ck_price_obs_currency_fmt"),
         CheckConstraint(
