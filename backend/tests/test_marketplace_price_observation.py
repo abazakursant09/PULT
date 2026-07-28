@@ -169,7 +169,7 @@ def test_enum_values_fit_column_length():
 
 def test_not_participating_inserts(conn):   # 17 chars — proves String(20)
     ins(conn, observation_kind="promotion", participation_status="not_participating",
-        promotion_id=None, promotion_key="__none__")
+        promotion_type="unknown", promotion_id=None, promotion_key="__none__")
     assert _count(conn) == 1
 
 
@@ -221,19 +221,25 @@ def test_catalog_with_participation_blocked(conn):
 def test_promotion_without_participation_blocked(conn):
     with pytest.raises(IntegrityError):
         ins(conn, observation_kind="promotion", participation_status=None,
-            promotion_id="PR1", promotion_key="PR1")
+            promotion_type="unknown", promotion_id="PR1", promotion_key="PR1")
+
+
+def test_promotion_without_promotion_type_blocked(conn):
+    with pytest.raises(IntegrityError):     # promotion observation now REQUIRES promotion_type
+        ins(conn, observation_kind="promotion", participation_status="active",
+            promotion_type=None, promotion_id="PR1", promotion_key="PR1")
 
 
 def test_active_without_promotion_id_blocked(conn):
     with pytest.raises(IntegrityError):
         ins(conn, observation_kind="promotion", participation_status="active",
-            promotion_id=None, promotion_key="__none__")
+            promotion_type="unknown", promotion_id=None, promotion_key="__none__")
 
 
 def test_promotion_key_mismatch_blocked(conn):
     with pytest.raises(IntegrityError):
         ins(conn, observation_kind="promotion", participation_status="active",
-            promotion_id="PR1", promotion_key="WRONG")
+            promotion_type="unknown", promotion_id="PR1", promotion_key="WRONG")
 
 
 def test_catalog_is_not_not_participating(conn):
@@ -245,7 +251,7 @@ def test_catalog_is_not_not_participating(conn):
 
 def test_participation_unknown_allowed(conn):
     ins(conn, observation_kind="promotion", participation_status="unknown",
-        promotion_id=None, promotion_key="__none__")
+        promotion_type="unknown", promotion_id=None, promotion_key="__none__")
     assert _count(conn) == 1
 
 
@@ -281,11 +287,23 @@ def test_commission_base_matrix(conn):
 
 
 def test_subsidy_matrix(conn):
-    with pytest.raises(IntegrityError):     # value requires provider_explicit
-        ins(conn, source="api", marketplace_subsidy=Decimal("100.00"), subsidy_status="unknown")
-    ins(conn, source="api", external_product_id="EXTna",
-        marketplace_subsidy=None, subsidy_status="not_applicable")   # not_applicable + NULL ok
-    assert _count(conn) == 1
+    # provider_explicit ⇔ value (biconditional). 0 is a PROVEN value.
+    ins(conn, source="api", external_product_id="E0",
+        marketplace_subsidy=Decimal("0.00"), subsidy_status="provider_explicit")   # provider_explicit + 0 OK
+    ins(conn, source="api", external_product_id="Ena",
+        marketplace_subsidy=None, subsidy_status="not_applicable")                 # not_applicable + NULL OK
+    ins(conn, source="api", external_product_id="Eun",
+        marketplace_subsidy=None, subsidy_status="unknown")                        # unknown + NULL OK
+    assert _count(conn) == 3
+    with pytest.raises(IntegrityError):     # provider_explicit + NULL blocked
+        ins(conn, source="api", external_product_id="Ex1",
+            marketplace_subsidy=None, subsidy_status="provider_explicit")
+    with pytest.raises(IntegrityError):     # value + unknown blocked
+        ins(conn, source="api", external_product_id="Ex2",
+            marketplace_subsidy=Decimal("100.00"), subsidy_status="unknown")
+    with pytest.raises(IntegrityError):     # value + not_applicable blocked
+        ins(conn, source="api", external_product_id="Ex3",
+            marketplace_subsidy=Decimal("100.00"), subsidy_status="not_applicable")
 
 
 def test_null_money_is_not_zero(conn):
@@ -306,8 +324,45 @@ def test_validity_window_blocked(conn):
 # ── IDEMPOTENCY / HISTORY (append-only) ─────────────────────────────────────────
 def test_retry_same_run_duplicate_blocked(conn):
     ins(conn, ingest_run_id="runX", external_product_id="E", source="api")
-    with pytest.raises(IntegrityError):    # same (store, ext, promo_key, source, run)
+    with pytest.raises(IntegrityError):    # same (store, ext, kind, promo_key, source, run)
         ins(conn, ingest_run_id="runX", external_product_id="E", source="api")
+
+
+def test_catalog_and_promotion_coexist_in_one_run(conn):
+    # one Store/Product/source/run: a catalog observation AND a promotion observation whose
+    # promotion_id is NULL (both promotion_key='__none__') must BOTH persist — observation_kind is
+    # part of the run key. Repeats of either within the run are still blocked.
+    ins(conn, ingest_run_id="R", external_product_id="E", source="api", observation_kind="catalog")
+    ins(conn, ingest_run_id="R", external_product_id="E", source="api", observation_kind="promotion",
+        participation_status="not_participating", promotion_type="unknown",
+        promotion_id=None, promotion_key="__none__")
+    assert _count(conn) == 2
+    with pytest.raises(IntegrityError):    # repeat catalog same run
+        ins(conn, ingest_run_id="R", external_product_id="E", source="api", observation_kind="catalog")
+    with pytest.raises(IntegrityError):    # repeat promotion same run
+        ins(conn, ingest_run_id="R", external_product_id="E", source="api", observation_kind="promotion",
+            participation_status="not_participating", promotion_type="unknown",
+            promotion_id=None, promotion_key="__none__")
+
+
+def test_missing_fields_db_default_and_isolation(conn):
+    # raw SQL omitting missing_fields → server_default '[]' → typed read returns []
+    conn.execute(text(
+        "INSERT INTO marketplace_price_observations"
+        "(id, ingest_run_id, marketplace_account_id, marketplace_store_id, product_id, "
+        " external_product_id, resolution_status, observation_kind, promotion_key, "
+        " catalog_price, currency_status, seller_revenue_status, commission_base_status, "
+        " subsidy_status, source, fetched_at, created_at) "
+        "VALUES('raw1','r','accW','s1','p1','E','resolved','catalog','__none__',"
+        " 1000, 'unknown','unknown','unknown','unknown','csv', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"))
+    got = conn.execute(sa.select(T.c.missing_fields).where(T.c.id == "raw1")).scalar()
+    assert got == []
+    # explicit value preserved unchanged
+    ins(conn, id="exp1", ingest_run_id="r2", external_product_id="E2", missing_fields=["storage"])
+    assert conn.execute(sa.select(T.c.missing_fields).where(T.c.id == "exp1")).scalar() == ["storage"]
+    # Python default is a CALLABLE (fresh list per row), never a shared mutable [] literal
+    d = T.c.missing_fields.default.arg
+    assert callable(d) and not isinstance(d, list)
 
 
 def test_same_identity_new_run_new_row(conn):
@@ -330,9 +385,9 @@ def test_external_row_id_does_not_block_new_price(conn):
 
 def test_active_and_ended_are_separate_immutable_rows(conn):
     ins(conn, ingest_run_id="r1", external_product_id="E", observation_kind="promotion",
-        participation_status="active", promotion_id="PR1", promotion_key="PR1")
+        participation_status="active", promotion_type="ozon_action", promotion_id="PR1", promotion_key="PR1")
     ins(conn, ingest_run_id="r2", external_product_id="E", observation_kind="promotion",
-        participation_status="ended", promotion_id="PR1", promotion_key="PR1")
+        participation_status="ended", promotion_type="ozon_action", promotion_id="PR1", promotion_key="PR1")
     assert _count(conn) == 2
     # the old active row is untouched (no update path in this slice)
     active = conn.execute(sa.select(sa.func.count()).select_from(T)

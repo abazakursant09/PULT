@@ -59,7 +59,9 @@ def upgrade() -> None:
         sa.Column("provider_valid_from", sa.DateTime(), nullable=True),
         sa.Column("provider_valid_to", sa.DateTime(), nullable=True),
         sa.Column("fetched_at", sa.DateTime(), nullable=False),
-        sa.Column("missing_fields", sa.JSON(), nullable=False),
+        # portable JSON default '[]' — SQLite stores the text, PostgreSQL casts the literal to json,
+        # so a raw INSERT omitting the column still yields [].
+        sa.Column("missing_fields", sa.JSON(), nullable=False, server_default=sa.text("'[]'")),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.ForeignKeyConstraint(
             ["marketplace_store_id", "marketplace_account_id"],
@@ -69,8 +71,8 @@ def upgrade() -> None:
             ["marketplace_store_id", "product_id"],
             ["product_placements.marketplace_store_id", "product_placements.product_id"],
             ondelete="CASCADE", name="fk_price_obs_placement"),
-        sa.UniqueConstraint("marketplace_store_id", "external_product_id", "promotion_key",
-                            "source", "ingest_run_id", name="uq_price_obs_run"),
+        sa.UniqueConstraint("marketplace_store_id", "external_product_id", "observation_kind",
+                            "promotion_key", "source", "ingest_run_id", name="uq_price_obs_run"),
         sa.CheckConstraint("resolution_status IN ('resolved', 'unassigned')",
                            name="ck_price_obs_resolution_status"),
         sa.CheckConstraint("observation_kind IN ('catalog', 'promotion')", name="ck_price_obs_kind"),
@@ -99,7 +101,8 @@ def upgrade() -> None:
             "promotion_id IS NULL AND participation_status IS NULL AND promotion_type IS NULL "
             "AND promotion_key = '" + _SENTINEL + "')",
             name="ck_price_obs_catalog"),
-        sa.CheckConstraint("observation_kind <> 'promotion' OR participation_status IS NOT NULL",
+        sa.CheckConstraint("observation_kind <> 'promotion' OR "
+                           "(participation_status IS NOT NULL AND promotion_type IS NOT NULL)",
                            name="ck_price_obs_promotion"),
         sa.CheckConstraint("participation_status IS NULL OR participation_status <> 'active' "
                            "OR promotion_id IS NOT NULL", name="ck_price_obs_active"),
@@ -117,8 +120,10 @@ def upgrade() -> None:
             "(commission_base_status = 'provider_explicit' AND commission_base IS NOT NULL) OR "
             "(commission_base_status <> 'provider_explicit' AND commission_base IS NULL)",
             name="ck_price_obs_commission_base_value"),
-        sa.CheckConstraint("marketplace_subsidy IS NULL OR subsidy_status = 'provider_explicit'",
-                           name="ck_price_obs_subsidy_value"),
+        sa.CheckConstraint(
+            "(subsidy_status = 'provider_explicit' AND marketplace_subsidy IS NOT NULL) OR "
+            "(subsidy_status <> 'provider_explicit' AND marketplace_subsidy IS NULL)",
+            name="ck_price_obs_subsidy_value"),
         sa.CheckConstraint(
             "source = 'api' OR ("
             "currency_status <> 'proven' AND seller_revenue_status <> 'provider_explicit' "

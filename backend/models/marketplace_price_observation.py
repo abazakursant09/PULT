@@ -33,7 +33,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
-    Column, String, DateTime, Numeric, JSON,
+    Column, String, DateTime, Numeric, JSON, text,
     ForeignKeyConstraint, UniqueConstraint, CheckConstraint, Index,
 )
 from database import Base
@@ -97,7 +97,10 @@ class MarketplacePriceObservation(Base):
     provider_valid_from    = Column(DateTime, nullable=True)        # provider-declared promo window
     provider_valid_to      = Column(DateTime, nullable=True)
     fetched_at             = Column(DateTime, nullable=False)       # when PULT observed the state
-    missing_fields         = Column(JSON, nullable=False, default=list)
+    # DB default '[]' (portable: SQLite stores the text, PostgreSQL casts the literal to json), so a
+    # raw INSERT omitting the column still yields []. Python `default=list` (a callable, never a shared
+    # literal) gives each ORM row its own list.
+    missing_fields         = Column(JSON, nullable=False, default=list, server_default=text("'[]'"))
     created_at             = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     __table_args__ = (
@@ -114,9 +117,11 @@ class MarketplacePriceObservation(Base):
             ["product_placements.marketplace_store_id", "product_placements.product_id"],
             ondelete="CASCADE", name="fk_price_obs_placement"),
 
-        # ── idempotency: one row per (store, external product, promotion, source, fetch-run) ─────
-        UniqueConstraint("marketplace_store_id", "external_product_id", "promotion_key",
-                         "source", "ingest_run_id", name="uq_price_obs_run"),
+        # ── idempotency: one row per (store, external product, KIND, promotion, source, fetch-run) ─
+        # observation_kind is IN the key so a single run may carry BOTH a catalog observation and a
+        # promotion observation with promotion_id NULL (both promotion_key='__none__') without collision.
+        UniqueConstraint("marketplace_store_id", "external_product_id", "observation_kind",
+                         "promotion_key", "source", "ingest_run_id", name="uq_price_obs_run"),
 
         # ── enum dictionaries ───────────────────────────────────────────────────────────────────
         CheckConstraint(_in("resolution_status", RESOLUTION_STATUSES), name="ck_price_obs_resolution_status"),
@@ -144,7 +149,8 @@ class MarketplacePriceObservation(Base):
             "promotion_id IS NULL AND participation_status IS NULL AND promotion_type IS NULL "
             "AND promotion_key = '" + PROMO_KEY_SENTINEL + "')",
             name="ck_price_obs_catalog"),
-        CheckConstraint("observation_kind <> 'promotion' OR participation_status IS NOT NULL",
+        CheckConstraint("observation_kind <> 'promotion' OR "
+                        "(participation_status IS NOT NULL AND promotion_type IS NOT NULL)",
                         name="ck_price_obs_promotion"),
         CheckConstraint("participation_status IS NULL OR participation_status <> 'active' "
                         "OR promotion_id IS NOT NULL", name="ck_price_obs_active"),
@@ -165,8 +171,12 @@ class MarketplacePriceObservation(Base):
             "(commission_base_status = 'provider_explicit' AND commission_base IS NOT NULL) OR "
             "(commission_base_status <> 'provider_explicit' AND commission_base IS NULL)",
             name="ck_price_obs_commission_base_value"),
-        CheckConstraint("marketplace_subsidy IS NULL OR subsidy_status = 'provider_explicit'",
-                        name="ck_price_obs_subsidy_value"),
+        # biconditional: provider_explicit ⇔ a value (0 is a PROVEN value, so provider_explicit + 0 is
+        # allowed); provider_explicit + NULL and value + unknown/not_applicable are both rejected.
+        CheckConstraint(
+            "(subsidy_status = 'provider_explicit' AND marketplace_subsidy IS NOT NULL) OR "
+            "(subsidy_status <> 'provider_explicit' AND marketplace_subsidy IS NULL)",
+            name="ck_price_obs_subsidy_value"),
         # any proven/provider_explicit proof is allowed ONLY on an API observation → CSV/manual can
         # never be executable.
         CheckConstraint(
