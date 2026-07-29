@@ -569,21 +569,9 @@ def test_pg_alembic_migration_nonempty_and_explain(monkeypatch):
             c.exec_driver_sql("DROP SCHEMA public CASCADE; CREATE SCHEMA public")
 
         # ── REAL migration chain up to the pre-change-only head ──
-        # A failure HERE is in a migration that predates 2.5E-1 (a pre-existing PostgreSQL defect: the
-        # Alembic chain has historically only been exercised on SQLite). Per the correction contract we
-        # STOP and REPORT it honestly rather than mask it with create_all — but we do NOT fail this job
-        # for a defect unrelated to 2.5E-1: it is surfaced as a loud, explicit skip. A failure in the
-        # eco1a2b3c4d01 step below (the migration under test) still hard-fails.
-        try:
-            command.upgrade(cfg, "ypo1a2b3c4d01")
-        except Exception as exc:  # noqa: BLE001 — report whatever the old chain raises
-            pytest.skip(
-                "PRE-EXISTING PostgreSQL migration defect BEFORE ypo1a2b3c4d01 (NOT part of 2.5E-1): "
-                f"{type(exc).__name__}: {exc}. The full Alembic chain does not yet run on PostgreSQL "
-                "(known: pad1a2b3c4d01 does `UPDATE protection_policies SET include_ad_spend = 0`, an "
-                "integer literal for a boolean column). Reported to Inal; NOT masked with create_all. "
-                "The eco1a2b3c4d01 PostgreSQL branch (add nullable -> backfill -> alter NOT NULL, no "
-                "default) is standard and independently green on SQLite + drift/parity.")
+        # The pad1a2b3c4d01 PostgreSQL fix is on master, so the full chain runs on PostgreSQL. No skip /
+        # xfail / create_all: any failure here (or in the eco1a2b3c4d01 step below) is a real red.
+        command.upgrade(cfg, "ypo1a2b3c4d01")
 
         # seed NON-EMPTY parent tables with distinct fetched_at (FK triggers off; synthetic rows)
         with eng.begin() as c:
