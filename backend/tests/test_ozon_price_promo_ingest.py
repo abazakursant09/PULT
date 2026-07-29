@@ -49,7 +49,7 @@ from services.marketplace.ingest import ozon as oz
 from services.marketplace.ozon_client import ozon_client
 import tasks.api_sync as api_sync
 
-REV = "ypo1a2b3c4d01"
+REV = "eco1a2b3c4d01"
 PRIOR = "mpo1a2b3c4d01"
 
 _LOOP = asyncio.new_event_loop()
@@ -254,12 +254,27 @@ def test_repeat_within_run_no_duplicate(monkeypatch):
     assert _run(db.execute(select(func.count()).select_from(MPO))).scalar_one() == 1
 
 
-def test_new_run_writes_fresh_row(monkeypatch):
-    # A full pass, then a second full pass → a NEW ingest_run_id → a new append-only row (freshness).
+def test_unchanged_run_writes_no_new_row(monkeypatch):
+    # PULT-LAUNCH-2.5E-1 change-only: a second pass with IDENTICAL evidence must NOT append a row.
     db = _run(_new_db()); uid, acc, store, conn = _run(_seed(db))
     st = _run(_state(db, conn, store, "price_observations"))
     _drain(db, st, monkeypatch, _Stub(prices=_FULL_PRICE), kind="prices")
     _drain(db, st, monkeypatch, _Stub(prices=_FULL_PRICE), kind="prices")
+    rows = _obs(db, observation_kind="catalog")
+    assert len(rows) == 1                                   # the identical repeat was deduped
+
+
+def test_changed_run_writes_fresh_row(monkeypatch):
+    # A changed buyer price on the next pass → a NEW append-only version (a real change-point).
+    db = _run(_new_db()); uid, acc, store, conn = _run(_seed(db))
+    st = _run(_state(db, conn, store, "price_observations"))
+    _drain(db, st, monkeypatch, _Stub(prices=_FULL_PRICE), kind="prices")
+    changed = {"result": {"items": [{
+        "product_id": 111, "offer_id": "OF-1",
+        "price": {"price": "1499.00", "old_price": "2000", "min_price": "900",
+                  "marketing_seller_price": "1300", "currency_code": "RUB",
+                  "auto_action_enabled": True}}], "last_id": ""}}
+    _drain(db, st, monkeypatch, _Stub(prices=changed), kind="prices")
     rows = _obs(db, observation_kind="catalog")
     assert len(rows) == 2 and len({r.ingest_run_id for r in rows}) == 2
 
@@ -658,7 +673,8 @@ def test_participation_status_rejects_eligible():
             promotion_type="ozon_action", participation_status=status,
             currency_status="unknown", seller_revenue_status="unknown",
             commission_base_status="unknown", subsidy_status="unknown", source="api",
-            fetched_at=_dtclass(2026, 7, 28), missing_fields=[]))
+            fetched_at=_dtclass(2026, 7, 28), last_verified_at=_dtclass(2026, 7, 28),
+            missing_fields=[]))
 
     _ins("active")                       # a valid participation value inserts fine (row shape is OK)
     with pytest.raises(IntegrityError):

@@ -86,6 +86,11 @@ class MarketplacePromotionObservation(Base):
     promotion_start_at     = Column(DateTime, nullable=True)
     promotion_end_at       = Column(DateTime, nullable=True)
     fetched_at             = Column(DateTime, nullable=False)
+    # PULT-LAUNCH-2.5E-1 — change-only bookkeeping (feature OFF). last_verified_at is the latest run
+    # that re-observed this EXACT evidence (incl. the child campaign set); evidence_fingerprint is the
+    # SHA-256 of the parent semantic fields + the sorted child set (NULL → change-only inserts).
+    last_verified_at       = Column(DateTime(timezone=True), nullable=False)
+    evidence_fingerprint   = Column(String(64), nullable=True)
     missing_fields         = Column(JSON, nullable=False, default=list, server_default=text("'[]'"))
     created_at             = Column(DateTime, nullable=False, default=datetime.utcnow)
 
@@ -151,6 +156,11 @@ class MarketplacePromotionObservation(Base):
         Index("ix_promo_obs_account_time", "marketplace_account_id", "fetched_at"),
         Index("ix_promo_obs_latest", "marketplace_account_id", "product_id", "promotion_id", "fetched_at"),
         Index("ix_promo_obs_promotion", "promotion_id"),
+        # PULT-LAUNCH-2.5E-1 — change-only latest-of-series lookup, keyed by the SERIES identity
+        # (account, external_product_id, promotion_id, source) with fetched_at last for MAX.
+        # last_verified_at / evidence_fingerprint are NOT indexed (fingerprint compared, not searched).
+        Index("ix_promo_obs_series", "marketplace_account_id", "external_product_id",
+              "promotion_id", "source", "fetched_at"),
     )
 
 

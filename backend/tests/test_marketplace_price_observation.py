@@ -102,7 +102,7 @@ def _row(**over):
         commission_base_status="unknown", subsidy_status="unknown",
         source="csv", provider_dataset=None, external_row_id=None,
         provider_valid_from=None, provider_valid_to=None, fetched_at=NOW,
-        missing_fields=[], created_at=NOW)
+        last_verified_at=NOW, missing_fields=[], created_at=NOW)
     base.update(over)
     base.setdefault("id", str(uuid.uuid4()))
     return base
@@ -150,6 +150,14 @@ def test_unassigned_with_product_blocked(conn):
 def test_unassigned_without_product_allowed(conn):
     ins(conn, resolution_status="unassigned", product_id=None)
     assert _count(conn) == 1
+
+
+def test_last_verified_at_is_required(conn):
+    # PULT-LAUNCH-2.5E-1: last_verified_at is NOT NULL with no default → omitting it is an IntegrityError,
+    # never a silent sentinel date.
+    values = {k: v for k, v in _row().items() if k != "last_verified_at"}
+    with pytest.raises(IntegrityError):
+        conn.execute(T.insert().values(**values))
 
 
 # ── LENGTHS (PostgreSQL VARCHAR guard; SQLite does not enforce) ─────────────────
@@ -352,9 +360,10 @@ def test_missing_fields_db_default_and_isolation(conn):
         "(id, ingest_run_id, marketplace_account_id, marketplace_store_id, product_id, "
         " external_product_id, resolution_status, observation_kind, promotion_key, "
         " catalog_price, currency_status, seller_revenue_status, commission_base_status, "
-        " subsidy_status, source, fetched_at, created_at) "
+        " subsidy_status, source, fetched_at, last_verified_at, created_at) "
         "VALUES('raw1','r','accW','s1','p1','E','resolved','catalog','__none__',"
-        " 1000, 'unknown','unknown','unknown','unknown','csv', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"))
+        " 1000, 'unknown','unknown','unknown','unknown','csv', CURRENT_TIMESTAMP, "
+        " CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"))
     got = conn.execute(sa.select(T.c.missing_fields).where(T.c.id == "raw1")).scalar()
     assert got == []
     # explicit value preserved unchanged
@@ -398,7 +407,7 @@ def test_active_and_ended_are_separate_immutable_rows(conn):
 # ── MIGRATION / SCHEMA ──────────────────────────────────────────────────────────
 def test_single_alembic_head():
     heads = ScriptDirectory.from_config(Config("alembic.ini")).get_heads()
-    assert heads == ["ypo1a2b3c4d01"], heads
+    assert heads == ["eco1a2b3c4d01"], heads
 
 
 def test_old_tables_preserved(conn):
@@ -432,10 +441,10 @@ def test_observation_writer_is_flag_gated_and_unscheduled():
         src = open(path, encoding="utf-8").read()
         if "MarketplacePriceObservation" in src or "marketplace_price_observations" in src:
             refs.append(rel)
-    # The ONLY production references are the per-marketplace ingest writers.
-    assert sorted(refs) == ["services/marketplace/ingest/ozon.py",
-                            "services/marketplace/ingest/wb.py",
-                            "services/marketplace/ingest/yandex.py"], refs
+    # The ONLY production reference is the shared change-only writer (PULT-LAUNCH-2.5E-1). The
+    # per-marketplace ingest modules assemble the evidence and delegate the actual write to it, so the
+    # table is touched from exactly ONE module — an even tighter pre-enable gate than before.
+    assert sorted(refs) == ["services/marketplace/ingest/change_only.py"], refs
 
     from config import settings
     assert settings.api_data_sync_enabled is False        # master switch OFF by default

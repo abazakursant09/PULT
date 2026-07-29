@@ -47,7 +47,7 @@ from services.marketplace.errors import ExecutionError
 from services.marketplace.ingest import yandex as yx
 import tasks.api_sync as api_sync
 
-HEAD = "ypo1a2b3c4d01"
+HEAD = "eco1a2b3c4d01"
 PRIOR = "wcb1a2b3c4d01"
 NOW = datetime(2026, 7, 28, 12, 0, 0)
 
@@ -107,7 +107,8 @@ def _prow(**over):
                 resolution_status="resolved", promotion_id="PR1", promotion_type="yandex_promo",
                 provider_status="AUTO", participation_status="active", auto_participation=True,
                 attribution_status="account_wide", currency_status="unknown", source="api",
-                provider_dataset="promos", fetched_at=NOW, missing_fields=[], created_at=NOW)
+                provider_dataset="promos", fetched_at=NOW, last_verified_at=NOW,
+                missing_fields=[], created_at=NOW)
     base.update(over)
     return base
 
@@ -470,17 +471,21 @@ def test_archived_store_is_unmapped(monkeypatch):
 
 
 def test_second_child_error_full_rollback(monkeypatch):
+    # PULT-LAUNCH-2.5E-1: the parent + all children are written atomically in change_only.observe_
+    # promotion. Force the SECOND child construction to blow up and prove the parent (already flushed)
+    # and the first child are rolled back with it — never a parent without its full child set.
+    from services.marketplace.ingest import change_only as co
     db = _run(_new_db()); uid, acc, stores, conn = _run(_seed(db, campaigns=("c1", "c2")))
     st = _run(_state(db, conn, stores["c1"]))
     calls = {"n": 0}
-    real = yx._upsert_promo_child
+    real_cls = co.MarketplacePromotionStoreEvidence
 
-    async def _boom(*a, **k):
+    def _boom(*a, **k):
         calls["n"] += 1
         if calls["n"] == 2:
             raise ExecutionError(ExecutionError.MARKETPLACE_5XX, "child boom")
-        return await real(*a, **k)
-    monkeypatch.setattr(yx, "_upsert_promo_child", _boom)
+        return real_cls(*a, **k)
+    monkeypatch.setattr(co, "MarketplacePromotionStoreEvidence", _boom)
     _use(monkeypatch, _Promo(offers={"PR1": _page([
         _off("OF-1", "PARTIALLY_AUTO", "1", "1", campaign_ids=["c1", "c2"])])}))
     _run(yx.fetch_and_persist_page(db, st, "tok"))   # LIST
@@ -505,6 +510,15 @@ def test_repeat_run_no_duplicate(monkeypatch):
     page._calls = {}
     _run(yx.fetch_and_persist_page(db, st, "tok")); _run(db.commit())
     assert len(_parents(db)) == 1 and len(_children(db)) == 1
+
+
+def test_change_only_unchanged_run_dedups(monkeypatch):
+    # PULT-LAUNCH-2.5E-1: an identical second pass writes no new parent (change-only wiring).
+    db = _run(_new_db()); uid, acc, stores, conn = _run(_seed(db))
+    st = _run(_state(db, conn, stores["c1"]))
+    _drain(db, st, monkeypatch, _Promo(offers={"PR1": _page([_off("OF-1", "AUTO", "1", "1")])}))
+    _drain(db, st, monkeypatch, _Promo(offers={"PR1": _page([_off("OF-1", "AUTO", "1", "1")])}))
+    assert len(_parents(db)) == 1
 
 
 def test_new_run_appends_version(monkeypatch):
@@ -647,7 +661,9 @@ def test_source_guard_new_model_only_in_ingest():
         src = open(path, encoding="utf-8").read()
         if "MarketplacePromotionObservation" in src or "marketplace_promotion_observations" in src:
             refs.append(rel)
-    assert refs == ["services/marketplace/ingest/yandex.py"], refs
+    # PULT-LAUNCH-2.5E-1 — the promotion tables are now written from exactly ONE module, the shared
+    # change-only writer; yandex.py assembles the evidence and delegates the write to it.
+    assert sorted(refs) == ["services/marketplace/ingest/change_only.py"], refs
 
 
 # ══ MIGRATION ypo1a2b3c4d01 ══════════════════════════════════════════════════════
