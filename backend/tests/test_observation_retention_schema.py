@@ -128,22 +128,25 @@ def _read(rel):
     return (_BACKEND / rel).read_text(encoding="utf-8")
 
 
-def test_no_cleanup_service_or_delete_or_advisory_lock():
-    # No production module deletes from the observation tables or takes an advisory lock. (Scan every
-    # backend .py outside tests/models/alembic; the change-only writer only SELECT/INSERTs.)
+# PULT-LAUNCH-2.5E-2B-2 added the sweep SERVICE; it lives in exactly this package and nothing else may
+# delete from the observation tables or take the retention advisory lock.
+_RETENTION_PKG = "services/marketplace/retention/"
+
+
+def test_only_the_retention_package_deletes_or_locks():
+    # Outside the sanctioned retention package, NO production module deletes from the observation tables
+    # or takes the advisory lock. (The change-only writer only SELECT/INSERTs.)
     import glob
     offenders = []
     for path in glob.glob(str(_BACKEND / "**" / "*.py"), recursive=True):
         rel = os.path.relpath(path, _BACKEND).replace("\\", "/")
-        if rel.startswith(("tests/", "models/")) or "alembic/versions/" in rel:
+        if rel.startswith(("tests/", "models/")) or "alembic/versions/" in rel or rel.startswith(_RETENTION_PKG):
             continue
-        src = open(path, encoding="utf-8").read()
-        low = src.lower()
+        low = open(path, encoding="utf-8").read().lower()
         if "delete from marketplace_price_observations" in low \
                 or "delete from marketplace_promotion_observations" in low \
-                or "pg_advisory" in low or "pg_try_advisory" in low:
-            offenders.append(rel)
-        if "observations_cleanup" in low or "observation_sweep" in low or "run_observations_cleanup" in low:
+                or "pg_advisory" in low or "pg_try_advisory" in low \
+                or "observation_sweep" in low or "run_observation_retention" in low:
             offenders.append(rel)
     assert offenders == [], offenders
 
@@ -151,16 +154,18 @@ def test_no_cleanup_service_or_delete_or_advisory_lock():
 def test_scheduler_untouched_by_retention():
     sched = _read("tasks/scheduler.py")
     assert "observation_retention" not in sched
-    assert "observations_cleanup" not in sched
+    assert "observation_sweep" not in sched
 
 
-def test_flag_starts_no_work():
-    # The flag exists in config only; no module reads it to start work in this slice.
+def test_flag_read_only_by_the_retention_package():
+    # The flag gates ONLY the sweep service; no other module reads it to start work, and no scheduler
+    # tick or endpoint invokes the sweep in this slice.
     import glob
     readers = []
     for path in glob.glob(str(_BACKEND / "**" / "*.py"), recursive=True):
         rel = os.path.relpath(path, _BACKEND).replace("\\", "/")
-        if rel.startswith("tests/") or rel == "config.py" or "alembic/versions/" in rel:
+        if rel.startswith("tests/") or rel == "config.py" or "alembic/versions/" in rel \
+                or rel.startswith(_RETENTION_PKG):
             continue
         if "observation_retention_enabled" in open(path, encoding="utf-8").read():
             readers.append(rel)

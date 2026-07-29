@@ -87,13 +87,14 @@ jobs:
           pip install -r requirements.txt
           pip install psycopg2-binary asyncpg pytest
 
-      - name: Real Alembic migration + EXPLAIN index gate (real PostgreSQL)
+      - name: Real Alembic migration + EXPLAIN index gate + retention DELETE (real PostgreSQL)
         env:
           PULT_TEST_PG_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/pult_explain
           PULT_TEST_PG_ALEMBIC_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/pult_explain
         run: |
           pytest -p no:cacheprovider -q -s -rA \
-            tests/test_change_only_observations.py::test_pg_alembic_migration_nonempty_and_explain
+            tests/test_change_only_observations.py::test_pg_alembic_migration_nonempty_and_explain \
+            tests/test_observation_retention_sweep.py::test_pg_functional_delete
 
   # Proves the FULL Alembic chain runs on the database production actually uses. The chain was
   # historically only exercised on SQLite, which has no strict boolean type and silently accepted an
