@@ -653,7 +653,18 @@ def test_pg_alembic_migration_nonempty_and_explain(monkeypatch):
                 "WHERE marketplace_account_id='a' AND external_product_id='OF-TARGET' "
                 "AND promotion_id='PR-T' AND source='api' "
                 "ORDER BY fetched_at DESC, created_at DESC, id DESC LIMIT 1").fetchall())
+            # explicit unassigned (product_id IS NULL) case — the same series index must serve it
+            null_plan = "\n".join(str(r[0]) for r in c.exec_driver_sql(
+                "EXPLAIN SELECT * FROM marketplace_price_observations "
+                "WHERE marketplace_store_id='s' AND external_product_id='E-TARGET' "
+                "AND observation_kind='catalog' AND promotion_key='__none__' AND source='api' "
+                "AND product_id IS NULL "
+                "ORDER BY fetched_at DESC, created_at DESC, id DESC LIMIT 1").fetchall())
+        print("\n[PG EXPLAIN price latest]\n" + price_plan)
+        print("\n[PG EXPLAIN promotion latest]\n" + promo_plan)
+        print("\n[PG EXPLAIN price latest, product_id IS NULL]\n" + null_plan)
         assert "ix_price_obs_series" in price_plan, price_plan
         assert "ix_promo_obs_series" in promo_plan, promo_plan
+        assert "ix_price_obs_series" in null_plan, null_plan
     finally:
         eng.dispose()

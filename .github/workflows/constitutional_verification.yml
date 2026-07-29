@@ -92,7 +92,7 @@ jobs:
           PULT_TEST_PG_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/pult_explain
           PULT_TEST_PG_ALEMBIC_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/pult_explain
         run: |
-          pytest -p no:cacheprovider -q -rs \
+          pytest -p no:cacheprovider -q -s -rA \
             tests/test_change_only_observations.py::test_pg_alembic_migration_nonempty_and_explain
 
   # Proves the FULL Alembic chain runs on the database production actually uses. The chain was
