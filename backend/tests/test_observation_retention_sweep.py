@@ -156,7 +156,10 @@ def test_batch_error_log_has_no_secrets_and_no_traceback(monkeypatch, caplog):
     monkeypatch.setattr(obs, "engine", e)
     monkeypatch.setattr(obs, "AsyncSessionLocal", _boom_sessionmaker(Session))
     monkeypatch.setattr(obs.settings, "observation_retention_enabled", True)
-    with caplog.at_level(logging.WARNING):
+    # An earlier migration test's alembic fileConfig can disable app loggers; re-enable + target this one.
+    monkeypatch.setattr(obs.logger, "disabled", False)
+    monkeypatch.setattr(obs.logger, "propagate", True)
+    with caplog.at_level(logging.WARNING, logger=obs.logger.name):
         res = _run(obs.run_observation_retention(now=T0))
     assert res.failed_batches == 1 and res.price_removed == 0
     txt = caplog.text
