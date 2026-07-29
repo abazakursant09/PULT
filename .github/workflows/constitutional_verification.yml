@@ -94,7 +94,11 @@ jobs:
         run: |
           pytest -p no:cacheprovider -q -s -rA \
             tests/test_change_only_observations.py::test_pg_alembic_migration_nonempty_and_explain \
-            tests/test_observation_retention_sweep.py::test_pg_functional_delete
+            tests/test_observation_retention_sweep.py::test_pg_functional_delete \
+            tests/test_observation_retention_sweep.py::test_pg_second_advisory_lock_blocks \
+            tests/test_observation_retention_sweep.py::test_pg_advisory_lock_released_after_error \
+            tests/test_observation_retention_sweep.py::test_pg_parent_delete_cascades_children_real_fk \
+            tests/test_observation_retention_sweep.py::test_pg_rollback_keeps_rows_then_next_run_continues
 
   # Proves the FULL Alembic chain runs on the database production actually uses. The chain was
   # historically only exercised on SQLite, which has no strict boolean type and silently accepted an

@@ -145,28 +145,36 @@ async def _distinct_accounts(db) -> list[str]:
 
 
 async def _sweep_table(account: str, t: _Table, params: dict, batch_size: int,
-                       dialect: str, result: RetentionResult, *, price: bool) -> None:
+                       dialect: str, result: RetentionResult, *, price: bool) -> bool:
     """Delete candidates for ONE account/table in bounded batches. One batch = one short transaction;
-    counters advance only after a successful commit; an error rolls back the current batch, marks a
-    failed batch and stops THIS account/table (a committed batch is never rolled back)."""
+    counters advance only after a successful commit; a committed batch is never rolled back. On ANY
+    error: roll back the current (uncommitted) batch, count exactly ONE failed batch, and return False
+    — the caller then stops all further cleanup of THIS account. Returns True on a clean pass.
+
+    The error is logged as a SAFE, NUMBER-ONLY fact: never logger.exception / exc_info / the exception
+    object / str(exc) / SQL / SQL parameters, any of which could carry account/store/product/SKU/
+    external/promotion identifiers. The session is closed by its context manager and never reused."""
     stmt = _delete_sql(t, dialect)
     p = dict(params, acc=account, batch=batch_size)
-    try:
-        async with AsyncSessionLocal() as db:
-            while True:
+    async with AsyncSessionLocal() as db:
+        while True:
+            try:
                 res = await db.execute(stmt, p)
                 removed = res.rowcount or 0
                 await db.commit()
-                result.batches += 1
-                if price:
-                    result.price_removed += removed
-                else:
-                    result.promotion_removed += removed
-                if removed < batch_size:
-                    break
-    except Exception:
-        result.failed_batches += 1
-        logger.exception("observation retention: batch failed (details suppressed)")
+            except Exception:
+                await db.rollback()
+                result.failed_batches += 1
+                logger.warning("observation retention: batch failed; failed_batches=%d",
+                               result.failed_batches)
+                return False
+            result.batches += 1
+            if price:
+                result.price_removed += removed
+            else:
+                result.promotion_removed += removed
+            if removed < batch_size:
+                return True
 
 
 async def _run_sweep(dry_run: bool, params: dict, batch_size: int, dialect: str,
@@ -177,8 +185,11 @@ async def _run_sweep(dry_run: bool, params: dict, batch_size: int, dialect: str,
         if dry_run:
             return
         accounts = await _distinct_accounts(db)
-    for account in accounts:                                   # each account independent, price then promo
-        await _sweep_table(account, _PRICE, params, batch_size, dialect, result, price=True)
+    for account in accounts:                                   # each account independent, its own session(s)
+        # A price-sweep failure stops ALL further cleanup of THIS account (its promotion is NOT swept);
+        # the loop then moves to the next account with a fresh session.
+        if not await _sweep_table(account, _PRICE, params, batch_size, dialect, result, price=True):
+            continue
         await _sweep_table(account, _PROMO, params, batch_size, dialect, result, price=False)
 
 

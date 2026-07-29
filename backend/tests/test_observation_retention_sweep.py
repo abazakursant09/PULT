@@ -107,6 +107,98 @@ def _ids(Session, model):
     return _run(_i())
 
 
+# Secret identifiers that a naive SQLAlchemy exception / traceback would carry (account/store/SKU/
+# external/promotion + a SQL parameter). None of these may reach the logs.
+_SECRETS = ("SECRET-ACCT-uuid", "SECRET-STORE-uuid", "SECRET-SKU", "SECRET-EXT", "SECRET-PROMO")
+
+
+def _boom_sessionmaker(real_session, *, boom_acc=None, boom_table="marketplace_price_observations"):
+    """A sessionmaker whose DELETE on `boom_table` (optionally only for account `boom_acc`) raises an
+    exception laden with secret identifiers + SQL parameters — everything else delegates to a real
+    session. Simulates a mid-batch DB failure to prove the log is safe and the account stops."""
+    class _Wrap:
+        def __init__(self):
+            self._real = real_session()
+
+        async def __aenter__(self):
+            self._s = await self._real.__aenter__()
+            return self
+
+        async def __aexit__(self, *a):
+            return await self._real.__aexit__(*a)
+
+        async def execute(self, stmt, params=None, *a, **k):
+            s = str(stmt)
+            if "DELETE" in s.upper() and boom_table in s \
+                    and (boom_acc is None or (params or {}).get("acc") == boom_acc):
+                raise RuntimeError(
+                    "simulated DB failure " + " ".join(_SECRETS)
+                    + " [SQL: DELETE FROM marketplace_price_observations WHERE ...]"
+                    + " [parameters: {'acc': '" + _SECRETS[0] + "'}]")
+            return await self._s.execute(stmt, params, *a, **k)
+
+        async def commit(self):
+            return await self._s.commit()
+
+        async def rollback(self):
+            return await self._s.rollback()
+
+    return _Wrap
+
+
+# ══ FIX 1 — SAFE LOGS ════════════════════════════════════════════════════════════
+def test_batch_error_log_has_no_secrets_and_no_traceback(monkeypatch, caplog):
+    import logging
+    e, Session = _run(_mk_db())
+    _run(_seed(Session, price=[
+        dict(id="old", external_product_id="E", resolution_status="resolved", fetched_at=T0 - timedelta(days=400)),
+        dict(id="new", external_product_id="E", resolution_status="resolved", fetched_at=T0)]))
+    monkeypatch.setattr(obs, "engine", e)
+    monkeypatch.setattr(obs, "AsyncSessionLocal", _boom_sessionmaker(Session))
+    monkeypatch.setattr(obs.settings, "observation_retention_enabled", True)
+    with caplog.at_level(logging.WARNING):
+        res = _run(obs.run_observation_retention(now=T0))
+    assert res.failed_batches == 1 and res.price_removed == 0
+    txt = caplog.text
+    for secret in _SECRETS:
+        assert secret not in txt, secret
+    assert "Traceback" not in txt and "[SQL:" not in txt and "parameters" not in txt
+    assert "batch failed" in txt and "failed_batches=1" in txt
+
+
+# ══ FIX 2 — ERROR STOPS THE WHOLE ACCOUNT ════════════════════════════════════════
+def test_price_error_stops_account_promotion_but_next_account_runs(monkeypatch):
+    e, Session = _run(_mk_db())
+    old = T0 - timedelta(days=200)
+    _run(_seed(Session,
+               price=[dict(id="A_p_old", marketplace_account_id="A", marketplace_store_id="sA",
+                           external_product_id="E", resolution_status="resolved", fetched_at=old),
+                      dict(id="A_p_new", marketplace_account_id="A", marketplace_store_id="sA",
+                           external_product_id="E", resolution_status="resolved", fetched_at=T0),
+                      dict(id="B_p_old", marketplace_account_id="B", marketplace_store_id="sB",
+                           external_product_id="E", resolution_status="resolved", fetched_at=old),
+                      dict(id="B_p_new", marketplace_account_id="B", marketplace_store_id="sB",
+                           external_product_id="E", resolution_status="resolved", fetched_at=T0)],
+               promo=[dict(id="A_q_old", marketplace_account_id="A", external_product_id="OF",
+                           promotion_id="PR", fetched_at=old),
+                      dict(id="A_q_new", marketplace_account_id="A", external_product_id="OF",
+                           promotion_id="PR", fetched_at=T0)]))
+    # only account A's PRICE delete fails -> A promotion must NOT run (on 55fcc46 it did, deleting A_q_old)
+    monkeypatch.setattr(obs, "engine", e)
+    monkeypatch.setattr(obs, "AsyncSessionLocal", _boom_sessionmaker(Session, boom_acc="A"))
+    monkeypatch.setattr(obs.settings, "observation_retention_enabled", True)
+    res = _run(obs.run_observation_retention(now=T0))
+    assert res.failed_batches == 1                                   # exactly one, for account A
+    price_ids, promo_ids = _ids(Session, MPO), _ids(Session, PO)
+    assert {"A_p_old", "A_p_new"} <= price_ids                       # A price batch rolled back -> intact
+    assert {"A_q_old", "A_q_new"} <= promo_ids                       # A promotion never swept -> intact
+    assert "B_p_old" not in price_ids and "B_p_new" in price_ids     # B cleaned by a fresh session
+    # once the fault clears, a normal re-run cleans account A too
+    monkeypatch.setattr(obs, "AsyncSessionLocal", Session)
+    _run(obs.run_observation_retention(now=T0))
+    assert _ids(Session, MPO) == {"A_p_new", "B_p_new"} and _ids(Session, PO) == {"A_q_new"}
+
+
 # ══ 9.1 FEATURE OFF ══════════════════════════════════════════════════════════════
 def test_feature_off_no_delete_no_lock(monkeypatch):
     e, Session = _run(_mk_db())
@@ -340,7 +432,183 @@ def test_guard_no_wiring():
         assert bad not in src
 
 
-# ══ 9.11 REAL PostgreSQL functional DELETE (skips locally; runs in postgres-explain CI job) ══════════
+# ══ REAL PostgreSQL 16 (skip locally; run with 0 skipped in the postgres-explain CI job) ═════════════
+def _pg_engine_or_skip():
+    url = os.environ.get("PULT_TEST_PG_URL") or os.environ.get("PULT_PG_URL")
+    if not url or not url.startswith("postgres"):
+        pytest.skip("BLOCKED_ENVIRONMENT: no PostgreSQL (PULT_TEST_PG_URL unset); runs on real "
+                    "PostgreSQL 16 in the postgres-explain CI job.")
+    return create_async_engine(
+        url.replace("+psycopg2", "+asyncpg").replace("postgresql://", "postgresql+asyncpg://"))
+
+
+async def _pg_reset(e):
+    async with e.begin() as c:                    # own fresh schema (asyncpg: one command per call)
+        await c.exec_driver_sql("DROP SCHEMA IF EXISTS public CASCADE")
+        await c.exec_driver_sql("CREATE SCHEMA public")
+        await c.run_sync(Base.metadata.create_all)
+
+
+async def _pg_seed_valid(Session):
+    """Real, valid, related rows so FK / CASCADE work for real — NO session_replication_role=replica."""
+    async with Session() as db:
+        await db.execute(text("INSERT INTO users(id,email,name,hashed_password) VALUES('u','a@b.c','A','x')"))
+        await db.execute(text("INSERT INTO workspaces(id,owner_user_id,created_at) VALUES('w','u',now())"))
+        await db.execute(text("INSERT INTO marketplace_accounts(id,workspace_id,marketplace,identity_status) "
+                              "VALUES('a','w','yandex','verified')"))
+        await db.execute(text("INSERT INTO marketplace_stores(id,marketplace_account_id,marketplace,store_key,"
+                              "external_store_id,label,source,status,created_at,updated_at) "
+                              "VALUES('st','a','yandex','st','c1','S','api','active',now(),now())"))
+        await db.commit()
+
+
+def _use_pg(monkeypatch, e, Session):
+    monkeypatch.setattr(obs, "engine", e)
+    monkeypatch.setattr(obs, "AsyncSessionLocal", Session)
+    monkeypatch.setattr(obs.settings, "observation_retention_enabled", True)
+
+
+# ── FIX 3.1 — a second run cannot take the advisory lock (real PostgreSQL) ────────
+def test_pg_second_advisory_lock_blocks(monkeypatch):
+    e = _pg_engine_or_skip()
+    Session = sessionmaker(e, class_=AsyncSession, expire_on_commit=False)
+
+    async def _go():
+        await _pg_reset(e)
+        await _pg_seed_valid(Session)
+        old = T0 - timedelta(days=200)
+        async with Session() as db:                # unassigned price rows (valid FK, no product needed)
+            for i, fa in ((0, old), (1, T0)):
+                await db.execute(MPO.__table__.insert().values(**_price_row(
+                    id=f"p{i}", marketplace_account_id="a", marketplace_store_id="st",
+                    external_product_id="E", resolution_status="unassigned", fetched_at=fa)))
+            await db.commit()
+        _use_pg(monkeypatch, e, Session)
+        lock_conn = await e.connect()              # a real, separate connection holds the SAME lock
+        got = (await lock_conn.execute(text("SELECT pg_try_advisory_lock(:n,:o)"),
+                                       {"n": obs._LOCK_NAMESPACE, "o": obs._LOCK_OPERATION})).scalar()
+        assert got is True
+        try:
+            res = await obs.run_observation_retention(now=T0)
+            async with Session() as db:
+                cnt = (await db.execute(select(func.count()).select_from(MPO))).scalar_one()
+        finally:
+            await lock_conn.execute(text("SELECT pg_advisory_unlock(:n,:o)"),
+                                    {"n": obs._LOCK_NAMESPACE, "o": obs._LOCK_OPERATION})
+            await lock_conn.close()
+        assert res.enabled is True and res.lock_acquired is False and res.price_removed == 0 and cnt == 2
+        res2 = await obs.run_observation_retention(now=T0)     # lock now free -> cleans
+        async with Session() as db:
+            ids = {r[0] for r in (await db.execute(select(MPO.id))).all()}
+        await e.dispose()
+        return res2, ids
+    res2, ids = _run(_go())
+    assert res2.lock_acquired is True and ids == {"p1"}
+
+
+# ── FIX 3.2 — the advisory lock is released after a batch error (not stuck on the pool) ───────────────
+def test_pg_advisory_lock_released_after_error(monkeypatch):
+    e = _pg_engine_or_skip()
+    Session = sessionmaker(e, class_=AsyncSession, expire_on_commit=False)
+
+    async def _go():
+        await _pg_reset(e)
+        await _pg_seed_valid(Session)
+        old = T0 - timedelta(days=200)
+        async with Session() as db:
+            for i, fa in ((0, old), (1, T0)):
+                await db.execute(MPO.__table__.insert().values(**_price_row(
+                    id=f"p{i}", marketplace_account_id="a", marketplace_store_id="st",
+                    external_product_id="E", resolution_status="unassigned", fetched_at=fa)))
+            await db.commit()
+        monkeypatch.setattr(obs, "engine", e)
+        monkeypatch.setattr(obs, "AsyncSessionLocal", _boom_sessionmaker(Session))
+        monkeypatch.setattr(obs.settings, "observation_retention_enabled", True)
+        errored = await obs.run_observation_retention(now=T0)     # got lock, batch failed, safe result
+        # prove the lock is FREE now: a fresh connection can take it
+        async with e.connect() as c:
+            free = (await c.execute(text("SELECT pg_try_advisory_lock(:n,:o)"),
+                                    {"n": obs._LOCK_NAMESPACE, "o": obs._LOCK_OPERATION})).scalar()
+            if free:
+                await c.execute(text("SELECT pg_advisory_unlock(:n,:o)"),
+                                {"n": obs._LOCK_NAMESPACE, "o": obs._LOCK_OPERATION})
+        monkeypatch.setattr(obs, "AsyncSessionLocal", Session)   # clear the fault
+        good = await obs.run_observation_retention(now=T0)       # next run takes the lock and cleans
+        async with Session() as db:
+            ids = {r[0] for r in (await db.execute(select(MPO.id))).all()}
+        await e.dispose()
+        return errored, free, good, ids
+    errored, free, good, ids = _run(_go())
+    assert errored.lock_acquired is True and errored.failed_batches == 1 and errored.price_removed == 0
+    assert free is True                                          # not stuck on a pooled connection
+    assert good.lock_acquired is True and ids == {"p1"}
+
+
+# ── FIX 3.3 — real FK ON DELETE CASCADE removes children (no session_replication_role) ────────────────
+def test_pg_parent_delete_cascades_children_real_fk(monkeypatch):
+    e = _pg_engine_or_skip()
+    Session = sessionmaker(e, class_=AsyncSession, expire_on_commit=False)
+
+    async def _go():
+        await _pg_reset(e)
+        await _pg_seed_valid(Session)
+        old = T0 - timedelta(days=200)
+        async with Session() as db:               # PARTIALLY_AUTO parents (unassigned) + mapped children
+            for pid, fa in (("Q_old", old), ("Q_new", T0)):
+                await db.execute(PO.__table__.insert().values(**_promo_row(
+                    id=pid, marketplace_account_id="a", external_product_id="OF", promotion_id="PR",
+                    provider_status="PARTIALLY_AUTO", attribution_status="exact_stores", fetched_at=fa)))
+            for sid, pid, ca in (("SE_old", "Q_old", old), ("SE_new", "Q_new", T0)):
+                await db.execute(SE.__table__.insert().values(
+                    id=sid, promotion_observation_id=pid, marketplace_account_id="a",
+                    external_store_id="c1", marketplace_store_id="st", mapping_status="mapped", created_at=ca))
+            await db.commit()
+        _use_pg(monkeypatch, e, Session)
+        res = await obs.run_observation_retention(now=T0)
+        async with Session() as db:
+            parents = {r[0] for r in (await db.execute(select(PO.id))).all()}
+            children = {r[0] for r in (await db.execute(select(SE.id))).all()}
+        await e.dispose()
+        return res, parents, children
+    res, parents, children = _run(_go())
+    assert res.promotion_removed == 1
+    assert parents == {"Q_new"}                    # old non-latest parent gone
+    assert children == {"SE_new"}                  # its child removed by real FK CASCADE, never directly
+
+
+# ── FIX 3.4 — a batch error rolls back on real PostgreSQL; the next run continues ─────────────────────
+def test_pg_rollback_keeps_rows_then_next_run_continues(monkeypatch):
+    e = _pg_engine_or_skip()
+    Session = sessionmaker(e, class_=AsyncSession, expire_on_commit=False)
+
+    async def _go():
+        await _pg_reset(e)
+        await _pg_seed_valid(Session)
+        old = T0 - timedelta(days=200)
+        async with Session() as db:
+            for i, fa in ((0, old), (1, T0)):
+                await db.execute(MPO.__table__.insert().values(**_price_row(
+                    id=f"p{i}", marketplace_account_id="a", marketplace_store_id="st",
+                    external_product_id="E", resolution_status="unassigned", fetched_at=fa)))
+            await db.commit()
+        monkeypatch.setattr(obs, "engine", e)
+        monkeypatch.setattr(obs, "AsyncSessionLocal", _boom_sessionmaker(Session))
+        monkeypatch.setattr(obs.settings, "observation_retention_enabled", True)
+        errored = await obs.run_observation_retention(now=T0)
+        async with Session() as db:
+            after_err = {r[0] for r in (await db.execute(select(MPO.id))).all()}
+        monkeypatch.setattr(obs, "AsyncSessionLocal", Session)   # next run: fresh sessions, continues
+        good = await obs.run_observation_retention(now=T0)
+        async with Session() as db:
+            after_good = {r[0] for r in (await db.execute(select(MPO.id))).all()}
+        await e.dispose()
+        return errored, after_err, good, after_good
+    errored, after_err, good, after_good = _run(_go())
+    assert errored.failed_batches == 1 and after_err == {"p0", "p1"}   # rolled back — nothing deleted
+    assert good.price_removed == 1 and after_good == {"p1"}            # next run cleans the old non-latest
+
+
+# ══ existing functional DELETE (synthetic seed with FK bypass — kept as-is) ══════════════════════════
 def test_pg_functional_delete(monkeypatch):
     url = os.environ.get("PULT_TEST_PG_URL") or os.environ.get("PULT_PG_URL")
     if not url or not url.startswith("postgres"):
