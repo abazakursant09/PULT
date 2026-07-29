@@ -441,10 +441,11 @@ def test_observation_writer_is_flag_gated_and_unscheduled():
         src = open(path, encoding="utf-8").read()
         if "MarketplacePriceObservation" in src or "marketplace_price_observations" in src:
             refs.append(rel)
-    # The ONLY production reference is the shared change-only writer (PULT-LAUNCH-2.5E-1). The
-    # per-marketplace ingest modules assemble the evidence and delegate the actual write to it, so the
-    # table is touched from exactly ONE module — an even tighter pre-enable gate than before.
-    assert sorted(refs) == ["services/marketplace/ingest/change_only.py"], refs
+    # The ONLY production references are the shared change-only WRITER (2.5E-1) and the retention SWEEP
+    # (2.5E-2B-2, feature OFF, unscheduled) — the two sanctioned modules that touch the table; nothing
+    # else reads or writes it.
+    assert sorted(refs) == ["services/marketplace/ingest/change_only.py",
+                            "services/marketplace/retention/observation_sweep.py"], refs
 
     from config import settings
     assert settings.api_data_sync_enabled is False        # master switch OFF by default
