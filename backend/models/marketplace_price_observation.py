@@ -226,4 +226,8 @@ class MarketplacePriceObservation(Base):
         # fingerprint are deliberately NOT indexed (the fingerprint is compared, never searched).
         Index("ix_price_obs_series", "marketplace_store_id", "external_product_id",
               "observation_kind", "promotion_key", "source", "fetched_at"),
+        # PULT-LAUNCH-2.5E-2B-1 — per-account age scan for the future retention sweep (keyed by
+        # fetched_at, the evidence time, NOT created_at). Mirrors the promotion table's existing
+        # ix_promo_obs_account_time. Schema only; nothing prunes any row yet.
+        Index("ix_price_obs_account_time", "marketplace_account_id", "fetched_at"),
     )
