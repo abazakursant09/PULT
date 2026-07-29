@@ -97,6 +97,11 @@ class Settings(BaseSettings):
     # Master switch for the L4 automation scheduler. Off by default — L4 actions
     # only fire when this is on AND a per-user AutomationRule is enabled.
     automation_enabled: bool = False
+    # PULT-LAUNCH-2.5E-2: master switch for observation-history retention (change-only price/promotion
+    # observations). OFF by default and NOT seller-controlled. It is INDEPENDENT of api_data_sync_enabled
+    # and automation_enabled and, on its own, starts NO work: no cleanup service, no DELETE, no scheduler
+    # tick. It only gates a future retention sweep (2.5E-2B-2). While false, nothing prunes any row.
+    observation_retention_enabled: bool = False
 
     # How many products one connection's review auto-sync processes per scheduler cycle. A conservative
     # technical default (NOT an official WB/Ozon rate limit) that bounds the request burst; the cursor
