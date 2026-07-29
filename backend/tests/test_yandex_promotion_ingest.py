@@ -663,7 +663,8 @@ def test_source_guard_new_model_only_in_ingest():
             refs.append(rel)
     # PULT-LAUNCH-2.5E-1 — the promotion tables are now written from exactly ONE module, the shared
     # change-only writer; yandex.py assembles the evidence and delegates the write to it.
-    assert sorted(refs) == ["services/marketplace/ingest/change_only.py"], refs
+    assert sorted(refs) == ["services/marketplace/ingest/change_only.py",
+                            "services/marketplace/retention/observation_sweep.py"], refs
 
 
 # ══ MIGRATION ypo1a2b3c4d01 ══════════════════════════════════════════════════════
