@@ -351,7 +351,8 @@ def test_pg_functional_delete(monkeypatch):
 
     async def _go():
         async with e.begin() as c:                    # self-isolating: own fresh schema
-            await c.exec_driver_sql("DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public")
+            await c.exec_driver_sql("DROP SCHEMA IF EXISTS public CASCADE")   # asyncpg: one command per call
+            await c.exec_driver_sql("CREATE SCHEMA public")
             await c.run_sync(Base.metadata.create_all)
         old = T0 - timedelta(days=200)
         async with Session() as db:
