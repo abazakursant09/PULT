@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useCallback, useEffect, useState } from 'react'
+import { useParams } from 'next/navigation'
 import { api, type ImportConflictRow } from '@/lib/api'
 import { LedgerShell } from '@/components/stores/LedgerShell'
 import { ErrorState } from '@/components/system/ErrorState'
@@ -14,8 +15,8 @@ import { ErrorState } from '@/components/system/ErrorState'
 
 type Action = 'link_existing' | 'create_new' | 'leave_unassigned'
 
-export default function ConflictsPage({ params }: { params: { importId: string } }) {
-  const { importId } = params
+export default function ConflictsPage() {
+  const { importId } = useParams<{ importId: string }>()
   const [rows, setRows] = useState<ImportConflictRow[] | null>(null)
   const [failed, setFailed] = useState(false)
   const [busyRow, setBusyRow] = useState<string | null>(null)

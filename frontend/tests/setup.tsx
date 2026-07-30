@@ -25,6 +25,10 @@ vi.mock('next/navigation', () => {
     useRouter: () => router,
     usePathname: () => '/dashboard',
     useSearchParams: () => new URLSearchParams(),
+    // Dynamic-route pages read their segment via useParams() (Next 15 client-component pattern,
+    // React-18 compatible). Tests render them with fixed ids (st-1 / imp-1); one stable object
+    // covers every dynamic page under test — each picks the key it needs.
+    useParams: () => ({ storeId: 'st-1', importId: 'imp-1' }),
   }
 })
 

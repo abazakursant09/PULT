@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useCallback, useEffect, useState } from 'react'
+import { useParams } from 'next/navigation'
 import { api, type ImportConfirmResponse, type ImportPreviewResponse, type StoreRef } from '@/lib/api'
 import { LedgerShell, LedgerFigure } from '@/components/stores/LedgerShell'
 import { CsvDropzone } from '@/components/stores/CsvDropzone'
@@ -47,8 +48,8 @@ function typeLabel(t: string | null | undefined): string {
   return IMPORT_TYPE_LABEL[t] ?? t
 }
 
-export default function StoreImportPage({ params }: { params: { storeId: string } }) {
-  const { storeId } = params
+export default function StoreImportPage() {
+  const { storeId } = useParams<{ storeId: string }>()
 
   const [store, setStore]   = useState<StoreRef | null>(null)
   const [head, setHead]     = useState<'loading' | 'ready' | 'blocked'>('loading')
