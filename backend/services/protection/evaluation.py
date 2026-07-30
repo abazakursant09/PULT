@@ -60,6 +60,8 @@ from services.source_policy.product_money_reader import api_product_count
 from services.source_policy.money_reader import _period_filter
 from services.source_policy import dataset_authority as da
 from services.protection.cost_map import resolve_metric_money, MONEY_METRICS
+from services.protection.observation_resolver import resolve_current_observation, CONFLICT
+from config import settings
 
 WINDOW_DAYS = DEFAULT_RETURN_WINDOW_DAYS   # 90
 # storage/acquiring/last_mile have no marketplace-operation source on master; they are resolved only
@@ -355,24 +357,61 @@ async def _gather(db, *, policy: ProtectionPolicy, store: MarketplaceStore, prod
     marketplace = store.marketplace
     period = _period(now)
 
-    price, price_source, price_conflict, price_fetched = await _resolve_price(
-        db, store_id=store.id, product_id=product.id, marketplace=marketplace, now=now)
-
     csv_units = await _csv_units(db, store_id=store.id, product_id=product.id, period=period)
 
     cost_lines: list[CostLine] = []
     conflicts: list[str] = []
-    pf = _fresh(price_source, price_fetched, now, {"currency_unconfirmed": True, "warning_only": True})
-    if price_source is not None and price_fetched is None:
-        pf["freshness"] = "freshness_unknown"
-    freshness: dict = {"candidate_price": pf}
-    if price_conflict:
-        conflicts.append("price")
-    # The sale currency of the catalog price cannot be proven (no stored currency anywhere), so the
-    # ECONOMIC result must be blocked: a currency_unconfirmed conflict forces calculation_status to
-    # conflict → economic_verdict / projected_contribution stay NULL and the price is warning-only.
-    if price is not None:
-        conflicts.append("currency_unconfirmed")
+    currency: Optional[str] = None
+    freshness: dict = {}
+
+    # PULT-LAUNCH-2.5F-B advisory bridge — proven API price/currency observations, read ONLY when BOTH
+    # flags are on. Otherwise ZERO observation SELECTs and the unchanged CSV path below runs. Advisory
+    # only: promo_price_proven / commission_official_tariff / provider_capability_confirmed stay False at
+    # the return, so nothing here can make the evaluation executable.
+    obs = None
+    if settings.api_data_sync_enabled and settings.protection_use_observations:
+        obs = await resolve_current_observation(
+            db, marketplace_account_id=store.marketplace_account_id, marketplace_store_id=store.id,
+            product_id=product.id, marketplace=marketplace, evaluated_at=now,
+            freshness_threshold_seconds=None)
+
+    if obs is not None and obs.price_usable() and obs.currency_proven:
+        # A proven API buyer/promo price with a PROVEN currency: adopt it as the advisory candidate. The
+        # currency_unconfirmed conflict (which pins the CSV catalog price) no longer applies. A buyer
+        # price is NEVER treated as seller revenue — seller_revenue stays unknown via the money metrics.
+        price = obs.candidate_buyer_price
+        price_source = "api"
+        currency = obs.currency
+        pf = _fresh(price_source, obs.fetched_at, now,
+                    {"kind": obs.price_kind, "currency_proven": True, "warning_only": True,
+                     "provenance": "observation_api"})
+        pf["freshness"] = obs.freshness
+        freshness["candidate_price"] = pf
+        freshness["observation"] = obs.as_evidence()
+    else:
+        # CSV advisory path — unchanged. The sale currency of the CSV catalog price cannot be proven (no
+        # stored currency), so a currency_unconfirmed conflict forces calculation_status to conflict →
+        # economic_verdict / projected_contribution stay NULL and the price is warning-only.
+        price, price_source, price_conflict, price_fetched = await _resolve_price(
+            db, store_id=store.id, product_id=product.id, marketplace=marketplace, now=now)
+        pf = _fresh(price_source, price_fetched, now, {"currency_unconfirmed": True, "warning_only": True})
+        if price_source is not None and price_fetched is None:
+            pf["freshness"] = "freshness_unknown"
+        freshness["candidate_price"] = pf
+        if price_conflict:
+            conflicts.append("price")
+        if price is not None:
+            conflicts.append("currency_unconfirmed")
+        if obs is not None:
+            # bridge on but not adopted: record the explicit fallback. An ambiguous API find suppresses
+            # the exact economic result (source_conflict); stale/missing is a silent, recorded fallback.
+            ev = obs.as_evidence()
+            if obs.status == CONFLICT:
+                ev["fallback_reason"] = "observation_conflict"
+                conflicts.append("price")
+            else:
+                ev["fallback_reason"] = obs.status
+            freshness["observation"] = ev
 
     # money metrics — a per-unit cost needs the money magnitude AND a proven SALE-quantity denominator
     # from a COMPATIBLE source. CSV money ⇒ CSV finance units (same finance source). API money has NO
@@ -446,11 +485,12 @@ async def _gather(db, *, policy: ProtectionPolicy, store: MarketplaceStore, prod
                          "evaluated_at": now.isoformat(), "threshold_seconds": None}
     freshness["taxes"]["provenance"] = "seller_confirmed_tax_setting"
 
-    # currency of the SALE is never inferred — not from a manual-cost currency, not a default RUB.
-    # It is unprovable on master (see currency_unconfirmed conflict above), so it stays None.
+    # currency of the SALE is never inferred — not from a manual-cost currency, not a default RUB. It is
+    # None unless a proven API observation supplied it (bridge above); on the CSV path it stays None and
+    # the currency_unconfirmed conflict blocks the economic result.
     return ContributionInputs(
         marketplace=marketplace, store_id=store.id, product_id=product.id, promo_id=None,
-        candidate_buyer_price=price, promo_price_proven=False, currency=None,
+        candidate_buyer_price=price, promo_price_proven=False, currency=currency,
         cogs=cogs, cost_lines=cost_lines, commission_official_tariff=False,
         returns=returns, include_ad_spend=policy.include_ad_spend,
         source_conflicts=conflicts, provider_capability_confirmed=False,

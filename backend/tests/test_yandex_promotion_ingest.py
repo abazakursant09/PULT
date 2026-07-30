@@ -661,10 +661,12 @@ def test_source_guard_new_model_only_in_ingest():
         src = open(path, encoding="utf-8").read()
         if "MarketplacePromotionObservation" in src or "marketplace_promotion_observations" in src:
             refs.append(rel)
-    # PULT-LAUNCH-2.5E-1 — the promotion tables are now written from exactly ONE module, the shared
-    # change-only writer; yandex.py assembles the evidence and delegates the write to it.
+    # PULT-LAUNCH-2.5E-1 — the promotion tables are WRITTEN from exactly ONE module, the shared
+    # change-only writer; yandex.py assembles the evidence and delegates the write to it. The retention
+    # sweep and the read-only advisory resolver (2.5F-B, SELECT-only, feature OFF) also reference them.
     assert sorted(refs) == ["services/marketplace/ingest/change_only.py",
-                            "services/marketplace/retention/observation_sweep.py"], refs
+                            "services/marketplace/retention/observation_sweep.py",
+                            "services/protection/observation_resolver.py"], refs
 
 
 # ══ MIGRATION ypo1a2b3c4d01 ══════════════════════════════════════════════════════

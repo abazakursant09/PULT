@@ -106,6 +106,14 @@ class Settings(BaseSettings):
     # even if observation_retention_enabled is accidentally turned on, the sweep only COUNTS candidates
     # and deletes NOTHING until an operator explicitly sets this False. NOT seller-controlled, no endpoint.
     observation_retention_dry_run: bool = True
+    # PULT-LAUNCH-2.5F-B: operator-only switch for the advisory observations→protection-evaluation
+    # bridge. OFF by default and NOT seller-controlled, no endpoint. The bridge reads proven API
+    # price/currency/promotion observations for the protection evaluation ONLY when BOTH this AND
+    # api_data_sync_enabled are True; with either false the evaluation runs its unchanged CSV advisory
+    # path and issues ZERO observation SELECTs. It is INDEPENDENT of automation_enabled and never
+    # unlocks an executable action (promo_price_proven / commission_official_tariff /
+    # provider_capability_confirmed stay hard-False regardless).
+    protection_use_observations: bool = False
 
     # How many products one connection's review auto-sync processes per scheduler cycle. A conservative
     # technical default (NOT an official WB/Ozon rate limit) that bounds the request burst; the cursor

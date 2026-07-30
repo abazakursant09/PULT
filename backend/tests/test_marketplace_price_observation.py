@@ -441,11 +441,17 @@ def test_observation_writer_is_flag_gated_and_unscheduled():
         src = open(path, encoding="utf-8").read()
         if "MarketplacePriceObservation" in src or "marketplace_price_observations" in src:
             refs.append(rel)
-    # The ONLY production references are the shared change-only WRITER (2.5E-1) and the retention SWEEP
-    # (2.5E-2B-2, feature OFF, unscheduled) — the two sanctioned modules that touch the table; nothing
-    # else reads or writes it.
+    # The ONLY production references are the shared change-only WRITER (2.5E-1), the retention SWEEP
+    # (2.5E-2B-2, feature OFF, unscheduled), and the read-only advisory RESOLVER (2.5F-B, feature OFF) —
+    # the sanctioned modules that touch the table; the resolver only SELECTs (asserted below).
     assert sorted(refs) == ["services/marketplace/ingest/change_only.py",
-                            "services/marketplace/retention/observation_sweep.py"], refs
+                            "services/marketplace/retention/observation_sweep.py",
+                            "services/protection/observation_resolver.py"], refs
+    # the resolver is READ-ONLY: it never writes the observation tables (2.5F-B advisory bridge).
+    import services.protection.observation_resolver as _orv
+    _resolver_src = inspect.getsource(_orv).lower()
+    for _verb in ("insert(", "update(", "delete(", ".add(", ".commit(", ".flush("):
+        assert _verb not in _resolver_src, f"observation_resolver must not call {_verb}"
 
     from config import settings
     assert settings.api_data_sync_enabled is False        # master switch OFF by default
