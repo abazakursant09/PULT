@@ -7,6 +7,13 @@ logger = logging.getLogger(__name__)
 
 _INSECURE_VALUES = {"change_me", "change_me_use_openssl_rand_hex_32",
                     "dev-secret-key-change-in-production", ""}
+# SECURITY-2A — a weak/default SECRET_KEY is tolerated ONLY in these explicit local environments.
+# Every other value of APP_ENV (production, staging, beta, or an unknown/misspelled string) is treated
+# as non-development and is fail-closed: an unrecognised APP_ENV must never silently become development.
+_DEV_ENVS = {"development", "test", "local"}
+# Minimum acceptable SECRET_KEY length (chars). `openssl rand -hex 32` yields 64; 32 is the floor. The
+# key value itself is NEVER logged or included in any error message — only its length is inspected.
+_MIN_SECRET_LEN = 32
 
 
 class Settings(BaseSettings):
@@ -150,41 +157,56 @@ if not settings.yookassa_return_url:
 #   DATABASE_URL — must be a real (PostgreSQL) database, not SQLite
 #   CRED_ENC_KEY — encrypts stored marketplace tokens at rest (else RuntimeError)
 #   SMTP_HOST    — delivers email verification / password-reset links (P7.1)
-if settings.app_env == "production":
+# SECURITY-2A — resolve the environment once, case-insensitively. An unknown/misspelled APP_ENV is
+# NOT a dev env, so it inherits the non-dev fail-closed path below (never a silent downgrade).
+_env = (settings.app_env or "").strip().lower()
+_is_dev_env = _env in _DEV_ENVS
+# A SECRET_KEY is weak if it is a known default/empty OR shorter than the floor. Length only — the value
+# is never inspected beyond its length and never printed.
+_secret_weak = settings.secret_key in _INSECURE_VALUES or len(settings.secret_key) < _MIN_SECRET_LEN
+
+if not _is_dev_env:
     errors: list[str] = []
-    if settings.secret_key in _INSECURE_VALUES:
-        errors.append("SECRET_KEY is not set or uses insecure default (openssl rand -hex 32)")
-    if "sqlite" in settings.database_url:
-        errors.append("DATABASE_URL points to SQLite — use PostgreSQL in production")
+    # Secret perimeter — enforced in EVERY non-development environment (production, staging, beta, …).
+    if _secret_weak:
+        errors.append(
+            "SECRET_KEY is missing, a known insecure default, or shorter than "
+            f"{_MIN_SECRET_LEN} chars — set a strong random value (openssl rand -hex 32)")
     if not settings.cred_enc_key:
         errors.append("CRED_ENC_KEY is not set — required to encrypt marketplace tokens at rest")
-    if not settings.smtp_host:
-        errors.append("SMTP_HOST is not set — email verification / password reset cannot be delivered")
-    if "localhost" in settings.frontend_url or "127.0.0.1" in settings.frontend_url:
-        # A localhost FRONTEND_URL makes every verification / password-reset link a dead 404,
-        # so no seller can complete signup. This is a launch showstopper, not an advisory — fail loud.
-        errors.append("FRONTEND_URL points to localhost — verification / reset links would 404 for every seller")
+    # Operational launch checks are production-specific (a staging/beta box may legitimately differ on
+    # database / SMTP / host); the secret checks above already cover every non-dev environment.
+    if settings.app_env == "production":
+        if "sqlite" in settings.database_url:
+            errors.append("DATABASE_URL points to SQLite — use PostgreSQL in production")
+        if not settings.smtp_host:
+            errors.append("SMTP_HOST is not set — email verification / password reset cannot be delivered")
+        if "localhost" in settings.frontend_url or "127.0.0.1" in settings.frontend_url:
+            # A localhost FRONTEND_URL makes every verification / password-reset link a dead 404,
+            # so no seller can complete signup. This is a launch showstopper, not an advisory — fail loud.
+            errors.append("FRONTEND_URL points to localhost — verification / reset links would 404 for every seller")
     if errors:
         for e in errors:
-            logger.critical("[ПУЛЬТ] PRODUCTION CONFIG ERROR: %s", e)
+            logger.critical("[ПУЛЬТ] CONFIG ERROR (app_env=%s): %s", settings.app_env, e)
         sys.exit(
-            "[ПУЛЬТ] Startup aborted. Fix production config errors:\n  - "
+            "[ПУЛЬТ] Startup aborted — this is a non-development environment. "
+            "Fix the config errors below (no secret value is shown):\n  - "
             + "\n  - ".join(errors)
         )
-    # Non-fatal production advisories — the app runs, but these should be set.
+    # Non-fatal advisories — the app runs, but these should be set.
     if not settings.sentry_dsn:
-        logger.warning("⚠️  SENTRY_DSN not set — error tracking disabled in production.")
+        logger.warning("⚠️  SENTRY_DSN not set — error tracking disabled.")
     if not settings.yookassa_secret_key:
         logger.warning("⚠️  YOOKASSA_SECRET_KEY not set — payments will fail until configured.")
 
-# ── Development / staging warnings ───────────────────────────────────────────
-if settings.secret_key in _INSECURE_VALUES:
+# ── Development / test warnings (a weak default is tolerated ONLY here) ───────
+if _is_dev_env and _secret_weak:
     logger.warning(
-        "⚠️  SECRET_KEY uses insecure default. "
-        "Set a strong value: openssl rand -hex 32"
+        "⚠️  SECRET_KEY uses an insecure/short default — allowed only in development/test. "
+        "Set a strong value before any deploy: openssl rand -hex 32"
     )
-if "sqlite" in settings.database_url and settings.app_env != "development":
+if "sqlite" in settings.database_url and not _is_dev_env:
     logger.warning(
-        "⚠️  SQLite is not suitable for production. "
+        "⚠️  SQLite is not suitable outside development. "
         "Set DATABASE_URL to postgresql+asyncpg://..."
     )
