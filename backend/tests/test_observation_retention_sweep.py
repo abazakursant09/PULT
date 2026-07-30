@@ -630,8 +630,11 @@ def test_pg_statement_timeout_rolls_back_batch(monkeypatch):
                 "marketplace_store_id,product_id,external_product_id,resolution_status,observation_kind,"
                 "promotion_key,currency_status,seller_revenue_status,commission_base_status,subsidy_status,"
                 "source,fetched_at,last_verified_at,missing_fields,created_at)"
+                # distinct params per column: fetched_at/created_at are timestamp, last_verified_at is
+                # timestamptz -> one shared placeholder makes asyncpg deduce inconsistent types for $1.
                 " SELECT 'p'||g,'r'||g,'a','st',NULL,'E','unassigned','catalog','__none__','unknown',"
-                "'unknown','unknown','unknown','api',:o,:o,'[]',:o FROM generate_series(1,5000) g"), {"o": old})
+                "'unknown','unknown','unknown','api',:fa,:lv,'[]',:cr FROM generate_series(1,5000) g"),
+                {"fa": old, "lv": old, "cr": old})
             await db.commit()
         monkeypatch.setattr(obs, "engine", e)
         monkeypatch.setattr(obs, "AsyncSessionLocal", Session)
@@ -645,6 +648,40 @@ def test_pg_statement_timeout_rolls_back_batch(monkeypatch):
     res, n = _run(_go())
     assert res.failed_batches >= 1 and res.price_removed == 0    # statement_timeout -> rolled back
     assert n == 5000                                             # every row intact (nothing committed)
+
+
+# ── FIX 3b — SET LOCAL lock_timeout fires per batch when a row lock is held → rollback (real PostgreSQL) ──
+def test_pg_lock_timeout_rolls_back_batch(monkeypatch):
+    e = _pg_engine_or_skip()
+    Session = sessionmaker(e, class_=AsyncSession, expire_on_commit=False)
+
+    async def _go():
+        await _pg_reset(e)
+        await _pg_seed_valid(Session)
+        old = T0 - timedelta(days=200)
+        async with Session() as db:                # p0 = old non-latest (the doomed row), p1 = latest (kept)
+            for i, fa in ((0, old), (1, T0)):
+                await db.execute(MPO.__table__.insert().values(**_price_row(
+                    id=f"p{i}", marketplace_account_id="a", marketplace_store_id="st",
+                    external_product_id="E", resolution_status="unassigned", fetched_at=fa)))
+            await db.commit()
+        _use_pg(monkeypatch, e, Session)
+        monkeypatch.setattr(obs, "_LOCK_TIMEOUT", "1ms")   # SET LOCAL per batch -> the DELETE cannot wait
+        lock_conn = await e.connect()                       # a separate open txn holds a row lock on p0
+        await lock_conn.execute(text("SELECT id FROM marketplace_price_observations "
+                                     "WHERE id='p0' FOR UPDATE"))
+        try:
+            res = await obs.run_observation_retention(now=T0, batch_size=5000)   # DELETE p0 blocks -> lock_timeout
+            async with Session() as db:
+                n = (await db.execute(select(func.count()).select_from(MPO))).scalar_one()
+        finally:
+            await lock_conn.rollback()                      # release the held row lock
+            await lock_conn.close()
+        await e.dispose()
+        return res, n
+    res, n = _run(_go())
+    assert res.failed_batches >= 1 and res.price_removed == 0    # lock_timeout -> rolled back, not deleted
+    assert n == 2                                               # both rows intact (nothing committed)
 
 
 # ── FIX 4 — the per-run deadline is checked BETWEEN batches → timed_out, next run continues ───────────
