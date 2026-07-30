@@ -623,7 +623,7 @@ def test_pg_statement_timeout_rolls_back_batch(monkeypatch):
     async def _go():
         await _pg_reset(e)
         await _pg_seed_valid(Session)
-        old = (T0 - timedelta(days=200)).isoformat(sep=" ")
+        old = T0 - timedelta(days=200)             # bind a datetime, not a str: asyncpg types each param per column
         async with Session() as db:                # 5000 rows in one series -> a DELETE slow enough to trip 1ms
             await db.execute(text(
                 "INSERT INTO marketplace_price_observations(id,ingest_run_id,marketplace_account_id,"
