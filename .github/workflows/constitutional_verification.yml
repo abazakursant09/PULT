@@ -98,7 +98,11 @@ jobs:
             tests/test_observation_retention_sweep.py::test_pg_second_advisory_lock_blocks \
             tests/test_observation_retention_sweep.py::test_pg_advisory_lock_released_after_error \
             tests/test_observation_retention_sweep.py::test_pg_parent_delete_cascades_children_real_fk \
-            tests/test_observation_retention_sweep.py::test_pg_rollback_keeps_rows_then_next_run_continues
+            tests/test_observation_retention_sweep.py::test_pg_rollback_keeps_rows_then_next_run_continues \
+            tests/test_observation_retention_sweep.py::test_pg_statement_timeout_rolls_back_batch \
+            tests/test_observation_retention_sweep.py::test_pg_lock_timeout_rolls_back_batch \
+            tests/test_observation_retention_sweep.py::test_pg_deadline_between_batches_timed_out \
+            tests/test_observation_retention_sweep.py::test_pg_dry_run_counts_only
 
   # Proves the FULL Alembic chain runs on the database production actually uses. The chain was
   # historically only exercised on SQLite, which has no strict boolean type and silently accepted an

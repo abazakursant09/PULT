@@ -134,8 +134,8 @@ _RETENTION_PKG = "services/marketplace/retention/"
 
 
 def test_only_the_retention_package_deletes_or_locks():
-    # Outside the sanctioned retention package, NO production module deletes from the observation tables
-    # or takes the advisory lock. (The change-only writer only SELECT/INSERTs.)
+    # The actual DELETE against the observation tables and the advisory lock live ONLY in the retention
+    # package. The scheduler (2.5E-3B) may CALL run_observation_retention, but must not delete/lock itself.
     import glob
     offenders = []
     for path in glob.glob(str(_BACKEND / "**" / "*.py"), recursive=True):
@@ -145,28 +145,35 @@ def test_only_the_retention_package_deletes_or_locks():
         low = open(path, encoding="utf-8").read().lower()
         if "delete from marketplace_price_observations" in low \
                 or "delete from marketplace_promotion_observations" in low \
-                or "pg_advisory" in low or "pg_try_advisory" in low \
-                or "observation_sweep" in low or "run_observation_retention" in low:
+                or "pg_advisory" in low or "pg_try_advisory" in low:
             offenders.append(rel)
     assert offenders == [], offenders
 
 
-def test_scheduler_untouched_by_retention():
+def test_scheduler_wires_retention_via_one_tick_no_second_loop():
+    # PULT-LAUNCH-2.5E-3B: the scheduler wires retention through a single tick + a tracked task, inside
+    # the ONE existing loop — never a second scheduler, never an inline await of the sweep, never a
+    # direct DELETE/advisory lock.
     sched = _read("tasks/scheduler.py")
-    assert "observation_retention" not in sched
-    assert "observation_sweep" not in sched
+    assert "_observation_retention_tick" in sched
+    assert "run_observation_retention" in sched
+    assert sched.count("while True") == 1
+    low = sched.lower()
+    assert "delete from marketplace_" not in low and "pg_advisory" not in low
 
 
-def test_flag_read_only_by_the_retention_package():
-    # The flag gates ONLY the sweep service; no other module reads it to start work, and no scheduler
-    # tick or endpoint invokes the sweep in this slice.
+def test_flag_read_only_by_retention_package_and_scheduler():
+    # The retention flags gate ONLY the sweep service and the scheduler tick — no other module reads them
+    # to start work, and there is no endpoint.
     import glob
+    allowed = (_RETENTION_PKG, "tasks/scheduler.py")
     readers = []
     for path in glob.glob(str(_BACKEND / "**" / "*.py"), recursive=True):
         rel = os.path.relpath(path, _BACKEND).replace("\\", "/")
         if rel.startswith("tests/") or rel == "config.py" or "alembic/versions/" in rel \
-                or rel.startswith(_RETENTION_PKG):
+                or rel.startswith(_RETENTION_PKG) or rel in allowed:
             continue
-        if "observation_retention_enabled" in open(path, encoding="utf-8").read():
+        if "observation_retention_enabled" in open(path, encoding="utf-8").read() \
+                or "observation_retention_dry_run" in open(path, encoding="utf-8").read():
             readers.append(rel)
     assert readers == [], readers
