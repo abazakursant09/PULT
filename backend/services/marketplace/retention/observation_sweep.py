@@ -57,6 +57,15 @@ assert 0 < _LOCK_NAMESPACE < 2 ** 31 and 0 < _LOCK_OPERATION < 2 ** 31
 _local_lock = asyncio.Lock()
 
 
+# Per-batch PostgreSQL guards (constant SQL — never operator/user input). SET LOCAL is re-issued inside
+# every batch transaction (it lasts only until that transaction commits).
+_STATEMENT_TIMEOUT = "30s"
+_LOCK_TIMEOUT = "5s"
+# A whole sweep is bounded so it can never run past its hourly slot; checked BETWEEN batches so a
+# committed batch is never split. The scheduler passes this; the service default is None (no limit).
+DEFAULT_MAX_DURATION_SECONDS = 600
+
+
 @dataclass
 class RetentionResult:
     enabled: bool
@@ -71,6 +80,9 @@ class RetentionResult:
     child_rows_removed: Optional[int] = None
     batches: int = 0
     failed_batches: int = 0
+    # True ONLY when a real per-run deadline was reached between batches (never for dry-run, disabled,
+    # or a busy advisory lock). The scheduler treats timed_out as a failed run.
+    timed_out: bool = False
     duration_ms: int = 0
 
 
@@ -144,21 +156,31 @@ async def _distinct_accounts(db) -> list[str]:
     return [r[0] for r in rows.all()]
 
 
-async def _sweep_table(account: str, t: _Table, params: dict, batch_size: int,
-                       dialect: str, result: RetentionResult, *, price: bool) -> bool:
-    """Delete candidates for ONE account/table in bounded batches. One batch = one short transaction;
-    counters advance only after a successful commit; a committed batch is never rolled back. On ANY
-    error: roll back the current (uncommitted) batch, count exactly ONE failed batch, and return False
-    — the caller then stops all further cleanup of THIS account. Returns True on a clean pass.
+async def _sweep_table(account: str, t: _Table, params: dict, batch_size: int, dialect: str,
+                       result: RetentionResult, *, price: bool, deadline: Optional[float] = None) -> str:
+    """Delete candidates for ONE account/table in bounded batches. Returns 'ok' (clean), 'failed' (a
+    batch errored → caller skips the rest of THIS account), or 'stopped' (the per-run deadline was
+    reached between batches → caller stops the WHOLE sweep). One batch = one short transaction;
+    counters advance only after a successful commit; a committed batch is never rolled back.
 
-    The error is logged as a SAFE, NUMBER-ONLY fact: never logger.exception / exc_info / the exception
-    object / str(exc) / SQL / SQL parameters, any of which could carry account/store/product/SKU/
-    external/promotion identifiers. The session is closed by its context manager and never reused."""
+    Each PostgreSQL batch transaction first re-issues SET LOCAL statement_timeout / lock_timeout (they
+    last only to the next commit); on SQLite these are skipped. A statement/lock timeout surfaces as a
+    normal error → the current batch rolls back, one failed batch is counted, and 'failed' is returned.
+
+    The error is a SAFE, NUMBER-ONLY log: never logger.exception / exc_info / the exception object /
+    str(exc) / SQL / SQL parameters (any of which could carry account/store/product/SKU/external/
+    promotion identifiers). The session is closed by its context manager and never reused."""
     stmt = _delete_sql(t, dialect)
     p = dict(params, acc=account, batch=batch_size)
     async with AsyncSessionLocal() as db:
         while True:
+            if deadline is not None and time.monotonic() >= deadline:
+                result.timed_out = True                    # checked BETWEEN batches — never mid-batch
+                return "stopped"
             try:
+                if dialect == "postgresql":
+                    await db.execute(text(f"SET LOCAL statement_timeout = '{_STATEMENT_TIMEOUT}'"))
+                    await db.execute(text(f"SET LOCAL lock_timeout = '{_LOCK_TIMEOUT}'"))
                 res = await db.execute(stmt, p)
                 removed = res.rowcount or 0
                 await db.commit()
@@ -167,18 +189,18 @@ async def _sweep_table(account: str, t: _Table, params: dict, batch_size: int,
                 result.failed_batches += 1
                 logger.warning("observation retention: batch failed; failed_batches=%d",
                                result.failed_batches)
-                return False
+                return "failed"
             result.batches += 1
             if price:
                 result.price_removed += removed
             else:
                 result.promotion_removed += removed
             if removed < batch_size:
-                return True
+                return "ok"
 
 
 async def _run_sweep(dry_run: bool, params: dict, batch_size: int, dialect: str,
-                     result: RetentionResult) -> None:
+                     result: RetentionResult, deadline: Optional[float] = None) -> None:
     async with AsyncSessionLocal() as db:
         result.price_candidates = int((await db.execute(_count_sql(_PRICE), params)).scalar() or 0)
         result.promotion_candidates = int((await db.execute(_count_sql(_PROMO), params)).scalar() or 0)
@@ -186,20 +208,27 @@ async def _run_sweep(dry_run: bool, params: dict, batch_size: int, dialect: str,
             return
         accounts = await _distinct_accounts(db)
     for account in accounts:                                   # each account independent, its own session(s)
-        # A price-sweep failure stops ALL further cleanup of THIS account (its promotion is NOT swept);
-        # the loop then moves to the next account with a fresh session.
-        if not await _sweep_table(account, _PRICE, params, batch_size, dialect, result, price=True):
+        st = await _sweep_table(account, _PRICE, params, batch_size, dialect, result,
+                                price=True, deadline=deadline)
+        if st == "stopped":                                    # deadline reached -> stop the WHOLE sweep
+            return
+        if st == "failed":                                     # price failed -> skip THIS account's promo
             continue
-        await _sweep_table(account, _PROMO, params, batch_size, dialect, result, price=False)
+        if await _sweep_table(account, _PROMO, params, batch_size, dialect, result,
+                              price=False, deadline=deadline) == "stopped":
+            return
 
 
 async def run_observation_retention(*, dry_run: bool = False, now: Optional[datetime] = None,
-                                    batch_size: int = DEFAULT_BATCH_SIZE) -> RetentionResult:
+                                    batch_size: int = DEFAULT_BATCH_SIZE,
+                                    max_duration: Optional[float] = None) -> RetentionResult:
     """Prune old non-latest observation change-points (feature OFF by default).
 
     While observation_retention_enabled is False this returns immediately with enabled=False — no lock is
     requested, no SQL runs, no row changes — even for dry_run. `now` is for tests only; production uses
-    the current UTC. This is NOT wired to any scheduler and has no endpoint."""
+    the current UTC. `max_duration` (seconds) bounds one whole sweep: it is checked BETWEEN batches (never
+    mid-batch, so a committed batch is never split), and when reached the whole sweep stops with
+    timed_out=True — the next run continues idempotently. There is no endpoint."""
     started = time.monotonic()
     if not settings.observation_retention_enabled:
         return RetentionResult(enabled=False, lock_acquired=False, dry_run=dry_run)
@@ -210,6 +239,7 @@ async def run_observation_retention(*, dry_run: bool = False, now: Optional[date
         "resolved_cutoff": now_utc - timedelta(days=RESOLVED_MAX_AGE_DAYS),
         "unassigned_cutoff": now_utc - timedelta(days=UNASSIGNED_MAX_AGE_DAYS),
     }
+    deadline = (started + max_duration) if max_duration is not None else None
     result = RetentionResult(enabled=True, lock_acquired=False, dry_run=dry_run)
     dialect = engine.dialect.name
 
@@ -227,7 +257,7 @@ async def run_observation_retention(*, dry_run: bool = False, now: Optional[date
                     return result
                 result.lock_acquired = True
                 try:
-                    await _run_sweep(dry_run, params, batch_size, dialect, result)
+                    await _run_sweep(dry_run, params, batch_size, dialect, result, deadline)
                 finally:
                     await lock_conn.execute(text("SELECT pg_advisory_unlock(:ns, :op)"),
                                             {"ns": _LOCK_NAMESPACE, "op": _LOCK_OPERATION})
@@ -239,7 +269,7 @@ async def run_observation_retention(*, dry_run: bool = False, now: Optional[date
                 return result
             async with _local_lock:
                 result.lock_acquired = True
-                await _run_sweep(dry_run, params, batch_size, dialect, result)
+                await _run_sweep(dry_run, params, batch_size, dialect, result, deadline)
     finally:
         result.duration_ms = int((time.monotonic() - started) * 1000)
 

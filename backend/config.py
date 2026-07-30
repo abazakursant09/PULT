@@ -100,8 +100,12 @@ class Settings(BaseSettings):
     # PULT-LAUNCH-2.5E-2: master switch for observation-history retention (change-only price/promotion
     # observations). OFF by default and NOT seller-controlled. It is INDEPENDENT of api_data_sync_enabled
     # and automation_enabled and, on its own, starts NO work: no cleanup service, no DELETE, no scheduler
-    # tick. It only gates a future retention sweep (2.5E-2B-2). While false, nothing prunes any row.
+    # tick. It only gates the retention sweep. While false, nothing prunes any row.
     observation_retention_enabled: bool = False
+    # PULT-LAUNCH-2.5E-3: operator-only dry-run switch for the retention sweep. Default True (fail-safe):
+    # even if observation_retention_enabled is accidentally turned on, the sweep only COUNTS candidates
+    # and deletes NOTHING until an operator explicitly sets this False. NOT seller-controlled, no endpoint.
+    observation_retention_dry_run: bool = True
 
     # How many products one connection's review auto-sync processes per scheduler cycle. A conservative
     # technical default (NOT an official WB/Ozon rate limit) that bounds the request burst; the cursor

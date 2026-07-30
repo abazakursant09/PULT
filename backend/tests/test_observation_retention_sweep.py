@@ -419,16 +419,20 @@ def test_aware_now_offsets_give_same_cutoff(monkeypatch):
 
 
 # ══ 9.12 GUARD ═══════════════════════════════════════════════════════════════════
-def test_guard_no_wiring():
+def test_guard_flags_off_and_sweep_is_read_delete_only():
     from pathlib import Path
     backend = Path(__file__).resolve().parents[1]
-    sched = (backend / "tasks" / "scheduler.py").read_text(encoding="utf-8")
-    assert "observation_retention" not in sched and "observation_sweep" not in sched
     from config import settings
+    # PULT-LAUNCH-2.5E-3B WIRES retention into the scheduler, but every master switch stays OFF and the
+    # dry-run switch defaults True (fail-safe).
     assert settings.observation_retention_enabled is False
+    assert settings.observation_retention_dry_run is True
     assert settings.api_data_sync_enabled is False
     assert settings.automation_enabled is False
-    # the sweep never writes / never touches provider or ingest
+    sched = (backend / "tasks" / "scheduler.py").read_text(encoding="utf-8")
+    assert sched.count("while True") == 1              # exactly ONE loop — no second scheduler
+    assert "_observation_retention_tick" in sched      # wired via a tick, not an inline await of the sweep
+    # the sweep never writes rows / never touches provider or ingest
     src = (backend / "services" / "marketplace" / "retention" / "observation_sweep.py").read_text(encoding="utf-8")
     assert "INSERT INTO" not in src.upper()
     for bad in ("requests.", "httpx.", "provider", "updatePromoOffers", "deletePromoOffers"):
@@ -609,6 +613,96 @@ def test_pg_rollback_keeps_rows_then_next_run_continues(monkeypatch):
     errored, after_err, good, after_good = _run(_go())
     assert errored.failed_batches == 1 and after_err == {"p0", "p1"}   # rolled back — nothing deleted
     assert good.price_removed == 1 and after_good == {"p1"}            # next run cleans the old non-latest
+
+
+# ── FIX 3 — SET LOCAL statement_timeout fires per batch → rollback (real PostgreSQL) ──────────────────
+def test_pg_statement_timeout_rolls_back_batch(monkeypatch):
+    e = _pg_engine_or_skip()
+    Session = sessionmaker(e, class_=AsyncSession, expire_on_commit=False)
+
+    async def _go():
+        await _pg_reset(e)
+        await _pg_seed_valid(Session)
+        old = (T0 - timedelta(days=200)).isoformat(sep=" ")
+        async with Session() as db:                # 5000 rows in one series -> a DELETE slow enough to trip 1ms
+            await db.execute(text(
+                "INSERT INTO marketplace_price_observations(id,ingest_run_id,marketplace_account_id,"
+                "marketplace_store_id,product_id,external_product_id,resolution_status,observation_kind,"
+                "promotion_key,currency_status,seller_revenue_status,commission_base_status,subsidy_status,"
+                "source,fetched_at,last_verified_at,missing_fields,created_at)"
+                " SELECT 'p'||g,'r'||g,'a','st',NULL,'E','unassigned','catalog','__none__','unknown',"
+                "'unknown','unknown','unknown','api',:o,:o,'[]',:o FROM generate_series(1,5000) g"), {"o": old})
+            await db.commit()
+        monkeypatch.setattr(obs, "engine", e)
+        monkeypatch.setattr(obs, "AsyncSessionLocal", Session)
+        monkeypatch.setattr(obs.settings, "observation_retention_enabled", True)
+        monkeypatch.setattr(obs, "_STATEMENT_TIMEOUT", "1ms")     # SET LOCAL per batch -> DELETE times out
+        res = await obs.run_observation_retention(now=T0, batch_size=5000)
+        async with Session() as db:
+            n = (await db.execute(select(func.count()).select_from(MPO))).scalar_one()
+        await e.dispose()
+        return res, n
+    res, n = _run(_go())
+    assert res.failed_batches >= 1 and res.price_removed == 0    # statement_timeout -> rolled back
+    assert n == 5000                                             # every row intact (nothing committed)
+
+
+# ── FIX 4 — the per-run deadline is checked BETWEEN batches → timed_out, next run continues ───────────
+def test_pg_deadline_between_batches_timed_out(monkeypatch):
+    e = _pg_engine_or_skip()
+    Session = sessionmaker(e, class_=AsyncSession, expire_on_commit=False)
+
+    async def _go():
+        await _pg_reset(e)
+        await _pg_seed_valid(Session)
+        old = T0 - timedelta(days=200)
+        async with Session() as db:
+            for i, fa in ((0, old), (1, T0)):
+                await db.execute(MPO.__table__.insert().values(**_price_row(
+                    id=f"p{i}", marketplace_account_id="a", marketplace_store_id="st",
+                    external_product_id="E", resolution_status="unassigned", fetched_at=fa)))
+            await db.commit()
+        monkeypatch.setattr(obs, "engine", e)
+        monkeypatch.setattr(obs, "AsyncSessionLocal", Session)
+        monkeypatch.setattr(obs.settings, "observation_retention_enabled", True)
+        timed = await obs.run_observation_retention(now=T0, max_duration=0.0)     # deadline already passed
+        async with Session() as db:
+            after = (await db.execute(select(func.count()).select_from(MPO))).scalar_one()
+        good = await obs.run_observation_retention(now=T0)                        # no deadline -> continues
+        async with Session() as db:
+            ids = {r[0] for r in (await db.execute(select(MPO.id))).all()}
+        await e.dispose()
+        return timed, after, good, ids
+    timed, after, good, ids = _run(_go())
+    assert timed.timed_out is True and timed.price_removed == 0 and after == 2   # stopped before any delete
+    assert good.timed_out is False and good.price_removed == 1 and ids == {"p1"}  # next run cleans, latest kept
+
+
+# ── scheduler dry-run vs real on real PostgreSQL ─────────────────────────────────
+def test_pg_dry_run_counts_only(monkeypatch):
+    e = _pg_engine_or_skip()
+    Session = sessionmaker(e, class_=AsyncSession, expire_on_commit=False)
+
+    async def _go():
+        await _pg_reset(e)
+        await _pg_seed_valid(Session)
+        old = T0 - timedelta(days=200)
+        async with Session() as db:
+            for i, fa in ((0, old), (1, T0)):
+                await db.execute(MPO.__table__.insert().values(**_price_row(
+                    id=f"p{i}", marketplace_account_id="a", marketplace_store_id="st",
+                    external_product_id="E", resolution_status="unassigned", fetched_at=fa)))
+            await db.commit()
+        monkeypatch.setattr(obs, "engine", e)
+        monkeypatch.setattr(obs, "AsyncSessionLocal", Session)
+        monkeypatch.setattr(obs.settings, "observation_retention_enabled", True)
+        res = await obs.run_observation_retention(now=T0, dry_run=True)
+        async with Session() as db:
+            n = (await db.execute(select(func.count()).select_from(MPO))).scalar_one()
+        await e.dispose()
+        return res, n
+    res, n = _run(_go())
+    assert res.dry_run and res.price_candidates == 1 and res.price_removed == 0 and n == 2  # counted, 0 deleted
 
 
 # ══ existing functional DELETE (synthetic seed with FK bypass — kept as-is) ══════════════════════════

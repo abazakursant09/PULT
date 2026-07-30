@@ -4,6 +4,7 @@
 """
 import asyncio
 import logging
+import time
 from datetime import datetime, timedelta
 
 from sqlalchemy import select
@@ -396,23 +397,124 @@ async def _send_weekly_reports() -> None:
             logger.exception("Failed to send weekly report to user %s", user.id)
 
 
+# ── observation retention (PULT-LAUNCH-2.5E-3) ──────────────────────────────────
+# The retention sweep is NOT awaited inline (a full sweep can take minutes and would delay every other
+# tick). Each hourly tick spawns ONE tracked asyncio.Task and returns immediately; the scheduler owns
+# that task's whole lifecycle (single loop — no second scheduler). Feature OFF by default.
+_RETENTION_INTERVAL_SECONDS = 60 * 60
+_RETENTION_ALERT_AFTER = 3                       # one Sentry alert once N consecutive runs have failed
+_last_retention_at: float | None = None          # set at run_scheduler START (not import) -> first run in 1h
+_retention_task: asyncio.Task | None = None
+_retention_consecutive_failures = 0
+
+
 async def run_scheduler() -> None:
     """Main scheduler loop — checks every minute. Also drives the L4 automation
     tick (Marketplace Execution Layer), gated by settings.automation_enabled."""
+    global _last_retention_at
     logger.info("Scheduler started (reports + L4 automation tick + measurement close)")
-    while True:
+    _last_retention_at = time.monotonic()         # first observation-retention run waits a FULL hour
+    try:
+        while True:
+            try:
+                await _send_daily_reports()
+                await _send_weekly_reports()
+                await _review_ingest_tick()
+                await _automation_tick()
+                await _measurement_close_tick()
+                await _advisory_runtime_tick()
+                await _uploads_cleanup_tick()
+                _observation_retention_tick()     # spawns/tracks a task; never awaits the sweep inline
+            except Exception:
+                logger.exception("Scheduler iteration error")
+            now = datetime.now()
+            await asyncio.sleep(60 - now.second)
+    finally:
+        await _shutdown_retention()               # on cancel/shutdown: cancel + await the retention task
+
+
+def _observation_retention_tick() -> None:
+    """Hourly, non-blocking. Feature OFF -> return (no task/lock/SQL). If a sweep is still running or the
+    hour has not elapsed -> return (never a second task). Otherwise spawn ONE tracked task and return."""
+    global _last_retention_at, _retention_task
+    if not settings.observation_retention_enabled:
+        return
+    if _retention_task is not None and not _retention_task.done():
+        return
+    now = time.monotonic()
+    if _last_retention_at is not None and now - _last_retention_at < _RETENTION_INTERVAL_SECONDS:
+        return
+    _last_retention_at = now
+    _retention_task = asyncio.create_task(_retention_run())
+    _retention_task.add_done_callback(_retention_done)
+
+
+async def _retention_run():
+    from services.marketplace.retention.observation_sweep import (
+        DEFAULT_MAX_DURATION_SECONDS, run_observation_retention)
+    # dry_run from the operator config; now=None -> production UTC; bounded to one hourly slot.
+    return await run_observation_retention(
+        dry_run=settings.observation_retention_dry_run, now=None,
+        max_duration=DEFAULT_MAX_DURATION_SECONDS)
+
+
+def _retention_done(task: "asyncio.Task") -> None:
+    """Consume the finished task's result/exception (so it is never 'never retrieved'), log SAFE numbers,
+    maintain the consecutive-failure counter, and clear the reference for the task that actually ended.
+    A shutdown cancellation is NOT a failed run; a busy advisory lock / disabled feature do not touch the
+    counter."""
+    global _retention_task, _retention_consecutive_failures
+    if task is _retention_task:
+        _retention_task = None
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.warning("observation retention: run error (details suppressed)")   # no exc/SQL/params/ids
+        failed = True
+    else:
+        res = task.result()
+        if not res.enabled or not res.lock_acquired:
+            logger.info("observation retention: skipped (disabled or another run active)")
+            return                                # neither success nor failure -> counter unchanged
+        if res.dry_run:
+            logger.info("observation retention dry-run: candidates %d price, %d promotion; duration %d ms",
+                        res.price_candidates, res.promotion_candidates, res.duration_ms)
+        else:
+            logger.info("observation retention: removed %d price, %d promotion; batches %d; failed %d; "
+                        "timed_out %s; duration %d ms", res.price_removed, res.promotion_removed,
+                        res.batches, res.failed_batches, res.timed_out, res.duration_ms)
+        failed = res.failed_batches > 0 or res.timed_out
+    if failed:
+        _retention_consecutive_failures += 1
+        if _retention_consecutive_failures == _RETENTION_ALERT_AFTER:   # exactly at N -> ONE alert
+            logger.error("observation retention: %d consecutive failed runs", _retention_consecutive_failures)
+            _retention_sentry_alert(_retention_consecutive_failures)
+    else:
+        _retention_consecutive_failures = 0       # a fully successful run resets the streak
+
+
+def _retention_sentry_alert(count: int) -> None:
+    """One explicit Sentry event (the existing channel). No-op without a DSN / sentry-sdk; never carries
+    account/store/product/SKU/external/promotion ids, exception objects, SQL, or SQL params."""
+    try:
+        import sentry_sdk
+        sentry_sdk.capture_message(
+            "observation retention: %d consecutive failed runs" % count, level="error")
+    except Exception:
+        pass                                      # missing sdk / no DSN -> scheduler keeps running
+
+
+async def _shutdown_retention() -> None:
+    """On scheduler/application shutdown: cancel a running retention task and await it so its current
+    uncommitted batch rolls back (committed batches stay). Never leaves a background task alive."""
+    task = _retention_task
+    if task is not None and not task.done():
+        task.cancel()
         try:
-            await _send_daily_reports()
-            await _send_weekly_reports()
-            await _review_ingest_tick()
-            await _automation_tick()
-            await _measurement_close_tick()
-            await _advisory_runtime_tick()
-            await _uploads_cleanup_tick()
-        except Exception:
-            logger.exception("Scheduler iteration error")
-        now = datetime.now()
-        await asyncio.sleep(60 - now.second)
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
 
 
 async def _uploads_cleanup_tick() -> None:
