@@ -152,8 +152,17 @@ WHERE action = :action AND dimension = :dim AND key_hash = :kh
 
 
 async def reserve(db: AsyncSession, action: str, *, identity: str = "", ip: Optional[str] = None) -> ThrottleResult:
-    """Atomically register one attempt against every dimension of `action` and report whether the caller
-    is currently blocked. Commits immediately (so a later request rollback cannot erase the count)."""
+    """Register one attempt and report whether the caller is currently blocked. Commits immediately (so a
+    later request rollback cannot erase the count).
+
+    The dimensions are checked NARROWEST-first (pair → identity → IP) and the walk SHORT-CIRCUITS on the
+    first blocked dimension: a broader bucket is only ever incremented by attempts that got past every
+    narrower gate. This is what stops a single source from globally locking a victim — once one email+IP
+    pair is blocked at its low limit (5), further attempts from that same pair are rejected at the pair
+    gate and no longer feed the identity-global counter, so one IP alone can never drive an email's global
+    lock (20). Reaching the identity-global limit therefore REQUIRES failures spread across several
+    independent pairs/IPs (a genuine distributed attack); likewise the IP-global limit (50) is only
+    reached by attempts that cleared both the pair and identity gates — i.e. one IP spraying many emails."""
     now = _now()
     win = settings.auth_throttle_window_seconds
     block = settings.auth_throttle_block_seconds
@@ -172,11 +181,11 @@ async def reserve(db: AsyncSession, action: str, *, identity: str = "", ip: Opti
             "now": now, "limit": limit, "block_until": block_until, "expires": expires,
             "window_cutoff": window_cutoff,
         })).first()
-        if row is not None:
-            bu = _as_utc(row.blocked_until)
-            if bu is not None and bu > now:
-                blocked = True
-                max_retry = max(max_retry, int((bu - now).total_seconds()) + 1)
+        bu = _as_utc(row.blocked_until) if row is not None else None
+        if bu is not None and bu > now:
+            blocked = True
+            max_retry = int((bu - now).total_seconds()) + 1
+            break  # narrower gate blocked → do NOT increment the broader buckets (single-source lock guard)
     await db.commit()
     await _maybe_cleanup(db)
     return ThrottleResult(blocked=blocked, retry_after_seconds=max_retry)

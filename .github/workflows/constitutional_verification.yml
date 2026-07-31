@@ -111,6 +111,9 @@ jobs:
             tests/test_auth_throttle_pg.py::test_pg_block_boundary_is_exact \
             tests/test_auth_throttle_pg.py::test_pg_identity_caught_across_rotating_ips \
             tests/test_auth_throttle_pg.py::test_pg_ip_caught_across_rotating_emails \
+            tests/test_auth_throttle_pg.py::test_pg_single_source_never_globally_locks_victim \
+            tests/test_auth_throttle_pg.py::test_pg_distributed_attack_reaches_identity_global \
+            tests/test_auth_throttle_pg.py::test_pg_cleanup_does_not_lose_a_concurrent_new_attempt \
             tests/test_auth_throttle_pg.py::test_pg_unknown_and_real_email_same_bucket \
             tests/test_auth_throttle_pg.py::test_pg_window_resets_after_elapse \
             tests/test_auth_throttle_pg.py::test_pg_blocked_until_is_monotonic \

@@ -156,6 +156,23 @@ def test_reset_throttle_blocks():
     assert r.status_code == 429
 
 
+# ── victim-lockout guard: one source can't drive an email's global lock ──────
+def test_single_source_does_not_feed_identity_global_after_pair_block():
+    db = _run(_new_db()); _run(_seed(db, email="victim@b.c"))
+    c = _client(db)
+    # one client (one IP) hammers one email well past the pair limit
+    for _ in range(settings.auth_throttle_login_pair_limit + 20):
+        _login(c, "victim@b.c")
+    from sqlalchemy import select
+    from models.auth_rate_limit_bucket import AuthRateLimitBucket
+    ident = _run(db.execute(
+        select(AuthRateLimitBucket.attempts).where(
+            AuthRateLimitBucket.action == "login", AuthRateLimitBucket.dimension == "identity"))).scalars().all()
+    # the identity-global counter never climbs toward its own limit from a single blocked pair
+    assert ident and ident[0] <= settings.auth_throttle_login_pair_limit
+    assert ident[0] < settings.auth_throttle_login_identity_limit
+
+
 # ── throttle logs / bucket rows carry no plaintext email or IP ───────────────
 def test_bucket_rows_store_only_hashes(caplog):
     db = _run(_new_db()); _run(_seed(db, email="priv@b.c"))

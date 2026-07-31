@@ -125,6 +125,41 @@ def test_pg_ip_caught_across_rotating_emails():
     assert _run(go()) == settings.auth_throttle_login_ip_limit          # caught by the IP dimension
 
 
+# ── C-victim. one source can NEVER drive an email's global lock (victim-lockout guard) ────────
+def test_pg_single_source_never_globally_locks_victim():
+    async def go():
+        e, S = await _fresh()
+        # one IP hammers one email far past the pair limit
+        for _ in range(settings.auth_throttle_login_pair_limit + 30):
+            async with S() as db:
+                await T.reserve(db, "login", identity="victim@x.c", ip="10.7.7.7")
+        ident = await _attempts(S, "login", "identity")
+        # the real owner, from a CLEAN IP, must still get in — the email was never globally locked
+        async with S() as db:
+            owner = await T.reserve(db, "login", identity="victim@x.c", ip="10.7.7.8")
+        await e.dispose()
+        return ident, owner.blocked
+    ident, owner_blocked = _run(go())
+    # once the pair blocked at 5, further same-pair attempts stopped feeding identity → it never nears 20
+    assert ident and ident[0] < settings.auth_throttle_login_identity_limit
+    assert ident[0] <= settings.auth_throttle_login_pair_limit
+    assert owner_blocked is False                       # victim not locked out by a single attacker
+
+
+# ── C-distributed. a genuine multi-IP attack DOES reach the identity-global lock ──────────────
+def test_pg_distributed_attack_reaches_identity_global():
+    async def go():
+        e, S = await _fresh()
+        last = False
+        # independent IPs, each a single failure (no pair ever blocks) → identity accrues across sources
+        for i in range(settings.auth_throttle_login_identity_limit):
+            async with S() as db:
+                last = (await T.reserve(db, "login", identity="target@x.c", ip=f"10.20.{i}.1")).blocked
+        await e.dispose()
+        return last
+    assert _run(go()) is True                           # identity-global trips once enough sources contribute
+
+
 # ── D. unknown and real emails share one bucket (no enumeration oracle) ──────
 def test_pg_unknown_and_real_email_same_bucket():
     async def go():
@@ -236,3 +271,40 @@ def test_pg_cleanup_keeps_active_block_deletes_expired():
         return deleted, remaining
     deleted, remaining = _run(go())
     assert deleted == 1 and remaining == ["ip"]      # expired removed, active block untouched
+
+
+# ── J. cleanup racing a fresh attempt for the SAME key never loses the new attempt ───────────
+def test_pg_cleanup_does_not_lose_a_concurrent_new_attempt():
+    async def go():
+        e, S = await _fresh()
+        now = T._now()
+        kh = T._key("ip", "", T.normalize_ip("10.30.0.1"))
+        # seed one EXPIRED, unblocked bucket for exactly the key the new attempt will touch
+        async with S() as db:
+            await db.execute(text(
+                "INSERT INTO auth_rate_limit_buckets(action,dimension,key_hash,window_started_at,attempts,"
+                "blocked_until,updated_at,expires_at) VALUES('reset','ip',:kh,:old,1,NULL,:old,:old)"),
+                {"kh": kh, "old": now - timedelta(seconds=10)})
+            await db.commit()
+
+        async def sweep():
+            async with S() as db:
+                await T.cleanup(db)
+
+        async def attempt():
+            async with S() as db:
+                await T.reserve(db, "reset", ip="10.30.0.1")
+
+        # cleanup wants to delete the expired row; the attempt refreshes/re-inserts the SAME key at once
+        await asyncio.gather(sweep(), attempt())
+
+        async with S() as db:
+            row = (await db.execute(text(
+                "SELECT attempts, expires_at FROM auth_rate_limit_buckets "
+                "WHERE action='reset' AND dimension='ip' AND key_hash=:kh"), {"kh": kh})).first()
+        await e.dispose()
+        return row
+    row = _run(go())
+    # whichever order wins (cleanup-then-insert or refresh-then-cleanup-skips), the live attempt survives
+    assert row is not None and row.attempts >= 1
+    assert T._as_utc(row.expires_at) > T._now()      # the surviving row is active, not the deleted stale one
