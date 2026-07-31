@@ -50,10 +50,24 @@ const _inflight = new Map<string, Promise<unknown>>()
 
 // ── Retry ─────────────────────────────────────────────────────────────────────
 
-const _NO_RETRY = new Set([400, 401, 403, 404, 422])
+// 429 (throttle) joins the 4xx set: a rate-limited request must never be retried — retrying only
+// deepens the block and delays the neutral message.
+const _NO_RETRY = new Set([400, 401, 403, 404, 422, 429])
 
 function _sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms))
+}
+
+// An error carrying a real HTTP status (the server answered). The transport-retry catch must NOT retry
+// these — the retry decision already happened when the response arrived; only response-less network
+// failures are retry-eligible.
+class HttpError extends Error {
+  status: number
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = 'HttpError'
+    this.status = status
+  }
 }
 
 // ── Headers ───────────────────────────────────────────────────────────────────
@@ -117,13 +131,13 @@ async function _fetch<T>(path: string, init: RequestInit | undefined, attempt = 
         await _sleep(500 * 2 ** attempt)
         return _fetch<T>(path, init, attempt + 1)
       }
-      throw new Error(await _parseError(res))
+      throw new HttpError(await _parseError(res), res.status)
     }
 
     return res.json() as Promise<T>
   } catch (err) {
     clearTimeout(timer)
-    if (err instanceof Error && err.name !== 'AbortError' && !(err.message.startsWith('HTTP ')) && attempt < 2) {
+    if (err instanceof Error && err.name !== 'AbortError' && err.name !== 'HttpError' && !(err.message.startsWith('HTTP ')) && attempt < 2) {
       await _sleep(500 * 2 ** attempt)
       return _fetch<T>(path, init, attempt + 1)
     }
@@ -185,13 +199,13 @@ async function reqForm<T>(path: string, body: FormData, attempt = 0): Promise<T>
         await _sleep(500 * 2 ** attempt)
         return reqForm<T>(path, body, attempt + 1)
       }
-      throw new Error(await _parseError(res))
+      throw new HttpError(await _parseError(res), res.status)
     }
 
     return res.json() as Promise<T>
   } catch (err) {
     clearTimeout(timer)
-    if (err instanceof Error && err.name !== 'AbortError' && !(err.message.startsWith('HTTP ')) && attempt < 2) {
+    if (err instanceof Error && err.name !== 'AbortError' && err.name !== 'HttpError' && !(err.message.startsWith('HTTP ')) && attempt < 2) {
       await _sleep(500 * 2 ** attempt)
       return reqForm<T>(path, body, attempt + 1)
     }

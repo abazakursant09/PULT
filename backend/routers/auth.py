@@ -14,7 +14,8 @@ from config import settings
 from database import get_db
 from dependencies import get_current_user, get_current_user_optional
 from auth_cookie import set_session_cookie, clear_session_cookie
-from rate_limit import limit_auth, limit_mfa, client_ip
+from rate_limit import limit_mfa, client_ip
+from services.auth_throttle import reserve as _throttle_reserve, release as _throttle_release
 from models.login_attempt import LoginAttempt
 from models.mfa_secret import MFASecret
 from services.mfa_crypto import load_secret
@@ -48,6 +49,25 @@ def hash_password(password: str) -> str:
 
 def verify_password(password: str, hashed: str) -> bool:
     return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
+
+
+# SECURITY-2C-2 — a fixed bcrypt hash so an UNKNOWN email runs the same password-verify cost as a real
+# one (removes the timing oracle). Computed once at import.
+_DUMMY_PW_HASH = hash_password("throttle-timing-equalizer-2c2-fixed")
+
+
+async def _throttle_or_429(db: AsyncSession, action: str, request: Request, *, identity: str = "") -> None:
+    """Reserve one attempt for `action` across all its throttle dimensions; 429 (with Retry-After) if the
+    caller is blocked. The reservation is committed even if the surrounding request later fails, so a
+    failed login is always counted. Identity is hashed (never stored) — unknown and real emails share the
+    same bucket space, so the throttle reveals nothing about whether an address exists."""
+    res = await _throttle_reserve(db, action, identity=identity, ip=_client_ip(request))
+    if res.blocked:
+        raise HTTPException(
+            status_code=429,
+            detail="Слишком много попыток. Подождите и попробуйте снова.",
+            headers={"Retry-After": str(res.retry_after_seconds)},
+        )
 
 
 def create_access_token(user_id: str, token_version: int) -> str:
@@ -114,8 +134,11 @@ async def register(
     db: AsyncSession = Depends(get_db),
 ):
     ip = _client_ip(request)
+    # SECURITY-2C-2 — request-rate throttle (per email + per IP) on top of the existing 24h creation cap;
+    # catches rapid existing-email probing that the creation cap (counts only CREATED users) would miss.
+    await _throttle_or_429(db, "register", request, identity=data.email)
 
-    # ── IP rate limit ─────────────────────────────────────────────────────────
+    # ── IP rate limit (account CREATION cap, 24h) ─────────────────────────────
     if ip:
         cutoff = datetime.utcnow() - timedelta(hours=IP_REG_WINDOW_H)
         ip_cnt = await db.execute(
@@ -253,17 +276,31 @@ async def login(
     request: Request,
     response: Response,
     db: AsyncSession = Depends(get_db),
-    _rl: None = Depends(limit_auth),
 ):
     ip = _client_ip(request)
+    # SECURITY-2C-2 — reserve BEFORE the bcrypt check (identity+IP / identity / IP dimensions); 429 if
+    # blocked. Same throttle path for known and unknown emails → no existence oracle.
+    await _throttle_or_429(db, "login", request, identity=data.email)
 
     result = await db.execute(select(User).where(User.email == data.email))
     user = result.scalar_one_or_none()
 
-    if not user or not verify_password(data.password, user.hashed_password):
+    # Unknown email: run the SAME bcrypt cost against a fixed dummy hash so the response time does not
+    # reveal whether the address exists, then fail identically.
+    if user is None:
+        verify_password(data.password, _DUMMY_PW_HASH)
         await _log(db, email=data.email, success=False, action="login",
                    reason="Неверный email или пароль", ip=ip)
         raise HTTPException(status_code=401, detail="Неверный email или пароль")
+
+    if not verify_password(data.password, user.hashed_password):
+        await _log(db, email=data.email, success=False, action="login",
+                   reason="Неверный email или пароль", ip=ip)
+        raise HTTPException(status_code=401, detail="Неверный email или пароль")
+
+    # Password is correct → this was NOT a brute-force failure: compensate this request's own +1 on
+    # every login dimension (only real failures net-accumulate; the IP's prior failures still stand).
+    await _throttle_release(db, "login", identity=data.email, ip=ip)
 
     if user.deleted_at:
         await _log(db, email=data.email, success=False, action="login",
@@ -409,7 +446,6 @@ async def resend_verification(
     data: ResendVerificationIn,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    _rl: None = Depends(limit_auth),
 ):
     """Re-send the email-verification link.
 
@@ -424,6 +460,9 @@ async def resend_verification(
     Nothing observable to the caller distinguishes those five cases, so the endpoint cannot be used
     to test whether an address is registered. A real SMTP failure is recorded server-side instead.
     """
+    # SECURITY-2C-2 — per-email + per-IP throttle (replaces the in-memory per-IP limiter); the neutral
+    # response and this shared throttle keep it enumeration-safe.
+    await _throttle_or_429(db, "email", request, identity=data.email)
     result = await db.execute(select(User).where(User.email == data.email))
     user = result.scalar_one_or_none()
 
@@ -453,8 +492,10 @@ async def forgot_password(
     data: ForgotPasswordIn,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    _rl: None = Depends(limit_auth),
 ):
+    # SECURITY-2C-2 — per-email + per-IP throttle (replaces the in-memory per-IP limiter). The neutral
+    # response below plus this shared throttle keep it enumeration-safe.
+    await _throttle_or_429(db, "email", request, identity=data.email)
     result = await db.execute(select(User).where(User.email == data.email))
     user = result.scalar_one_or_none()
 
@@ -492,8 +533,12 @@ class ResetPasswordIn(BaseModel):
 @router.post("/reset-password")
 async def reset_password(
     data: ResetPasswordIn,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
+    # SECURITY-2C-2 — per-IP throttle on the reset-confirm (identity is unknown until the token resolves;
+    # the reset TOKEN is never used as a throttle key and never logged). One-time-use race stays 2C-3.
+    await _throttle_or_429(db, "reset", request)
     result = await db.execute(
         select(User).where(User.reset_token == data.token)
     )

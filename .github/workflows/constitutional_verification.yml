@@ -106,7 +106,17 @@ jobs:
             tests/test_token_version_pg.py::test_pg_concurrent_logout_no_lost_update \
             tests/test_token_version_pg.py::test_pg_old_jwt_rejected_after_bump_new_accepted \
             tests/test_token_version_pg.py::test_pg_reset_bump_revokes_old_session \
-            tests/test_token_version_pg.py::test_pg_db_failure_is_503
+            tests/test_token_version_pg.py::test_pg_db_failure_is_503 \
+            tests/test_auth_throttle_pg.py::test_pg_concurrent_failures_all_counted \
+            tests/test_auth_throttle_pg.py::test_pg_block_boundary_is_exact \
+            tests/test_auth_throttle_pg.py::test_pg_identity_caught_across_rotating_ips \
+            tests/test_auth_throttle_pg.py::test_pg_ip_caught_across_rotating_emails \
+            tests/test_auth_throttle_pg.py::test_pg_unknown_and_real_email_same_bucket \
+            tests/test_auth_throttle_pg.py::test_pg_window_resets_after_elapse \
+            tests/test_auth_throttle_pg.py::test_pg_blocked_until_is_monotonic \
+            tests/test_auth_throttle_pg.py::test_pg_release_does_not_clear_block \
+            tests/test_auth_throttle_pg.py::test_pg_state_persists_across_sessions \
+            tests/test_auth_throttle_pg.py::test_pg_cleanup_keeps_active_block_deletes_expired
 
   # Proves the FULL Alembic chain runs on the database production actually uses. The chain was
   # historically only exercised on SQLite, which has no strict boolean type and silently accepted an

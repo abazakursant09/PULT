@@ -351,7 +351,7 @@ def test_migration_last_verified_notnull_no_default(monkeypatch, tmp_path):
     dbfile = tmp_path / "eco_default.db"
     monkeypatch.setenv("ALEMBIC_DATABASE_URL", f"sqlite+aiosqlite:///{dbfile.as_posix()}")
     import db_migrations as dbm
-    command.upgrade(dbm._alembic_config(), "tkv1a2b3c4d01")
+    command.upgrade(dbm._alembic_config(), "atl1a2b3c4d01")
     c = sqlite3.connect(str(dbfile))
     try:
         for t in ("marketplace_price_observations", "marketplace_promotion_observations"):
@@ -424,7 +424,7 @@ def test_migration_nonempty_sqlite_backfill_preserve_and_constraints(monkeypatch
     con.close()
 
     # ── the migration under test ──
-    command.upgrade(cfg, "tkv1a2b3c4d01")
+    command.upgrade(cfg, "atl1a2b3c4d01")
 
     con = sqlite3.connect(str(dbfile))
     con.execute("PRAGMA foreign_keys=ON")
@@ -495,7 +495,7 @@ def test_migration_nonempty_sqlite_backfill_preserve_and_constraints(monkeypatch
         assert con.execute("SELECT COUNT(*) FROM marketplace_promotion_store_evidence").fetchone()[0] == 1
     finally:
         con.close()
-    command.upgrade(cfg, "tkv1a2b3c4d01")                            # re-upgrade succeeds
+    command.upgrade(cfg, "atl1a2b3c4d01")                            # re-upgrade succeeds
 
 
 # ══ SCHEMA GUARDS ════════════════════════════════════════════════════════════════
@@ -594,7 +594,7 @@ def test_pg_alembic_migration_nonempty_and_explain(monkeypatch):
                 " '2026-06-15 08:30:00')")
 
         # ── the migration under test, on PostgreSQL ──
-        command.upgrade(cfg, "tkv1a2b3c4d01")
+        command.upgrade(cfg, "atl1a2b3c4d01")
 
         with eng.connect() as c:
             # backfill on the pre-existing rows

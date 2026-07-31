@@ -27,6 +27,7 @@ from .legal_case import LegalCase
 from .chat_message import ChatMessage
 from .mfa_secret import MFASecret
 from .login_attempt import LoginAttempt
+from .auth_rate_limit_bucket import AuthRateLimitBucket  # SECURITY-2C-2 auth throttle state
 from .notification import Notification
 from .success_story import SuccessStory
 from .telegram_settings import TelegramSettings
