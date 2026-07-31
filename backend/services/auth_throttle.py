@@ -22,10 +22,12 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import text
+from sqlalchemy import DateTime, Integer, String, bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
+
+_TZ = DateTime(timezone=True)
 
 _HMAC_CONTEXT = "pult:auth-throttle:v1"
 
@@ -131,13 +133,22 @@ ON CONFLICT (action, dimension, key_hash) DO UPDATE SET
     updated_at = :now,
     expires_at = :expires
 RETURNING attempts, blocked_until
-""")
+""").bindparams(
+    # asyncpg cannot infer the type of a bare bind inside `CASE ... THEN :block_until ELSE NULL END`
+    # and defaults it to text, which PostgreSQL then refuses against the timestamptz column. Declaring
+    # the types makes PG cast correctly and is a no-op on SQLite.
+    bindparam("now", type_=_TZ), bindparam("block_until", type_=_TZ),
+    bindparam("expires", type_=_TZ), bindparam("window_cutoff", type_=_TZ),
+    bindparam("limit", type_=Integer()),
+    bindparam("action", type_=String()), bindparam("dim", type_=String()),
+    bindparam("kh", type_=String()),
+)
 
 _RELEASE = text("""
 UPDATE auth_rate_limit_buckets
 SET attempts = CASE WHEN attempts > 0 THEN attempts - 1 ELSE 0 END, updated_at = :now
 WHERE action = :action AND dimension = :dim AND key_hash = :kh
-""")
+""").bindparams(bindparam("now", type_=_TZ))
 
 
 async def reserve(db: AsyncSession, action: str, *, identity: str = "", ip: Optional[str] = None) -> ThrottleResult:
@@ -198,19 +209,16 @@ async def release(db: AsyncSession, action: str, *, identity: str = "", ip: Opti
     await db.commit()
 
 
-# Portable bounded delete of fully-expired rows (PG has no DELETE ... LIMIT → subquery on the row id).
-_CLEANUP_PG = text("""
-DELETE FROM auth_rate_limit_buckets WHERE ctid IN (
-  SELECT ctid FROM auth_rate_limit_buckets
+# Bounded delete of fully-expired rows. PG has no DELETE ... LIMIT, and ctid/rowid are dialect-specific,
+# so we bound via a subquery on the PRIMARY KEY tuple — portable across PostgreSQL 16 and SQLite (both
+# support row-value `IN (SELECT ... LIMIT n)`), with no dialect detection.
+_CLEANUP = text("""
+DELETE FROM auth_rate_limit_buckets
+WHERE (action, dimension, key_hash) IN (
+  SELECT action, dimension, key_hash FROM auth_rate_limit_buckets
   WHERE expires_at < :now AND (blocked_until IS NULL OR blocked_until < :now)
   LIMIT :batch)
-""")
-_CLEANUP_SQLITE = text("""
-DELETE FROM auth_rate_limit_buckets WHERE rowid IN (
-  SELECT rowid FROM auth_rate_limit_buckets
-  WHERE expires_at < :now AND (blocked_until IS NULL OR blocked_until < :now)
-  LIMIT :batch)
-""")
+""").bindparams(bindparam("now", type_=_TZ), bindparam("batch", type_=Integer()))
 
 
 async def cleanup(db: AsyncSession) -> int:
@@ -218,8 +226,6 @@ async def cleanup(db: AsyncSession) -> int:
     active block. Returns the number deleted (a numeric-only signal; no key_hash is logged)."""
     now = _now()
     batch = int(settings.auth_throttle_cleanup_batch)
-    dialect = db.bind.dialect.name if db.bind is not None else "sqlite"
-    stmt = _CLEANUP_PG if dialect == "postgresql" else _CLEANUP_SQLITE
-    res = await db.execute(stmt, {"now": now, "batch": batch})
+    res = await db.execute(_CLEANUP, {"now": now, "batch": batch})
     await db.commit()
     return res.rowcount or 0
