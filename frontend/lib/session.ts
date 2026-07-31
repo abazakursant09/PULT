@@ -1,71 +1,25 @@
 /**
- * Centralised auth session helper.
- * All token reads/writes go through here — never directly touch localStorage or cookies elsewhere.
+ * SECURITY-2B-2 — the auth session lives ONLY in a backend-set Secure HttpOnly cookie.
  *
- * Cookie `pult_token`:
- *   - JS-readable (not HttpOnly) so the login page can set it client-side.
- *   - Read by Next.js middleware at the edge — no round-trip to the backend needed.
- *   - Architecture is designed for a future migration to HttpOnly + refresh tokens:
- *     just move setToken to a server action / API route and add HttpOnly flag there.
+ * JavaScript can no longer read or write the session token: there is no getToken/setToken, nothing is
+ * kept in localStorage or a JS-readable cookie, and every API call authenticates via `credentials:
+ * 'include'` (the browser attaches the HttpOnly cookie automatically). This module keeps only the
+ * NON-SECRET user profile for instant UI hydration, plus a one-time purge of any pre-2B-2 token/cookie.
  */
 
-const TOKEN_KEY   = 'token'
-const USER_KEY    = 'user'
-const COOKIE_NAME = 'pult_token'
-const MAX_AGE     = 60 * 60 * 24 * 60 // 60 days
+const USER_KEY = 'user'
+// Legacy keys from the old Bearer/localStorage scheme — PURGED once, never read or sent.
+const LEGACY_TOKEN_KEY = 'token'
+const LEGACY_COOKIE = 'pult_token'
 
-function isHttps(): boolean {
-  return typeof window !== 'undefined' && window.location.protocol === 'https:'
-}
-
-/**
- * Returns the auth token.
- * Priority: cookie (edge-readable) → localStorage (legacy fallback).
- */
-export function getToken(): string | null {
-  if (typeof window === 'undefined') return null
-  const match = document.cookie
-    .split('; ')
-    .find(row => row.startsWith(`${COOKIE_NAME}=`))
-  if (match) {
-    const val = match.split('=').slice(1).join('=')
-    const decoded = decodeURIComponent(val)
-    if (decoded) return decoded
-  }
-  return localStorage.getItem(TOKEN_KEY)
-}
-
-/**
- * Persists token + user to both cookie and localStorage.
- * Called after every successful login / email-verify / OAuth flow.
- */
-export function setToken(accessToken: string, user: unknown): void {
+/** Persist the non-secret user profile (returned by login/verify/MFA). Never a token. */
+export function setUser(user: unknown): void {
   if (typeof window === 'undefined') return
-  localStorage.setItem(TOKEN_KEY, accessToken)
   localStorage.setItem(USER_KEY, JSON.stringify(user))
-  const secure = isHttps() ? '; Secure' : ''
-  document.cookie = [
-    `${COOKIE_NAME}=${encodeURIComponent(accessToken)}`,
-    'path=/',
-    'SameSite=Lax',
-    `Max-Age=${MAX_AGE}`,
-    secure,
-  ].filter(Boolean).join('; ')
+  purgeLegacyAuth()
 }
 
-/**
- * Clears all session state: localStorage + cookie.
- * Call this on logout or when backend returns 401.
- */
-export function clearSession(): void {
-  if (typeof window === 'undefined') return
-  localStorage.removeItem(TOKEN_KEY)
-  localStorage.removeItem(USER_KEY)
-  // Expire the cookie immediately
-  document.cookie = `${COOKIE_NAME}=; path=/; SameSite=Lax; Max-Age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT`
-}
-
-/** Returns the stored user object, or null if not found / invalid JSON. */
+/** The stored user profile, or null. UI hint only — the real auth boundary is the cookie + backend. */
 export function getUser<T = unknown>(): T | null {
   if (typeof window === 'undefined') return null
   try {
@@ -76,7 +30,28 @@ export function getUser<T = unknown>(): T | null {
   }
 }
 
-/** True if a token exists in cookie or localStorage. Does NOT validate JWT. */
+/** Drop local UI state on logout / 401. Does NOT touch the HttpOnly cookie (only the backend can). */
+export function clearSession(): void {
+  if (typeof window === 'undefined') return
+  localStorage.removeItem(USER_KEY)
+  purgeLegacyAuth()
+}
+
+/**
+ * One-time hygiene: remove any leftover pre-2B-2 token from localStorage and expire the old JS cookie.
+ * These values are only ever DELETED here — never read, never sent — so a stale token cannot leak.
+ */
+export function purgeLegacyAuth(): void {
+  if (typeof window === 'undefined') return
+  try {
+    localStorage.removeItem(LEGACY_TOKEN_KEY)
+    document.cookie = `${LEGACY_COOKIE}=; path=/; Max-Age=0; SameSite=Lax`
+  } catch {
+    /* storage disabled — nothing to purge */
+  }
+}
+
+/** True if a user profile is present. A UI convenience only; the backend re-checks the cookie on every request. */
 export function isAuthenticated(): boolean {
-  return Boolean(getToken())
+  return Boolean(getUser())
 }

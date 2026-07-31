@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { Settings, LogOut, ChevronDown, Home, ArrowLeft } from 'lucide-react'
 import { NotificationBell } from '@/components/NotificationBell'
 import { ThemeToggle } from '@/components/cabinet/ThemeToggle'
-import { type User } from '@/lib/api'
+import { api, type User } from '@/lib/api'
 import { clearSession } from '@/lib/session'
 
 const BREADCRUMBS: Record<string, string> = {
@@ -52,7 +52,7 @@ export function DashboardTopBar() {
     return () => document.removeEventListener('mousedown', handler)
   }, [open])
 
-  function logout() { clearSession(); router.push('/login') }
+  function logout() { api.auth.logout().catch(() => {}).finally(() => { clearSession(); router.push('/login') }) }
 
   const crumb = pathname ? (BREADCRUMBS[pathname] ?? pathname.split('/').filter(Boolean).pop() ?? '') : ''
   const isRoot = pathname === '/dashboard'

@@ -10,7 +10,7 @@ import { QRCodeSVG } from 'qrcode.react'
 import { api, type TelegramSettings } from '@/lib/api'
 import { ErrorBoundary } from '@/components/system/ErrorBoundary'
 import { hasActiveSubscription, planLabel } from '@/lib/plans'
-import { clearSession } from '@/lib/session'
+import { clearSession, isAuthenticated } from '@/lib/session'
 import { LanguageSwitcher } from '@/components/LanguageSwitcher'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -683,7 +683,7 @@ function AccountContent() {
   const [tab, setTab] = useState<Tab>('profile')
 
   useEffect(() => {
-    if (!localStorage.getItem('token')) { router.push('/login'); return }
+    if (!isAuthenticated()) { router.push('/login'); return }
     const t = searchParams.get('tab') as Tab | null
     if (t && TABS.some(x => x.id === t)) setTab(t)
   }, [router, searchParams])

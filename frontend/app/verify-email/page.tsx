@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { CheckCircle2, XCircle, Loader2 } from 'lucide-react'
 import { api } from '@/lib/api'
-import { setToken } from '@/lib/session'
+import { setUser } from '@/lib/session'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -65,7 +65,7 @@ function VerifyEmailContent() {
     }
     api.auth.verifyEmail(token)
       .then(data => {
-        setToken(data.access_token, data.user)
+        setUser(data.user)
         setStatus('success')
         setTimeout(() => router.push('/dashboard'), 2000)
       })

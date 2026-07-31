@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 import bcrypt
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from jose import jwt
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select, func
@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from database import get_db
+from dependencies import get_current_user
+from auth_cookie import set_session_cookie, clear_session_cookie
 from rate_limit import limit_auth, limit_mfa, client_ip
 from models.login_attempt import LoginAttempt
 from models.mfa_secret import MFASecret
@@ -22,7 +24,7 @@ from models.workspace import Workspace
 from routers.mfa import verify_totp
 from services.email import send_verification_email, send_password_reset_email
 from schemas.auth import (
-    ForgotPasswordResponse, RegisterResponse, TokenResponse,
+    ForgotPasswordResponse, RegisterResponse, SessionResponse,
     UserLogin, UserRegister, UserResponse,
 )
 
@@ -100,12 +102,6 @@ async def _log(
 class MFALoginIn(BaseModel):
     mfa_token: str
     code:      str
-
-
-class MFALoginOut(BaseModel):
-    access_token: str
-    token_type:   str = "bearer"
-    user:         UserResponse
 
 
 # ── Register ─────────────────────────────────────────────────────────────────
@@ -223,8 +219,9 @@ async def register(
 
 # ── Verify email ──────────────────────────────────────────────────────────────
 
-@router.get("/verify-email", response_model=TokenResponse)
+@router.get("/verify-email", response_model=SessionResponse)
 async def verify_email(
+    response: Response,
     token: str = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
@@ -243,8 +240,8 @@ async def verify_email(
         await db.refresh(user)
         log.info("email_verified: user=%s email=%s", user.id, user.email)
 
-    access_token = create_access_token(str(user.id))
-    return TokenResponse(access_token=access_token, user=UserResponse.model_validate(user))
+    set_session_cookie(response, create_access_token(str(user.id)))
+    return SessionResponse(user=UserResponse.model_validate(user))
 
 
 # ── Login ─────────────────────────────────────────────────────────────────────
@@ -253,6 +250,7 @@ async def verify_email(
 async def login(
     data: UserLogin,
     request: Request,
+    response: Response,
     db: AsyncSession = Depends(get_db),
     _rl: None = Depends(limit_auth),
 ):
@@ -292,16 +290,17 @@ async def login(
 
     log.info("login_success: user=%s email=%s ip=%s", user.id, data.email, ip)
     await _log(db, email=data.email, success=True, action="login", ip=ip)
-    token = create_access_token(str(user.id))
-    return TokenResponse(access_token=token, user=UserResponse.model_validate(user))
+    set_session_cookie(response, create_access_token(str(user.id)))
+    return SessionResponse(user=UserResponse.model_validate(user))
 
 
 # ── MFA verify step ───────────────────────────────────────────────────────────
 
-@router.post("/login/mfa", response_model=MFALoginOut)
+@router.post("/login/mfa", response_model=SessionResponse)
 async def login_mfa(
     data: MFALoginIn,
     request: Request,
+    response: Response,
     db: AsyncSession = Depends(get_db),
 ):
     from jose import JWTError
@@ -343,8 +342,31 @@ async def login_mfa(
 
     log.info("mfa_verified: user=%s ip=%s", user_id, ip)
     await _log(db, email=user.email, success=True, action="mfa_verify", ip=ip)
-    token = create_access_token(str(user.id))
-    return MFALoginOut(access_token=token, user=UserResponse.model_validate(user))
+    set_session_cookie(response, create_access_token(str(user.id)))
+    return SessionResponse(user=UserResponse.model_validate(user))
+
+
+# ── Current session ───────────────────────────────────────────────────────────
+@router.get("/me", response_model=UserResponse)
+async def me(response: Response, user: User = Depends(get_current_user)):
+    """The current user, resolved from the HttpOnly session cookie. 401 when the cookie is absent /
+    invalid / expired. Lets the frontend hydrate auth state on reload without ever holding a token."""
+    response.headers["Cache-Control"] = "no-store"
+    return UserResponse.model_validate(user)
+
+
+# ── Logout ──────────────────────────────────────────────────────────────────────
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(response: Response):
+    """Clear the session cookie. Idempotent (a repeat logout is a safe no-op) and covered by the
+    central Origin-CSRF check like every other mutating browser route. HONEST LIMIT: this drops the
+    browser cookie but does NOT revoke a JWT already copied off the client — server-side revocation
+    (token_version / jti) is SECURITY-2C. The injected `response` (with the delete-cookie header) is
+    returned as-is; the 204 status comes from the decorator."""
+    clear_session_cookie(response)
+    response.headers["Cache-Control"] = "no-store"
+    response.status_code = status.HTTP_204_NO_CONTENT
+    return response
 
 
 # ── Resend verification ───────────────────────────────────────────────────────

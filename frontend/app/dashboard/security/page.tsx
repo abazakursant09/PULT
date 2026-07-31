@@ -1,5 +1,6 @@
 'use client'
 
+import { isAuthenticated } from "@/lib/session"
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
@@ -29,7 +30,7 @@ export default function SecurityPage() {
   const [copied,      setCopied]      = useState(false)
 
   useEffect(() => {
-    if (!localStorage.getItem('token')) { router.push('/login'); return }
+    if (!isAuthenticated()) { router.push('/login'); return }
     api.mfa.status()
       .then(s => setMfaEnabled(s.enabled))
       .catch(() => {})

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { X, Zap } from 'lucide-react'
 import { api, type TodayItem } from '@/lib/api'
-import { getToken } from '@/lib/session'
+import { isAuthenticated } from '@/lib/session'
 import { trackEvent } from '@/lib/events'
 
 // ── Module-level cache ────────────────────────────────────────────────────────
@@ -68,7 +68,7 @@ export function CopilotBar() {
   const [hidden, setHidden] = useState(false)
 
   useEffect(() => {
-    if (!getToken()) return
+    if (!isAuthenticated()) return
 
     // Apply current cache pick for new pathname (no flicker on nav)
     if (_today) {

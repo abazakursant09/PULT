@@ -105,8 +105,9 @@ def test_verify_email_flow(monkeypatch):
         await register(UserRegister(email="v@b.com", name="V", password="Passw0rd"), _Req(), db)
         user = (await db.execute(select(User).where(User.email == "v@b.com"))).scalar_one()
         tok = user.verification_token
-        resp = await verify_email(tok, db)
-        assert resp.access_token
+        from fastapi import Response as _Resp
+        resp = await verify_email(_Resp(), tok, db)     # cookie contract: (response, token, db)
+        assert resp.user and resp.user.email == "v@b.com"   # SessionResponse — no access_token in body
         refreshed = (await db.execute(select(User).where(User.email == "v@b.com"))).scalar_one()
         assert refreshed.is_verified is True
     _run(go())

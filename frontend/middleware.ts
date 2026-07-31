@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 /**
- * Edge-level auth guard.
- * Reads pult_token cookie (set by lib/session.ts on login).
- * Does NOT validate the JWT — that stays on the backend API.
- * Presence check is enough to block unauthenticated SSR flicker.
+ * Edge-level UX guard (SECURITY-2B-2).
+ * Checks only for the PRESENCE of the backend-set HttpOnly session cookie to avoid an unauthenticated
+ * SSR flicker. It is NOT a security boundary: it never decodes the JWT, and a forged cookie only opens
+ * a frontend route — every /api request is still re-validated by the backend, which returns 401. The
+ * cookie name differs by environment (dev vs the `__Host-` prefixed prod name), so both are accepted.
  */
 
 const PROTECTED_PREFIXES = ['/dashboard', '/checkout']
-const COOKIE_NAME = 'pult_token'
+const COOKIE_NAMES = ['__Host-pult_session', 'pult_session_dev']
 
 export function middleware(request: NextRequest): NextResponse {
   const { pathname } = request.nextUrl
@@ -19,7 +20,7 @@ export function middleware(request: NextRequest): NextResponse {
 
   if (!isProtected) return NextResponse.next()
 
-  const token = request.cookies.get(COOKIE_NAME)?.value
+  const token = COOKIE_NAMES.map(n => request.cookies.get(n)?.value).find(Boolean)
   if (!token) {
     const loginUrl = new URL('/login', request.url)
     loginUrl.searchParams.set('from', pathname)

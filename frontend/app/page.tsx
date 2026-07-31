@@ -10,7 +10,7 @@ import {
   Settings, LogOut, Home,
 } from 'lucide-react'
 import { NotificationBell } from '@/components/NotificationBell'
-import { type User } from '@/lib/api'
+import { api, type User } from '@/lib/api'
 import { clearSession } from '@/lib/session'
 import { trackEvent, captureAttribution } from '@/lib/events'
 import { LANDING_PROOF } from '@/config/landing-proof'
@@ -125,7 +125,7 @@ function LandingNav({ user }: { user: User | null }) {
     return () => document.removeEventListener('mousedown', handler)
   }, [open])
 
-  function logout() { clearSession(); router.push('/login') }
+  function logout() { api.auth.logout().catch(() => {}).finally(() => { clearSession(); router.push('/login') }) }
 
   return (
     <nav className="fixed top-0 inset-x-0 z-50" style={{

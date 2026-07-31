@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ArrowRight, Shield } from 'lucide-react'
 import { api } from '@/lib/api'
-import { setToken } from '@/lib/session'
+import { setUser } from '@/lib/session'
 import { useLang } from '@/lib/lang-context'
 
 type Step = 'credentials' | 'mfa'
@@ -48,7 +48,7 @@ export default function LoginPage() {
       if (remember) localStorage.setItem('bp_remember_email', form.email)
       else localStorage.removeItem('bp_remember_email')
       const auth = data as import('@/lib/api').AuthResponse
-      setToken(auth.access_token, auth.user)
+      setUser(auth.user)
       router.push(redirectTo)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : t('common.error'))
@@ -59,7 +59,7 @@ export default function LoginPage() {
     e.preventDefault(); setError(''); setLoading(true)
     try {
       const data = await api.mfa.loginMfa(mfaToken, mfaCode)
-      setToken(data.access_token, data.user)
+      setUser(data.user)
       router.push(redirectTo)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : t('common.error'))
