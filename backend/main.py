@@ -29,36 +29,44 @@ import models  # ensure all tables are registered before init_db
 
 # ── Security headers middleware ───────────────────────────────────────────────
 
+_HEADER_DEV_ENVS = {"development", "test", "local"}
+
+
+def _is_dev_env() -> bool:
+    return (settings.app_env or "").strip().lower() in _HEADER_DEV_ENVS
+
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
+        is_dev = _is_dev_env()
         response.headers["X-Frame-Options"]        = "DENY"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-XSS-Protection"]       = "1; mode=block"
         response.headers["Referrer-Policy"]         = "strict-origin-when-cross-origin"
-        response.headers["Permissions-Policy"]      = "camera=(), microphone=(), geolocation=()"
-        _fe = settings.frontend_url.rstrip("/")
-        _api = settings.api_url.rstrip("/")
-        _ws = _fe.replace("https://", "wss://").replace("http://", "ws://")
-        # Always include localhost for development tooling
-        _connect = (
-            f"connect-src 'self' {_api} {_fe} {_ws} "
-            f"http://localhost:8000 http://localhost:3000 ws://localhost:3000"
-        )
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline'; "
-            "style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data: https:; "
-            f"{_connect}; "
-            "font-src 'self' data:; "
-            "frame-ancestors 'none';"
-        )
-        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["Permissions-Policy"]      = "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+        response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
         response.headers["X-Permitted-Cross-Domain-Policies"] = "none"
-        # SECURITY-2B-2 — never let a proxy/browser cache an auth response (it may carry Set-Cookie or
-        # the user profile). Covers login / verify-email / login/mfa / logout / me.
-        if request.url.path.startswith("/api/auth/"):
+        # SECURITY-2B-3 — CSP for API RESPONSES (the frontend HTML CSP is set by Next, next.config.js).
+        # Prod: API returns JSON only → lock it right down. Dev: Swagger /docs (dev-only) needs inline.
+        if is_dev:
+            _fe = settings.frontend_url.rstrip("/")
+            _api = settings.api_url.rstrip("/")
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
+                f"img-src 'self' data:; connect-src 'self' {_api} {_fe} http://localhost:8000; "
+                "font-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none';"
+            )
+        else:
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; "
+                "object-src 'none'; form-action 'none'"
+            )
+            # HSTS only for a real HTTPS deployment; never asserted over local http.
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        # Never let a shared proxy / browser cache an API response — they carry Set-Cookie or per-seller
+        # / financial JSON. Public reference endpoints lose CDN caching, an acceptable trade for safety.
+        if request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
         return response
 
