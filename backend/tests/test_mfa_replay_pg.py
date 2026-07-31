@@ -53,8 +53,12 @@ async def _fresh():
 async def _seed(S, *, enabled=True, last_step=None):
     uid = str(uuid.uuid4())
     secret = _generate_secret()
+    # Commit the parent User FIRST, then the child MFASecret: PostgreSQL enforces the FK immediately,
+    # so the two rows cannot share one flush (SQLite, with FKs off in tests, tolerated it).
     async with S() as db:
         db.add(User(id=uid, email=f"{uid}@ex.c", name="S", hashed_password="h", is_verified=True))
+        await db.commit()
+    async with S() as db:
         db.add(MFASecret(user_id=uid, secret=secret, enabled=enabled, last_totp_step=last_step))
         await db.commit()
     return uid, secret
