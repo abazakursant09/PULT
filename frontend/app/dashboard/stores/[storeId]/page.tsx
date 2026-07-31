@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useCallback, useEffect, useState } from 'react'
+import { useParams } from 'next/navigation'
 import { api, type StoreRef } from '@/lib/api'
 import { LedgerShell } from '@/components/stores/LedgerShell'
 import { StoreImportsTable } from '@/components/stores/StoreImportsTable'
@@ -18,8 +19,8 @@ import { marketplaceLabel } from '@/components/stores/CabinetGroup'
 // An archived store stays fully readable. Only the upload action disappears, because that is the
 // one thing the backend refuses (409) for an archived store.
 
-export default function StorePage({ params }: { params: { storeId: string } }) {
-  const { storeId } = params
+export default function StorePage() {
+  const { storeId } = useParams<{ storeId: string }>()
   const [store, setStore] = useState<StoreRef | null>(null)
   const [state, setState] = useState<'loading' | 'ready' | 'missing' | 'failed'>('loading')
   const [restoring, setRestoring] = useState(false)
