@@ -8,7 +8,6 @@
  *  - keepalive:true so events survive page unloads / route changes
  *  - Debounced per event+entity (500ms) to prevent accidental spam
  */
-import { getToken } from './session'
 
 interface TrackPayload {
   event_type:  string
@@ -77,15 +76,12 @@ function _isThrottled(type: string, entityId?: string): boolean {
 
 async function _send(payload: TrackPayload): Promise<void> {
   try {
-    const token = getToken()
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-    if (token) headers['Authorization'] = `Bearer ${token}`
-
+    // SECURITY-2B-2 — HttpOnly cookie via credentials:'include'; no Authorization header.
     await fetch('/api/events/track', {
       method:      'POST',
       keepalive:   true,
       credentials: 'include',
-      headers,
+      headers:     { 'Content-Type': 'application/json' },
       body:        JSON.stringify(payload),
     })
   } catch {

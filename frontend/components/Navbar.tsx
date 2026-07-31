@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ArrowLeft, LogOut, Zap } from 'lucide-react'
-import { type User } from '@/lib/api'
+import { api, type User } from '@/lib/api'
 import { clearSession } from '@/lib/session'
 import { LanguageSwitcher } from '@/components/LanguageSwitcher'
 
@@ -17,8 +17,11 @@ export function Navbar({ user, showBack, backHref = '/dashboard' }: NavbarProps)
   const router = useRouter()
 
   function logout() {
-    clearSession()
-    router.push('/login')
+    // SECURITY-2B-2 — clear the backend HttpOnly cookie, then local UI state (idempotent).
+    api.auth.logout().catch(() => {}).finally(() => {
+      clearSession()
+      router.push('/login')
+    })
   }
 
   return (

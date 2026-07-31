@@ -1,5 +1,6 @@
 'use client'
 
+import { isAuthenticated } from "@/lib/session"
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { Bell, RefreshCw, AlertTriangle, Zap, Info, ArrowLeft, ShieldAlert } from 'lucide-react'
@@ -42,7 +43,7 @@ export default function MonitorPage() {
   }, [router])
 
   useEffect(() => {
-    if (!localStorage.getItem('token')) { router.push('/login'); return }
+    if (!isAuthenticated()) { router.push('/login'); return }
     setLoading(true)
     load().finally(() => setLoading(false))
   }, [load, router])

@@ -1,5 +1,6 @@
 'use client'
 
+import { isAuthenticated } from "@/lib/session"
 import { useState } from 'react'
 import { Trophy, X, Send, Check } from 'lucide-react'
 import { api } from '@/lib/api'
@@ -42,8 +43,7 @@ export function ShareSuccessModal({ autoTitle, onClose }: Props) {
 
     // Post to backend if authenticated
     try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
-      if (token) {
+      if (isAuthenticated()) {     // SECURITY-2B-2 — UI gate only; the cookie authorizes the call
         await api.successStories.create({
           title:       story.title,
           text:        story.text,

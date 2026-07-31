@@ -48,6 +48,12 @@ class TokenResponse(BaseModel):
     user:         UserResponse
 
 
+class SessionResponse(BaseModel):
+    # SECURITY-2B-2 — login / verify-email / MFA return ONLY the safe user profile. The session JWT is
+    # delivered exclusively in the HttpOnly cookie and never appears in any JSON body.
+    user: UserResponse
+
+
 class RegisterResponse(BaseModel):
     # P7.1 — verification link is delivered by email, never returned in the response.
     message: str

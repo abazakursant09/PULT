@@ -94,7 +94,7 @@ def test_valid_code_within_allowance_still_works(monkeypatch):
     assert c.post("/api/auth/login/mfa", json={"mfa_token": token, "code": "222222"}).status_code == 401
     ok = c.post("/api/auth/login/mfa", json={"mfa_token": token, "code": _valid_code(secret)})
     assert ok.status_code == 200, ok.text
-    assert "access_token" in ok.json()
+    assert "access_token" not in ok.json() and ok.json()["user"]   # cookie contract: no token in body
 
 
 def test_limiter_is_keyed_per_account(monkeypatch):

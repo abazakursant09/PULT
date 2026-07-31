@@ -125,7 +125,7 @@ export default function ChatPage() {
         setWarning(res.warning)
         // Refresh user to update chat_blocked status
         const updated = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/api/auth/me`, {
-          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+          credentials: 'include',    // SECURITY-2B-2 — HttpOnly cookie, no Bearer
         }).then(r => r.ok ? r.json() : null).catch(() => null)
         if (updated) {
           localStorage.setItem('user', JSON.stringify(updated))

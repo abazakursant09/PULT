@@ -1,4 +1,5 @@
 'use client'
+import { isAuthenticated } from "@/lib/session"
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -116,7 +117,7 @@ export default function Home() {
   // old two-signal behaviour instead of inventing a state.
   const [firstRun, setFirstRun] = useState<FirstRunState | null>(null)
 
-  useEffect(() => { if (!localStorage.getItem('token')) router.push('/login') }, [router])
+  useEffect(() => { if (!isAuthenticated()) router.push('/login') }, [router])
   useEffect(() => { setSub(_buildSub(new Date())) }, [])
   useEffect(() => {
     let alive = true

@@ -1,32 +1,24 @@
 from typing import Optional
 
 from fastapi import Depends, HTTPException, Request
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt, JWTError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from database import get_db
+from auth_cookie import read_session_cookie
 from models.user import User
-
-# auto_error=False so missing Authorization header doesn't 403 —
-# we fall back to the pult_token cookie instead.
-_bearer = HTTPBearer(auto_error=False)
 
 
 async def get_current_user(
     request: Request,
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer),
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    # Priority: cookie > Authorization header
-    token: Optional[str] = None
-    cookie_val = request.cookies.get("pult_token")
-    if cookie_val:
-        token = cookie_val
-    elif credentials:
-        token = credentials.credentials
+    # SECURITY-2B-2 — the browser session lives ONLY in the HttpOnly cookie. The Authorization: Bearer
+    # fallback was removed so a token stolen via XSS/localStorage can no longer authenticate; internal
+    # cron/HMAC endpoints keep their own X-Internal-Key auth (they never used this dependency).
+    token: Optional[str] = read_session_cookie(request)
 
     if not token:
         raise HTTPException(status_code=401, detail="Не авторизован")
@@ -51,12 +43,11 @@ async def get_current_user(
 
 async def get_current_user_optional(
     request: Request,
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer),
     db: AsyncSession = Depends(get_db),
 ) -> Optional[User]:
     """Like get_current_user but returns None instead of raising 401.
     Used by fire-and-forget endpoints that accept anonymous events."""
     try:
-        return await get_current_user(request, credentials, db)
+        return await get_current_user(request, db)
     except HTTPException:
         return None

@@ -5,6 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from config import settings
+from csrf import OriginCsrfMiddleware
 
 logging.basicConfig(
     level=logging.INFO,
@@ -55,6 +56,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         )
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         response.headers["X-Permitted-Cross-Domain-Policies"] = "none"
+        # SECURITY-2B-2 — never let a proxy/browser cache an auth response (it may carry Set-Cookie or
+        # the user profile). Covers login / verify-email / login/mfa / logout / me.
+        if request.url.path.startswith("/api/auth/"):
+            response.headers["Cache-Control"] = "no-store"
         return response
 
 
@@ -113,9 +118,16 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    # SECURITY-2B-2 — only the methods/headers the browser client actually uses. Authorization is gone
+    # (the session is a cookie now); an unknown Origin still fails the allow_origins allowlist above.
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type"],
 )
+
+# SECURITY-2B-2 — server-side Origin/Referer CSRF guard for cookie-authenticated mutations. Added after
+# CORS so it is the OUTER layer for real requests; the CORS preflight OPTIONS is never a state method,
+# so it passes through untouched.
+app.add_middleware(OriginCsrfMiddleware)
 
 app.include_router(auth.router,      prefix="/api/auth",     tags=["auth"])
 app.include_router(mfa.router,       prefix="/api/auth/mfa", tags=["mfa"])

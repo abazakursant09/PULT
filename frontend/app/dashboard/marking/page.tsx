@@ -36,9 +36,8 @@ export default function MarkingPage() {
   const scan = useCallback(async () => {
     setLoading(true)
     try {
-      const token = localStorage.getItem('token')
       const r = await fetch('/api/marking/scan', {
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: 'include',    // SECURITY-2B-2 — HttpOnly cookie, no Bearer
       })
       if (!r.ok) throw new Error()
       const data: ProductStatus[] = await r.json()
@@ -57,9 +56,8 @@ export default function MarkingPage() {
     if (!checkCat.trim()) return
     setChecking(true)
     try {
-      const token = localStorage.getItem('token')
       const r = await fetch(`/api/marking/check?category=${encodeURIComponent(checkCat)}`, {
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: 'include',    // SECURITY-2B-2 — HttpOnly cookie, no Bearer
       })
       const data: CheckResult = await r.json()
       setCheckResult(data)

@@ -1,4 +1,4 @@
-import { getToken, clearSession } from '@/lib/session'
+import { clearSession } from '@/lib/session'
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
 
@@ -59,12 +59,12 @@ function _sleep(ms: number): Promise<void> {
 // ── Headers ───────────────────────────────────────────────────────────────────
 
 function headers(extra?: Record<string, string>) {
-  const t = getToken()
+  // SECURITY-2B-2 — no Authorization header. The session is an HttpOnly cookie sent via
+  // credentials:'include' on every request; JS has no token to attach.
   const h: Record<string, string> = {
     'Content-Type': 'application/json',
     'Accept': 'application/json',
   }
-  if (t) h['Authorization'] = `Bearer ${t}`
   if (extra) Object.assign(h, extra)
   return h
 }
@@ -106,6 +106,7 @@ async function _fetch<T>(path: string, init: RequestInit | undefined, attempt = 
       ...init,
       headers: headers(init?.headers as Record<string, string> | undefined),
       mode: 'cors',
+      credentials: 'include',   // send the HttpOnly session cookie
       signal: ctrl.signal,
     })
     clearTimeout(timer)
@@ -167,15 +168,15 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 
 async function reqForm<T>(path: string, body: FormData, attempt = 0): Promise<T> {
   const url = `${API}${path}`
-  const t = getToken()
+  // SECURITY-2B-2 — no Authorization header; the HttpOnly session cookie authenticates via credentials.
   const h: Record<string, string> = {}
-  if (t) h['Authorization'] = `Bearer ${t}`
 
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), _timeout(path))
 
   try {
-    const res = await fetch(url, { method: 'POST', body, headers: h, mode: 'cors', signal: ctrl.signal })
+    const res = await fetch(url, { method: 'POST', body, headers: h, mode: 'cors',
+                                   credentials: 'include', signal: ctrl.signal })
     clearTimeout(timer)
 
     if (!res.ok) {
@@ -357,8 +358,7 @@ export interface SendMessageResult {
 }
 
 export interface AuthResponse {
-  access_token: string
-  token_type: string
+  // SECURITY-2B-2 — login/verify/MFA return ONLY the user; the session is delivered as an HttpOnly cookie.
   user: User
 }
 
@@ -1261,6 +1261,9 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ email, password }),
       }),
+    // SECURITY-2B-2 — backend clears the HttpOnly session cookie. Idempotent; safe to ignore errors.
+    logout: () => req<void>('/api/auth/logout', { method: 'POST' }),
+    me: () => req<User>('/api/auth/me'),
     register: (email: string, name: string, password: string, ref_code?: string) =>
       req<RegisterResponse>('/api/auth/register', {
         method: 'POST',
