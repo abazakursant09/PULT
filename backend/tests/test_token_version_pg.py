@@ -13,7 +13,7 @@ import uuid
 
 import pytest
 from fastapi import HTTPException, Request
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -132,8 +132,14 @@ def test_pg_db_failure_is_503():
         e = _pg_engine_or_skip()
         S, uid = await _reset_and_seed(e, ver=0)
         tok = create_access_token(uid, 0)
-        await e.dispose()                           # engine gone → any query errors
         async with S() as db:
+            # Poison the transaction deterministically: a bad statement aborts the asyncpg transaction,
+            # so get_current_user's next SELECT raises InFailedSQLTransactionError (a SQLAlchemyError) →
+            # the dependency must surface 503, never a false 401 and never fail-open.
+            try:
+                await db.execute(text("SELECT * FROM __no_such_table_2c1__"))
+            except Exception:
+                pass
             try:
                 await get_current_user(_req(tok), db)
                 return "NO_ERROR"
