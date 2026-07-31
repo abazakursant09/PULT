@@ -122,7 +122,7 @@ def test_forgot_password_no_token_sends_email(monkeypatch):
         db = await _engine()
         await register(UserRegister(email="f@b.com", name="F", password="Passw0rd"), _Req(), db)
         sent.clear()
-        resp = await forgot_password(ForgotPasswordIn(email="f@b.com"), _Req(), db, _rl=None)
+        resp = await forgot_password(ForgotPasswordIn(email="f@b.com"), _Req(), db)
         assert isinstance(resp, ForgotPasswordResponse)
         dumped = resp.model_dump()
         assert set(dumped.keys()) == {"message"}          # NO reset_token
@@ -141,9 +141,9 @@ def test_reset_password_flow(monkeypatch):
     async def go():
         db = await _engine()
         await register(UserRegister(email="r@b.com", name="R", password="Passw0rd"), _Req(), db)
-        await forgot_password(ForgotPasswordIn(email="r@b.com"), _Req(), db, _rl=None)
+        await forgot_password(ForgotPasswordIn(email="r@b.com"), _Req(), db)
         tok = sent[-1][2]
-        resp = await reset_password(ResetPasswordIn(token=tok, password="NewPass0rd"), db)
+        resp = await reset_password(ResetPasswordIn(token=tok, password="NewPass0rd"), _Req(), db)
         assert "message" in resp
         user = (await db.execute(select(User).where(User.email == "r@b.com"))).scalar_one()
         assert auth.verify_password("NewPass0rd", user.hashed_password)

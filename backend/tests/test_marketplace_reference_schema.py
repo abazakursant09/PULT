@@ -151,4 +151,4 @@ def test_alembic_single_head():
     from alembic.config import Config
     from alembic.script import ScriptDirectory
     heads = ScriptDirectory.from_config(Config("alembic.ini")).get_heads()
-    assert heads == ["tkv1a2b3c4d01"], heads
+    assert heads == ["atl1a2b3c4d01"], heads

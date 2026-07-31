@@ -142,6 +142,26 @@ class Settings(BaseSettings):
     # many real proxies exist (behind one Caddy/nginx, set TRUSTED_PROXY_COUNT=1).
     trusted_proxy_count: int = 0
 
+    # ── SECURITY-2C-2 — PostgreSQL-atomic auth throttle (multi-worker / restart-safe) ─────────────
+    # Three independent dimensions per protected action. LOGIN counts FAILURES only (a success
+    # compensates its own increment). identity+IP is the strictest local pair; identity-global is set
+    # high so an attacker cannot lock a seller out; IP-global is NAT-aware for password spraying.
+    auth_throttle_window_seconds: int = 900          # 15-min sliding window
+    auth_throttle_block_seconds: int = 900           # 15-min block once the limit is hit
+    auth_throttle_login_pair_limit: int = 5          # (identity+IP)  local, strictest
+    auth_throttle_login_identity_limit: int = 20     # identity global — distributed credential stuffing
+    auth_throttle_login_ip_limit: int = 50           # IP global — password spraying (NAT-tolerant)
+    # register / forgot / resend / reset — every request counted (no success compensation).
+    auth_throttle_register_ip_limit: int = 10
+    auth_throttle_register_identity_limit: int = 5
+    auth_throttle_email_ip_limit: int = 15           # forgot-password + resend-verification per IP
+    auth_throttle_email_identity_limit: int = 5      # forgot-password + resend-verification per email
+    auth_throttle_reset_ip_limit: int = 20           # reset-password confirm per IP
+    # opportunistic bounded cleanup: at most one sweep per this interval, deleting a small batch of
+    # fully-expired (window + block elapsed) buckets so a random-email attack cannot grow the table.
+    auth_throttle_cleanup_interval_seconds: int = 300
+    auth_throttle_cleanup_batch: int = 200
+
     model_config = {"env_file": ".env"}
 
 

@@ -375,16 +375,16 @@ def test_asking_for_a_mail_verifies_nobody():
 
 
 def test_the_rate_limiter_is_still_wired_to_these_routes():
-    """No endpoint quietly lost its throttle while being touched.
-
-    Registration does not use `limit_auth`; it has its own per-IP account cap. The two endpoints
-    that send mail on demand — and would otherwise be a free mail cannon — do use it.
+    """No endpoint quietly lost its throttle while being touched. SECURITY-2C-2 replaced the in-memory
+    per-IP `limit_auth` with the PostgreSQL-atomic auth throttle: the two mail-on-demand endpoints
+    reserve the `email` action, and registration keeps BOTH its 24h creation cap and a throttle.
     """
     import inspect
     src = inspect.getsource(auth_router)
     for fn in ("async def resend_verification", "async def forgot_password"):
         start = src.index(fn)
-        assert "limit_auth" in src[start:start + 600], f"{fn} lost its rate limit"
+        assert '_throttle_or_429(db, "email"' in src[start:start + 1600], f"{fn} lost its throttle"
 
     reg = src.index("async def register")
-    assert "IP_REG_LIMIT" in src[reg:reg + 2000], "registration lost its per-IP account cap"
+    assert "IP_REG_LIMIT" in src[reg:reg + 2200], "registration lost its per-IP account cap"
+    assert '_throttle_or_429(db, "register"' in src[reg:reg + 2200], "registration lost its throttle"
