@@ -47,7 +47,7 @@ from services.marketplace.errors import ExecutionError
 from services.marketplace.ingest import yandex as yx
 import tasks.api_sync as api_sync
 
-HEAD = "atl1a2b3c4d01"
+HEAD = "mts1a2b3c4d01"
 PRIOR = "wcb1a2b3c4d01"
 NOW = datetime(2026, 7, 28, 12, 0, 0)
 

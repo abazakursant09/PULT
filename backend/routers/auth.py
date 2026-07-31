@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from jose import jwt
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select, func, update
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
@@ -22,7 +23,7 @@ from services.mfa_crypto import load_secret
 from models.referral_record import ReferralRecord
 from models.user import User
 from models.workspace import Workspace
-from routers.mfa import verify_totp
+from routers.mfa import claim_totp_step
 from services.email import send_verification_email, send_password_reset_email
 from schemas.auth import (
     ForgotPasswordResponse, RegisterResponse, SessionResponse,
@@ -373,10 +374,22 @@ async def login_mfa(
     # holding the password cannot spray the 6-digit space; a real user's few retries pass.
     await limit_mfa(str(user_id), request)
 
-    if not verify_totp(load_secret(mfa_record.secret), data.code):
+    # SECURITY-2C-3A — verify AND atomically consume the code's TOTP step. A wrong code or a
+    # replayed / prior step returns False → 401 (counted as a failed attempt). A DB error inside the
+    # claim raises 503 (fail-closed: no cookie), never a false "wrong code". The reserved step is
+    # committed BEFORE the session cookie is issued, so one code authenticates at most once even under
+    # two concurrent /login/mfa requests (the second re-reads last_totp_step and matches 0 rows).
+    if not await claim_totp_step(db, user_id=str(user_id),
+                                 secret=load_secret(mfa_record.secret), code=data.code):
         await _log(db, email=user.email, success=False, action="mfa_verify",
                    reason="Неверный TOTP-код", ip=ip)
         raise HTTPException(status_code=401, detail="Неверный код аутентификатора")
+
+    try:
+        await db.commit()   # burn the reserved step before any session is issued
+    except SQLAlchemyError:
+        await db.rollback()
+        raise HTTPException(status_code=503, detail="Сервис временно недоступен. Повторите попытку.")
 
     log.info("mfa_verified: user=%s ip=%s", user_id, ip)
     await _log(db, email=user.email, success=True, action="mfa_verify", ip=ip)

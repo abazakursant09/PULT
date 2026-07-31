@@ -135,7 +135,9 @@ def test_verify_email_sets_cookie_no_token():
 def test_mfa_login_sets_cookie(monkeypatch):
     db = _run(_new_db())
     u = _run(_seed(db, email="m@b.c", mfa=True))
-    monkeypatch.setattr(auth_router, "verify_totp", lambda *a, **k: True)
+    async def _claim_ok(*a, **k):   # SECURITY-2C-3A — login now consumes the step via claim_totp_step
+        return True
+    monkeypatch.setattr(auth_router, "claim_totp_step", _claim_ok)
     monkeypatch.setattr(auth_router, "load_secret", lambda s: "x")
     monkeypatch.setattr(auth_router, "limit_mfa", lambda *a, **k: asyncio.sleep(0))
     c = _client(db)
