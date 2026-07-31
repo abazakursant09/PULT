@@ -155,7 +155,7 @@ def test_me_with_cookie_ok_without_401_bearer_rejected():
     # no cookie → 401
     assert c.get("/api/auth/me").status_code == 401
     # Bearer only (no cookie) → 401 (fallback removed)
-    tok = create_access_token(str(u.id))
+    tok = create_access_token(str(u.id), u.token_version)
     assert c.get("/api/auth/me", headers={"Authorization": f"Bearer {tok}"}).status_code == 401
     # valid cookie → 200
     c.cookies.set(_dev_name(), tok)
@@ -180,7 +180,7 @@ def test_logout_clears_cookie_idempotent():
     db = _run(_new_db())
     u = _run(_seed(db, email="lo@b.c"))
     c = _client(db)
-    c.cookies.set(_dev_name(), create_access_token(str(u.id)))
+    c.cookies.set(_dev_name(), create_access_token(str(u.id), u.token_version))
     r = c.post("/api/auth/logout", headers={"origin": ORIGIN})
     assert r.status_code == 204
     sc = r.headers.get("set-cookie", "").lower()
@@ -194,7 +194,7 @@ def _auth_client():
     db = _run(_new_db())
     u = _run(_seed(db, email="csrf@b.c"))
     c = _client(db)
-    c.cookies.set(_dev_name(), create_access_token(str(u.id)))
+    c.cookies.set(_dev_name(), create_access_token(str(u.id), u.token_version))
     return c
 
 

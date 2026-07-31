@@ -28,6 +28,12 @@ class User(Base):
     reset_token         = Column(String(255), nullable=True)
     reset_token_expires = Column(DateTime, nullable=True)
 
+    # SECURITY-2C-1 — server-side session revocation. Every issued access JWT carries the user's
+    # token_version at issue time (claim `ver`); get_current_user rejects a JWT whose `ver` != this.
+    # Incremented (atomic SQL) on logout, on successful password reset, and on account deletion, so a
+    # copied cookie dies immediately. Server-controlled, monotonically increasing, never user input.
+    token_version       = Column(Integer, nullable=False, default=0, server_default='0')
+
     # Telegram
     telegram_chat_id = Column(String(100), nullable=True)
 

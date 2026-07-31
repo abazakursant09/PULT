@@ -102,7 +102,11 @@ jobs:
             tests/test_observation_retention_sweep.py::test_pg_statement_timeout_rolls_back_batch \
             tests/test_observation_retention_sweep.py::test_pg_lock_timeout_rolls_back_batch \
             tests/test_observation_retention_sweep.py::test_pg_deadline_between_batches_timed_out \
-            tests/test_observation_retention_sweep.py::test_pg_dry_run_counts_only
+            tests/test_observation_retention_sweep.py::test_pg_dry_run_counts_only \
+            tests/test_token_version_pg.py::test_pg_concurrent_logout_no_lost_update \
+            tests/test_token_version_pg.py::test_pg_old_jwt_rejected_after_bump_new_accepted \
+            tests/test_token_version_pg.py::test_pg_reset_bump_revokes_old_session \
+            tests/test_token_version_pg.py::test_pg_db_failure_is_503
 
   # Proves the FULL Alembic chain runs on the database production actually uses. The chain was
   # historically only exercised on SQLite, which has no strict boolean type and silently accepted an
