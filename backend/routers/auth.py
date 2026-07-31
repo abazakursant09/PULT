@@ -7,12 +7,12 @@ import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from jose import jwt
 from pydantic import BaseModel, EmailStr
-from sqlalchemy import select, func
+from sqlalchemy import select, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from database import get_db
-from dependencies import get_current_user
+from dependencies import get_current_user, get_current_user_optional
 from auth_cookie import set_session_cookie, clear_session_cookie
 from rate_limit import limit_auth, limit_mfa, client_ip
 from models.login_attempt import LoginAttempt
@@ -50,11 +50,12 @@ def verify_password(password: str, hashed: str) -> bool:
     return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
 
 
-def create_access_token(user_id: str, extra: Optional[dict] = None) -> str:
-    expire  = datetime.utcnow() + timedelta(minutes=settings.access_token_expire_minutes)
-    payload = {"sub": user_id, "exp": expire}
-    if extra:
-        payload.update(extra)
+def create_access_token(user_id: str, token_version: int) -> str:
+    # SECURITY-2C-1 — `ver` is the user's token_version at issue time (server-side, never from client).
+    # get_current_user rejects a JWT whose ver != the user's current token_version, so logout / reset /
+    # delete (which increment it) revoke every previously issued cookie. Only sub/exp/ver — no jti/iat.
+    expire = datetime.utcnow() + timedelta(minutes=settings.access_token_expire_minutes)
+    payload = {"sub": user_id, "exp": expire, "ver": int(token_version)}
     return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
 
 
@@ -240,7 +241,7 @@ async def verify_email(
         await db.refresh(user)
         log.info("email_verified: user=%s email=%s", user.id, user.email)
 
-    set_session_cookie(response, create_access_token(str(user.id)))
+    set_session_cookie(response, create_access_token(str(user.id), user.token_version))
     return SessionResponse(user=UserResponse.model_validate(user))
 
 
@@ -290,7 +291,7 @@ async def login(
 
     log.info("login_success: user=%s email=%s ip=%s", user.id, data.email, ip)
     await _log(db, email=data.email, success=True, action="login", ip=ip)
-    set_session_cookie(response, create_access_token(str(user.id)))
+    set_session_cookie(response, create_access_token(str(user.id), user.token_version))
     return SessionResponse(user=UserResponse.model_validate(user))
 
 
@@ -342,7 +343,7 @@ async def login_mfa(
 
     log.info("mfa_verified: user=%s ip=%s", user_id, ip)
     await _log(db, email=user.email, success=True, action="mfa_verify", ip=ip)
-    set_session_cookie(response, create_access_token(str(user.id)))
+    set_session_cookie(response, create_access_token(str(user.id), user.token_version))
     return SessionResponse(user=UserResponse.model_validate(user))
 
 
@@ -357,12 +358,23 @@ async def me(response: Response, user: User = Depends(get_current_user)):
 
 # ── Logout ──────────────────────────────────────────────────────────────────────
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-async def logout(response: Response):
-    """Clear the session cookie. Idempotent (a repeat logout is a safe no-op) and covered by the
-    central Origin-CSRF check like every other mutating browser route. HONEST LIMIT: this drops the
-    browser cookie but does NOT revoke a JWT already copied off the client — server-side revocation
-    (token_version / jti) is SECURITY-2C. The injected `response` (with the delete-cookie header) is
-    returned as-is; the 204 status comes from the decorator."""
+async def logout(
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user_optional),
+):
+    """SECURITY-2C-1 — REAL server-side revocation. Atomically bump token_version so EVERY previously
+    issued JWT for this user (this device and any other) is rejected by get_current_user; a copied
+    cookie stops working immediately. The bump is a single atomic SQL increment (`token_version + 1`),
+    NOT a Python read-modify-write, so two concurrent logouts never lose an update and never 500; the
+    counter only ever increases. Commit lands BEFORE the cookie is cleared. Idempotent: a missing /
+    invalid / already-revoked cookie resolves user=None → we just clear the cookie and return 204.
+    Still covered by the central Origin-CSRF check."""
+    if user is not None:
+        await db.execute(
+            update(User).where(User.id == user.id).values(token_version=User.token_version + 1)
+        )
+        await db.commit()
     clear_session_cookie(response)
     response.headers["Cache-Control"] = "no-store"
     response.status_code = status.HTTP_204_NO_CONTENT
@@ -499,6 +511,12 @@ async def reset_password(
     user.hashed_password = hash_password(data.password)
     user.reset_token = None
     user.reset_token_expires = None
+    # SECURITY-2C-1 — a successful reset revokes ALL prior sessions: bump token_version in the SAME
+    # transaction as the new password, so the new hash and the session revocation commit together and
+    # any cookie issued before the reset is rejected on its next request. Atomic SQL increment (not a
+    # Python read-modify-write). NOTE: the two-concurrent-reset-confirm race (reset-token one-time-use)
+    # is still open until SECURITY-2C-3; this only revokes sessions on a SUCCESSFUL reset.
+    user.token_version = User.token_version + 1
 
     # Completing a reset PROVES control of the mailbox: the link only reached them by email, and
     # it is checked for validity and expiry above and consumed here. So this is the second honest

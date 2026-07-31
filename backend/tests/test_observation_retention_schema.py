@@ -21,7 +21,7 @@ from config import Settings, settings
 from models.marketplace_price_observation import MarketplacePriceObservation as MPO
 from models.marketplace_promotion_observation import MarketplacePromotionObservation as PO
 
-HEAD = "rpa1a2b3c4d01"
+HEAD = "tkv1a2b3c4d01"
 PRIOR = "eco1a2b3c4d01"
 _BACKEND = Path(__file__).resolve().parents[1]
 

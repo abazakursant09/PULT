@@ -40,7 +40,7 @@ import routers.auth as auth
 from routers.auth import register
 from schemas.auth import UserRegister
 
-REV = "rpa1a2b3c4d01"      # current alembic head; these tests upgrade to "head"
+REV = "tkv1a2b3c4d01"      # current alembic head; these tests upgrade to "head"
 PRIOR = "mcs1a2b3c4d01"    # the revision before F1.0 — where `workspaces` does not exist yet
 TABLE = "workspaces"
 
@@ -219,7 +219,12 @@ def test_backfill_does_not_modify_users(monkeypatch):
     command.upgrade(cfg, "head")
     after = _rows(sync_url, "SELECT * FROM users ORDER BY id")
 
-    assert before == after, "M0 modified `users` — it must be additive only"
+    # Additive-only means existing user ROWS are never modified — but LATER migrations may append new
+    # columns with a default (e.g. SECURITY-2C-1 users.token_version, default 0). Compare only the
+    # columns that existed at PRIOR; any new trailing column is allowed, a changed original value is not.
+    n = len(before[0]) if before else 0
+    after_original_cols = [row[:n] for row in after]
+    assert before == after_original_cols, "M0 modified `users` — it must be additive only"
 
 
 # ── C. migration roundtrip ───────────────────────────────────────────────────

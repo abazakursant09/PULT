@@ -253,6 +253,10 @@ async def delete_account(
     current_user.deleted_at   = now
     current_user.was_referrer = q_has_referrals.scalars().first() is not None
     current_user.was_referred = current_user.referred_by_id is not None
+    # SECURITY-2C-1 — revoke every existing session in the same transaction as the soft-delete. The
+    # deleted_at check in get_current_user already 403s a deleted user, but bumping token_version makes
+    # any copied cookie fail closed (401) even before that path — defence in depth. Atomic SQL increment.
+    current_user.token_version = User.token_version + 1
 
     await db.commit()
 
