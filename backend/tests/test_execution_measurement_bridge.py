@@ -229,7 +229,8 @@ def test_execute_calls_open_on_success(monkeypatch):
     ae, _ = _wire(monkeypatch, open_impl=open_impl)
     body = types.SimpleNamespace(overrides={}, dry_run=False)
     user = types.SimpleNamespace(id="u1")
-    resp = _run(ae.execute_insight("margin_crisis:wb:SKU1", body, current_user=user, db=_DB()))
+    resp = _run(ae.execute_insight("margin_crisis:wb:SKU1", body, current_user=user, db=_DB(),
+                                   idempotency_key=str(uuid.uuid4())))
     assert len(calls) == 1
     assert calls[0]["action_key"] == "set_price"
     assert calls[0]["entity_id"] == "OFF1"
@@ -258,7 +259,8 @@ def test_execute_open_exception_non_blocking(monkeypatch):
     ae, _ = _wire(monkeypatch, open_impl=open_impl)
     body = types.SimpleNamespace(overrides={}, dry_run=False)
     user = types.SimpleNamespace(id="u1")
-    resp = _run(ae.execute_insight("margin_crisis:wb:SKU1", body, current_user=user, db=_DB()))
+    resp = _run(ae.execute_insight("margin_crisis:wb:SKU1", body, current_user=user, db=_DB(),
+                                   idempotency_key=str(uuid.uuid4())))
     assert resp.success is True  # execution unaffected
 
 

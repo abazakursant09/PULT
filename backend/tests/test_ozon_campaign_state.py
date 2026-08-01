@@ -21,7 +21,7 @@ from models.marketplace_connection import MarketplaceConnection
 from models.api_credential import ApiCredential
 from models.execution_log import ExecutionLog          # noqa: F401
 from models.automation_rule import AutomationRule      # noqa: F401
-from services.marketplace import executor, credential_vault
+from services.marketplace import executor, credential_vault, operation_key
 from services.marketplace import ozon_performance_auth as auth
 from services.marketplace import action_catalog
 from services.marketplace.ozon_client import ozon_client
@@ -204,7 +204,8 @@ def test_executor_ozon_success_isolated_from_wb(monkeypatch):
 
         res = await executor.execute(
             db=db, user_id=uid, action_type="ad_set_state",
-            payload={"marketplace": "ozon", "campaign_id": 7, "action": "pause"})
+            payload={"marketplace": "ozon", "campaign_id": 7, "action": "pause"},
+            idempotency_key=operation_key.client_key(str(uuid.uuid4())))
         assert res.status == "success" and res.result["state"] == "pause"
         assert seen == [("BEARER", 7, "deactivate")]   # pause → deactivate, real bearer
     _run(go())
@@ -227,7 +228,8 @@ def test_wb_ad_set_state_unchanged(monkeypatch):
         monkeypatch.setattr(wb_client, "set_campaign_state", fake)
         res = await executor.execute(
             db=db, user_id=uid, action_type="ad_set_state",
-            payload={"marketplace": "wildberries", "campaign_id": 7, "action": "pause"})
+            payload={"marketplace": "wildberries", "campaign_id": 7, "action": "pause"},
+            idempotency_key=operation_key.client_key(str(uuid.uuid4())))
         assert res.status == "success" and res.result["state"] == "pause"
     _run(go())
 

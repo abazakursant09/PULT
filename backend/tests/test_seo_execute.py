@@ -11,7 +11,7 @@ from models.marketplace_connection import MarketplaceConnection
 from models.api_credential import ApiCredential
 from models.execution_log import ExecutionLog          # noqa: F401
 from models.automation_rule import AutomationRule      # noqa: F401
-from services.marketplace import executor, credential_vault
+from services.marketplace import executor, credential_vault, operation_key
 from services.marketplace.wb_client import wb_client
 
 
@@ -46,6 +46,7 @@ def test_update_card_success_sets_nmid():
             db=db, user_id=uid, action_type="update_card",
             payload={"marketplace": "wildberries", "offer_id": "555",
                      "card": {"title": "Новый SEO-заголовок"}},
+            idempotency_key=operation_key.client_key(str(uuid.uuid4())),
         )
         assert res.status == "success", res.error
         assert captured["card"]["nmID"] == 555           # dispatcher injects nmID
@@ -64,6 +65,7 @@ def test_update_card_revert_restores_old():
             db=db, user_id=uid, action_type="update_card",
             payload={"marketplace": "wildberries", "offer_id": "1",
                      "card": {"title": "new"}, "old_card": {"title": "old"}},
+            idempotency_key=operation_key.client_key(str(uuid.uuid4())),
         )
         assert res.reversible
         rev = await executor.revert(db=db, user_id=uid, log_id=res.log_id)

@@ -2,9 +2,11 @@
 
 A marketplace write that may have committed but returned TIMEOUT/5XX is recorded as `ambiguous`
 and NEVER auto-repeated: a second call with the same idempotency key returns needs_reconcile
-without re-dispatching. Clean failures (AUTH/VALIDATION/RATE_LIMIT) stay `failed`/`rejected` and
-remain retryable. Success idempotency is unchanged. The change is additive to the shared executor,
-so pricing/ads paths are unaffected.
+without re-dispatching. Clean failures (AUTH/VALIDATION/RATE_LIMIT) are recorded `failed`/`rejected`;
+under 2D-1B-B claim-before-dispatch a retry with the SAME operation key no longer re-dispatches (it
+resolves to needs_reconcile / PRIOR_FAILED) — a genuine retry needs a NEW operation key. Success
+idempotency is unchanged. The change is additive to the shared executor, so pricing/ads paths are
+unaffected.
 """
 import asyncio
 import uuid
@@ -18,7 +20,7 @@ from models.marketplace_connection import MarketplaceConnection
 from models.api_credential import ApiCredential
 from models.execution_log import ExecutionLog  # noqa: F401
 import models  # register tables
-from services.marketplace import executor, credential_vault
+from services.marketplace import executor, credential_vault, operation_key
 from services.marketplace.wb_client import wb_client
 from services.marketplace.errors import ExecutionError
 
@@ -57,11 +59,11 @@ def _ok(counter):
     return _fake
 
 
-def _publish(db, uid, key="review:x"):
+def _publish(db, uid, key=None):
     return executor.execute(
         db=db, user_id=uid, action_type="publish_review_response",
         payload={"marketplace": "wildberries", "feedback_id": "fb1", "text": "Спасибо!", "rating": 5},
-        idempotency_key=key,
+        idempotency_key=key or operation_key.review_key("x"),
     )
 
 
@@ -94,11 +96,11 @@ def test_ambiguous_then_retry_does_not_redispatch():
         db, uid = await _setup()
         c = {"calls": 0}
         wb_client.publish_feedback_answer = _raiser(ExecutionError.TIMEOUT, c)
-        r1 = await _publish(db, uid, key="review:1")
+        r1 = await _publish(db, uid, key=operation_key.review_key("1"))
         assert r1.status == "ambiguous" and c["calls"] == 1
         # retry with the SAME key — even if the marketplace would now answer, we must not call it
         wb_client.publish_feedback_answer = _ok(c)
-        r2 = await _publish(db, uid, key="review:1")
+        r2 = await _publish(db, uid, key=operation_key.review_key("1"))
         assert r2.status == "needs_reconcile"
         assert r2.ok is False
         assert c["calls"] == 1          # NO second marketplace call
@@ -112,8 +114,8 @@ def test_success_idempotency_unchanged():
         db, uid = await _setup()
         c = {"calls": 0}
         wb_client.publish_feedback_answer = _ok(c)
-        r1 = await _publish(db, uid, key="review:s")
-        r2 = await _publish(db, uid, key="review:s")
+        r1 = await _publish(db, uid, key=operation_key.review_key("s"))
+        r2 = await _publish(db, uid, key=operation_key.review_key("s"))
         assert r1.status == "success" and r2.status == "success"
         assert c["calls"] == 1          # second returns prior success, no re-call
     _run(go())
@@ -126,11 +128,14 @@ def test_auth_remains_failed_and_retryable():
         db, uid = await _setup()
         c = {"calls": 0}
         wb_client.publish_feedback_answer = _raiser(ExecutionError.AUTH, c)
-        r1 = await _publish(db, uid, key="review:a")
+        r1 = await _publish(db, uid, key=operation_key.review_key("a"))
         assert r1.status == "failed" and r1.error["code"] == "AUTH"
-        # same key retried — AUTH is clean, so it IS re-dispatched (not suppressed)
-        r2 = await _publish(db, uid, key="review:a")
-        assert r2.status == "failed" and c["calls"] == 2
+        # 2D-1B-B claim-before-dispatch: the same key now RESOLVES against the prior failed claim row
+        # instead of re-dispatching. A clean failure is no longer silently retried under the same key —
+        # the retry returns needs_reconcile (PRIOR_FAILED) and the marketplace is NOT called again.
+        wb_client.publish_feedback_answer = _ok(c)
+        r2 = await _publish(db, uid, key=operation_key.review_key("a"))
+        assert r2.status == "needs_reconcile" and c["calls"] == 1
     _run(go())
 
 
@@ -139,7 +144,7 @@ def test_rate_limit_is_not_ambiguous():
         db, uid = await _setup()
         c = {"calls": 0}
         wb_client.publish_feedback_answer = _raiser(ExecutionError.RATE_LIMIT, c)
-        res = await _publish(db, uid, key="review:r")
+        res = await _publish(db, uid, key=operation_key.review_key("r"))
         assert res.status == "failed"                    # 429 is clean, not ambiguous
         assert not ExecutionError.is_ambiguous_error("RATE_LIMIT")
     _run(go())

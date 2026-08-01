@@ -21,6 +21,7 @@ from models.user import User
 
 from services.decision_apply_ux.preview import build_apply_preview, ApplyPreview
 from services.decision_apply_ux.confirm import confirm_and_apply_decision, ApplyConfirmResult
+from ._op_http import forbid_body_key
 
 router = APIRouter()
 
@@ -69,7 +70,9 @@ async def decision_apply_preview(
 class ConfirmRequest(BaseModel):
     marketplace: str
     sku: Optional[str] = None
-    idempotency_key: str
+    # SECURITY-2D-1B-B — deprecated: the executor key is server-derived (v1:decision:<id>). Kept Optional
+    # so an old client that still sends it gets an explicit 422 instead of a silent ignore.
+    idempotency_key: Optional[str] = None
 
 
 class ConfirmResponse(BaseModel):
@@ -97,9 +100,15 @@ async def decision_apply_confirm(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ConfirmResponse:
+    forbid_body_key(body.idempotency_key)
     res = await confirm_and_apply_decision(
         db, user_id=current_user.id, decision_id=decision_id, marketplace=body.marketplace,
-        sku=body.sku, idempotency_key=body.idempotency_key)
+        sku=body.sku)
     if res.reason == "decision_not_found":
         raise HTTPException(status_code=404, detail="decision not found")
+    if res.status == "needs_reconcile":
+        raise HTTPException(status_code=409,
+                            detail={"code": res.reason or "NEEDS_RECONCILE",
+                                    "decision_id": res.decision_id,
+                                    "execution_log_id": res.execution_log_id})
     return _confirm_view(res)

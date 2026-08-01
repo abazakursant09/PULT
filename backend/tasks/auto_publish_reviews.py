@@ -22,7 +22,7 @@ from models.review_response import ReviewResponse
 from models.product import Product
 from models.user import User
 from models.execution_log import ExecutionLog
-from services.marketplace import executor
+from services.marketplace import executor, operation_key
 from services.marketplace.guard import NEGATIVE_RATING_MAX
 from services.marketplace import review_automation_gate as gate
 
@@ -195,7 +195,7 @@ async def run_auto_publish_reviews() -> dict:
                     },
                     mode="automated_l4",
                     insight_key="rating_good",
-                    idempotency_key=f"review:{review.id}",
+                    idempotency_key=operation_key.review_key(review.id),
                     rule=rule_dict,
                 )
                 if res.ok:

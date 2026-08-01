@@ -23,6 +23,7 @@ from dependencies import get_current_user
 from models.user import User
 from services import decision_apply
 from services.measurement_close_bridge import close_due_measurements
+from ._op_http import forbid_body_key
 
 router = APIRouter()
 
@@ -65,6 +66,9 @@ async def apply_decision_endpoint(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ApplyDecisionResponse:
+    # SECURITY-2D-1B-B — the executor key for a decision is ALWAYS server-derived (v1:decision:<id>).
+    # A client-supplied body key is forbidden (deprecated field kept Optional for a clean 422).
+    forbid_body_key(body.idempotency_key)
     res = await decision_apply.apply_decision(
         db=db,
         user_id=current_user.id,
@@ -72,9 +76,13 @@ async def apply_decision_endpoint(
         overrides=body.overrides,
         mode=body.mode,
         connection_id=body.connection_id,
-        idempotency_key=body.idempotency_key,
         dry_run=body.dry_run,
     )
+    if res.status == "needs_reconcile":
+        raise HTTPException(status_code=409,
+                            detail={"code": res.reason or "NEEDS_RECONCILE",
+                                    "decision_id": res.decision_id,
+                                    "execution_log_id": res.execution_log_id})
     return ApplyDecisionResponse(
         ok=res.ok,
         decision_id=res.decision_id,

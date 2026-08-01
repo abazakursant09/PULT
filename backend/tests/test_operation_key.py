@@ -1,0 +1,76 @@
+"""SECURITY-2D-1B-B — operation key validation (pure). Identity, never content."""
+import pytest
+
+from services.marketplace import operation_key as ok
+
+_GOOD = "3f2504e0-4f89-41d3-9a0c-0305e82c3301"   # canonical lowercase UUIDv4
+
+
+def test_client_key_wraps_valid_uuid():
+    assert ok.client_key(_GOOD) == "v1:client:" + _GOOD
+    assert ok.is_valid_v1_key(ok.client_key(_GOOD))
+
+
+def test_namespaced_builders_and_length():
+    assert ok.decision_key("d1") == "v1:decision:d1"
+    assert ok.review_key("r1") == "v1:review:r1"
+    assert ok.revert_key("L1") == "v1:revert:L1"
+    for k in (ok.client_key(_GOOD), ok.decision_key(_GOOD), ok.review_key(_GOOD),
+              ok.revert_key(_GOOD)):
+        assert ok.is_valid_v1_key(k) and len(k) <= ok.MAX_KEY_LEN
+
+
+@pytest.mark.parametrize("bad", [
+    None,                                            # missing → REQUIRED
+    "",                                              # empty
+    "   ",                                           # whitespace
+    " 3f2504e0-4f89-41d3-9a0c-0305e82c3301",         # leading space
+    "3F2504E0-4F89-41D3-9A0C-0305E82C3301",          # uppercase (non-canonical)
+    "3f2504e0-4f89-11d3-9a0c-0305e82c3301",          # version 1, not 4
+    "3f2504e0-4f89-41d3-0a0c-0305e82c3301",          # variant 0, invalid
+    "3f2504e04f8941d39a0c0305e82c3301",              # no hyphens / wrong length
+    "not-a-uuid",                                    # malformed
+    "3f2504e0-4f89-41d3-9a0c-0305e82c3301-extra",    # overlong
+])
+def test_bad_client_uuid_rejected(bad):
+    with pytest.raises(ok.OperationKeyError):
+        ok.client_key(bad)
+
+
+def test_required_vs_invalid_codes():
+    with pytest.raises(ok.OperationKeyError) as e1:
+        ok.canonical_client_uuid(None)
+    assert e1.value.code == "OPERATION_KEY_REQUIRED"
+    with pytest.raises(ok.OperationKeyError) as e2:
+        ok.canonical_client_uuid("nope")
+    assert e2.value.code == "OPERATION_KEY_INVALID"
+
+
+def test_bool_is_not_a_key():
+    with pytest.raises(ok.OperationKeyError):
+        ok.canonical_client_uuid(True)   # bool must never be accepted as a uuid
+
+
+@pytest.mark.parametrize("key,ok_flag", [
+    ("v1:client:" + _GOOD, True),
+    ("v1:decision:abc", True),
+    ("v1:review:abc", True),
+    ("v1:revert:abc", True),
+    ("v1:intent:abc", True),                         # reserved namespace still shape-valid
+    ("review:abc", False),                           # legacy format
+    ("price:p:100", False),                          # legacy content key
+    ("v1:client:", False),                           # empty tail
+    ("v1:client:has space", False),                  # whitespace in tail
+    ("v2:client:x", False),                          # wrong version prefix
+    (None, False),
+    ("v1:" + "x" * 200, False),                       # overlong / no valid namespace
+])
+def test_is_valid_v1_key(key, ok_flag):
+    assert ok.is_valid_v1_key(key) is ok_flag
+
+
+def test_forbid_body_key():
+    ok.forbid_body_key(None)                          # None is fine
+    with pytest.raises(ok.OperationKeyError) as e:
+        ok.forbid_body_key(_GOOD)
+    assert e.value.code == "BODY_OPERATION_KEY_FORBIDDEN"

@@ -18,7 +18,7 @@ from database import Base
 from models.marketplace_connection import MarketplaceConnection
 from models.api_credential import ApiCredential
 import models  # noqa: F401  register tables
-from services.marketplace import executor, credential_vault, action_catalog
+from services.marketplace import executor, credential_vault, action_catalog, operation_key
 from services.marketplace import action_catalog as ac
 from services.marketplace.wb_client import wb_client
 from services.marketplace.errors import ExecutionError
@@ -127,7 +127,7 @@ def test_ozon_publish_routes_and_succeeds(monkeypatch):
         res = await executor.execute(
             db=db, user_id=uid, action_type="publish_review_response",
             payload={"marketplace": "ozon", "feedback_id": "fb1", "text": "Спасибо!", "rating": 5},
-            idempotency_key="review:oz")
+            idempotency_key=operation_key.review_key("oz"))
         assert res.status == "success"
         # composite credential split correctly: client_id from the connection, api_key from the vault
         assert seen == {"token": "tok", "client_id": "CID", "review_id": "fb1", "text": "Спасибо!"}
@@ -145,7 +145,7 @@ def test_yandex_publish_without_a_resolved_cabinet_fails_closed(monkeypatch):
         res = await executor.execute(
             db=db, user_id=uid, action_type="publish_review_response",
             payload={"marketplace": "yandex", "feedback_id": "fb1", "text": "hi", "rating": 5},
-            idempotency_key="review:ym")
+            idempotency_key=operation_key.review_key("ym"))
         assert res.ok is False
         assert res.error["code"] == ExecutionError.AUTH
     _run(go())
@@ -158,7 +158,7 @@ def test_megamarket_publish_still_fails_closed(monkeypatch):
         res = await executor.execute(
             db=db, user_id=uid, action_type="publish_review_response",
             payload={"marketplace": "megamarket", "feedback_id": "fb1", "text": "hi", "rating": 5},
-            idempotency_key="review:mm")
+            idempotency_key=operation_key.review_key("mm"))
         assert res.status == "rejected"
         assert res.error["code"] == ExecutionError.CAPABILITY_NOT_SUPPORTED
     _run(go())
@@ -174,7 +174,7 @@ def test_wb_publish_still_dispatches(monkeypatch):
         res = await executor.execute(
             db=db, user_id=uid, action_type="publish_review_response",
             payload={"marketplace": "wildberries", "feedback_id": "fb1", "text": "Спасибо!", "rating": 5},
-            idempotency_key="review:wb")
+            idempotency_key=operation_key.review_key("wb"))
         assert res.status == "success"
         assert seen == {"feedback_id": "fb1", "text": "Спасибо!"}
     _run(go())

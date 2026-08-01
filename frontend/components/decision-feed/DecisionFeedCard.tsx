@@ -65,11 +65,6 @@ const APPLY_REASON_RU: Record<string, string> = {
 function applyReason(r: string | null): string {
   return r ? (APPLY_REASON_RU[r] ?? r) : 'Решение пока нельзя применить'
 }
-function newIdempotencyKey(): string {
-  const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto
-  return c?.randomUUID ? c.randomUUID() : `apply-${Date.now()}-${Math.random().toString(36).slice(2)}`
-}
-
 function tomorrowISO(): string {
   return new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
 }
@@ -136,9 +131,10 @@ export function DecisionFeedCard(
     if (!decisionId) return
     setApply({ kind: 'busy' })
     try {
+      // SECURITY-2D-1B-B: no client idempotency key — the executor derives it from Decision.id, so a
+      // double-submit of the same decision cannot cause a second provider dispatch.
       const r = await api.decisionApply.confirm(decisionId, {
         marketplace: item.marketplace ?? '', sku: item.sku ?? undefined,
-        idempotency_key: newIdempotencyKey(),
       })
       setApply({ kind: 'done', r })
     } catch (e) {

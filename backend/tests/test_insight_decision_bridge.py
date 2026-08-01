@@ -278,6 +278,7 @@ def test_execute_promotes_exactly_once(monkeypatch):
 
     body = types.SimpleNamespace(overrides={}, dry_run=False)
     user = types.SimpleNamespace(id="u1")
-    resp = _run(ae.execute_insight("margin_crisis:wb:SKU1", body, current_user=user, db=None))
+    resp = _run(ae.execute_insight("margin_crisis:wb:SKU1", body, current_user=user, db=None,
+                                   idempotency_key=str(uuid.uuid4())))
     assert calls == ["margin_crisis:wb:SKU1"]
     assert resp.success is True

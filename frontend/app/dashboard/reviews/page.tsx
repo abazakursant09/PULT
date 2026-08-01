@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { SellerBar } from '@/components/seller/Shell'
 import { api, type ReviewResponse, type ReviewState, type ReviewHistoryEntry } from '@/lib/api'
+import { newOperationKey } from '@/lib/opkey'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -263,7 +264,7 @@ export default function ReviewsPage() {
                     <Button variant="secondary" size="sm" disabled={busy}
                       onClick={() => act(() => api.reviews.approve(sel.product_id, sel.id))}>Одобрить</Button>
                     <Button variant="primary" size="sm" disabled={busy}
-                      onClick={() => act(() => api.reviews.publish(sel.product_id, sel.id))}>Опубликовать</Button>
+                      onClick={() => act(() => api.reviews.publish(sel.product_id, sel.id, newOperationKey()))}>Опубликовать</Button>
                   </div>
 
                   <div className="mt-4 border-t border-[var(--line)] pt-3">

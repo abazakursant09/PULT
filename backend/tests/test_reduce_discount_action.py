@@ -19,7 +19,7 @@ import models  # registers tables
 from models.marketplace_connection import MarketplaceConnection
 from models.api_credential import ApiCredential
 from models.execution_log import ExecutionLog
-from services.marketplace import executor, credential_vault, action_catalog, wb_client, ozon_client
+from services.marketplace import executor, credential_vault, action_catalog, wb_client, ozon_client, operation_key
 from services.marketplace.errors import ExecutionError
 from services.marketplace.action_metric_binding import target_metric, problem_action_space
 from services import capability_registry
@@ -82,7 +82,8 @@ def test_wb_routes_to_set_discount(monkeypatch):
         await _conn(db, uid, "wildberries")   # WB connections store the full label
         res = await executor.execute(db=db, user_id=uid, action_type="reduce_discount",
                                      payload={"marketplace": "wildberries", "offer_id": "123", "discount": 5},
-                                     decision_id="d1")
+                                     decision_id="d1",
+                                     idempotency_key=operation_key.client_key(str(uuid.uuid4())))
         assert res.status == "success" and seen == {"offer_id": "123", "discount": 5.0}
     _run(go())
 

@@ -1,7 +1,7 @@
 import logging
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 
@@ -16,6 +16,7 @@ from schemas.pricing import (
 )
 from tasks.check_pricing import compute_recommendation
 from services.marketplace import executor
+from ._op_http import resolve_client_key, raise_if_reconcile
 
 log    = logging.getLogger(__name__)
 router = APIRouter()
@@ -139,7 +140,11 @@ async def check_price(
             },
             mode="automated_l4",
             insight_key="margin_crisis",
-            idempotency_key=f"price:{product_id}:{recommended}",
+            # SECURITY-2D-1B-B — the auto-push has NO durable operation id: the old content-derived key
+            # (price:<product>:<value>) is removed and NOT replaced by a random/content fallback. With no
+            # server-owned v1 key an automated_l4 write is rejected in the executor (0 provider calls) —
+            # in addition to the 2D-1A automation_enabled choke. A durable PricePushIntent is deferred to
+            # when auto-pricing is actually enabled (out of 1B-B scope).
             rule={"enabled": True, "guard": {
                 "min_price": rule.min_price, "max_price": rule.max_price,
             }},
@@ -177,7 +182,9 @@ async def apply_price(
     product_id: str,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
 ):
+    op_key = resolve_client_key(idempotency_key, dry_run=False)
     product = await _get_product_or_404(product_id, current_user.id, db)
     rule = await _get_rule_or_404(product_id, db)
 
@@ -214,8 +221,9 @@ async def apply_price(
         },
         mode="manual_l3",
         insight_key="margin_crisis",
-        idempotency_key=f"price:{product_id}:{recommended}",
+        idempotency_key=op_key,
     )
+    raise_if_reconcile(res)
     if not res.ok:
         raise HTTPException(
             status_code=502,

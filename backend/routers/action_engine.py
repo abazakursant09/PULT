@@ -4225,6 +4225,9 @@ async def update_insight_status(
 # ══════════════════════════════════════════════════════════════════════════════
 from services.marketplace import executor as _executor                 # noqa: E402
 from services.marketplace import insight_mapping as _imap              # noqa: E402
+from services.marketplace import operation_key as _opkey              # noqa: E402
+from ._op_http import resolve_client_key as _resolve_client_key, raise_if_reconcile as _raise_if_reconcile  # noqa: E402
+from fastapi import Header as _Header                                  # noqa: E402
 from models.review_response import ReviewResponse as _ReviewResponse   # noqa: E402
 from models.product import Product as _Product                         # noqa: E402
 
@@ -4257,6 +4260,7 @@ async def execute_insight(
     body: ExecuteInsightRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    idempotency_key: str | None = _Header(None, alias="Idempotency-Key"),
 ):
     uid = current_user.id
     plan = await _imap.resolve_plan(db, uid, insight_key, body.overrides)
@@ -4318,7 +4322,7 @@ async def execute_insight(
                 payload={"feedback_id": r.external_review_id, "text": r.response_text,
                          "rating": r.rating},
                 mode="manual_l3", insight_key=insight_key, decision_id=decision_id,
-                idempotency_key=f"review:{r.id}", dry_run=body.dry_run,
+                idempotency_key=_opkey.review_key(r.id), dry_run=body.dry_run,
             )
             results.append({"review_id": r.id, "status": res.status,
                             "execution_id": res.log_id, "error": res.error})
@@ -4337,11 +4341,15 @@ async def execute_insight(
         )
 
     # ── single action ─────────────────────────────────────────────────────────
+    # Manual direct execution → client operation UUID (header). The promoted decision_id is provenance
+    # only, never the executor key (per the approved hybrid: action_engine single = client UUID).
+    op_key = _resolve_client_key(idempotency_key, dry_run=body.dry_run)
     res = await _executor.execute(
         db=db, user_id=uid, action_type=plan.action_type, payload=plan.payload,
         mode="manual_l3", insight_key=insight_key, decision_id=decision_id,
-        dry_run=body.dry_run,
+        idempotency_key=op_key, dry_run=body.dry_run,
     )
+    _raise_if_reconcile(res)
 
     # ── Insight → Decision → ExecutionLog → Measurement OPEN (bridge Slice 3) ──
     # Best-effort, non-blocking, open-only. Real success + listing-grain action

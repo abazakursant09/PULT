@@ -17,7 +17,7 @@ from models.marketplace_connection import MarketplaceConnection
 from models.api_credential import ApiCredential
 from models.execution_log import ExecutionLog          # noqa: F401 (register table)
 from models.automation_rule import AutomationRule      # noqa: F401
-from services.marketplace import executor, credential_vault
+from services.marketplace import executor, credential_vault, operation_key
 from services.marketplace.wb_client import wb_client
 
 
@@ -67,6 +67,7 @@ def test_l3_publish_success():
         res = await executor.execute(
             db=db, user_id=uid, action_type="publish_review_response",
             payload={"marketplace": "wildberries", "feedback_id": "fb1", "text": "Спасибо за отзыв!", "rating": 5},
+            idempotency_key=operation_key.review_key("fb1"),
         )
         assert res.status == "success", res.error
         assert res.api_request_id == "req-123"
@@ -144,7 +145,7 @@ def test_idempotency_dedupes():
         kw = dict(
             db=db, user_id=uid, action_type="publish_review_response",
             payload={"marketplace": "wildberries", "feedback_id": "fb1", "text": "ответ", "rating": 5},
-            idempotency_key="review:abc",
+            idempotency_key=operation_key.review_key("abc"),
         )
         r1 = await executor.execute(**kw)
         r2 = await executor.execute(**kw)

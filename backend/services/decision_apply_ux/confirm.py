@@ -63,13 +63,13 @@ async def _open_measurement_if_needed(db, user_id: str, decision_id: str, now) -
 
 async def confirm_and_apply_decision(
     db: AsyncSession, *, user_id: str, decision_id: str, marketplace: str,
-    sku: Optional[str], idempotency_key: str, now: Optional[datetime] = None,
+    sku: Optional[str], idempotency_key: Optional[str] = None, now: Optional[datetime] = None,
 ) -> ApplyConfirmResult:
-    """Apply a bound decision after explicit confirmation. idempotency_key required."""
-    if not idempotency_key:
-        return ApplyConfirmResult(False, decision_id, None, None, "not_applied",
-                                  "idempotency_key_required", False, None)
+    """Apply a bound decision after explicit confirmation.
 
+    SECURITY-2D-1B-B — no client idempotency_key is required or used for the executor claim: the
+    executor derives v1:decision:<Decision.id> server-side. The append-only intent ledger is unchanged.
+    """
     # 1) preview = the single authoritative gate (dry_run, no apply)
     preview = await build_apply_preview(
         db, user_id=user_id, decision_id=decision_id, marketplace=marketplace, sku=sku, now=now)

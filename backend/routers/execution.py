@@ -2,7 +2,7 @@
 import logging
 from typing import List
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,6 +15,7 @@ from schemas.marketplace import (
     ExecuteRequest, ExecuteResponse, ExecutionLogOut, ExecutionLogDetailOut,
 )
 from services.marketplace import executor
+from ._op_http import resolve_client_key, raise_if_reconcile
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -25,7 +26,10 @@ async def execute_action(
     body: ExecuteRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
 ):
+    op_key = resolve_client_key(idempotency_key, dry_run=body.dry_run,
+                                body_key=body.idempotency_key)
     res = await executor.execute(
         db=db,
         user_id=current_user.id,
@@ -34,9 +38,10 @@ async def execute_action(
         mode="manual_l3",
         connection_id=body.connection_id,
         insight_key=body.insight_key,
-        idempotency_key=body.idempotency_key,
+        idempotency_key=op_key,
         dry_run=body.dry_run,
     )
+    raise_if_reconcile(res)
     return ExecuteResponse(
         log_id=res.log_id, status=res.status, action_type=res.action_type,
         marketplace=res.marketplace, api_request_id=res.api_request_id,

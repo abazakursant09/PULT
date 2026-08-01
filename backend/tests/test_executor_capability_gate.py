@@ -19,7 +19,7 @@ import models  # registers tables
 from models.marketplace_connection import MarketplaceConnection
 from models.api_credential import ApiCredential
 from models.execution_log import ExecutionLog
-from services.marketplace import executor, credential_vault
+from services.marketplace import executor, credential_vault, operation_key
 from services.marketplace.action_catalog import ActionSpec
 from services.marketplace.errors import ExecutionError
 
@@ -77,7 +77,8 @@ def test_supported_capability_dispatches(monkeypatch):
         db = await _engine(); uid = str(uuid.uuid4())
         await _conn(db, uid)
         res = await executor.execute(db=db, user_id=uid, action_type="ad_set_bid",
-                                     payload={"marketplace": "wb"}, decision_id="dec-1")
+                                     payload={"marketplace": "wb"}, decision_id="dec-1",
+                                     idempotency_key=operation_key.client_key(str(uuid.uuid4())))
         assert res.status == "success"
         assert calls == ["dispatched"]
     _run(go())
@@ -132,7 +133,8 @@ def test_unmapped_action_skips_gate(monkeypatch):
         db = await _engine(); uid = str(uuid.uuid4())
         await _conn(db, uid, scope="advert")
         res = await executor.execute(db=db, user_id=uid, action_type="set_price",
-                                     payload={"marketplace": "wb"})
+                                     payload={"marketplace": "wb"},
+                                     idempotency_key=operation_key.client_key(str(uuid.uuid4())))
         assert res.status == "success"
         assert calls == ["dispatched"]
     _run(go())

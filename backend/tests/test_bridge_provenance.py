@@ -9,6 +9,7 @@ raising promotion leaves decision_id=None and execution proceeds.
 import asyncio
 import inspect
 import types
+import uuid
 
 from routers import action_engine as ae
 from services.insight_decision_bridge import PromoteResult
@@ -64,7 +65,8 @@ def test_single_path_passes_promoted_decision_id(monkeypatch):
 
     captured = _wire_single(monkeypatch, promote=promote)
     resp = _run(ae.execute_insight("margin_crisis:wb:SKU1", _body(),
-                                   current_user=_user(), db=None))
+                                   current_user=_user(), db=None,
+                                   idempotency_key=str(uuid.uuid4())))
     assert len(captured) == 1
     assert captured[0]["decision_id"] == "dec-123"
     assert resp.success is True
@@ -79,7 +81,8 @@ def test_blocked_promotion_threads_none_and_executes(monkeypatch):
 
     captured = _wire_single(monkeypatch, promote=promote)
     resp = _run(ae.execute_insight("margin_crisis:wb:SKU1", _body(),
-                                   current_user=_user(), db=None))
+                                   current_user=_user(), db=None,
+                                   idempotency_key=str(uuid.uuid4())))
     assert len(captured) == 1
     assert captured[0]["decision_id"] is None
     assert resp.success is True
@@ -93,7 +96,8 @@ def test_promotion_exception_is_non_blocking(monkeypatch):
 
     captured = _wire_single(monkeypatch, promote=promote)
     resp = _run(ae.execute_insight("margin_crisis:wb:SKU1", _body(),
-                                   current_user=_user(), db=None))
+                                   current_user=_user(), db=None,
+                                   idempotency_key=str(uuid.uuid4())))
     assert len(captured) == 1
     assert captured[0]["decision_id"] is None
     assert resp.success is True
@@ -162,7 +166,8 @@ def test_response_contract_unchanged(monkeypatch):
 
     _wire_single(monkeypatch, promote=promote)
     resp = _run(ae.execute_insight("margin_crisis:wb:SKU1", _body(),
-                                   current_user=_user(), db=None))
+                                   current_user=_user(), db=None,
+                                   idempotency_key=str(uuid.uuid4())))
     # Same fields the pre-Slice-2 single path returned.
     assert resp.success is True
     assert resp.status == "success"

@@ -11,7 +11,7 @@ from models.marketplace_connection import MarketplaceConnection
 from models.api_credential import ApiCredential
 from models.execution_log import ExecutionLog          # noqa: F401
 from models.automation_rule import AutomationRule      # noqa: F401
-from services.marketplace import executor, credential_vault
+from services.marketplace import executor, credential_vault, operation_key
 from services.marketplace.wb_client import wb_client
 
 
@@ -46,6 +46,7 @@ def test_set_bid_success_and_revert():
             db=db, user_id=uid, action_type="ad_set_bid",
             payload={"marketplace": "wildberries", "campaign_id": 7, "cpm": 210,
                      "adv_type": 8, "old_cpm": 320},
+            idempotency_key=operation_key.client_key(str(uuid.uuid4())),
         )
         assert res.status == "success" and res.reversible
         rev = await executor.revert(db=db, user_id=uid, log_id=res.log_id)
@@ -63,6 +64,7 @@ def test_set_state_pause():
         res = await executor.execute(
             db=db, user_id=uid, action_type="ad_set_state",
             payload={"marketplace": "wildberries", "campaign_id": 7, "action": "pause"},
+            idempotency_key=operation_key.client_key(str(uuid.uuid4())),
         )
         assert res.status == "success" and res.result["state"] == "pause"
     _run(go())

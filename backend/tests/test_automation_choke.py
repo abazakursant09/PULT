@@ -20,7 +20,7 @@ from models.api_credential import ApiCredential
 from models.execution_log import ExecutionLog
 import models  # noqa: F401  register tables
 from config import settings
-from services.marketplace import executor, credential_vault
+from services.marketplace import executor, credential_vault, operation_key
 from services.marketplace.wb_client import wb_client
 
 AUTOMATION_CODE = "GUARD_AUTOMATION_DISABLED"
@@ -93,7 +93,8 @@ def test_automated_l4_reaches_dispatch_once_when_flag_true(monkeypatch):
         wb_client.publish_feedback_answer = _counting_publish(c)
         res = await executor.execute(db=db, user_id=uid, action_type="publish_review_response",
                                      payload=_review_payload(), mode="automated_l4",
-                                     rule={"enabled": True})
+                                     rule={"enabled": True},
+                                     idempotency_key=operation_key.review_key("fb1"))
         return res, c["calls"]
     res, calls = _run(go())
     assert calls == 1                                # flag True → the choke passes, one real dispatch
@@ -138,7 +139,8 @@ def test_manual_l3_not_blocked_by_choke(monkeypatch):
         c = {"calls": 0}
         wb_client.publish_feedback_answer = _counting_publish(c)
         res = await executor.execute(db=db, user_id=uid, action_type="publish_review_response",
-                                     payload=_review_payload(), mode="manual_l3")   # user-initiated L3
+                                     payload=_review_payload(), mode="manual_l3",   # user-initiated L3
+                                     idempotency_key=operation_key.review_key("fb1"))
         return res, c["calls"]
     res, calls = _run(go())
     assert res.error is None or res.error.get("code") != AUTOMATION_CODE   # choke did NOT fire
