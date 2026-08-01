@@ -128,7 +128,13 @@ jobs:
             tests/test_mfa_replay_pg.py::test_pg_uncommitted_claim_not_visible_to_others \
             tests/test_mfa_replay_pg.py::test_pg_db_error_is_503 \
             tests/test_mfa_replay_pg.py::test_pg_enable_concurrent_one_success \
-            tests/test_mfa_replay_pg.py::test_pg_disable_replay_rejected
+            tests/test_mfa_replay_pg.py::test_pg_disable_replay_rejected \
+            tests/test_reset_digest_pg.py::test_pg_concurrent_confirm_one_success \
+            tests/test_reset_digest_pg.py::test_pg_success_bumps_token_version_and_password \
+            tests/test_reset_digest_pg.py::test_pg_reuse_after_success_rejected \
+            tests/test_reset_digest_pg.py::test_pg_rollback_keeps_token_valid \
+            tests/test_reset_digest_pg.py::test_pg_expired_token_rejected \
+            tests/test_reset_digest_pg.py::test_pg_expiry_comparison_works
 
   # Proves the FULL Alembic chain runs on the database production actually uses. The chain was
   # historically only exercised on SQLite, which has no strict boolean type and silently accepted an

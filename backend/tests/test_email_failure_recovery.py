@@ -74,10 +74,14 @@ def _register(client, email=None):
 
 async def _seed(db, *, verified=False, reset_token=None, expires=None, email=None):
     addr = email or f"{uuid.uuid4()}@example.com"
+    # SECURITY-2C-3B — the DB stores the DIGEST; the raw token is what the client POSTs. Seed the
+    # digest of the given raw token so the confirm endpoint (which hashes the submitted token) matches.
+    from services.reset_token import hash_reset_token
     user = User(id=str(uuid.uuid4()), email=addr, name="S",
                 hashed_password=hash_password(GOOD_PW), is_verified=verified,
                 verification_token=None if verified else "verify-me",
-                reset_token=reset_token, reset_token_expires=expires)
+                reset_token=hash_reset_token(reset_token) if reset_token else None,
+                reset_token_expires=expires)
     db.add(user)
     await db.commit()
     return user
@@ -235,10 +239,11 @@ def test_a_valid_reset_verifies_the_account():
     db = _run(_new_db())
     user = _run(_seed(db, verified=False, reset_token="rt-1",
                       expires=datetime.utcnow() + timedelta(hours=1)))
+    uid = user.id                                # SECURITY-2C-3B — capture before the atomic reset
     r = _client(db).post("/api/auth/reset-password",
                          json={"token": "rt-1", "password": GOOD_PW})
     assert r.status_code == 200
-    fresh = _run(db.execute(select(User).where(User.id == user.id))).scalars().first()
+    fresh = _run(db.execute(select(User).where(User.id == uid))).scalars().first()
     assert fresh.is_verified is True
     assert fresh.verification_token is None      # the outstanding link is retired with it
 
@@ -247,10 +252,11 @@ def test_an_unknown_reset_token_verifies_nobody():
     db = _run(_new_db())
     user = _run(_seed(db, verified=False, reset_token="rt-1",
                       expires=datetime.utcnow() + timedelta(hours=1)))
+    uid = user.id
     r = _client(db).post("/api/auth/reset-password",
                          json={"token": "not-the-token", "password": GOOD_PW})
     assert r.status_code == 400
-    fresh = _run(db.execute(select(User).where(User.id == user.id))).scalars().first()
+    fresh = _run(db.execute(select(User).where(User.id == uid))).scalars().first()
     assert fresh.is_verified is False
 
 
@@ -259,10 +265,11 @@ def test_an_expired_reset_token_verifies_nobody():
     db = _run(_new_db())
     user = _run(_seed(db, verified=False, reset_token="rt-old",
                       expires=datetime.utcnow() - timedelta(minutes=1)))
+    uid = user.id
     r = _client(db).post("/api/auth/reset-password",
                          json={"token": "rt-old", "password": GOOD_PW})
     assert r.status_code == 400
-    fresh = _run(db.execute(select(User).where(User.id == user.id))).scalars().first()
+    fresh = _run(db.execute(select(User).where(User.id == uid))).scalars().first()
     assert fresh.is_verified is False
 
 
@@ -284,8 +291,9 @@ def test_a_reset_cannot_verify_someone_elses_address():
     mine = _run(_seed(db, verified=False, reset_token="rt-mine",
                       expires=datetime.utcnow() + timedelta(hours=1)))
     theirs = _run(_seed(db, verified=False))
+    their_id = theirs.id
     _client(db).post("/api/auth/reset-password", json={"token": "rt-mine", "password": GOOD_PW})
-    other = _run(db.execute(select(User).where(User.id == theirs.id))).scalars().first()
+    other = _run(db.execute(select(User).where(User.id == their_id))).scalars().first()
     assert other.is_verified is False
     del mine
 

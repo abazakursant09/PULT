@@ -1,8 +1,8 @@
 'use client'
 
-import { Suspense, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import Link from 'next/link'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useRouter } from 'next/navigation'
 import { KeyRound, ArrowRight, CheckCircle2, Loader2 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { Card } from '@/components/ui/card'
@@ -13,8 +13,21 @@ import { Separator } from '@/components/ui/separator'
 
 function ResetPasswordContent() {
   const router = useRouter()
-  const params = useSearchParams()
-  const token  = params.get('token') ?? ''
+
+  // SECURITY-2C-3B — the raw reset token arrives in the URL FRAGMENT (#token=…). The fragment is never
+  // sent to any server (no proxy access log, no Referer). Read it in the browser, keep it ONLY in
+  // component memory (never localStorage/sessionStorage/cookie, never back in the URL), and strip it
+  // from the address bar / history immediately so it cannot leak via history or a later navigation.
+  const [token, setToken] = useState('')
+  const [ready, setReady] = useState(false)
+
+  useEffect(() => {
+    const m = /(?:^#|&)token=([^&]+)/.exec(window.location.hash)
+    if (m) setToken(decodeURIComponent(m[1]))
+    // Remove the fragment regardless (also clears a stray empty one). Keep path + query intact.
+    window.history.replaceState(null, '', window.location.pathname + window.location.search)
+    setReady(true)
+  }, [])
 
   const [form,    setForm]    = useState({ password: '', confirm: '' })
   const [loading, setLoading] = useState(false)
@@ -40,6 +53,7 @@ function ResetPasswordContent() {
       setError(err instanceof Error ? err.message : 'Ошибка сброса пароля')
     } finally {
       setLoading(false)
+      setToken('')   // SECURITY-2C-3B — purge the raw token from memory after the one submit
     }
   }
 
@@ -98,7 +112,7 @@ function ResetPasswordContent() {
             </div>
           </div>
 
-          {!token && (
+          {ready && !token && !done && (
             <div
               className="mb-6 px-4 py-3 rounded-xl"
               style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)', color: '#DC2626', fontSize: '0.875rem' }}
