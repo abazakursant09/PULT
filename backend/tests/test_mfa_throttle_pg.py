@@ -17,23 +17,24 @@ import os
 import uuid
 
 import pytest
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.testclient import TestClient
+import time
+
+from fastapi import HTTPException, Request, Response
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
-from database import Base, get_db
+from database import Base
 import models  # noqa: F401
+from dependencies import get_current_user
 from models.user import User
 from models.mfa_secret import MFASecret
 from models.auth_rate_limit_bucket import AuthRateLimitBucket
 from config import settings
 from services import auth_throttle as T
-from routers import mfa as mfa_router
+from routers.mfa import mfa_verify, mfa_disable, MFACodeIn, _generate_secret, _totp
 from routers.auth import hash_password, create_access_token
-from routers.mfa import _generate_secret, _totp
 
 COOKIE = "pult_session_dev"   # app_env defaults to test → dev cookie name
 
@@ -295,12 +296,14 @@ def test_pg_reservation_option_c_semantics():
     assert after_ok == [1]           # committed independently: post-reserve failure would leave it counted
 
 
-# ══ enable / disable session revocation (real endpoints on PG) ══════════════
+# ══ enable / disable session revocation (endpoint coroutines called DIRECTLY) ═══
+# TestClient runs its own event loop; asyncpg connections are loop-bound, so we call the route
+# coroutines directly on the one _run() loop (the same pattern token_version_pg uses).
 
 async def _seed_mfa_user(S, *, enabled, ver=0):
     uid = str(uuid.uuid4())
     secret = _generate_secret()
-    async with S() as db:
+    async with S() as db:                       # parent User first (real-PG FK), then child MFASecret
         db.add(User(id=uid, email=f"{uid}@x.c", name="S", hashed_password=hash_password("pw"),
                     is_verified=True, token_version=ver))
         await db.commit()
@@ -310,44 +313,66 @@ async def _seed_mfa_user(S, *, enabled, ver=0):
     return uid, secret
 
 
-def _mfa_client(S):
-    app = FastAPI()
-    app.include_router(mfa_router.router, prefix="/api/mfa")
-    async def _db():
-        async with S() as s:
-            yield s
-    app.dependency_overrides[get_db] = _db
-    return TestClient(app)
+def _http_req(ip="203.0.113.5"):
+    return Request({"type": "http", "method": "POST", "path": "/", "headers": [], "client": (ip, 0)})
 
 
-def _req(token):
+def _cookie_req(token):
     return Request({"type": "http", "method": "GET", "path": "/",
                     "headers": [(b"cookie", f"{COOKIE}={token}".encode())]})
+
+
+async def _call_verify(S, uid, code, ip="203.0.113.5"):
+    """Invoke the real mfa_verify with a user loaded in the SAME session, so the token_version bump and
+    db.refresh operate on a live ORM instance. Returns (status, cookie_set)."""
+    resp = Response()
+    async with S() as db:
+        user = (await db.execute(select(User).where(User.id == uid))).scalar_one()
+        try:
+            await mfa_verify(MFACodeIn(code=code), _http_req(ip), resp, user, db)
+            status = 200
+        except HTTPException as ex:
+            status = ex.status_code
+    return status, "set-cookie" in {k.lower() for k in resp.headers}
+
+
+async def _call_disable(S, uid, code, ip="203.0.113.5"):
+    resp = Response()
+    async with S() as db:
+        user = (await db.execute(select(User).where(User.id == uid))).scalar_one()
+        try:
+            await mfa_disable(MFACodeIn(code=code), _http_req(ip), resp, user, db)
+            status = 200
+        except HTTPException as ex:
+            status = ex.status_code
+    return status, "set-cookie" in {k.lower() for k in resp.headers}
+
+
+async def _state(S, uid):
+    async with S() as db:
+        ver = (await db.execute(select(User.token_version).where(User.id == uid))).scalar_one()
+        enabled = (await db.execute(select(MFASecret.enabled).where(MFASecret.user_id == uid))).scalar_one()
+    return ver, enabled
 
 
 def test_pg_enable_bumps_token_version_and_reissues_cookie():
     async def go():
         e, S = await _fresh()
         uid, secret = await _seed_mfa_user(S, enabled=False, ver=0)
-        c = _mfa_client(S)
-        c.cookies.set(COOKIE, create_access_token(uid, 0))
-        r = c.post("/api/mfa/verify", json={"code": _totp(secret, int(__import__("time").time()))})
-        # DB state + old/new cookie acceptance via the REAL dependency
-        from dependencies import get_current_user
-        async with S() as db:
-            ver = (await db.execute(select(User.token_version).where(User.id == uid))).scalar_one()
-            enabled = (await db.execute(select(MFASecret.enabled).where(MFASecret.user_id == uid))).scalar_one()
+        status, cookie_set = await _call_verify(S, uid, _totp(secret, int(time.time())))
+        ver, enabled = await _state(S, uid)
+        # old cookie (ver 0) now rejected; a cookie with the new version is accepted
         old_rejected = False
         async with S() as db:
             try:
-                await get_current_user(_req(create_access_token(uid, 0)), db)
+                await get_current_user(_cookie_req(create_access_token(uid, 0)), db)
             except HTTPException as ex:
                 old_rejected = ex.status_code == 401
         async with S() as db:
-            u = await get_current_user(_req(create_access_token(uid, ver)), db)   # new version accepted
+            u = await get_current_user(_cookie_req(create_access_token(uid, ver)), db)
             new_ok = u.id == uid
         await e.dispose()
-        return r.status_code, "set-cookie" in {k.lower() for k in r.headers}, ver, enabled, old_rejected, new_ok
+        return status, cookie_set, ver, enabled, old_rejected, new_ok
     status, cookie_set, ver, enabled, old_rejected, new_ok = _run(go())
     assert status == 200 and cookie_set is True
     assert ver == 1 and enabled is True and old_rejected is True and new_ok is True
@@ -357,15 +382,10 @@ def test_pg_disable_bumps_token_version_and_reissues_cookie():
     async def go():
         e, S = await _fresh()
         uid, secret = await _seed_mfa_user(S, enabled=True, ver=0)
-        c = _mfa_client(S)
-        c.cookies.set(COOKIE, create_access_token(uid, 0))
-        r = c.request("DELETE", "/api/mfa/disable",
-                      json={"code": _totp(secret, int(__import__("time").time()))})
-        async with S() as db:
-            ver = (await db.execute(select(User.token_version).where(User.id == uid))).scalar_one()
-            enabled = (await db.execute(select(MFASecret.enabled).where(MFASecret.user_id == uid))).scalar_one()
+        status, cookie_set = await _call_disable(S, uid, _totp(secret, int(time.time())))
+        ver, enabled = await _state(S, uid)
         await e.dispose()
-        return r.status_code, "set-cookie" in {k.lower() for k in r.headers}, ver, enabled
+        return status, cookie_set, ver, enabled
     status, cookie_set, ver, enabled = _run(go())
     assert status == 200 and cookie_set is True and ver == 1 and enabled is False
 
@@ -374,15 +394,11 @@ def test_pg_wrong_manage_code_does_not_bump_or_reissue():
     async def go():
         e, S = await _fresh()
         uid, secret = await _seed_mfa_user(S, enabled=True, ver=0)
-        c = _mfa_client(S)
-        c.cookies.set(COOKIE, create_access_token(uid, 0))
-        wrong = "000000" if _totp(secret, int(__import__("time").time())) != "000000" else "111111"
-        r = c.request("DELETE", "/api/mfa/disable", json={"code": wrong})
-        async with S() as db:
-            ver = (await db.execute(select(User.token_version).where(User.id == uid))).scalar_one()
-            enabled = (await db.execute(select(MFASecret.enabled).where(MFASecret.user_id == uid))).scalar_one()
+        wrong = "000000" if _totp(secret, int(time.time())) != "000000" else "111111"
+        status, cookie_set = await _call_disable(S, uid, wrong)
+        ver, enabled = await _state(S, uid)
         await e.dispose()
-        return r.status_code, "set-cookie" in {k.lower() for k in r.headers}, ver, enabled
+        return status, cookie_set, ver, enabled
     status, cookie_set, ver, enabled = _run(go())
     assert status == 400 and cookie_set is False and ver == 0 and enabled is True   # nothing changed
 
@@ -391,22 +407,15 @@ def test_pg_concurrent_enable_no_desync():
     async def go():
         e, S = await _fresh()
         uid, secret = await _seed_mfa_user(S, enabled=False, ver=0)
-
-        def call():
-            c = _mfa_client(S)
-            c.cookies.set(COOKIE, create_access_token(uid, 0))
-            return c.post("/api/mfa/verify", json={"code": _totp(secret, int(__import__("time").time()))})
-
-        # two concurrent enables (threads → real concurrent PG transactions)
-        import concurrent.futures as cf
-        with cf.ThreadPoolExecutor(max_workers=2) as ex:
-            r1, r2 = [f.result() for f in [ex.submit(call), ex.submit(call)]]
-        async with S() as db:
-            ver = (await db.execute(select(User.token_version).where(User.id == uid))).scalar_one()
-            enabled = (await db.execute(select(MFASecret.enabled).where(MFASecret.user_id == uid))).scalar_one()
+        code = _totp(secret, int(time.time()))
+        # two concurrent enables on independent sessions → real PG row-lock serialization
+        results = await asyncio.gather(_call_verify(S, uid, code, ip="10.1.1.1"),
+                                       _call_verify(S, uid, code, ip="10.1.1.2"))
+        ver, enabled = await _state(S, uid)
         await e.dispose()
-        return {r1.status_code, r2.status_code}, ver, enabled
+        return {s for s, _ in results}, ver, enabled
     codes, ver, enabled = _run(go())
-    # both may 200 (idempotent enable) with atomic +1 each → version advanced without corruption
+    # same code → the replay guard lets exactly one win (200) and the other 400; version bumped by the
+    # winner only. Never a 500 / desync; MFA ends enabled.
     assert enabled is True and ver >= 1
-    assert codes <= {200, 400}     # never a 500 / desync
+    assert codes <= {200, 400}
