@@ -59,19 +59,48 @@ def _sessionmaker():
     return eng, sessionmaker(eng, class_=AsyncSession, expire_on_commit=False)
 
 
-async def _seed_user(Session):
+async def _seed_user(Session, marketplace="wildberries"):
     from models.marketplace_connection import MarketplaceConnection
     from models.api_credential import ApiCredential
     from services.marketplace import credential_vault
     uid = str(uuid.uuid4())
     async with Session() as db:
-        conn = MarketplaceConnection(id=str(uuid.uuid4()), user_id=uid, marketplace="wildberries",
-                                     status="connected", scopes=["feedbacks"])
+        conn = MarketplaceConnection(id=str(uuid.uuid4()), user_id=uid, marketplace=marketplace,
+                                     status="connected", scopes=["feedbacks", "prices"])
         db.add(conn); await db.flush()
-        db.add(ApiCredential(id=str(uuid.uuid4()), connection_id=conn.id, scope="feedbacks",
-                             secret_enc=credential_vault.encrypt("tok"), meta={}))
+        for scope in ("feedbacks", "prices"):
+            db.add(ApiCredential(id=str(uuid.uuid4()), connection_id=conn.id, scope=scope,
+                                 secret_enc=credential_vault.encrypt("tok"), meta={}))
         await db.commit()
     return uid
+
+
+async def _conn_id(Session, uid):
+    from sqlalchemy import select as _select
+    from models.marketplace_connection import MarketplaceConnection
+    async with Session() as db:
+        return (await db.execute(_select(MarketplaceConnection.id).where(
+            MarketplaceConnection.user_id == uid))).scalars().first()
+
+
+def _fp_for_publish(uid, conn_id, text="Спасибо!"):
+    from services.marketplace.executor import _fingerprint
+    return _fingerprint(uid, conn_id, "wildberries", "publish_review_response", "manual_l3",
+                        {"marketplace": "wildberries", "feedback_id": "fb1", "text": text, "rating": 5},
+                        None)
+
+
+async def _seed_claim(Session, uid, key, fp, status, *, in_flight_ts=False, decision_id=None,
+                      action_type="publish_review_response"):
+    from datetime import datetime, timezone
+    from models.execution_log import ExecutionLog
+    async with Session() as db:
+        db.add(ExecutionLog(
+            id=str(uuid.uuid4()), user_id=uid, action_type=action_type, mode="manual_l3",
+            payload={}, status=status, idempotency_key=key, request_fingerprint=fp,
+            decision_id=decision_id,
+            dispatch_started_at=datetime.now(timezone.utc) if in_flight_ts else None))
+        await db.commit()
 
 
 def _install_stub(monkeypatch, counter, *, fail=None, delay=0.05):
@@ -302,3 +331,259 @@ def test_pg_migration_duplicate_v1_preflight_fails_closed(monkeypatch):
             c.exec_driver_sql("DROP SCHEMA public CASCADE; CREATE SCHEMA public")
         command.upgrade(cfg, "head")
         eng2.dispose()
+
+
+# ── resolve outcomes on an existing claim (crash states + mismatch), all 0 dispatch ───────────
+
+def _seeded_reconcile_case(monkeypatch, *, status, use_fp, in_flight_ts=False):
+    _ensure_schema(monkeypatch)
+    c = {"n": 0}
+    _install_stub(monkeypatch, c, delay=0)
+
+    async def go():
+        eng, Session = _sessionmaker()
+        try:
+            uid = await _seed_user(Session)
+            conn_id = await _conn_id(Session, uid)
+            key = _rk()
+            fp = _fp_for_publish(uid, conn_id) if use_fp == "match" else \
+                (None if use_fp == "null" else "fp1:" + "0" * 64)
+            await _seed_claim(Session, uid, key, fp, status=status, in_flight_ts=in_flight_ts)
+            r = await _publish(Session, uid, key)
+            assert r.status == "needs_reconcile", (status, use_fp, r.status)
+            assert c["n"] == 0
+            return r
+        finally:
+            await eng.dispose()
+    return _run(go())
+
+
+def test_pg_crash_after_pending_blocks(monkeypatch):
+    # claim committed, provider never called (dispatch_started_at NULL) -> retry blocked, 0 dispatch
+    r = _seeded_reconcile_case(monkeypatch, status="pending", use_fp="match")
+    assert r.error["code"] == "OPERATION_IN_PROGRESS"
+
+
+def test_pg_crash_after_in_flight_blocks(monkeypatch):
+    # provider dispatch begun (dispatch_started_at set), terminal not written -> retry blocked
+    r = _seeded_reconcile_case(monkeypatch, status="in_flight", use_fp="match", in_flight_ts=True)
+    assert r.error["code"] == "OPERATION_IN_PROGRESS"
+
+
+def test_pg_ambiguous_prior_blocks(monkeypatch):
+    r = _seeded_reconcile_case(monkeypatch, status="ambiguous", use_fp="match")
+    assert r.error["code"] == "AMBIGUOUS_PRIOR"
+
+
+def test_pg_existing_failed_blocks(monkeypatch):
+    r = _seeded_reconcile_case(monkeypatch, status="failed", use_fp="match")
+    assert r.error["code"] == "PRIOR_FAILED"
+
+
+def test_pg_v1_null_fingerprint_blocks(monkeypatch):
+    r = _seeded_reconcile_case(monkeypatch, status="success", use_fp="null")
+    assert r.error["code"] == "NEEDS_RECONCILE"
+
+
+def test_pg_same_key_different_fingerprint_mismatch_seeded(monkeypatch):
+    r = _seeded_reconcile_case(monkeypatch, status="success", use_fp="diff")
+    assert r.error["code"] == "IDEMPOTENCY_MISMATCH"
+
+
+# ── automation-disabled L4 + auto-pricing: 0 dispatch ─────────────────────────────────────────
+
+def test_pg_automation_disabled_l4_zero(monkeypatch):
+    _ensure_schema(monkeypatch)
+    c = {"n": 0}
+    _install_stub(monkeypatch, c, delay=0)
+    from config import settings
+    monkeypatch.setattr(settings, "automation_enabled", False)
+
+    async def go():
+        from services.marketplace import executor, operation_key
+        eng, Session = _sessionmaker()
+        try:
+            uid = await _seed_user(Session)
+            async with Session() as db:
+                r = await executor.execute(
+                    db=db, user_id=uid, action_type="publish_review_response",
+                    payload={"marketplace": "wildberries", "feedback_id": "fb1", "text": "x", "rating": 5},
+                    mode="automated_l4", idempotency_key=operation_key.review_key(str(uuid.uuid4())))
+            assert r.status == "rejected" and c["n"] == 0
+        finally:
+            await eng.dispose()
+    _run(go())
+
+
+def test_pg_autopricing_no_durable_key_zero(monkeypatch):
+    _ensure_schema(monkeypatch)
+    from services.marketplace.wb_client import wb_client
+    calls = {"n": 0}
+
+    async def _fake_set_price(*, token, offer_id, price, discount=None):
+        calls["n"] += 1
+        return {"requestId": "r"}
+    monkeypatch.setattr(wb_client, "set_price", _fake_set_price)
+    from config import settings
+    monkeypatch.setattr(settings, "automation_enabled", False)
+
+    async def go():
+        from services.marketplace import executor
+        eng, Session = _sessionmaker()
+        try:
+            uid = await _seed_user(Session)
+            async with Session() as db:
+                r = await executor.execute(          # automated_l4 set_price with NO key (auto-pricing)
+                    db=db, user_id=uid, action_type="set_price",
+                    payload={"marketplace": "wildberries", "offer_id": "OF1", "price": 100, "old_price": 90},
+                    mode="automated_l4", idempotency_key=None)
+            assert r.status == "rejected" and calls["n"] == 0
+        finally:
+            await eng.dispose()
+    _run(go())
+
+
+# ── concurrent Decision apply -> one dispatch (server-derived v1:decision:<id>) ────────────────
+
+def test_pg_concurrent_decision_apply_one_dispatch(monkeypatch):
+    _ensure_schema(monkeypatch)
+    c = {"n": 0}
+    _install_stub(monkeypatch, c, delay=0.05)
+
+    async def go():
+        from models.user import User
+        from models.marketplace_connection import MarketplaceConnection
+        from models.api_credential import ApiCredential
+        from models.decision import Decision
+        from services.marketplace import credential_vault
+        from services import decision_apply
+        eng, Session = _sessionmaker()
+        try:
+            uid = str(uuid.uuid4())
+            did = str(uuid.uuid4())
+            async with Session() as db:
+                db.add(User(id=uid, email=uid + "@e.invalid", name="S",
+                            hashed_password="x", is_verified=True))
+                await db.flush()
+                conn = MarketplaceConnection(id=str(uuid.uuid4()), user_id=uid,
+                                             marketplace="wildberries", status="connected",
+                                             scopes=["feedbacks"])
+                db.add(conn)
+                await db.flush()
+                db.add(ApiCredential(id=str(uuid.uuid4()), connection_id=conn.id, scope="feedbacks",
+                                     secret_enc=credential_vault.encrypt("tok"), meta={}))
+                db.add(Decision(id=did, user_id=uid, problem="p",
+                                action_key="publish_review_response"))
+                await db.commit()
+
+            async def one():
+                async with Session() as db:
+                    return await decision_apply.apply_decision(
+                        db=db, user_id=uid, decision_id=did,
+                        overrides={"marketplace": "wildberries", "feedback_id": "fb1",
+                                   "text": "Spasibo", "rating": 5})
+            await asyncio.gather(one(), one(), return_exceptions=True)
+            assert c["n"] == 1                       # both derive v1:decision:<id> -> one dispatch
+        finally:
+            await eng.dispose()
+    _run(go())
+
+
+# ── revert: one inverse, second revert 0, ambiguous revert not repeated ────────────────────────
+
+def _install_set_price_stub(monkeypatch, calls, *, fail=None):
+    from services.marketplace.wb_client import wb_client
+    from services.marketplace.errors import ExecutionError
+
+    async def _fake(*, token, offer_id, price, discount=None):
+        calls["n"] += 1
+        if fail:
+            raise ExecutionError(fail, "boom")
+        return {"requestId": "r"}
+    monkeypatch.setattr(wb_client, "set_price", _fake)
+
+
+async def _set_price(Session, uid, key):
+    from services.marketplace import executor
+    async with Session() as db:
+        return await executor.execute(
+            db=db, user_id=uid, action_type="set_price",
+            payload={"marketplace": "wildberries", "offer_id": "OF1", "price": 100, "old_price": 90},
+            mode="manual_l3", idempotency_key=key)
+
+
+def test_pg_revert_one_inverse_then_second_revert_zero(monkeypatch):
+    _ensure_schema(monkeypatch)
+    calls = {"n": 0}
+    _install_set_price_stub(monkeypatch, calls)
+
+    async def go():
+        from services.marketplace import executor, operation_key
+        eng, Session = _sessionmaker()
+        try:
+            uid = await _seed_user(Session)
+            r0 = await _set_price(Session, uid, operation_key.client_key(str(uuid.uuid4())))
+            assert r0.status == "success" and calls["n"] == 1
+            async with Session() as db:
+                rv = await executor.revert(db=db, user_id=uid, log_id=r0.log_id)
+            assert rv.status == "success" and calls["n"] == 2     # one inverse dispatch
+            # second revert: original is now 'reverted' -> blocked at the guard, 0 dispatch
+            raised = False
+            async with Session() as db:
+                try:
+                    await executor.revert(db=db, user_id=uid, log_id=r0.log_id)
+                except Exception:
+                    raised = True
+            assert raised and calls["n"] == 2
+        finally:
+            await eng.dispose()
+    _run(go())
+
+
+def test_pg_concurrent_revert_one_inverse(monkeypatch):
+    _ensure_schema(monkeypatch)
+    calls = {"n": 0}
+    _install_set_price_stub(monkeypatch, calls)
+
+    async def go():
+        from services.marketplace import executor, operation_key
+        eng, Session = _sessionmaker()
+        try:
+            uid = await _seed_user(Session)
+            r0 = await _set_price(Session, uid, operation_key.client_key(str(uuid.uuid4())))
+            assert calls["n"] == 1
+
+            async def one():
+                async with Session() as db:
+                    return await executor.revert(db=db, user_id=uid, log_id=r0.log_id)
+            await asyncio.gather(one(), one(), return_exceptions=True)
+            assert calls["n"] == 2                    # original 1 + exactly one inverse
+        finally:
+            await eng.dispose()
+    _run(go())
+
+
+def test_pg_ambiguous_revert_not_repeated(monkeypatch):
+    _ensure_schema(monkeypatch)
+    calls = {"n": 0}
+    _install_set_price_stub(monkeypatch, calls)     # original succeeds
+
+    async def go():
+        from services.marketplace import executor, operation_key
+        from services.marketplace.errors import ExecutionError
+        eng, Session = _sessionmaker()
+        try:
+            uid = await _seed_user(Session)
+            r0 = await _set_price(Session, uid, operation_key.client_key(str(uuid.uuid4())))
+            assert calls["n"] == 1
+            _install_set_price_stub(monkeypatch, calls, fail=ExecutionError.TIMEOUT)  # inverse ambiguous
+            async with Session() as db:
+                rv = await executor.revert(db=db, user_id=uid, log_id=r0.log_id)
+            assert rv.status == "ambiguous" and calls["n"] == 2
+            _install_set_price_stub(monkeypatch, calls)     # would now succeed -> must NOT be called
+            async with Session() as db:
+                rv2 = await executor.revert(db=db, user_id=uid, log_id=r0.log_id)
+            assert rv2.status == "needs_reconcile" and calls["n"] == 2   # ambiguous inverse not repeated
+        finally:
+            await eng.dispose()
+    _run(go())

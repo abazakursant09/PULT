@@ -163,6 +163,18 @@ jobs:
             tests/test_execlog_claim_pg.py::test_pg_legacy_review_alias_blocks \
             tests/test_execlog_claim_pg.py::test_pg_legacy_decision_alias_blocks \
             tests/test_execlog_claim_pg.py::test_pg_prior_failed_blocks_retry \
+            tests/test_execlog_claim_pg.py::test_pg_crash_after_pending_blocks \
+            tests/test_execlog_claim_pg.py::test_pg_crash_after_in_flight_blocks \
+            tests/test_execlog_claim_pg.py::test_pg_ambiguous_prior_blocks \
+            tests/test_execlog_claim_pg.py::test_pg_existing_failed_blocks \
+            tests/test_execlog_claim_pg.py::test_pg_v1_null_fingerprint_blocks \
+            tests/test_execlog_claim_pg.py::test_pg_same_key_different_fingerprint_mismatch_seeded \
+            tests/test_execlog_claim_pg.py::test_pg_automation_disabled_l4_zero \
+            tests/test_execlog_claim_pg.py::test_pg_autopricing_no_durable_key_zero \
+            tests/test_execlog_claim_pg.py::test_pg_concurrent_decision_apply_one_dispatch \
+            tests/test_execlog_claim_pg.py::test_pg_revert_one_inverse_then_second_revert_zero \
+            tests/test_execlog_claim_pg.py::test_pg_concurrent_revert_one_inverse \
+            tests/test_execlog_claim_pg.py::test_pg_ambiguous_revert_not_repeated \
             tests/test_execlog_claim_pg.py::test_pg_migration_duplicate_v1_preflight_fails_closed
 
   # Proves the FULL Alembic chain runs on the database production actually uses. The chain was

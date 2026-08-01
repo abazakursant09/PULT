@@ -201,6 +201,35 @@ def test_legacy_decision_alias_blocks_by_decision_id():
     _run(go())
 
 
+def test_fingerprint_includes_connection_action_mode_target_params():
+    # Proves that a SAME key with a different connection / action / mode / store-target / params yields a
+    # DIFFERENT fingerprint → the claim resolve returns IDEMPOTENCY_MISMATCH (0 dispatch), never routed.
+    from services.marketplace.executor import _fingerprint
+    base = dict(user_id="u", connection_id="c1", marketplace="wildberries",
+                action_type="set_price", mode="manual_l3",
+                payload={"offer_id": "OF1", "price": 100, "marketplace": "wildberries"},
+                reverted_from=None)
+
+    def fp(**over):
+        d = {**base, **over}
+        return _fingerprint(d["user_id"], d["connection_id"], d["marketplace"], d["action_type"],
+                            d["mode"], d["payload"], d["reverted_from"])
+
+    ref = fp()
+    assert fp(connection_id="c2") != ref                       # different connection/store
+    assert fp(action_type="update_card") != ref                # different action
+    assert fp(mode="automated_l4") != ref                      # different mode
+    assert fp(payload={"offer_id": "OF2", "price": 100, "marketplace": "wildberries"}) != ref  # target
+    assert fp(payload={"offer_id": "OF1", "price": 999, "marketplace": "wildberries"}) != ref  # params
+    assert fp() == ref                                          # deterministic / stable
+    # a float price is converted to a scale-preserving string BEFORE fp1 (fp1 itself rejects floats), so
+    # the fingerprint is computed deterministically and never lets a raw float reach the hasher.
+    from decimal import Decimal
+    f_float = fp(payload={"offer_id": "OF1", "price": 100.5, "marketplace": "wildberries"})
+    f_dec = fp(payload={"offer_id": "OF1", "price": Decimal("100.5"), "marketplace": "wildberries"})
+    assert f_float == f_dec and isinstance(f_float, str)
+
+
 def test_new_v1_op_is_not_blocked_by_content_legacy_row():
     async def go():
         db, uid = await _setup()
