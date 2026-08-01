@@ -65,7 +65,7 @@ def test_operations_signal_migration_roundtrip(monkeypatch):
     # chains past this operations revision)
     script = ScriptDirectory.from_config(cfg)
     heads = script.get_heads()
-    assert heads == ["mts1a2b3c4d01"], f"expected single head, got {heads}"
+    assert heads == ["lad1a2b3c4d01"], f"expected single head, got {heads}"
 
     # (1) upgrade to ops1a2b3c4d01 creates the table
     command.upgrade(cfg, REV)

@@ -46,7 +46,7 @@ from schemas.marketplace import ConnectionCreate, ConnectionOut
 from services.marketplace import credential_vault, executor
 from services import execution_measurement_bridge
 
-REV = "mts1a2b3c4d01"
+REV = "lad1a2b3c4d01"
 PRIOR = "mpa1a2b3c4d01"
 CIPHERTEXT = b"gAAAAA-fake-fernet-ciphertext-bytes"
 

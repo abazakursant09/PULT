@@ -134,7 +134,8 @@ jobs:
             tests/test_reset_digest_pg.py::test_pg_reuse_after_success_rejected \
             tests/test_reset_digest_pg.py::test_pg_rollback_keeps_token_valid \
             tests/test_reset_digest_pg.py::test_pg_expired_token_rejected \
-            tests/test_reset_digest_pg.py::test_pg_expiry_comparison_works
+            tests/test_reset_digest_pg.py::test_pg_expiry_comparison_works \
+            tests/test_login_attempts_drop_pg.py::test_pg_drop_login_attempts_removes_table_and_pii
 
   # Proves the FULL Alembic chain runs on the database production actually uses. The chain was
   # historically only exercised on SQLite, which has no strict boolean type and silently accepted an
