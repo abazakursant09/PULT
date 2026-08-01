@@ -171,7 +171,8 @@ def test_logout_idempotent_without_and_with_revoked_cookie():
 def test_reset_bumps_version_old_cookie_dies_new_login_works():
     db = _run(_new_db())
     u = _run(_seed(db, email="rs@b.c", token_version=0))
-    u.reset_token = "rtok"; u.reset_token_expires = datetime.utcnow() + timedelta(hours=1)
+    from services.reset_token import hash_reset_token   # SECURITY-2C-3B — DB holds the digest
+    u.reset_token = hash_reset_token("rtok"); u.reset_token_expires = datetime.utcnow() + timedelta(hours=1)
     _run(db.commit())
     c = _client(db)
     old = _tok(u.id, 0)

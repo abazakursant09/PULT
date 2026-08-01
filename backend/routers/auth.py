@@ -7,7 +7,7 @@ import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from jose import jwt
 from pydantic import BaseModel, EmailStr
-from sqlalchemy import select, func, update
+from sqlalchemy import select, func, update, text, bindparam, Boolean, DateTime, String
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,6 +25,7 @@ from models.user import User
 from models.workspace import Workspace
 from routers.mfa import claim_totp_step
 from services.email import send_verification_email, send_password_reset_email
+from services.reset_token import hash_reset_token
 from schemas.auth import (
     ForgotPasswordResponse, RegisterResponse, SessionResponse,
     UserLogin, UserRegister, UserResponse,
@@ -518,17 +519,21 @@ async def forgot_password(
             message="Если этот email зарегистрирован, мы отправили на него ссылку для сброса пароля.",
         )
 
-    reset_token = secrets.token_urlsafe(32)
-    user.reset_token = reset_token
+    # SECURITY-2C-3B — the raw token (256-bit) goes ONLY into the emailed link; the DB stores only its
+    # SHA-256 digest, so a DB read yields no usable reset link.
+    raw_token = secrets.token_urlsafe(32)
+    user.reset_token = hash_reset_token(raw_token)
     user.reset_token_expires = datetime.utcnow() + timedelta(hours=24)
     await db.commit()
 
-    log.info("password_reset_requested: user=%s email=%s", user.id, data.email)
+    # user id only — never the email (PII) or the token — so the log can never become an enumeration
+    # or account-takeover aid.
+    log.info("password_reset_requested: user=%s", user.id)
     # The RESPONSE stays byte-identical whether the address exists or the send failed — this is the
     # one endpoint where an honest delivery flag would hand an attacker an account-enumeration
     # oracle. The failure goes to the server log instead, carrying the user id and no token, so an
     # operator can see the outage without the log becoming a way to verify anybody.
-    if not await send_password_reset_email(user.email, user.name, reset_token):
+    if not await send_password_reset_email(user.email, user.name, raw_token):
         log.warning("password_reset: email not delivered user=%s", user.id)
 
     return ForgotPasswordResponse(
@@ -543,6 +548,31 @@ class ResetPasswordIn(BaseModel):
     password: str
 
 
+# SECURITY-2C-3B — ONE atomic statement is the whole reset: match the token DIGEST (never a plaintext
+# lookup), check it is unexpired, set the new password, CONSUME the token (NULL), revoke every prior
+# session (token_version+1), and verify the account — all committed together or not at all. Two
+# concurrent confirms of one token can therefore succeed only once: the first NULLs reset_token, so the
+# second's `WHERE reset_token = :digest` matches 0 rows and changes nothing. No SELECT→mutate→commit.
+# Booleans are typed binds (never an int literal) so the UPDATE runs identically on PostgreSQL and
+# SQLite; `now` is a typed naive-UTC bind to match the timestamp column on both drivers.
+_RESET_CONSUME = text("""
+UPDATE users
+   SET hashed_password     = :hash,
+       reset_token         = NULL,
+       reset_token_expires = NULL,
+       token_version       = token_version + 1,
+       is_verified         = :verified,
+       verification_token  = NULL
+ WHERE reset_token = :digest
+   AND reset_token_expires IS NOT NULL
+   AND reset_token_expires > :now
+RETURNING id
+""").bindparams(
+    bindparam("hash", type_=String()), bindparam("digest", type_=String()),
+    bindparam("now", type_=DateTime()), bindparam("verified", type_=Boolean()),
+)
+
+
 @router.post("/reset-password")
 async def reset_password(
     data: ResetPasswordIn,
@@ -550,47 +580,37 @@ async def reset_password(
     db: AsyncSession = Depends(get_db),
 ):
     # SECURITY-2C-2 — per-IP throttle on the reset-confirm (identity is unknown until the token resolves;
-    # the reset TOKEN is never used as a throttle key and never logged). One-time-use race stays 2C-3.
+    # the reset TOKEN is never used as a throttle key and never logged).
     await _throttle_or_429(db, "reset", request)
-    result = await db.execute(
-        select(User).where(User.reset_token == data.token)
-    )
-    user = result.scalar_one_or_none()
 
-    if not user:
-        raise HTTPException(status_code=400, detail="Недействительная или устаревшая ссылка")
-
-    if user.reset_token_expires and datetime.utcnow() > user.reset_token_expires:
-        raise HTTPException(status_code=400, detail="Ссылка сброса пароля истекла. Запросите новую.")
-
+    # Trivial input errors first — this never touches (or burns) a token, and a short-password 422 is
+    # identical whether the token is valid or not, so it leaks nothing.
     if len(data.password) < 8:
         raise HTTPException(status_code=422, detail="Пароль — минимум 8 символов")
 
-    user.hashed_password = hash_password(data.password)
-    user.reset_token = None
-    user.reset_token_expires = None
-    # SECURITY-2C-1 — a successful reset revokes ALL prior sessions: bump token_version in the SAME
-    # transaction as the new password, so the new hash and the session revocation commit together and
-    # any cookie issued before the reset is rejected on its next request. Atomic SQL increment (not a
-    # Python read-modify-write). NOTE: the two-concurrent-reset-confirm race (reset-token one-time-use)
-    # is still open until SECURITY-2C-3; this only revokes sessions on a SUCCESSFUL reset.
-    user.token_version = User.token_version + 1
+    # Hash the digest and the new password BEFORE the DB write: only the digest is ever bound into SQL
+    # (a leaked SQL error can expose the digest, never the raw token), and an unknown token runs the
+    # same bcrypt cost as a real one.
+    digest = hash_reset_token(data.token)
+    new_hash = hash_password(data.password)
 
-    # Completing a reset PROVES control of the mailbox: the link only reached them by email, and
-    # it is checked for validity and expiry above and consumed here. So this is the second honest
-    # route to a verified account — and the one that rescues a seller whose verification mail never
-    # arrived, who could previously neither log in nor reset their way back in.
-    #
-    # It is the successful USE of a valid token that verifies, never the mere request of one: an
-    # invalid or expired token raises above and never reaches this line.
-    if not user.is_verified:
-        user.is_verified = True
-        # Retire the outstanding verification link too — the account is verified, so leaving a live
-        # token lying around would serve no purpose.
-        user.verification_token = None
-        log.info("email_verified_via_password_reset: user=%s", user.id)
+    try:
+        row = (await db.execute(_RESET_CONSUME, {
+            "hash": new_hash, "digest": digest, "verified": True,
+            "now": datetime.utcnow(),
+        })).first()
+        if row is None:
+            # Unknown / expired / already-used all look identical from outside (neutral 400).
+            await db.rollback()
+            raise HTTPException(status_code=400, detail="Недействительная или устаревшая ссылка")
+        await db.commit()
+    except SQLAlchemyError:
+        # Fail-closed: nothing is committed, the token stays valid, and we never surface SQL/params.
+        await db.rollback()
+        raise HTTPException(status_code=503, detail="Сервис временно недоступен. Повторите попытку.")
 
-    await db.commit()
-
-    log.info("password_reset_completed: user=%s", user.id)
+    # The Core UPDATE bypassed the ORM identity map; expire anything this session already loaded so a
+    # later read in the same session reflects the write (production opens a fresh session per request).
+    db.expire_all()
+    log.info("password_reset_completed: user=%s", row.id)
     return {"message": "Пароль успешно изменён. Войдите с новым паролем."}

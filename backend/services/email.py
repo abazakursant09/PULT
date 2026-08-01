@@ -42,9 +42,11 @@ async def send_email(to: str, subject: str, body: str) -> bool:
     """Send an email. Returns True if handed to SMTP, False if only logged/failed.
     Never raises — auth flows must complete regardless of mail-server state."""
     if not settings.smtp_host:
-        # Development fallback: no mail server configured. Log, do not deliver.
-        log.warning("EMAIL (not sent — SMTP not configured) to=%s subject=%s\n%s",
-                    to, subject, body)
+        # Development fallback: no mail server configured. Log that a mail WOULD have gone out, but
+        # NEVER the body — it carries the reset / verification link with a live raw token, which must
+        # not land in application logs (SECURITY-2C-3B). Tests obtain the token through the mailer
+        # seam (they patch send_password_reset_email / send_verification_email), never from this log.
+        log.warning("EMAIL (not sent — SMTP not configured) to=%s subject=%s", to, subject)
         return False
     try:
         await asyncio.to_thread(_send_sync, to, subject, body)
@@ -66,7 +68,10 @@ async def send_verification_email(to: str, name: str | None, token: str) -> bool
 
 
 async def send_password_reset_email(to: str, name: str | None, token: str) -> bool:
-    link = f"{settings.frontend_url.rstrip('/')}/reset-password?token={token}"
+    # SECURITY-2C-3B — the token rides in the URL FRAGMENT (#), which the browser never sends to any
+    # server: it stays out of reverse-proxy access logs and Referer headers. The reset page reads it
+    # in JS and strips it from the address bar immediately.
+    link = f"{settings.frontend_url.rstrip('/')}/reset-password#token={token}"
     body = (
         f"Здравствуйте{', ' + name if name else ''}!\n\n"
         f"Вы запросили сброс пароля в Бизнес-Пульт. Перейдите по ссылке "

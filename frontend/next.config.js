@@ -73,6 +73,16 @@ const nextConfig = {
         source,
         headers: [{ key: 'Cache-Control', value: 'no-store' }],
       })),
+      // SECURITY-2C-3B — the reset page briefly holds a raw reset token from the URL fragment. Never
+      // cache it, and send NO Referer at all (overrides the site-wide strict-origin-when-cross-origin)
+      // so not even the origin can leak alongside a token to any resource the page might touch.
+      {
+        source: '/reset-password',
+        headers: [
+          { key: 'Cache-Control', value: 'no-store' },
+          { key: 'Referrer-Policy', value: 'no-referrer' },
+        ],
+      },
     ]
   },
 }
