@@ -53,7 +53,9 @@ def test_set_price_success():
     _run(go())
 
 
-def test_guard_max_price_blocks():
+def test_guard_max_price_blocks(monkeypatch):
+    from config import settings
+    monkeypatch.setattr(settings, "automation_enabled", True)   # 2D-1A: L4 needs the flag to reach the guard
     async def go():
         db, uid = await _setup()
         wb_client.set_price = lambda **k: (_ for _ in ()).throw(AssertionError("should not dispatch"))
