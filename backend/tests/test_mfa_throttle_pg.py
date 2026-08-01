@@ -13,6 +13,7 @@ counts nothing, a post-reserve error counts one); and enable/disable bump token_
 the current user gets a fresh one) atomically, with wrong codes changing nothing.
 """
 import asyncio
+import re
 import os
 import uuid
 
@@ -446,6 +447,17 @@ def _http_app(S):
     return app
 
 
+def _hdr(tok):
+    # Send auth via an explicit Cookie header (a JWT has no ';'), avoiding httpx jar CookieConflict when
+    # the response sets a same-name cookie with a different path.
+    return {"cookie": f"{COOKIE}={tok}"}
+
+
+def _cookie_value(set_cookie):
+    m = re.search(rf"{COOKIE}=([^;]+)", set_cookie or "")
+    return m.group(1) if m else None
+
+
 def test_pg_enable_http_flow_sets_httponly_cookie_and_revokes_old():
     async def go():
         e, S = await _fresh()
@@ -454,14 +466,12 @@ def test_pg_enable_http_flow_sets_httponly_cookie_and_revokes_old():
         old_tok = create_access_token(uid, 0)
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://t") as cli:
-            cli.cookies.set(COOKIE, old_tok)
-            r = await cli.post("/api/auth/mfa/verify", json={"code": _totp(secret, int(time.time()))})
+            r = await cli.post("/api/auth/mfa/verify", headers=_hdr(old_tok),
+                               json={"code": _totp(secret, int(time.time()))})
             hdr = r.headers.get("set-cookie", "")
-            new_tok = cli.cookies.get(COOKIE)               # jar updated by the response
-            me_new = await cli.get("/api/auth/me")          # new cookie in the jar
-        async with AsyncClient(transport=transport, base_url="http://t") as cli2:
-            cli2.cookies.set(COOKIE, old_tok)
-            me_old = await cli2.get("/api/auth/me")         # explicit OLD cookie
+            new_tok = _cookie_value(hdr)                       # parse the reissued cookie
+            me_new = await cli.get("/api/auth/me", headers=_hdr(new_tok))    # new cookie works
+            me_old = await cli.get("/api/auth/me", headers=_hdr(old_tok))    # old cookie revoked
         await e.dispose()
         return r.status_code, hdr, old_tok, new_tok, me_new.status_code, me_old.status_code
     status, hdr, old_tok, new_tok, me_new, me_old = _run(go())
@@ -479,12 +489,11 @@ def test_pg_disable_http_flow_sets_cookie_and_me_works():
         app = _http_app(S)
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://t") as cli:
-            cli.cookies.set(COOKIE, create_access_token(uid, 0))
-            r = await cli.request("DELETE", "/api/auth/mfa/disable",
+            r = await cli.request("DELETE", "/api/auth/mfa/disable", headers=_hdr(create_access_token(uid, 0)),
                                   json={"code": _totp(secret, int(time.time()))})
             hdr = r.headers.get("set-cookie", "")
-            new_tok = cli.cookies.get(COOKIE)
-            me_new = await cli.get("/api/auth/me")
+            new_tok = _cookie_value(hdr)
+            me_new = await cli.get("/api/auth/me", headers=_hdr(new_tok))
         await e.dispose()
         return r.status_code, hdr, new_tok, me_new.status_code
     status, hdr, new_tok, me_new = _run(go())
@@ -500,13 +509,12 @@ def test_pg_manage_http_wrong_and_429_issue_no_cookie():
         transport = ASGITransport(app=app)
         wrong = "000000" if _totp(secret, int(time.time())) != "000000" else "111111"
         statuses, cookies = [], []
+        tok = create_access_token(uid, 0)
         async with AsyncClient(transport=transport, base_url="http://t") as cli:
-            cli.cookies.set(COOKIE, create_access_token(uid, 0))
             for _ in range(M_PAIR + 2):                     # wrong codes → 400s, then the pair block → 429
-                r = await cli.request("DELETE", "/api/auth/mfa/disable", json={"code": wrong})
+                r = await cli.request("DELETE", "/api/auth/mfa/disable", headers=_hdr(tok), json={"code": wrong})
                 statuses.append(r.status_code)
                 cookies.append("set-cookie" in {k.lower() for k in r.headers})
-                cli.cookies.set(COOKIE, create_access_token(uid, 0))   # keep the session cookie fixed
         ver, enabled = await _state(S, uid)
         await e.dispose()
         return statuses, cookies, ver, enabled
