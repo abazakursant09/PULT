@@ -32,6 +32,16 @@ class ExecutionLog(Base):
     created_at     = Column(DateTime, default=datetime.utcnow)
     finished_at    = Column(DateTime, nullable=True)
 
+    # SECURITY-2D-1B-A — additive, UNWIRED foundation for DB-enforced idempotency (the wiring +
+    # partial-UNIQUE claim land in 1B-B). idempotency_key will identify WHICH business operation (a
+    # stable immutable operation id — never derived from content); request_fingerprint describes WHAT
+    # that operation does (its contents), so a same-key request with different contents can be caught as
+    # a mismatch instead of dispatched. A content hash must NEVER be used as the operation identity: two
+    # legitimate operations with equal content at different times are NOT a retry. Both columns are
+    # nullable and NOT read by any runtime path in 1B-A.
+    request_fingerprint = Column(String(72), nullable=True)   # "fp1:" + 64 lowercase hex = 68 chars
+    dispatch_started_at = Column(DateTime(timezone=True), nullable=True)   # set just before the provider call (1B-B)
+
     __table_args__ = (
         Index("ix_execlog_user", "user_id"),
         Index("ix_execlog_user_action", "user_id", "action_type"),

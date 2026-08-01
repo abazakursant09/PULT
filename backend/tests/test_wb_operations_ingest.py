@@ -178,7 +178,7 @@ def test_no_pii_columns():
 def test_alembic_single_head():
     from alembic.config import Config
     from alembic.script import ScriptDirectory
-    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["mfd1a2b3c4d01"]
+    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["efp1a2b3c4d01"]
 
 
 # ── Orders ──────────────────────────────────────────────────────────────────────
