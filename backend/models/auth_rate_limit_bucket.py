@@ -21,7 +21,7 @@ from datetime import datetime
 from sqlalchemy import Column, String, Integer, DateTime, CheckConstraint, PrimaryKeyConstraint, Index
 from database import Base
 
-ACTIONS = ("login", "register", "email", "reset")
+ACTIONS = ("login", "register", "email", "reset", "mfa_login", "mfa_manage")   # 2C-4A adds MFA actions
 DIMENSIONS = ("pair", "identity", "ip")
 
 

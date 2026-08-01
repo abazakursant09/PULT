@@ -105,15 +105,7 @@ async def limit_import(request: Request) -> None:
     await _limiter.hit(f"import:{_uid(request)}", limit=5, window_s=600)
 
 
-async def limit_mfa(subject: str, request: Request) -> None:
-    """5 attempts / 300 s per MFA subject (+ client IP) — TOTP verification.
-
-    /login/mfa had no limiter, so an attacker holding a valid password (already past
-    /login) could spray unlimited 6-digit codes at a 5-min mfa_token and brute-force the
-    second factor. The key is the MFA subject, not just the IP, so the throttle follows
-    the account being attacked even across IPs; the IP is appended so one victim account
-    cannot be locked out globally by an attacker from a single address. 5 tries per 5 min
-    leaves TOTP's 10^6 space effectively unbrute-forceable while a real user's fat-finger
-    retries still go through.
-    """
-    await _limiter.hit(f"mfa:{subject}:{client_ip(request)}", limit=5, window_s=300)
+# SECURITY-2C-4A — the in-memory MFA limiter was replaced by the DURABLE PostgreSQL throttle
+# (services/auth_throttle, actions mfa_login / mfa_manage): per-worker in-memory state reset on restart
+# and did not span workers. This _SlidingWindow stays only for the non-auth product limiters above
+# (limit_ai / limit_rebuild / limit_import).
