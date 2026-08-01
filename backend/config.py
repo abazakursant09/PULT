@@ -157,6 +157,15 @@ class Settings(BaseSettings):
     auth_throttle_email_ip_limit: int = 15           # forgot-password + resend-verification per IP
     auth_throttle_email_identity_limit: int = 5      # forgot-password + resend-verification per email
     auth_throttle_reset_ip_limit: int = 20           # reset-password confirm per IP
+    # SECURITY-2C-4A — durable TOTP-guess throttle. mfa_login = POST /login/mfa (attacker holds the
+    # password); mfa_manage = enable + disable (a cookie-auth attacker guessing TOTP). Separate actions
+    # so a management attack cannot lock login and vice-versa. Identity = server-verified user_id.
+    auth_throttle_mfa_login_pair_limit: int = 5
+    auth_throttle_mfa_login_identity_limit: int = 20
+    auth_throttle_mfa_login_ip_limit: int = 50
+    auth_throttle_mfa_manage_pair_limit: int = 5     # management is rare → tighter globals than login
+    auth_throttle_mfa_manage_identity_limit: int = 10
+    auth_throttle_mfa_manage_ip_limit: int = 30
     # opportunistic bounded cleanup: at most one sweep per this interval, deleting a small batch of
     # fully-expired (window + block elapsed) buckets so a random-email attack cannot grow the table.
     auth_throttle_cleanup_interval_seconds: int = 300

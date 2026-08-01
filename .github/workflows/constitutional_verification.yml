@@ -135,7 +135,26 @@ jobs:
             tests/test_reset_digest_pg.py::test_pg_rollback_keeps_token_valid \
             tests/test_reset_digest_pg.py::test_pg_expired_token_rejected \
             tests/test_reset_digest_pg.py::test_pg_expiry_comparison_works \
-            tests/test_login_attempts_drop_pg.py::test_pg_drop_login_attempts_removes_table_and_pii
+            tests/test_login_attempts_drop_pg.py::test_pg_drop_login_attempts_removes_table_and_pii \
+            tests/test_mfa_throttle_pg.py::test_pg_mfa_login_concurrent_counted_and_boundary \
+            tests/test_mfa_throttle_pg.py::test_pg_mfa_login_identity_across_ips \
+            tests/test_mfa_throttle_pg.py::test_pg_mfa_login_ip_across_users \
+            tests/test_mfa_throttle_pg.py::test_pg_mfa_login_single_source_never_locks_victim_but_distributed_does \
+            tests/test_mfa_throttle_pg.py::test_pg_mfa_login_success_release_keeps_block \
+            tests/test_mfa_throttle_pg.py::test_pg_mfa_login_persists_across_sessions \
+            tests/test_mfa_throttle_pg.py::test_pg_mfa_manage_boundary_and_victim_lockout \
+            tests/test_mfa_throttle_pg.py::test_pg_mfa_manage_identity_across_ips \
+            tests/test_mfa_throttle_pg.py::test_pg_mfa_manage_ip_across_users \
+            tests/test_mfa_throttle_pg.py::test_pg_mfa_login_and_manage_are_isolated \
+            tests/test_mfa_throttle_pg.py::test_pg_active_block_not_bypassed_by_a_correct_code \
+            tests/test_mfa_throttle_pg.py::test_pg_reservation_option_c_semantics \
+            tests/test_mfa_throttle_pg.py::test_pg_enable_bumps_token_version_and_reissues_cookie \
+            tests/test_mfa_throttle_pg.py::test_pg_disable_bumps_token_version_and_reissues_cookie \
+            tests/test_mfa_throttle_pg.py::test_pg_wrong_manage_code_does_not_bump_or_reissue \
+            tests/test_mfa_throttle_pg.py::test_pg_concurrent_enable_no_desync \
+            tests/test_mfa_throttle_pg.py::test_pg_enable_http_flow_sets_httponly_cookie_and_revokes_old \
+            tests/test_mfa_throttle_pg.py::test_pg_disable_http_flow_sets_cookie_and_me_works \
+            tests/test_mfa_throttle_pg.py::test_pg_manage_http_wrong_and_429_issue_no_cookie
 
   # Proves the FULL Alembic chain runs on the database production actually uses. The chain was
   # historically only exercised on SQLite, which has no strict boolean type and silently accepted an

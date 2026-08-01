@@ -139,7 +139,8 @@ def test_mfa_login_sets_cookie(monkeypatch):
         return True
     monkeypatch.setattr(auth_router, "claim_totp_step", _claim_ok)
     monkeypatch.setattr(auth_router, "load_secret", lambda s: "x")
-    monkeypatch.setattr(auth_router, "limit_mfa", lambda *a, **k: asyncio.sleep(0))
+    # SECURITY-2C-4A — the in-memory limit_mfa is gone; the durable mfa_login throttle runs against the
+    # create_all auth_rate_limit_buckets table (a single attempt is well under the limit).
     c = _client(db)
     pending = create_mfa_pending_token(str(u.id))
     r = c.post("/api/auth/login/mfa", json={"mfa_token": pending, "code": "123456"},

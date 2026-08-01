@@ -15,7 +15,7 @@ from config import settings
 from database import get_db
 from dependencies import get_current_user, get_current_user_optional
 from auth_cookie import set_session_cookie, clear_session_cookie
-from rate_limit import limit_mfa, client_ip
+from rate_limit import client_ip
 from services.auth_throttle import reserve as _throttle_reserve, release as _throttle_release
 from models.mfa_secret import MFASecret
 from services.mfa_crypto import load_secret
@@ -339,9 +339,13 @@ async def login_mfa(
     if not mfa_record or not mfa_record.enabled:
         raise HTTPException(status_code=400, detail="MFA не настроена")
 
-    # Throttle TOTP guesses per account (+IP). Every code submission counts, so an attacker
-    # holding the password cannot spray the 6-digit space; a real user's few retries pass.
-    await limit_mfa(str(user_id), request)
+    # SECURITY-2C-4A — DURABLE per-account TOTP-guess throttle (action mfa_login, dims pair/identity/ip;
+    # identity is the server-validated pre-MFA user_id, never email). Reserved BEFORE the crypto check;
+    # 429 + Retry-After if blocked. Replaces the old in-memory limiter, so the cap survives restarts and
+    # is shared across workers. The reservation commits immediately (2C-2 invariant): a failure INSIDE
+    # reserve counts nothing (upsert atomic, 503); a failure AFTER it (the claim/commit below) leaves the
+    # one reserved attempt counted — fail-closed, honest Option-C semantics.
+    await _throttle_or_429(db, "mfa_login", request, identity=str(user_id))
 
     # SECURITY-2C-3A — verify AND atomically consume the code's TOTP step. A wrong code or a
     # replayed / prior step returns False → 401 (counted as a failed attempt). A DB error inside the
@@ -357,6 +361,10 @@ async def login_mfa(
     except SQLAlchemyError:
         await db.rollback()
         raise HTTPException(status_code=503, detail="Сервис временно недоступен. Повторите попытку.")
+
+    # Correct code → NOT a brute-force failure: compensate this request's own +1 on every mfa_login
+    # dimension (only real guesses net-accumulate; an already-set block is never cleared).
+    await _throttle_release(db, "mfa_login", identity=str(user_id), ip=_client_ip(request))
 
     log.info("mfa_verified: user=%s", user_id)   # no IP in application logs
     set_session_cookie(response, create_access_token(str(user.id), user.token_version))

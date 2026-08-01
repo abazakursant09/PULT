@@ -10,15 +10,18 @@ import struct
 import time
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlalchemy import BigInteger, String, bindparam, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from auth_cookie import set_session_cookie
 from database import get_db
 from dependencies import get_current_user
 from models.mfa_secret import MFASecret
+from rate_limit import client_ip
+from services.auth_throttle import reserve as _throttle_reserve, release as _throttle_release
 from services.mfa_crypto import store_secret, load_secret
 from models.user import User
 
@@ -177,9 +180,35 @@ async def mfa_setup(
     return MFASetupOut(secret=secret, otpauth=otpauth)
 
 
+# SECURITY-2C-4A — bump token_version and RETURN the written value in the SAME transaction, so the new
+# version is captured in a local variable and the cookie can be built AFTER commit with NO further DB
+# read. This closes the post-commit gap: a db.refresh() could fail after the bump committed, leaving the
+# old cookie revoked and no new one issued.
+_BUMP_TOKEN_VERSION = text(
+    "UPDATE users SET token_version = token_version + 1 WHERE id = :uid RETURNING token_version"
+).bindparams(bindparam("uid", type_=String()))
+
+
+async def _mfa_manage_throttle_or_429(db: AsyncSession, request: Request, *, user_id: str) -> None:
+    """SECURITY-2C-4A — DURABLE per-account throttle for MFA MANAGEMENT (enable + disable). Its own
+    action `mfa_manage`, separate from `mfa_login`, so a management attack cannot lock login and vice
+    versa. identity is the authenticated user_id (never email). Reserved BEFORE the TOTP claim; 429 +
+    Retry-After if blocked. The reservation commits immediately (2C-2 invariant): a DB error inside
+    reserve counts nothing (503); a DB error AFTER it leaves the one attempt counted (Option-C)."""
+    res = await _throttle_reserve(db, "mfa_manage", identity=user_id, ip=client_ip(request))
+    if res.blocked:
+        raise HTTPException(
+            status_code=429,
+            detail="Слишком много попыток. Подождите и попробуйте снова.",
+            headers={"Retry-After": str(res.retry_after_seconds)},
+        )
+
+
 @router.post("/verify")
 async def mfa_verify(
     body: MFACodeIn,
+    request: Request,
+    response: Response,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -193,26 +222,48 @@ async def mfa_verify(
         raise HTTPException(status_code=400, detail="Сначала запустите настройку MFA (/setup)")
     if record.enabled:
         raise HTTPException(status_code=400, detail="MFA уже активирована")
-    # Reserve the code's TOTP step and flip `enabled` in ONE transaction: the step-claim and the
-    # activation commit together (or neither does). A replayed code fails at the claim (400); a DB
-    # error raises 503 without enabling. The code spent to enable cannot be reused for an immediate
-    # login — the user waits for the next 30-second code (documented UX cost of one code).
+
+    await _mfa_manage_throttle_or_429(db, request, user_id=str(current_user.id))
+
+    # Reserve the code's TOTP step, flip `enabled`, and bump token_version in ONE transaction: the
+    # step-claim, activation and session revocation commit together (or none do). A replayed / wrong
+    # code fails at the claim (400) and changes nothing; a DB error raises 503 with the old session
+    # still valid. Enabling MFA is a security state change, so every OTHER device's cookie is revoked.
     if not await claim_totp_step(db, user_id=current_user.id,
                                  secret=load_secret(record.secret), code=body.code):
         raise HTTPException(status_code=400, detail="Неверный код — проверьте приложение аутентификатора")
 
+    from routers.auth import create_access_token   # local import avoids the auth↔mfa import cycle
     record.enabled = True
+    # Bump token_version and CAPTURE the written value in-transaction (RETURNING) — the enable flush and
+    # the revocation land in ONE commit, and the new version is a plain local, so no post-commit DB read
+    # is needed to build the cookie.
+    new_version = (await db.execute(_BUMP_TOKEN_VERSION,
+                                    {"uid": str(current_user.id)})).scalar_one()
     try:
         await db.commit()
     except SQLAlchemyError:
         await db.rollback()
         raise HTTPException(status_code=503, detail="Сервис временно недоступен. Повторите попытку.")
+
+    # Commit succeeded → the old cookie is now revoked. Issue the new cookie IMMEDIATELY from the value
+    # captured above. Nothing between the commit and this line touches the DB, so no post-commit failure
+    # can leave the account with a dead old cookie and no new one.
+    set_session_cookie(response, create_access_token(str(current_user.id), int(new_version)))
+    # Best-effort throttle compensation AFTER the cookie is set: a failure here only leaves this one
+    # successful attempt counted (benign) and can never affect the session that was just issued.
+    try:
+        await _throttle_release(db, "mfa_manage", identity=str(current_user.id), ip=client_ip(request))
+    except SQLAlchemyError:
+        pass
     return {"message": "MFA успешно включена"}
 
 
 @router.delete("/disable")
 async def mfa_disable(
     body: MFACodeIn,
+    request: Request,
+    response: Response,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -224,16 +275,31 @@ async def mfa_disable(
 
     if not record or not record.enabled:
         raise HTTPException(status_code=400, detail="MFA не включена")
-    # Reserve the code's step and disable in ONE transaction: a replayed code cannot turn MFA off,
-    # and a DB error (503) leaves MFA enabled rather than half-disabled.
+
+    await _mfa_manage_throttle_or_429(db, request, user_id=str(current_user.id))
+
+    # Reserve the code's step, disable, and bump token_version in ONE transaction: a replayed / wrong
+    # code cannot turn MFA off (400, nothing changes), and a DB error (503) leaves MFA enabled with the
+    # old session valid. Turning MFA off is a security downgrade, so every OTHER device's cookie is
+    # revoked here too.
     if not await claim_totp_step(db, user_id=current_user.id,
                                  secret=load_secret(record.secret), code=body.code):
         raise HTTPException(status_code=400, detail="Неверный код")
 
+    from routers.auth import create_access_token   # local import avoids the auth↔mfa import cycle
     record.enabled = False
+    new_version = (await db.execute(_BUMP_TOKEN_VERSION,
+                                    {"uid": str(current_user.id)})).scalar_one()
     try:
         await db.commit()
     except SQLAlchemyError:
         await db.rollback()
         raise HTTPException(status_code=503, detail="Сервис временно недоступен. Повторите попытку.")
+
+    # Cookie from the captured version, immediately after commit — no post-commit DB read (see enable).
+    set_session_cookie(response, create_access_token(str(current_user.id), int(new_version)))
+    try:
+        await _throttle_release(db, "mfa_manage", identity=str(current_user.id), ip=client_ip(request))
+    except SQLAlchemyError:
+        pass
     return {"message": "MFA отключена"}

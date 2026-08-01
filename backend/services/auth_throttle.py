@@ -41,6 +41,13 @@ _ACTION_DIMS: dict[str, list[tuple[str, str]]] = {
     "email": [("identity", "auth_throttle_email_identity_limit"),
               ("ip", "auth_throttle_email_ip_limit")],
     "reset": [("ip", "auth_throttle_reset_ip_limit")],
+    # SECURITY-2C-4A — MFA TOTP-guess throttle. identity = server-verified user_id (never email).
+    "mfa_login": [("pair", "auth_throttle_mfa_login_pair_limit"),
+                  ("identity", "auth_throttle_mfa_login_identity_limit"),
+                  ("ip", "auth_throttle_mfa_login_ip_limit")],
+    "mfa_manage": [("pair", "auth_throttle_mfa_manage_pair_limit"),
+                   ("identity", "auth_throttle_mfa_manage_identity_limit"),
+                   ("ip", "auth_throttle_mfa_manage_ip_limit")],
 }
 
 # module-level best-effort throttle for the opportunistic sweep (per worker). Not a security control.
