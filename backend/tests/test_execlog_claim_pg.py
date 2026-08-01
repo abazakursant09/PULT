@@ -175,7 +175,9 @@ def test_pg_invalid_and_missing_key_never_dispatch(monkeypatch):
         eng, Session = _sessionmaker()
         try:
             uid = await _seed_user(Session)
-            for bad in (None, "", "review:x", "v1:client:NOTUUID"):
+            # Executor requires a well-formed v1 SHAPE; canonical-UUID validation is the router's job
+            # (tested in test_operation_key / test_body_operation_key). These non-v1 keys are rejected.
+            for bad in (None, "", "review:x", "price:p:1", "v2:client:x"):
                 r = await _publish(Session, uid, bad)
                 assert r.status == "rejected", bad
             assert c["n"] == 0
@@ -264,16 +266,19 @@ def test_pg_migration_duplicate_v1_preflight_fails_closed(monkeypatch):
     """Two rows sharing (user_id, v1 key) make the unique-index migration refuse (numeric count only)."""
     _ensure_schema(monkeypatch)
 
-    async def go():
-        from alembic import command
-        import db_migrations as dbm
-        from models.execution_log import ExecutionLog
-        cfg = dbm._alembic_config()
-        # drop the unique index FIRST so two same-key rows can coexist, then attempt the upgrade
-        command.downgrade(cfg, "efp1a2b3c4d01")
+    # NOTE: alembic commands run SYNC at the top level — never inside a running event loop (asyncpg's
+    # env.py calls asyncio.run(), which raises if a loop is already running).
+    from alembic import command
+    import db_migrations as dbm
+    from models.execution_log import ExecutionLog
+    cfg = dbm._alembic_config()
+    command.downgrade(cfg, "efp1a2b3c4d01")     # drop the unique index so two same-key rows can coexist
+
+    key = "v1:client:" + str(uuid.uuid4())
+
+    async def seed():
         eng, Session = _sessionmaker()
         uid = await _seed_user(Session)
-        key = "v1:client:" + str(uuid.uuid4())
         async with Session() as db:
             for _ in range(2):
                 db.add(ExecutionLog(id=str(uuid.uuid4()), user_id=uid, action_type="set_price",
@@ -281,11 +286,19 @@ def test_pg_migration_duplicate_v1_preflight_fails_closed(monkeypatch):
                                     idempotency_key=key))
             await db.commit()
         await eng.dispose()
+        return uid
+
+    uid = _run(seed())
+    try:
         with pytest.raises(Exception) as e:
             command.upgrade(cfg, "uqc1a2b3c4d01")
         msg = str(e.value)
         assert "preflight" in msg and key not in msg and uid not in msg   # numeric only, no PII
-        global _SCHEMA_READY                                              # force clean rebuild next test
-        _SCHEMA_READY = False
-
-    _run(go())
+    finally:
+        # leave a clean, fully-migrated schema for any following test, regardless of run order
+        import sqlalchemy as sa
+        eng2 = sa.create_engine(_pg_sync_url())
+        with eng2.begin() as c:
+            c.exec_driver_sql("DROP SCHEMA public CASCADE; CREATE SCHEMA public")
+        command.upgrade(cfg, "head")
+        eng2.dispose()

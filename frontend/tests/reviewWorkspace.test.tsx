@@ -66,7 +66,8 @@ describe('review workspace', () => {
     await user.click(screen.getByRole('button', { name: 'Одобрить' }))
     await waitFor(() => expect(approve).toHaveBeenCalledWith('p1', 'r1'))
     await user.click(screen.getByRole('button', { name: 'Опубликовать' }))
-    await waitFor(() => expect(publish).toHaveBeenCalledWith('p1', 'r1'))
+    // SECURITY-2D-1B-B: publish now carries a client operation key (Idempotency-Key) as a 3rd arg
+    await waitFor(() => expect(publish).toHaveBeenCalledWith('p1', 'r1', expect.any(String)))
   })
 
   it('surfaces a failed publication', async () => {
