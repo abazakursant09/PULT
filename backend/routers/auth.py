@@ -17,7 +17,6 @@ from dependencies import get_current_user, get_current_user_optional
 from auth_cookie import set_session_cookie, clear_session_cookie
 from rate_limit import limit_mfa, client_ip
 from services.auth_throttle import reserve as _throttle_reserve, release as _throttle_release
-from models.login_attempt import LoginAttempt
 from models.mfa_secret import MFASecret
 from services.mfa_crypto import load_secret
 from models.referral_record import ReferralRecord
@@ -100,24 +99,10 @@ def _client_ip(request: Optional[Request]) -> Optional[str]:
     return client_ip(request)
 
 
-async def _log(
-    db: AsyncSession,
-    *,
-    email: str,
-    success: bool,
-    action: str,
-    reason: Optional[str] = None,
-    ip: Optional[str] = None,
-) -> None:
-    attempt = LoginAttempt(
-        email=email,
-        ip_address=ip,
-        success=success,
-        action=action,
-        reason=reason,
-    )
-    db.add(attempt)
-    await db.commit()
+# SECURITY-2C-3C — the per-attempt audit-row writer was removed. That table stored plaintext email + IP
+# for every attempt, had ZERO readers (no auth decision, no endpoint, no report — the durable
+# brute-force state lives in the 2C-2 throttle buckets as HMAC fingerprints), and only accumulated PII.
+# Auth flows no longer persist attempts; security counters remain in the throttle.
 
 
 # ── MFA login schema ──────────────────────────────────────────────────────────
@@ -160,8 +145,6 @@ async def register(
     existing = result.scalar_one_or_none()
 
     if existing and not existing.deleted_at:
-        await _log(db, email=data.email, success=False, action="register",
-                   reason="Email уже зарегистрирован", ip=ip)
         raise HTTPException(status_code=400, detail="Email уже зарегистрирован")
 
     # ── Account recovery ──────────────────────────────────────────────────────
@@ -178,8 +161,7 @@ async def register(
         # Do NOT create a new ReferralRecord — bonuses don't repeat
         await db.commit()
         await db.refresh(existing)
-        log.info("account_restored: user=%s email=%s ip=%s", existing.id, data.email, ip)
-        await _log(db, email=data.email, success=True, action="register_restore", ip=ip)
+        log.info("account_restored: user=%s", existing.id)   # no email/IP in application logs
         await send_verification_email(existing.email, existing.name, verification_token)
         return RegisterResponse(
             message="Аккаунт восстановлен. Проверьте почту и подтвердите email для входа.",
@@ -224,8 +206,7 @@ async def register(
     await db.commit()
     await db.refresh(user)
 
-    log.info("register: user=%s email=%s ip=%s ref=%s", user.id, data.email, ip, data.ref_code)
-    await _log(db, email=data.email, success=True, action="register", ip=ip)
+    log.info("register: user=%s ref=%s", user.id, data.ref_code)   # no email/IP in application logs
     # The account is kept whatever happens to the mail — losing it would be worse, and the seller
     # can resend. But the RESULT is no longer discarded: telling someone to check an inbox we
     # failed to write to is the lie that left them stranded.
@@ -264,7 +245,7 @@ async def verify_email(
         user.verification_token = None
         await db.commit()
         await db.refresh(user)
-        log.info("email_verified: user=%s email=%s", user.id, user.email)
+        log.info("email_verified: user=%s", user.id)   # no email in application logs
 
     set_session_cookie(response, create_access_token(str(user.id), user.token_version))
     return SessionResponse(user=UserResponse.model_validate(user))
@@ -291,13 +272,9 @@ async def login(
     # reveal whether the address exists, then fail identically.
     if user is None:
         verify_password(data.password, _DUMMY_PW_HASH)
-        await _log(db, email=data.email, success=False, action="login",
-                   reason="Неверный email или пароль", ip=ip)
         raise HTTPException(status_code=401, detail="Неверный email или пароль")
 
     if not verify_password(data.password, user.hashed_password):
-        await _log(db, email=data.email, success=False, action="login",
-                   reason="Неверный email или пароль", ip=ip)
         raise HTTPException(status_code=401, detail="Неверный email или пароль")
 
     # Password is correct → this was NOT a brute-force failure: compensate this request's own +1 on
@@ -305,13 +282,9 @@ async def login(
     await _throttle_release(db, "login", identity=data.email, ip=ip)
 
     if user.deleted_at:
-        await _log(db, email=data.email, success=False, action="login",
-                   reason="Аккаунт удалён", ip=ip)
         raise HTTPException(status_code=403, detail="Аккаунт удалён. Зарегистрируйтесь повторно для восстановления.")
 
     if not user.is_verified:
-        await _log(db, email=data.email, success=False, action="login",
-                   reason="Email не подтверждён", ip=ip)
         raise HTTPException(
             status_code=403,
             detail="Подтвердите email перед входом. Проверьте почту или используйте ссылку из страницы регистрации.",
@@ -324,12 +297,9 @@ async def login(
 
     if mfa_record and mfa_record.enabled:
         mfa_token = create_mfa_pending_token(str(user.id))
-        await _log(db, email=data.email, success=True, action="login",
-                   reason="mfa_required", ip=ip)
         return {"mfa_required": True, "mfa_token": mfa_token}
 
-    log.info("login_success: user=%s email=%s ip=%s", user.id, data.email, ip)
-    await _log(db, email=data.email, success=True, action="login", ip=ip)
+    log.info("login_success: user=%s", user.id)   # no email/IP in application logs
     set_session_cookie(response, create_access_token(str(user.id), user.token_version))
     return SessionResponse(user=UserResponse.model_validate(user))
 
@@ -344,8 +314,6 @@ async def login_mfa(
     db: AsyncSession = Depends(get_db),
 ):
     from jose import JWTError
-
-    ip = _client_ip(request)
 
     try:
         payload = jwt.decode(
@@ -382,8 +350,6 @@ async def login_mfa(
     # two concurrent /login/mfa requests (the second re-reads last_totp_step and matches 0 rows).
     if not await claim_totp_step(db, user_id=str(user_id),
                                  secret=load_secret(mfa_record.secret), code=data.code):
-        await _log(db, email=user.email, success=False, action="mfa_verify",
-                   reason="Неверный TOTP-код", ip=ip)
         raise HTTPException(status_code=401, detail="Неверный код аутентификатора")
 
     try:
@@ -392,8 +358,7 @@ async def login_mfa(
         await db.rollback()
         raise HTTPException(status_code=503, detail="Сервис временно недоступен. Повторите попытку.")
 
-    log.info("mfa_verified: user=%s ip=%s", user_id, ip)
-    await _log(db, email=user.email, success=True, action="mfa_verify", ip=ip)
+    log.info("mfa_verified: user=%s", user_id)   # no IP in application logs
     set_session_cookie(response, create_access_token(str(user.id), user.token_version))
     return SessionResponse(user=UserResponse.model_validate(user))
 
