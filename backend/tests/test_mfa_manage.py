@@ -12,6 +12,7 @@ import uuid
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -147,6 +148,50 @@ def test_disable_throttle_blocks_after_pair_limit():
                 for _ in range(settings.auth_throttle_mfa_manage_pair_limit + 2)]
     assert 429 in statuses                          # durable mfa_manage throttle trips
     assert statuses[0] == 400 and statuses[-1] == 429
+
+
+# ── DB error at the version-commit → 503, no cookie, nothing changed ─────────
+
+class _CommitFailOnNth:
+    """Wraps a real session but raises on the Nth commit (reserve commits once; the version-commit is
+    the 2nd) — proves the cookie is issued ONLY after a successful commit."""
+    def __init__(self, real, n):
+        self._real = real
+        self._n = n
+        self._count = 0
+    async def commit(self):
+        self._count += 1
+        if self._count == self._n:
+            raise SQLAlchemyError("boom")
+        return await self._real.commit()
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+
+def test_commit_failure_gives_503_and_no_cookie():
+    db = _run(_new_db())
+    uid, secret = _run(_seed(db, enabled=True, ver=0))
+    wrapped = _CommitFailOnNth(db, 2)      # fail the version-commit, not the reserve commit
+
+    async def _override():
+        yield wrapped
+    app = FastAPI()
+    app.include_router(mfa_router.router, prefix="/api/mfa")
+    app.dependency_overrides[get_db] = _override
+    c = TestClient(app)
+    c.cookies.set(COOKIE, create_access_token(uid, 0))
+
+    r = c.request("DELETE", "/api/mfa/disable", json={"code": _code(secret)})
+    assert r.status_code == 503
+    assert "set-cookie" not in {k.lower() for k in r.headers}   # cookie only after a successful commit
+
+    async def check():
+        db.expire_all()
+        rec = (await db.execute(select(MFASecret).where(MFASecret.user_id == uid))).scalar_one()
+        u = (await db.execute(select(User).where(User.id == uid))).scalar_one()
+        return rec.enabled, u.token_version
+    enabled, ver = _run(check())
+    assert enabled is True and ver == 0                          # rollback: old version/state intact
 
 
 # ── setup guard: no secret rotation while enabled ────────────────────────────

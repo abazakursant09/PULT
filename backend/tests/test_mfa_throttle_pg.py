@@ -19,13 +19,15 @@ import uuid
 import pytest
 import time
 
-from fastapi import HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Request, Response
+from httpx import ASGITransport, AsyncClient
+from jose import jwt as jose_jwt
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
-from database import Base
+from database import Base, get_db
 import models  # noqa: F401
 from dependencies import get_current_user
 from models.user import User
@@ -33,8 +35,14 @@ from models.mfa_secret import MFASecret
 from models.auth_rate_limit_bucket import AuthRateLimitBucket
 from config import settings
 from services import auth_throttle as T
+from routers import auth as auth_module
+from routers import mfa as mfa_module
 from routers.mfa import mfa_verify, mfa_disable, MFACodeIn, _generate_secret, _totp
 from routers.auth import hash_password, create_access_token
+
+
+def _decode_ver(token):
+    return jose_jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm]).get("ver")
 
 COOKIE = "pult_session_dev"   # app_env defaults to test → dev cookie name
 
@@ -419,3 +427,90 @@ def test_pg_concurrent_enable_no_desync():
     # winner only. Never a 500 / desync; MFA ends enabled.
     assert enabled is True and ver >= 1
     assert codes <= {200, 400}
+
+
+# ══ real ASGI HTTP flow (httpx AsyncClient + ASGITransport, ONE event loop) ═══
+# Proves the actual HTTP contract — a real Set-Cookie header with the right attributes, the JWT inside
+# it carrying the NEW token_version, /auth/me accepting the new cookie and rejecting the old — end to
+# end over ASGI. ASGITransport runs the app in-process on the current loop, so asyncpg is not
+# loop-mismatched (unlike TestClient, which spins its own loop).
+
+def _http_app(S):
+    app = FastAPI()
+    app.include_router(auth_module.router, prefix="/api/auth")
+    app.include_router(mfa_module.router, prefix="/api/auth/mfa")
+    async def _db():
+        async with S() as s:
+            yield s
+    app.dependency_overrides[get_db] = _db
+    return app
+
+
+def test_pg_enable_http_flow_sets_httponly_cookie_and_revokes_old():
+    async def go():
+        e, S = await _fresh()
+        uid, secret = await _seed_mfa_user(S, enabled=False, ver=0)
+        app = _http_app(S)
+        old_tok = create_access_token(uid, 0)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://t") as cli:
+            cli.cookies.set(COOKIE, old_tok)
+            r = await cli.post("/api/auth/mfa/verify", json={"code": _totp(secret, int(time.time()))})
+            hdr = r.headers.get("set-cookie", "")
+            new_tok = cli.cookies.get(COOKIE)               # jar updated by the response
+            me_new = await cli.get("/api/auth/me")          # new cookie in the jar
+        async with AsyncClient(transport=transport, base_url="http://t") as cli2:
+            cli2.cookies.set(COOKIE, old_tok)
+            me_old = await cli2.get("/api/auth/me")         # explicit OLD cookie
+        await e.dispose()
+        return r.status_code, hdr, old_tok, new_tok, me_new.status_code, me_old.status_code
+    status, hdr, old_tok, new_tok, me_new, me_old = _run(go())
+    assert status == 200
+    low = hdr.lower()
+    assert COOKIE in hdr and "httponly" in low and "samesite=lax" in low and "path=/" in low
+    assert _decode_ver(old_tok) == 0 and _decode_ver(new_tok) == 1 and new_tok != old_tok
+    assert me_new == 200 and me_old == 401                  # new cookie works, old is revoked
+
+
+def test_pg_disable_http_flow_sets_cookie_and_me_works():
+    async def go():
+        e, S = await _fresh()
+        uid, secret = await _seed_mfa_user(S, enabled=True, ver=0)
+        app = _http_app(S)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://t") as cli:
+            cli.cookies.set(COOKIE, create_access_token(uid, 0))
+            r = await cli.request("DELETE", "/api/auth/mfa/disable",
+                                  json={"code": _totp(secret, int(time.time()))})
+            hdr = r.headers.get("set-cookie", "")
+            new_tok = cli.cookies.get(COOKIE)
+            me_new = await cli.get("/api/auth/me")
+        await e.dispose()
+        return r.status_code, hdr, new_tok, me_new.status_code
+    status, hdr, new_tok, me_new = _run(go())
+    assert status == 200 and COOKIE in hdr and "httponly" in hdr.lower()
+    assert _decode_ver(new_tok) == 1 and me_new == 200
+
+
+def test_pg_manage_http_wrong_and_429_issue_no_cookie():
+    async def go():
+        e, S = await _fresh()
+        uid, secret = await _seed_mfa_user(S, enabled=True, ver=0)
+        app = _http_app(S)
+        transport = ASGITransport(app=app)
+        wrong = "000000" if _totp(secret, int(time.time())) != "000000" else "111111"
+        statuses, cookies = [], []
+        async with AsyncClient(transport=transport, base_url="http://t") as cli:
+            cli.cookies.set(COOKIE, create_access_token(uid, 0))
+            for _ in range(M_PAIR + 2):                     # wrong codes → 400s, then the pair block → 429
+                r = await cli.request("DELETE", "/api/auth/mfa/disable", json={"code": wrong})
+                statuses.append(r.status_code)
+                cookies.append("set-cookie" in {k.lower() for k in r.headers})
+                cli.cookies.set(COOKIE, create_access_token(uid, 0))   # keep the session cookie fixed
+        ver, enabled = await _state(S, uid)
+        await e.dispose()
+        return statuses, cookies, ver, enabled
+    statuses, cookies, ver, enabled = _run(go())
+    assert 400 in statuses and 429 in statuses
+    assert not any(cookies)                                 # neither a wrong-code 400 nor a 429 sets a cookie
+    assert ver == 0 and enabled is True                    # nothing changed; MFA still on

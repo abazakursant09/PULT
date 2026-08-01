@@ -180,6 +180,15 @@ async def mfa_setup(
     return MFASetupOut(secret=secret, otpauth=otpauth)
 
 
+# SECURITY-2C-4A — bump token_version and RETURN the written value in the SAME transaction, so the new
+# version is captured in a local variable and the cookie can be built AFTER commit with NO further DB
+# read. This closes the post-commit gap: a db.refresh() could fail after the bump committed, leaving the
+# old cookie revoked and no new one issued.
+_BUMP_TOKEN_VERSION = text(
+    "UPDATE users SET token_version = token_version + 1 WHERE id = :uid RETURNING token_version"
+).bindparams(bindparam("uid", type_=String()))
+
+
 async def _mfa_manage_throttle_or_429(db: AsyncSession, request: Request, *, user_id: str) -> None:
     """SECURITY-2C-4A — DURABLE per-account throttle for MFA MANAGEMENT (enable + disable). Its own
     action `mfa_manage`, separate from `mfa_login`, so a management attack cannot lock login and vice
@@ -226,20 +235,27 @@ async def mfa_verify(
 
     from routers.auth import create_access_token   # local import avoids the auth↔mfa import cycle
     record.enabled = True
-    current_user.token_version = User.token_version + 1   # atomic SQL increment, same transaction
+    # Bump token_version and CAPTURE the written value in-transaction (RETURNING) — the enable flush and
+    # the revocation land in ONE commit, and the new version is a plain local, so no post-commit DB read
+    # is needed to build the cookie.
+    new_version = (await db.execute(_BUMP_TOKEN_VERSION,
+                                    {"uid": str(current_user.id)})).scalar_one()
     try:
         await db.commit()
     except SQLAlchemyError:
         await db.rollback()
         raise HTTPException(status_code=503, detail="Сервис временно недоступен. Повторите попытку.")
 
-    # Correct code → compensate this request's own +1 on the mfa_manage buckets (an active block stays).
-    await _throttle_release(db, "mfa_manage", identity=str(current_user.id), ip=client_ip(request))
-
-    # Read the version actually written (the SQL-expression assignment is not a usable Python value),
-    # then reissue the CURRENT user a fresh cookie with the new version — every older cookie now 401s.
-    await db.refresh(current_user)
-    set_session_cookie(response, create_access_token(str(current_user.id), current_user.token_version))
+    # Commit succeeded → the old cookie is now revoked. Issue the new cookie IMMEDIATELY from the value
+    # captured above. Nothing between the commit and this line touches the DB, so no post-commit failure
+    # can leave the account with a dead old cookie and no new one.
+    set_session_cookie(response, create_access_token(str(current_user.id), int(new_version)))
+    # Best-effort throttle compensation AFTER the cookie is set: a failure here only leaves this one
+    # successful attempt counted (benign) and can never affect the session that was just issued.
+    try:
+        await _throttle_release(db, "mfa_manage", identity=str(current_user.id), ip=client_ip(request))
+    except SQLAlchemyError:
+        pass
     return {"message": "MFA успешно включена"}
 
 
@@ -272,15 +288,18 @@ async def mfa_disable(
 
     from routers.auth import create_access_token   # local import avoids the auth↔mfa import cycle
     record.enabled = False
-    current_user.token_version = User.token_version + 1
+    new_version = (await db.execute(_BUMP_TOKEN_VERSION,
+                                    {"uid": str(current_user.id)})).scalar_one()
     try:
         await db.commit()
     except SQLAlchemyError:
         await db.rollback()
         raise HTTPException(status_code=503, detail="Сервис временно недоступен. Повторите попытку.")
 
-    await _throttle_release(db, "mfa_manage", identity=str(current_user.id), ip=client_ip(request))
-
-    await db.refresh(current_user)
-    set_session_cookie(response, create_access_token(str(current_user.id), current_user.token_version))
+    # Cookie from the captured version, immediately after commit — no post-commit DB read (see enable).
+    set_session_cookie(response, create_access_token(str(current_user.id), int(new_version)))
+    try:
+        await _throttle_release(db, "mfa_manage", identity=str(current_user.id), ip=client_ip(request))
+    except SQLAlchemyError:
+        pass
     return {"message": "MFA отключена"}

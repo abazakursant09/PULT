@@ -151,7 +151,10 @@ jobs:
             tests/test_mfa_throttle_pg.py::test_pg_enable_bumps_token_version_and_reissues_cookie \
             tests/test_mfa_throttle_pg.py::test_pg_disable_bumps_token_version_and_reissues_cookie \
             tests/test_mfa_throttle_pg.py::test_pg_wrong_manage_code_does_not_bump_or_reissue \
-            tests/test_mfa_throttle_pg.py::test_pg_concurrent_enable_no_desync
+            tests/test_mfa_throttle_pg.py::test_pg_concurrent_enable_no_desync \
+            tests/test_mfa_throttle_pg.py::test_pg_enable_http_flow_sets_httponly_cookie_and_revokes_old \
+            tests/test_mfa_throttle_pg.py::test_pg_disable_http_flow_sets_cookie_and_me_works \
+            tests/test_mfa_throttle_pg.py::test_pg_manage_http_wrong_and_429_issue_no_cookie
 
   # Proves the FULL Alembic chain runs on the database production actually uses. The chain was
   # historically only exercised on SQLite, which has no strict boolean type and silently accepted an
