@@ -68,7 +68,9 @@ def test_set_state_pause():
     _run(go())
 
 
-def test_bid_guard_max_step_l4():
+def test_bid_guard_max_step_l4(monkeypatch):
+    from config import settings
+    monkeypatch.setattr(settings, "automation_enabled", True)   # 2D-1A: L4 needs the flag to reach the guard
     async def go():
         db, uid = await _setup()
         wb_client.set_bid = lambda **k: (_ for _ in ()).throw(AssertionError("no dispatch"))

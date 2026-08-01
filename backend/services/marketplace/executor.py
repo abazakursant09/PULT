@@ -16,6 +16,7 @@ from models.marketplace_connection import MarketplaceConnection
 from models.api_credential import ApiCredential
 from models.execution_log import ExecutionLog
 
+from config import settings
 from services import capability_registry
 
 from . import action_catalog, guard, credential_vault
@@ -179,6 +180,30 @@ async def execute(
     # dry_run false success). No marketplace client is ever touched on this path.
     if action_type in _CONTAINED_ACTIONS:
         err = _contained_error(target_mp)
+        if dry_run:
+            return ExecutionResult(None, "rejected", action_type, target_mp or "unknown",
+                                   error=err.to_dict())
+        rec = _new_log(user_id, action_type, target_mp, mode, payload, insight_key,
+                       idempotency_key, status="rejected", error_code=err.code,
+                       connection_id=connection_id, decision_id=decision_id)
+        db.add(rec)
+        await db.commit()
+        return ExecutionResult(rec.id, "rejected", action_type, target_mp or "unknown",
+                               error=err.to_dict())
+
+    # SECURITY-2D-1A — last-resort kill switch for AUTONOMOUS execution. An automated (L4) action
+    # requires settings.automation_enabled to be exactly True; the check lives HERE, inside the single
+    # executor entry point, BEFORE any connection / token / capability / guard / idempotency / dispatch,
+    # so no caller (scheduler, task, decision_apply, a direct internal call, an automated retry, or a
+    # revert of an automated action — which re-enters execute() with the ORIGINAL stored mode, execution
+    # _log.mode) can reach a provider while automation is off. Fail-closed: `is not True` blocks False /
+    # None / any non-True config value. Manual L3 is NOT gated by this flag — it is user-initiated and
+    # gated by auth / consent / capability / guard. dry_run returns an HONEST non-executable rejection
+    # (never a green "would send" preview); a rejected log is written for audit (never a dry_run false
+    # success), carrying no provider token and only the already-secret-free payload.
+    if mode == "automated_l4" and settings.automation_enabled is not True:
+        err = ExecutionError.guard("AUTOMATION_DISABLED",
+                                   "автоматическое исполнение отключено")
         if dry_run:
             return ExecutionResult(None, "rejected", action_type, target_mp or "unknown",
                                    error=err.to_dict())

@@ -76,7 +76,9 @@ def test_l3_publish_success():
 
 
 # ── guard: never auto-publish a non-positive review (L4) ──────────────────────
-def test_guard_blocks_negative_auto_publish():
+def test_guard_blocks_negative_auto_publish(monkeypatch):
+    from config import settings
+    monkeypatch.setattr(settings, "automation_enabled", True)   # 2D-1A: L4 needs the flag to reach the guard
     async def go():
         db, uid = await _setup()
         wb_client.publish_feedback_answer = _mock_publish({"calls": 0})
@@ -92,7 +94,9 @@ def test_guard_blocks_negative_auto_publish():
 
 
 # ── L4 requires an enabled rule ───────────────────────────────────────────────
-def test_l4_requires_rule():
+def test_l4_requires_rule(monkeypatch):
+    from config import settings
+    monkeypatch.setattr(settings, "automation_enabled", True)   # 2D-1A: reach the NO_ACTIVE_RULE guard
     async def go():
         db, uid = await _setup()
         res = await executor.execute(
