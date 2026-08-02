@@ -38,6 +38,8 @@ const FORBIDDEN: { token: RegExp; label: string }[] = [
   { token: /\bapi\.chat\b/, label: 'api.chat client' },
   { token: /\bChatMessage\b/, label: 'ChatMessage type' },
   { token: /\bSendMessageResult\b/, label: 'SendMessageResult type' },
+  { token: /\bchat_violations\b/, label: 'chat_violations field' },
+  { token: /\bchat_blocked\b/, label: 'chat_blocked field' },
   { token: /Биржа/, label: '"Биржа" UI text' },
 ]
 

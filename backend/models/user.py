@@ -16,12 +16,8 @@ class User(Base):
 
     # Subscription plan: master | profi | maximum
     plan            = Column(String(50), nullable=False, default='master', server_default='master')
-    # LEGAL-1A — the user-to-user "Биржа" chat was removed (149-FZ art. 10.1). These two
-    # moderation columns are now INERT: no code reads or writes them after chat removal. They are
-    # retained only so this cleanup did not require a users-table migration; they hold no message
-    # content. Safe to drop in a later dedicated migration if desired.
-    chat_violations = Column(Integer,  nullable=False, default=0,    server_default='0')
-    chat_blocked    = Column(Boolean,  nullable=False, default=False, server_default='0')
+    # LEGAL-1A — the user-to-user "Биржа" chat was removed (149-FZ art. 10.1). Its two chat-
+    # moderation columns were dropped by migration lch1a2b3c4d01; nothing reads or writes them.
 
     # Email verification (DEFAULT 1 so existing users stay verified after migration)
     is_verified         = Column(Boolean,  nullable=False, default=True,  server_default='1')

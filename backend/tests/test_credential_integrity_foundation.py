@@ -89,9 +89,9 @@ def _seed(sync_url, *, connections):
                 c.execute(
                     sa.text(
                         "INSERT INTO users (id, email, name, hashed_password, created_at, "
-                        "plan, chat_violations, chat_blocked, is_verified, was_referrer, "
+                        "plan, is_verified, was_referrer, "
                         "was_referred, is_restored) "
-                        "VALUES (:id, :email, :name, 'x', :created, 'master', 0, 0, 1, 0, 0, 0)"
+                        "VALUES (:id, :email, :name, 'x', :created, 'master', 1, 0, 0, 0)"
                     ),
                     {"id": user_id, "email": f"c{i}@b.com", "name": f"C{i}",
                      "created": datetime.utcnow()},

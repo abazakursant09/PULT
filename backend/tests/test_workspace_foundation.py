@@ -78,6 +78,14 @@ def _rows(sync_url, stmt):
         eng.dispose()
 
 
+def _user_maps(sync_url):
+    """users as a list of {column: value} dicts, ordered by id — comparison is column-order
+    independent, so a migration that drops a column (LEGAL-1A: chat_violations/chat_blocked) or
+    re-adds it at the end on downgrade does not spuriously fail a user-data comparison."""
+    cols = [r[1] for r in _rows(sync_url, "PRAGMA table_info(users)")]
+    return cols, [dict(zip(cols, row)) for row in _rows(sync_url, "SELECT * FROM users ORDER BY id")]
+
+
 def _seed_users(sync_url, n):
     """Insert n users directly, at the PRIOR revision (before `workspaces` exists)."""
     eng = sa.create_engine(sync_url)
@@ -88,9 +96,9 @@ def _seed_users(sync_url, n):
                 c.execute(
                     sa.text(
                         "INSERT INTO users (id, email, name, hashed_password, created_at, "
-                        "plan, chat_violations, chat_blocked, is_verified, was_referrer, "
+                        "plan, is_verified, was_referrer, "
                         "was_referred, is_restored) "
-                        "VALUES (:id, :email, :name, 'x', :created, 'master', 0, 0, 1, 0, 0, 0)"
+                        "VALUES (:id, :email, :name, 'x', :created, 'master', 1, 0, 0, 0)"
                     ),
                     {"id": uid, "email": f"u{i}@b.com", "name": f"U{i}",
                      "created": datetime.utcnow()},
@@ -214,17 +222,18 @@ def test_backfill_does_not_modify_users(monkeypatch):
 
     command.upgrade(cfg, PRIOR)
     _seed_users(sync_url, 3)
-    before = _rows(sync_url, "SELECT * FROM users ORDER BY id")
+    before_cols, before = _user_maps(sync_url)
 
     command.upgrade(cfg, "head")
-    after = _rows(sync_url, "SELECT * FROM users ORDER BY id")
+    after_cols, after = _user_maps(sync_url)
 
-    # Additive-only means existing user ROWS are never modified — but LATER migrations may append new
-    # columns with a default (e.g. SECURITY-2C-1 users.token_version, default 0). Compare only the
-    # columns that existed at PRIOR; any new trailing column is allowed, a changed original value is not.
-    n = len(before[0]) if before else 0
-    after_original_cols = [row[:n] for row in after]
-    assert before == after_original_cols, "M0 modified `users` — it must be additive only"
+    # M0 (the F1.0 workspace backfill) must never modify a user ROW. Between PRIOR and head the users
+    # SCHEMA does change legitimately — SECURITY-2C-1 adds token_version, LEGAL-1A (lch) drops
+    # chat_violations/chat_blocked — so compare only the columns present at BOTH revisions, by name.
+    # A surviving user value that changed would still fail here; a schema add/drop alone does not.
+    common = [c for c in before_cols if c in set(after_cols)]
+    assert [{c: r[c] for c in common} for r in before] == [{c: r[c] for c in common} for r in after], \
+        "M0 modified `users` — it must not change surviving user rows"
 
 
 # ── C. migration roundtrip ───────────────────────────────────────────────────
@@ -240,7 +249,7 @@ def test_upgrade_downgrade_upgrade_roundtrip(monkeypatch):
 
     command.upgrade(cfg, PRIOR)
     _seed_users(sync_url, 2)
-    users_before = _rows(sync_url, "SELECT * FROM users ORDER BY id")
+    _, users_before = _user_maps(sync_url)
 
     command.upgrade(cfg, "head")
     assert _current(sync_url) == REV
@@ -250,7 +259,11 @@ def test_upgrade_downgrade_upgrade_roundtrip(monkeypatch):
     command.downgrade(cfg, PRIOR)
     assert _current(sync_url) == PRIOR
     assert TABLE not in _tables(sync_url)
-    assert _rows(sync_url, "SELECT * FROM users ORDER BY id") == users_before  # (11)
+    # (11) downgrade leaves user rows intact. Compared as {col: value} maps so the chat columns that
+    # LEGAL-1A re-adds at the END of the table on downgrade (rather than their original position) do
+    # not spuriously differ; their restored default 0 matches the seeded 0.
+    _, users_after = _user_maps(sync_url)
+    assert users_after == users_before
 
     command.upgrade(cfg, "head")
     assert _current(sync_url) == REV
