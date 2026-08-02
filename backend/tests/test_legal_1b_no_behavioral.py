@@ -64,12 +64,14 @@ def test_behavioral_tables_not_in_metadata():
 
 def test_events_routes_and_get_insights_removed_execute_kept():
     import main
+    from routers import action_engine
     paths = {getattr(r, "path", "") for r in main.app.routes}
     assert not any(p.startswith("/api/events") for p in paths)          # collection endpoint gone
-    # dormant behavioural GET /api/insights gone (no bare insights collection route)
-    assert not any(p.rstrip("/") == "/api/insights" for p in paths)
-    # the live objective executor path stays (match is robust to the path-converter rendering)
-    assert any("/insights/" in p and p.endswith("/execute") for p in paths)
+    # dormant behavioural GET /api/insights + the OperatorDecision writer are gone; the live objective
+    # executor stays. Checked at the handler level (robust to Starlette's path-converter rendering).
+    assert not hasattr(action_engine, "get_insights")
+    assert not hasattr(action_engine, "update_insight_status")
+    assert hasattr(action_engine, "execute_insight")
 
 
 def test_action_engine_compute_path_intact_no_behavioral():
@@ -120,7 +122,7 @@ async def _mkdb():
                             poolclass=StaticPool)
     async with e.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    return sessionmaker(e, class_=AsyncSession, expire_on_commit=False)()
+    return sessionmaker(e, class_=AsyncSession, expire_on_commit=False)(), e
 
 
 class _U:
@@ -155,13 +157,17 @@ def _shape(resp):
 def test_same_business_data_same_today_regardless_of_user():
     async def go():
         from routers.today import get_today
-        db = await _mkdb()
-        u1, u2 = str(uuid.uuid4()), str(uuid.uuid4())
-        await _seed_signals(db, u1)
-        await _seed_signals(db, u2)
-        r1 = await get_today(contour=None, limit=50, current_user=_U(u1), db=db)
-        r2 = await get_today(contour=None, limit=50, current_user=_U(u2), db=db)
-        # identical business inputs → identical Today projection (no per-user behavioural divergence)
-        assert _shape(r1) == _shape(r2)
-        assert len(r1.items) >= 1
+        db, eng = await _mkdb()
+        try:
+            u1, u2 = str(uuid.uuid4()), str(uuid.uuid4())
+            await _seed_signals(db, u1)
+            await _seed_signals(db, u2)
+            r1 = await get_today(contour=None, limit=50, current_user=_U(u1), db=db)
+            r2 = await get_today(contour=None, limit=50, current_user=_U(u2), db=db)
+            # identical business inputs → identical Today projection (no per-user behavioural divergence)
+            assert _shape(r1) == _shape(r2)
+            assert len(r1.items) >= 1
+        finally:
+            await db.close()
+            await eng.dispose()          # dispose the async engine (no "Event loop is closed" on teardown)
     _run(go())
