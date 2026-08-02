@@ -8,14 +8,9 @@ Sentry.init({
   environment: process.env.NODE_ENV,
   enabled: process.env.NODE_ENV === 'production',
   tracesSampleRate: 0.1,
-  replaysOnErrorSampleRate: 1.0,
-  replaysSessionSampleRate: 0.05,
-  integrations: [
-    Sentry.replayIntegration({
-      maskAllText: true,
-      blockAllMedia: true,
-    }),
-  ],
+  // LEGAL-1B (F): Sentry Session Replay (DOM/session recording) intentionally removed. This config
+  // captures errors only and never records the seller's session — no session-recording integration or
+  // its sample-rate knobs. Do NOT reintroduce (guarded by tests/noSentryReplay.test.ts).
   ignoreErrors: [
     'ResizeObserver loop limit exceeded',
     'Non-Error promise rejection captured',

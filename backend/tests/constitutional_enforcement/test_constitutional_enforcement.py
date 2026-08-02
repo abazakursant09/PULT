@@ -18,8 +18,8 @@ import pytest
 import constitutional_enforcement as ce
 import root_constitution as root
 
-GOLDEN_ROOT = "816632a3242098f6e545a813ab66ab6429948d316aefacb23f484d3e598f7b1d"
-GOLDEN_SIGNATURE = "73bff867251c222acf6ef4bd81161352966ee81af75fc4a630229901a0d9af6d"
+GOLDEN_ROOT = "ae931b5dbebfa11d72bb0a33ea0e9fa6f8442098b7341a1eb0527b54bf85b69a"
+GOLDEN_SIGNATURE = "4f5c3b2b3f43b9525bd98efd2e6a3c7acf012099a610116c3118cc6118c79ce5"
 LAYERS = list(ce.ENFORCED_LAYERS)
 
 _LIVE_ROOT = root.build_root_constitution()

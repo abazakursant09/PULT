@@ -74,8 +74,6 @@ from .insight import InsightRecord
 from .telegram_notification_log import TelegramNotificationLog
 from .seo_rebuild import SeoRebuild
 from .creative_variant import CreativeVariant
-from .user_event import UserEvent
-from .operator_decision import OperatorDecision
 # Product Graph (Doctrine §3/§7 core model) — Товар / Листинг / Решение
 from .physical_product import PhysicalProduct
 from .product_listing import ProductListing

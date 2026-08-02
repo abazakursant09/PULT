@@ -103,9 +103,12 @@ def test_intelligence_loop_still_uses_compute_insights():
     assert "_compute_insights" in src         # per-product digest unchanged
 
 
-# ── (6) legacy /api/insights endpoint still present (Copilot untouched) ──────
+# ── (6) LEGAL-1B: the dormant behavioral GET /api/insights is removed; the live
+#        objective compute path (_compute_insights, feeds /api/today + Telegram)
+#        remains intact ────────────────────────────────────────────────────────
 
-def test_legacy_insights_endpoint_present():
-    # Copilot reads GET /api/insights — its backend path must remain intact.
-    assert hasattr(action_engine, "get_insights")
+def test_legacy_insights_endpoint_removed_compute_path_intact():
+    # The behavioral get_insights endpoint (preference/operator-profile ranking) is gone.
+    assert not hasattr(action_engine, "get_insights")
+    # The objective _compute_insights path that feeds /api/today + Telegram stays.
     assert hasattr(action_engine, "_compute_insights")

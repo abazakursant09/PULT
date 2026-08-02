@@ -5,7 +5,6 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ArrowRight, MailCheck, CheckCircle2 } from 'lucide-react'
 import { api } from '@/lib/api'
-import { trackEvent, stampFunnel, FUNNEL_TS } from '@/lib/events'
 import { useLang } from '@/lib/lang-context'
 import { LanguageSwitcher } from '@/components/LanguageSwitcher'
 import { MathCaptcha } from '@/components/MathCaptcha'
@@ -116,7 +115,6 @@ export default function RegisterPage() {
     if (!/[A-ZА-ЯЁ]/.test(form.password))     { setError('Пароль должен содержать хотя бы одну заглавную букву'); return }
     if (!/\d/.test(form.password))             { setError('Пароль должен содержать хотя бы одну цифру'); return }
     setLoading(true)
-    trackEvent('registration_started', 'auth')
     try {
       const res = await api.auth.register(form.email, form.name, form.password, refCode ?? undefined)
       // The account exists either way. Whether a letter is actually on its way decides what this
@@ -124,9 +122,6 @@ export default function RegisterPage() {
       // what left sellers locked out of accounts they could not enter and could not recover.
       setMailSent(res.verification_email_sent !== false)
       setRegistered(true)
-      stampFunnel(FUNNEL_TS.signup)              // anchor for time_to_first_* activation metrics
-      trackEvent('registration_completed', 'auth')
-      trackEvent('trial_started', 'auth', undefined, { plan: 'trial' })
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : t('common.error'))
     } finally {

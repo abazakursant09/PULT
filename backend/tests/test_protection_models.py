@@ -509,7 +509,7 @@ def test_single_alembic_head():
     from alembic.config import Config
     from alembic.script import ScriptDirectory
     heads = ScriptDirectory.from_config(Config("alembic.ini")).get_heads()
-    assert heads == ["lch1a2b3c4d01"], heads
+    assert heads == ["rbp1a2b3c4d01"], heads
 
 
 # ── 23/24/25. feature stays OFF; stop_auto_promotion stays contained ─────────

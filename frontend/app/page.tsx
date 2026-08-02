@@ -12,7 +12,6 @@ import {
 import { NotificationBell } from '@/components/NotificationBell'
 import { api, type User } from '@/lib/api'
 import { clearSession } from '@/lib/session'
-import { trackEvent, captureAttribution } from '@/lib/events'
 import { LANDING_PROOF } from '@/config/landing-proof'
 
 /* ─── Design tokens — single accent (violet), no gold ─────────────────────── */
@@ -230,29 +229,6 @@ export default function LandingPage() {
     if (s) try { setUser(JSON.parse(s)) } catch {}
   }, [])
 
-  // Funnel: page view (once per mount) + per-section view (once per session)
-  useEffect(() => {
-    captureAttribution()                       // first-touch UTM/referrer
-    trackEvent('landing_page_viewed', 'landing')
-    const els = Array.from(document.querySelectorAll<HTMLElement>('[data-section]'))
-    if (typeof IntersectionObserver === 'undefined' || els.length === 0) return
-    const obs = new IntersectionObserver(entries => {
-      for (const e of entries) {
-        if (!e.isIntersecting) continue
-        const name = (e.target as HTMLElement).dataset.section
-        if (!name) { obs.unobserve(e.target); continue }
-        try {
-          if (sessionStorage.getItem(`bp_sv_${name}`)) { obs.unobserve(e.target); continue }
-          sessionStorage.setItem(`bp_sv_${name}`, '1')
-        } catch {}
-        trackEvent('section_viewed', 'landing', name, { section: name })
-        obs.unobserve(e.target)
-      }
-    }, { threshold: 0.3 })
-    els.forEach(el => obs.observe(el))
-    return () => obs.disconnect()
-  }, [])
-
   const startHref = user ? '/dashboard' : '/register'
 
   // Proof / case visibility — never render literal placeholders
@@ -281,12 +257,10 @@ export default function LandingPage() {
               </p>
               <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3 mb-4">
                 <Link href={startHref} className="btn btn-primary w-full sm:w-auto"
-                  onClick={() => trackEvent('landing_hero_cta_clicked', 'landing', undefined, { location: 'hero' })}
                   style={{ height: 52, padding: '0 28px', fontSize: '1rem', fontWeight: 600, borderRadius: 8, gap: 8 }}>
                   Найти мои потери <ArrowRight size={16} />
                 </Link>
                 <a href="#how"
-                  onClick={() => trackEvent('landing_demo_clicked', 'landing')}
                   className="inline-flex items-center justify-center gap-1.5 self-center sm:self-auto"
                   style={{ fontSize: '0.9375rem', fontWeight: 500, color: R.accentT, textDecoration: 'none', padding: '8px 4px' }}>
                   Посмотреть, как это работает ↓
@@ -358,7 +332,6 @@ export default function LandingPage() {
                 Пульт сам находит утечку, показывает сумму в рублях и говорит, что нажать. Вы не изучаете графики — вы делаете одно действие.
               </p>
               <Link href={startHref} className="btn btn-primary"
-                onClick={() => trackEvent('landing_hero_cta_clicked', 'landing', undefined, { location: 'the_moment' })}
                 style={{ height: 50, padding: '0 26px', fontSize: '0.9375rem', fontWeight: 600, borderRadius: 8, gap: 8 }}>
                 Найти такие потери у себя <ArrowRight size={16} />
               </Link>
@@ -446,7 +419,6 @@ export default function LandingPage() {
       {/* ── CTA after Security (close the gap to Pricing) ── */}
       <section style={{ padding: '0 32px 56px', textAlign: 'center' }}>
         <Link href={startHref} className="btn btn-primary"
-          onClick={() => trackEvent('landing_hero_cta_clicked', 'landing', undefined, { location: 'after_security' })}
           style={{ display: 'inline-flex', height: 52, padding: '0 28px', fontSize: '1rem', fontWeight: 600, borderRadius: 8, gap: 8 }}>
           Найти мои потери <ArrowRight size={16} />
         </Link>
@@ -547,7 +519,6 @@ export default function LandingPage() {
           </h2>
           <p style={{ fontSize: '1.125rem', color: R.text2, marginBottom: 36 }}>Узнайте за 2 минуты. Без карты.</p>
           <Link href={startHref} className="btn btn-primary"
-            onClick={() => trackEvent('landing_hero_cta_clicked', 'landing', undefined, { location: 'final' })}
             style={{ height: 56, padding: '0 40px', fontSize: '1.0625rem', fontWeight: 700, borderRadius: 10, gap: 10 }}>
             Найти мои потери <ArrowRight size={18} />
           </Link>

@@ -5,7 +5,6 @@ import { usePathname, useRouter } from 'next/navigation'
 import { X, Zap } from 'lucide-react'
 import { api, type TodayItem } from '@/lib/api'
 import { isAuthenticated } from '@/lib/session'
-import { trackEvent } from '@/lib/events'
 
 // ── Module-level cache ────────────────────────────────────────────────────────
 // Survives soft navigation (module is loaded once per session).
@@ -110,12 +109,10 @@ export function CopilotBar() {
   const cta   = item.recommended_action || 'Открыть'
 
   function handleAction() {
-    trackEvent('copilot_cta_clicked', pathname, item!.item_key, { contour: item!.contour })
     router.push('/dashboard')   // the canonical feed surface
   }
 
   function handleDismiss() {
-    trackEvent('copilot_dismissed', pathname, item!.item_key, { contour: item!.contour })
     sessionStorage.setItem('copilot_dismissed', item!.item_key)
     setHidden(true)
   }

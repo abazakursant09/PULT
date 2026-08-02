@@ -1,4 +1,3 @@
-import json
 import uuid
 import logging
 from datetime import datetime, timedelta
@@ -14,7 +13,6 @@ from config import settings
 from database import get_db
 from models.payment import Payment
 from models.user import User
-from models.user_event import UserEvent
 from dependencies import get_current_user
 
 logger = logging.getLogger(__name__)
@@ -247,14 +245,7 @@ async def yookassa_webhook(request: Request, db: AsyncSession = Depends(get_db))
 async def _activate_plan(user: User, payment: Payment, db: AsyncSession):
     user.plan = payment.plan
     user.subscription_end_date = datetime.utcnow() + timedelta(days=30)
-    # subscription_started — single source of truth. Fired here (the only place
-    # a plan transitions to active, reached by both webhook and status poll),
-    # so the conversion is never lost to a closed browser tab.
-    db.add(UserEvent(
-        user_id       = str(user.id),
-        event_type    = "subscription_started",
-        event_scope   = "billing",
-        entity_id     = payment.yookassa_payment_id,
-        metadata_json = json.dumps({"tariff": payment.tariff, "plan": payment.plan}, ensure_ascii=False),
-    ))
+    # LEGAL-1B: the behavioral analytics side-write ("subscription_started") was removed.
+    # Subscription state lives in user.plan / subscription_end_date + Payment; billing never
+    # depended on that analytics record.
     logger.info("Plan %s activated for user %s until %s", payment.plan, user.id, user.subscription_end_date)
