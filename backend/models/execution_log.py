@@ -1,8 +1,15 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, String, DateTime, JSON, Index, text
+from sqlalchemy import Column, String, DateTime, JSON, Index, Integer, CheckConstraint, text
 from database import Base
+
+# SECURITY-2D-1C-A — the only allowed reconciliation_status values (recovery classification, 1C-B).
+_RECON_STATUSES = (
+    "pending_recon", "reconciling", "intent_observed", "not_observed",
+    "still_unknown", "manual_attention", "resolved",
+)
+_RECON_IN = ", ".join(f"'{s}'" for s in _RECON_STATUSES)
 
 
 class ExecutionLog(Base):
@@ -42,6 +49,14 @@ class ExecutionLog(Base):
     request_fingerprint = Column(String(72), nullable=True)   # "fp1:" + 64 lowercase hex = 68 chars
     dispatch_started_at = Column(DateTime(timezone=True), nullable=True)   # set just before the provider call (1B-B)
 
+    # SECURITY-2D-1C-A — additive, UNWIRED recovery foundation. NOT read or written by any runtime path
+    # in 1C-A (executor untouched). claim_generation is the fencing token: a future controlled re-own
+    # (1C-C) bumps it, and the executor's pending→in_flight ownership CAS (also 1C-C) checks it, so a
+    # revived stale worker is fenced out. reconciliation_status records read-only recovery classification
+    # written by the reaper/reconciliation service (1C-B) — never the executor, never a provider write.
+    claim_generation      = Column(Integer, nullable=False, server_default="0", default=0)
+    reconciliation_status = Column(String(20), nullable=True)
+
     __table_args__ = (
         Index("ix_execlog_user", "user_id"),
         Index("ix_execlog_user_action", "user_id", "action_type"),
@@ -53,4 +68,10 @@ class ExecutionLog(Base):
         Index("uq_execlog_op_claim", "user_id", "idempotency_key", unique=True,
               sqlite_where=text("idempotency_key LIKE 'v1:%'"),
               postgresql_where=text("idempotency_key LIKE 'v1:%'")),
+        # SECURITY-2D-1C-A — fencing counter is non-negative; reconciliation_status is NULL or one of the
+        # 7 allowed recovery values (enum integrity enforced in the DB, not just app code).
+        CheckConstraint("claim_generation >= 0", name="ck_execlog_claim_generation_nonneg"),
+        CheckConstraint(
+            f"reconciliation_status IS NULL OR reconciliation_status IN ({_RECON_IN})",
+            name="ck_execlog_reconciliation_status"),
     )
