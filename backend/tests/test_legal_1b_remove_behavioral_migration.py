@@ -129,4 +129,4 @@ def test_rbp_migration_nonempty_roundtrip(monkeypatch, tmp_path):
 
     from alembic.config import Config
     from alembic.script import ScriptDirectory
-    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["rbp1a2b3c4d01"]
+    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["fcs1a2b3c4d01"]
