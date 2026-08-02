@@ -57,6 +57,13 @@ class ExecutionLog(Base):
     claim_generation      = Column(Integer, nullable=False, server_default="0", default=0)
     reconciliation_status = Column(String(20), nullable=True)
 
+    # SECURITY-2D-1C-B — read-only reconciliation scheduling (written ONLY by the recovery sweep, never
+    # the executor, never a provider write). Bound the number of read-rechecks and schedule the next one
+    # for eventual-consistent marketplaces. Unread in the executor.
+    reconciliation_attempts = Column(Integer, nullable=False, server_default="0", default=0)
+    last_reconciled_at      = Column(DateTime(timezone=True), nullable=True)
+    next_reconcile_at       = Column(DateTime(timezone=True), nullable=True)
+
     __table_args__ = (
         Index("ix_execlog_user", "user_id"),
         Index("ix_execlog_user_action", "user_id", "action_type"),
@@ -74,4 +81,5 @@ class ExecutionLog(Base):
         CheckConstraint(
             f"reconciliation_status IS NULL OR reconciliation_status IN ({_RECON_IN})",
             name="ck_execlog_reconciliation_status"),
+        CheckConstraint("reconciliation_attempts >= 0", name="ck_execlog_reconciliation_attempts_nonneg"),
     )

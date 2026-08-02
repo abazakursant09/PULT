@@ -21,7 +21,7 @@ from config import Settings, settings
 from models.marketplace_price_observation import MarketplacePriceObservation as MPO
 from models.marketplace_promotion_observation import MarketplacePromotionObservation as PO
 
-HEAD = "rcv1a2b3c4d01"
+HEAD = "rcb1a2b3c4d01"
 PRIOR = "eco1a2b3c4d01"
 _BACKEND = Path(__file__).resolve().parents[1]
 
@@ -131,6 +131,7 @@ def _read(rel):
 # PULT-LAUNCH-2.5E-2B-2 added the sweep SERVICE; it lives in exactly this package and nothing else may
 # delete from the observation tables or take the retention advisory lock.
 _RETENTION_PKG = "services/marketplace/retention/"
+_RECOVERY_PKG = "services/marketplace/recovery/"   # SECURITY-2D-1C-B — peer sanctioned advisory-lock sweep
 
 
 def test_only_the_retention_package_deletes_or_locks():
@@ -140,12 +141,16 @@ def test_only_the_retention_package_deletes_or_locks():
     offenders = []
     for path in glob.glob(str(_BACKEND / "**" / "*.py"), recursive=True):
         rel = os.path.relpath(path, _BACKEND).replace("\\", "/")
-        if rel.startswith(("tests/", "models/")) or "alembic/versions/" in rel or rel.startswith(_RETENTION_PKG):
+        # SECURITY-2D-1C-B added a SECOND sanctioned advisory-lock sweep (read-only recovery); it is a
+        # peer of retention and allowed to take an advisory lock, but it never DELETEs observations.
+        if rel.startswith(("tests/", "models/")) or "alembic/versions/" in rel \
+                or rel.startswith(_RETENTION_PKG) or rel.startswith(_RECOVERY_PKG):
             continue
         low = open(path, encoding="utf-8").read().lower()
         if "delete from marketplace_price_observations" in low \
-                or "delete from marketplace_promotion_observations" in low \
-                or "pg_advisory" in low or "pg_try_advisory" in low:
+                or "delete from marketplace_promotion_observations" in low:
+            offenders.append(rel)   # DELETE of observations stays retention-only
+        elif ("pg_advisory" in low or "pg_try_advisory" in low) and not rel.startswith(_RECOVERY_PKG):
             offenders.append(rel)
     assert offenders == [], offenders
 

@@ -1,0 +1,65 @@
+"""SECURITY-2D-1C-B — source guards: the recovery layer is read-only and unwired from the write path."""
+import pathlib
+import re
+
+_ROOT = pathlib.Path(__file__).resolve().parents[2]
+_BE = _ROOT / "backend"
+
+
+def _src(rel):
+    return (_BE / rel).read_text(encoding="utf-8")
+
+
+# provider WRITE method names that must NEVER be CALLED from the recovery layer
+_WRITE_CALLS = ("set_price(", "publish_feedback_answer(", "set_bid(", "set_campaign_state(",
+                "update_card(", "set_discount(", "activate", "deactivate")
+
+
+def test_reconcile_read_calls_no_provider_write():
+    src = _src("services/marketplace/recovery/reconcile_read.py")
+    # strip the _Provider-agnostic parts: any occurrence of a write-call pattern is forbidden.
+    for w in _WRITE_CALLS:
+        assert w not in src, f"recovery reconcile must not call provider write: {w}"
+
+
+def test_sweep_never_writes_status_generation_or_dispatch():
+    src = _src("services/marketplace/recovery/recovery_sweep.py")
+    # the only UPDATE ... SET touches reconciliation_* / last_reconciled_at / next_reconcile_at — never
+    # the bare status column, claim_generation or dispatch_started_at. Match a BARE `status=` assignment
+    # (a char other than '_' before it, so reconciliation_status= is excluded).
+    assert re.search(r"[^_a-z]status\s*=[^=]", src) is None       # no bare status= assignment
+    # no ASSIGNMENT / mutation of the fencing token or the dispatch stamp (docstring mentions are fine)
+    assert "claim_generation =" not in src and "claim_generation=" not in src
+    assert "dispatch_started_at =" not in src and "dispatch_started_at=" not in src
+    assert "reconciliation_status=" in src
+
+
+def test_executor_does_not_reference_recovery():
+    # the executor must not import/wire the recovery layer (needs_reconcile/_reconcile are 1B-B internals)
+    src = _src("services/marketplace/executor.py")
+    assert "recovery" not in src and "recovery_sweep" not in src and "reconcile_read" not in src
+
+
+def test_scheduler_does_not_call_recovery_sweep():
+    src = _src("tasks/scheduler.py")
+    assert "recovery_sweep" not in src and "run_recovery_sweep" not in src
+
+
+def test_recovery_flags_default_off():
+    from config import Settings
+    s = Settings()
+    assert s.recovery_reaper_enabled is False        # OFF
+    assert s.recovery_reaper_dry_run is True          # fail-safe
+
+
+def test_no_operator_recovery_endpoint():
+    # no HTTP surface for recovery in 1C-B (operator workflow is 1C-C)
+    routers = (_BE / "routers")
+    for p in routers.glob("*.py"):
+        assert not re.search(r"/recovery|recovery_sweep|run_recovery", p.read_text(encoding="utf-8")), p.name
+
+
+def test_recovery_reads_only_read_client_methods():
+    # reconcile_read imports must be read helpers / clients, never the executor's execute/revert
+    src = _src("services/marketplace/recovery/reconcile_read.py")
+    assert "executor.execute" not in src and ".revert(" not in src and "spec.dispatch" not in src
