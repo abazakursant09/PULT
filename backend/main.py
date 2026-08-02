@@ -17,7 +17,7 @@ from services.sentry_setup import init_sentry
 init_sentry()
 
 from database import init_db
-from routers import auth, products, reviews, pricing, monitor, finance, legal, startup, assistant, mfa, notifications, success_stories, telegram_settings, supplier_verification, suppliers_catalog, logistics, deals, supplier_reviews, promo, referrals, marking, ideas, payments, ai_image_service, csv_import, seo_projects, action_engine, rebuild_tracker, seo_intelligence, creative, events, connections, marketplace_accounts, store_catalog, source_policy, execution, automation, advertising, seo_execution, product_graph, decisions, analytics, learning, seo, advertising_engine, review_engine, growth_engine, legal_engine, decision_outcome, decision_feed, decision_apply, promotion_activation, today, presentation
+from routers import auth, products, reviews, pricing, monitor, finance, legal, startup, assistant, mfa, notifications, success_stories, telegram_settings, supplier_verification, suppliers_catalog, logistics, deals, supplier_reviews, promo, referrals, marking, ideas, payments, ai_image_service, csv_import, seo_projects, action_engine, rebuild_tracker, seo_intelligence, creative, connections, marketplace_accounts, store_catalog, source_policy, execution, automation, advertising, seo_execution, product_graph, decisions, analytics, learning, seo, advertising_engine, review_engine, growth_engine, legal_engine, decision_outcome, decision_feed, decision_apply, promotion_activation, today, presentation
 from routers.ai_image_service import queue_worker as ai_queue_worker
 from tasks.health_monitor import run_health_monitor
 from tasks.seed_catalog import seed_catalog
@@ -171,7 +171,6 @@ app.include_router(action_engine.router,         prefix="/api",         tags=["a
 app.include_router(rebuild_tracker.router,       prefix="/api",         tags=["rebuild-tracker"])
 app.include_router(seo_intelligence.router,      prefix="/api",         tags=["seo-intelligence"])
 app.include_router(creative.router,              prefix="/api",         tags=["creative"])
-app.include_router(events.router,               prefix="/api",         tags=["events"])
 # ── Marketplace Execution Layer (ME-1) ────────────────────────────────────────
 app.include_router(connections.router,           prefix="/api",         tags=["connections"])
 app.include_router(marketplace_accounts.router,  prefix="/api",         tags=["marketplace-accounts"])

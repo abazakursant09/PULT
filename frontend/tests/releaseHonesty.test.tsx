@@ -13,14 +13,6 @@ import type { ImportHistoryItem } from '@/lib/api'
 
 const ROOT = join(__dirname, '..')
 
-vi.mock('@/lib/analytics', () => ({
-  trackEvent: vi.fn(),
-  stampFunnel: vi.fn(),
-  firstTimeOnly: () => false,
-  elapsedSince: () => 0,
-  FUNNEL_TS: { signup: 'signup', firstImport: 'firstImport' },
-}))
-
 function historyRow(import_type: string, status = 'confirmed'): ImportHistoryItem {
   return {
     id: 'imp-1', filename: 'r.csv', marketplace: 'wb', import_type, status,

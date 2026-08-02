@@ -32,26 +32,6 @@ vi.mock('next/navigation', () => {
   }
 })
 
-// Telemetry is infrastructure, never the thing under test — and it is the one module that fires
-// on a TIMER. `trackEvent` defers through requestIdleCallback/setTimeout and then POSTs
-// /api/events/track, so a component that tracks anything schedules a real request that lands
-// AFTER the test that caused it has finished. By then the environment is being torn down and the
-// rejection has no live handler left: an unhandled rejection, attributed to no test, failing the
-// run about half the time. Stubbed here so no test can schedule one.
-//
-// Two test files mocked '@/lib/analytics' for this. That module does not exist — the real one is
-// '@/lib/events' — so those mocks silently did nothing. A mock of a path that does not resolve is
-// indistinguishable from working, which is why this went unnoticed.
-vi.mock('@/lib/events', () => ({
-  trackEvent: vi.fn(),
-  stampFunnel: vi.fn(),
-  elapsedSince: () => undefined,
-  firstTimeOnly: () => false,
-  getVisitorId: () => 'test-visitor',
-  captureAttribution: vi.fn(),
-  FUNNEL_TS: { signup: 'bp_ts_signup', firstImport: 'bp_ts_first_import', firstInsight: 'bp_ts_first_insight' },
-}))
-
 // No test may reach the network. Two things are needed, and throwing alone is only the first:
 //
 //  1. Throw, so nothing is actually sent and no fake data hides the omission. Returning a stubbed

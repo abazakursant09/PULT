@@ -189,7 +189,8 @@ jobs:
             tests/test_recovery_sweep_pg.py::test_pg_not_observed_and_dry_run_and_mismatch \
             tests/test_recovery_sweep_pg.py::test_pg_read_timeout_is_still_unknown \
             tests/test_recovery_sweep_pg.py::test_pg_flag_off_zero_everything \
-            tests/test_legal_1a_chat_migration_pg.py::test_pg_legal1a_seeded_roundtrip
+            tests/test_legal_1a_chat_migration_pg.py::test_pg_legal1a_seeded_roundtrip \
+            tests/test_legal_1b_remove_behavioral_migration_pg.py::test_pg_legal1b_seeded_roundtrip
 
   # Proves the FULL Alembic chain runs on the database production actually uses. The chain was
   # historically only exercised on SQLite, which has no strict boolean type and silently accepted an
