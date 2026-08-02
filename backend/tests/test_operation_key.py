@@ -51,22 +51,39 @@ def test_bool_is_not_a_key():
         ok.canonical_client_uuid(True)   # bool must never be accepted as a uuid
 
 
+_U = "3f2504e0-4f89-41d3-9a0c-0305e82c3301"   # a canonical uuid tail
+
+
 @pytest.mark.parametrize("key,ok_flag", [
-    ("v1:client:" + _GOOD, True),
-    ("v1:decision:abc", True),
-    ("v1:review:abc", True),
-    ("v1:revert:abc", True),
-    ("v1:intent:abc", True),                         # reserved namespace still shape-valid
+    ("v1:client:" + _U, True),
+    ("v1:decision:" + _U, True),                     # every namespace needs a real UUID tail
+    ("v1:review:" + _U, True),
+    ("v1:revert:" + _U, True),
+    ("v1:intent:" + _U, True),                        # reserved namespace, still UUID-shaped
+    ("v1:decision:abc", False),                      # non-UUID tail rejected
+    ("v1:review:abc", False),
+    ("v1:revert:abc", False),
+    ("v1:intent:abc", False),
+    ("v1:client:x", False),
+    ("v1:review:" + _U.upper(), False),              # uppercase tail is non-canonical
     ("review:abc", False),                           # legacy format
     ("price:p:100", False),                          # legacy content key
     ("v1:client:", False),                           # empty tail
     ("v1:client:has space", False),                  # whitespace in tail
-    ("v2:client:x", False),                          # wrong version prefix
+    ("v2:client:" + _U, False),                       # wrong version prefix
     (None, False),
     ("v1:" + "x" * 200, False),                       # overlong / no valid namespace
 ])
 def test_is_valid_v1_key(key, ok_flag):
     assert ok.is_valid_v1_key(key) is ok_flag
+
+
+def test_server_key_builders_reject_non_uuid_downstream():
+    # the builders accept any id string, but a non-UUID tail is caught by is_valid_v1_key before the
+    # executor would ever act on it (a malformed server-derived key can never reach the provider)
+    assert not ok.is_valid_v1_key(ok.decision_key("not-a-uuid"))
+    assert not ok.is_valid_v1_key(ok.review_key("123"))
+    assert ok.is_valid_v1_key(ok.decision_key(_U))
 
 
 def test_forbid_body_key():

@@ -91,7 +91,7 @@ def test_ozon_publish_timeout_is_ambiguous_and_not_retried(monkeypatch):
         monkeypatch.setattr(ozon_mod.ozon_client, "publish_feedback_answer", raiser)
 
         payload = {"marketplace": "ozon", "feedback_id": "OZ-R1", "text": "Спасибо!", "rating": 5}
-        oz_key = operation_key.review_key("oz1")
+        oz_key = operation_key.review_key("3160454f-4ae4-48fb-8d4c-116bcc2ef25a")
         r1 = await executor.execute(db=db, user_id=uid, action_type="publish_review_response",
                                     payload=payload, idempotency_key=oz_key)
         assert r1.status == "ambiguous" and calls["n"] == 1

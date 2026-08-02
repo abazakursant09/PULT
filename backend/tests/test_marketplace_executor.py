@@ -67,7 +67,7 @@ def test_l3_publish_success():
         res = await executor.execute(
             db=db, user_id=uid, action_type="publish_review_response",
             payload={"marketplace": "wildberries", "feedback_id": "fb1", "text": "Спасибо за отзыв!", "rating": 5},
-            idempotency_key=operation_key.review_key("fb1"),
+            idempotency_key=operation_key.review_key("f5aba5f8-25df-4364-8461-ac3d3145c7c0"),
         )
         assert res.status == "success", res.error
         assert res.api_request_id == "req-123"
@@ -145,7 +145,7 @@ def test_idempotency_dedupes():
         kw = dict(
             db=db, user_id=uid, action_type="publish_review_response",
             payload={"marketplace": "wildberries", "feedback_id": "fb1", "text": "ответ", "rating": 5},
-            idempotency_key=operation_key.review_key("abc"),
+            idempotency_key=operation_key.review_key("ba7816bf-8f01-4fea-8141-40de5dae2223"),
         )
         r1 = await executor.execute(**kw)
         r2 = await executor.execute(**kw)

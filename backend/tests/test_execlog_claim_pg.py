@@ -67,7 +67,8 @@ async def _seed_user(Session, marketplace="wildberries"):
     async with Session() as db:
         conn = MarketplaceConnection(id=str(uuid.uuid4()), user_id=uid, marketplace=marketplace,
                                      status="connected", scopes=["feedbacks", "prices"])
-        db.add(conn); await db.flush()
+        db.add(conn)
+        await db.flush()
         for scope in ("feedbacks", "prices"):
             db.add(ApiCredential(id=str(uuid.uuid4()), connection_id=conn.id, scope=scope,
                                  secret_enc=credential_vault.encrypt("tok"), meta={}))
@@ -584,6 +585,145 @@ def test_pg_ambiguous_revert_not_repeated(monkeypatch):
             async with Session() as db:
                 rv2 = await executor.revert(db=db, user_id=uid, log_id=r0.log_id)
             assert rv2.status == "needs_reconcile" and calls["n"] == 2   # ambiguous inverse not repeated
+        finally:
+            await eng.dispose()
+    _run(go())
+
+
+# ── revert atomicity (single terminal commit) on real PostgreSQL ──────────────────────────────
+
+def test_pg_revert_atomic_end_state(monkeypatch):
+    # after a successful revert the inverse is success, links reverted_from, and the original is
+    # 'reverted' — all set together (one terminal commit); an inverse=success/original=success state
+    # is structurally impossible.
+    _ensure_schema(monkeypatch)
+    calls = {"n": 0}
+    _install_set_price_stub(monkeypatch, calls)
+
+    async def go():
+        from sqlalchemy import select as _select
+        from models.execution_log import ExecutionLog
+        from services.marketplace import executor, operation_key
+        eng, Session = _sessionmaker()
+        try:
+            uid = await _seed_user(Session)
+            r0 = await _set_price(Session, uid, operation_key.client_key(str(uuid.uuid4())))
+            async with Session() as db:
+                rv = await executor.revert(db=db, user_id=uid, log_id=r0.log_id)
+            assert rv.status == "success" and calls["n"] == 2
+            async with Session() as db:
+                inv = (await db.execute(_select(ExecutionLog).where(
+                    ExecutionLog.id == rv.log_id))).scalars().first()
+                orig = (await db.execute(_select(ExecutionLog).where(
+                    ExecutionLog.id == r0.log_id))).scalars().first()
+            assert inv.status == "success" and inv.reverted_from == r0.log_id
+            assert orig.status == "reverted"
+        finally:
+            await eng.dispose()
+    _run(go())
+
+
+def test_pg_revert_terminal_commit_failure_no_second_dispatch(monkeypatch):
+    # provider call happens, then the terminal commit fails -> original stays 'success' (NOT reverted),
+    # the inverse stays in_flight, and a retry hits the in_flight claim -> needs_reconcile, 0 re-dispatch.
+    _ensure_schema(monkeypatch)
+    calls = {"n": 0}
+    _install_set_price_stub(monkeypatch, calls)
+
+    async def go():
+        from sqlalchemy import select as _select
+        from models.execution_log import ExecutionLog
+        from services.marketplace import executor, operation_key
+        eng, Session = _sessionmaker()
+        try:
+            uid = await _seed_user(Session)
+            r0 = await _set_price(Session, uid, operation_key.client_key(str(uuid.uuid4())))
+            assert calls["n"] == 1
+            # fail the 3rd commit of the revert flow (claim=1, in_flight=2, terminal=3)
+            async with Session() as db:
+                real_commit = db.commit
+                state = {"n": 0}
+
+                async def flaky():
+                    state["n"] += 1
+                    if state["n"] == 3:
+                        raise RuntimeError("terminal commit boom")
+                    return await real_commit()
+                db.commit = flaky
+                try:
+                    await executor.revert(db=db, user_id=uid, log_id=r0.log_id)
+                except Exception:
+                    pass
+            assert calls["n"] == 2                     # provider WAS called (before the failed commit)
+            async with Session() as db:
+                orig = (await db.execute(_select(ExecutionLog).where(
+                    ExecutionLog.id == r0.log_id))).scalars().first()
+            assert orig.status == "success"            # original NOT marked reverted (atomic)
+            # retry: the in_flight inverse claim blocks a second dispatch
+            async with Session() as db:
+                r2 = await executor.execute(
+                    db=db, user_id=uid, action_type="set_price",
+                    payload={"marketplace": "wildberries", "offer_id": "OF1", "price": 90,
+                             "old_price": 100},
+                    mode="manual_l3", idempotency_key=operation_key.revert_key(r0.log_id),
+                    reverted_from=r0.log_id)
+            assert r2.status == "needs_reconcile" and calls["n"] == 2
+        finally:
+            await eng.dispose()
+    _run(go())
+
+
+def test_pg_failed_inverse_leaves_original_success(monkeypatch):
+    # a failed inverse (clean dispatch error) never reaches the success terminal -> original unchanged
+    _ensure_schema(monkeypatch)
+    calls = {"n": 0}
+    _install_set_price_stub(monkeypatch, calls)
+
+    async def go():
+        from sqlalchemy import select as _select
+        from models.execution_log import ExecutionLog
+        from services.marketplace import executor, operation_key
+        from services.marketplace.errors import ExecutionError
+        eng, Session = _sessionmaker()
+        try:
+            uid = await _seed_user(Session)
+            r0 = await _set_price(Session, uid, operation_key.client_key(str(uuid.uuid4())))
+            _install_set_price_stub(monkeypatch, calls, fail=ExecutionError.AUTH)   # inverse fails clean
+            async with Session() as db:
+                rv = await executor.revert(db=db, user_id=uid, log_id=r0.log_id)
+            assert rv.status == "failed"
+            async with Session() as db:
+                orig = (await db.execute(_select(ExecutionLog).where(
+                    ExecutionLog.id == r0.log_id))).scalars().first()
+            assert orig.status == "success"            # not reverted on a failed inverse
+        finally:
+            await eng.dispose()
+    _run(go())
+
+
+def test_pg_cached_revert_no_second_provider_call(monkeypatch):
+    # re-issuing the same v1:revert claim after success returns the cached result, 0 second dispatch
+    _ensure_schema(monkeypatch)
+    calls = {"n": 0}
+    _install_set_price_stub(monkeypatch, calls)
+
+    async def go():
+        from services.marketplace import executor, operation_key
+        eng, Session = _sessionmaker()
+        try:
+            uid = await _seed_user(Session)
+            r0 = await _set_price(Session, uid, operation_key.client_key(str(uuid.uuid4())))
+            async with Session() as db:
+                await executor.revert(db=db, user_id=uid, log_id=r0.log_id)
+            assert calls["n"] == 2
+            async with Session() as db:               # same revert key, direct re-issue -> cached
+                r2 = await executor.execute(
+                    db=db, user_id=uid, action_type="set_price",
+                    payload={"marketplace": "wildberries", "offer_id": "OF1", "price": 90,
+                             "old_price": 100},
+                    mode="manual_l3", idempotency_key=operation_key.revert_key(r0.log_id),
+                    reverted_from=r0.log_id)
+            assert r2.status == "success" and calls["n"] == 2      # cached, no second provider call
         finally:
             await eng.dispose()
     _run(go())

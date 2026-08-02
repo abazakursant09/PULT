@@ -175,6 +175,10 @@ jobs:
             tests/test_execlog_claim_pg.py::test_pg_revert_one_inverse_then_second_revert_zero \
             tests/test_execlog_claim_pg.py::test_pg_concurrent_revert_one_inverse \
             tests/test_execlog_claim_pg.py::test_pg_ambiguous_revert_not_repeated \
+            tests/test_execlog_claim_pg.py::test_pg_revert_atomic_end_state \
+            tests/test_execlog_claim_pg.py::test_pg_revert_terminal_commit_failure_no_second_dispatch \
+            tests/test_execlog_claim_pg.py::test_pg_failed_inverse_leaves_original_success \
+            tests/test_execlog_claim_pg.py::test_pg_cached_revert_no_second_provider_call \
             tests/test_execlog_claim_pg.py::test_pg_migration_duplicate_v1_preflight_fails_closed
 
   # Proves the FULL Alembic chain runs on the database production actually uses. The chain was

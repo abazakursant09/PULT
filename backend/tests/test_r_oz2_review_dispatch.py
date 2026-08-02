@@ -127,7 +127,7 @@ def test_ozon_publish_routes_and_succeeds(monkeypatch):
         res = await executor.execute(
             db=db, user_id=uid, action_type="publish_review_response",
             payload={"marketplace": "ozon", "feedback_id": "fb1", "text": "Спасибо!", "rating": 5},
-            idempotency_key=operation_key.review_key("oz"))
+            idempotency_key=operation_key.review_key("7daee164-462c-455a-82bf-9935076388d5"))
         assert res.status == "success"
         # composite credential split correctly: client_id from the connection, api_key from the vault
         assert seen == {"token": "tok", "client_id": "CID", "review_id": "fb1", "text": "Спасибо!"}
@@ -145,7 +145,7 @@ def test_yandex_publish_without_a_resolved_cabinet_fails_closed(monkeypatch):
         res = await executor.execute(
             db=db, user_id=uid, action_type="publish_review_response",
             payload={"marketplace": "yandex", "feedback_id": "fb1", "text": "hi", "rating": 5},
-            idempotency_key=operation_key.review_key("ym"))
+            idempotency_key=operation_key.review_key("6eabf429-84ba-4707-8077-0d29b917259c"))
         assert res.ok is False
         assert res.error["code"] == ExecutionError.AUTH
     _run(go())
@@ -158,7 +158,7 @@ def test_megamarket_publish_still_fails_closed(monkeypatch):
         res = await executor.execute(
             db=db, user_id=uid, action_type="publish_review_response",
             payload={"marketplace": "megamarket", "feedback_id": "fb1", "text": "hi", "rating": 5},
-            idempotency_key=operation_key.review_key("mm"))
+            idempotency_key=operation_key.review_key("8fa1dddd-5360-4ceb-833c-5c6a12e714ed"))
         assert res.status == "rejected"
         assert res.error["code"] == ExecutionError.CAPABILITY_NOT_SUPPORTED
     _run(go())
@@ -174,7 +174,7 @@ def test_wb_publish_still_dispatches(monkeypatch):
         res = await executor.execute(
             db=db, user_id=uid, action_type="publish_review_response",
             payload={"marketplace": "wildberries", "feedback_id": "fb1", "text": "Спасибо!", "rating": 5},
-            idempotency_key=operation_key.review_key("wb"))
+            idempotency_key=operation_key.review_key("3b45022a-b367-48cd-8e12-e709e945bba2"))
         assert res.status == "success"
         assert seen == {"feedback_id": "fb1", "text": "Спасибо!"}
     _run(go())

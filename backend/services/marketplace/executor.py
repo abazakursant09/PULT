@@ -368,11 +368,23 @@ async def execute(
         return ExecutionResult(rec.id, "failed", action_type, target_mp,
                                error={"code": "DISPATCH_ERROR", "detail": "internal dispatch error", "retryable": False})
 
-    # 9) persist success
+    # 9) persist success. SECURITY-2D-1B-B — when this is the inverse of a revert (reverted_from set),
+    # the inverse's terminal success, its reverted_from link, AND the original's status='reverted' are
+    # written in ONE commit. It is therefore structurally impossible to observe a succeeded inverse whose
+    # original is still 'success': either all three land or none do. A terminal-commit failure after the
+    # provider call leaves the inverse at in_flight and the original unchanged, and a later retry hits the
+    # v1:revert claim (in_flight) → needs_reconcile, never a second dispatch.
     rec.status = "success"
     rec.api_request_id = result.get("api_request_id")
     rec.result = _safe_result(result)
     rec.finished_at = datetime.utcnow()
+    if reverted_from:
+        rec.reverted_from = reverted_from
+        original = (await db.execute(select(ExecutionLog).where(
+            ExecutionLog.id == reverted_from,
+            ExecutionLog.user_id == user_id))).scalars().first()
+        if original is not None and original.status == "success":
+            original.status = "reverted"
     await db.commit()
     log.info("execution success: user=%s action=%s mode=%s log=%s",
              user_id, action_type, mode, rec.id)
@@ -403,18 +415,13 @@ async def revert(*, db: AsyncSession, user_id: str, log_id: str) -> ExecutionRes
     # key); two concurrent reverts of the same original → one wins the claim, the other → needs_reconcile,
     # so at most one inverse provider dispatch happens. Original mode is passed back so the 2D-1A
     # automation choke still applies to the inverse of an automated action.
+    # The inverse's success, its reverted_from link, and original.status='reverted' are committed
+    # ATOMICALLY inside execute() (single terminal commit) — revert() adds no second commit, so the
+    # "inverse succeeded but original still success" window is structurally impossible. A rejected /
+    # failed / ambiguous inverse never reaches that success path, so the original stays as-is.
     res = await execute(db=db, user_id=user_id, action_type=inverse_action,
                         payload=inverse_payload, mode=rec.mode, connection_id=rec.connection_id,
                         idempotency_key=operation_key.revert_key(rec.id), reverted_from=rec.id)
-    # Only a SUCCESSFUL inverse may mark the original reverted. A rejected inverse (e.g. a
-    # 2.1A-contained stop_auto_promotion) reached no provider, so the original must stay as-is —
-    # never a false "reverted" on an action that did not actually run.
-    if res.ok and res.log_id:
-        rv = (await db.execute(select(ExecutionLog).where(ExecutionLog.id == res.log_id))).scalars().first()
-        if rv:
-            rv.reverted_from = rec.id
-            rec.status = "reverted"
-            await db.commit()
     return res
 
 

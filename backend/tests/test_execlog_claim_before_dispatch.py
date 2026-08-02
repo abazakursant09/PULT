@@ -35,7 +35,8 @@ async def _setup():
     uid = str(uuid.uuid4())
     conn = MarketplaceConnection(id=str(uuid.uuid4()), user_id=uid, marketplace="wildberries",
                                  status="connected", scopes=["feedbacks"])
-    db.add(conn); await db.flush()
+    db.add(conn)
+    await db.flush()
     db.add(ApiCredential(id=str(uuid.uuid4()), connection_id=conn.id, scope="feedbacks",
                          secret_enc=credential_vault.encrypt("tok"), meta={}))
     await db.commit()

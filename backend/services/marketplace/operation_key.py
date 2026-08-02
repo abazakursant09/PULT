@@ -24,8 +24,12 @@ MAX_KEY_LEN = 120
 _UUID4_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 )
-# A whole v1 operation key: v1:<ns>:<non-empty, no whitespace>.
-_V1_KEY_RE = re.compile(r"^v1:(client|decision|review|revert|intent):[^\s]+$")
+# A whole v1 operation key: v1:<ns>:<canonical lowercase hyphenated UUID>. The tail of EVERY namespace
+# must be a real UUID — client UUIDs are v4 (router-validated); Decision.id / review.id / ExecutionLog.id
+# are all str(uuid4). A non-UUID tail (v1:decision:abc, v1:review:x, …) is rejected, so a malformed
+# server-derived key can never reach the provider.
+_UUID_TAIL = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+_V1_KEY_RE = re.compile(r"^v1:(client|decision|review|revert|intent):" + _UUID_TAIL + r"$")
 
 
 class OperationKeyError(Exception):

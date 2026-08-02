@@ -94,7 +94,7 @@ def test_automated_l4_reaches_dispatch_once_when_flag_true(monkeypatch):
         res = await executor.execute(db=db, user_id=uid, action_type="publish_review_response",
                                      payload=_review_payload(), mode="automated_l4",
                                      rule={"enabled": True},
-                                     idempotency_key=operation_key.review_key("fb1"))
+                                     idempotency_key=operation_key.review_key("f5aba5f8-25df-4364-8461-ac3d3145c7c0"))
         return res, c["calls"]
     res, calls = _run(go())
     assert calls == 1                                # flag True → the choke passes, one real dispatch
@@ -140,7 +140,7 @@ def test_manual_l3_not_blocked_by_choke(monkeypatch):
         wb_client.publish_feedback_answer = _counting_publish(c)
         res = await executor.execute(db=db, user_id=uid, action_type="publish_review_response",
                                      payload=_review_payload(), mode="manual_l3",   # user-initiated L3
-                                     idempotency_key=operation_key.review_key("fb1"))
+                                     idempotency_key=operation_key.review_key("f5aba5f8-25df-4364-8461-ac3d3145c7c0"))
         return res, c["calls"]
     res, calls = _run(go())
     assert res.error is None or res.error.get("code") != AUTOMATION_CODE   # choke did NOT fire
