@@ -180,7 +180,15 @@ jobs:
             tests/test_execlog_claim_pg.py::test_pg_failed_inverse_leaves_original_success \
             tests/test_execlog_claim_pg.py::test_pg_cached_revert_no_second_provider_call \
             tests/test_execlog_claim_pg.py::test_pg_migration_duplicate_v1_preflight_fails_closed \
-            tests/test_execlog_recovery_foundation_pg.py::test_pg_additive_recovery_migration
+            tests/test_execlog_recovery_foundation_pg.py::test_pg_additive_recovery_migration \
+            tests/test_execlog_reconcile_scheduling_pg.py::test_pg_additive_reconcile_scheduling \
+            tests/test_recovery_sweep_pg.py::test_pg_two_concurrent_sweeps_one_lock_owner \
+            tests/test_recovery_sweep_pg.py::test_pg_lock_released_after_run \
+            tests/test_recovery_sweep_pg.py::test_pg_user_error_does_not_stop_others \
+            tests/test_recovery_sweep_pg.py::test_pg_intent_observed_writes_only_recon \
+            tests/test_recovery_sweep_pg.py::test_pg_not_observed_and_dry_run_and_mismatch \
+            tests/test_recovery_sweep_pg.py::test_pg_read_timeout_is_still_unknown \
+            tests/test_recovery_sweep_pg.py::test_pg_flag_off_zero_everything
 
   # Proves the FULL Alembic chain runs on the database production actually uses. The chain was
   # historically only exercised on SQLite, which has no strict boolean type and silently accepted an

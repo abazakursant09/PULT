@@ -121,6 +121,28 @@ class Settings(BaseSettings):
     # unlocks an executable action (promo_price_proven / commission_official_tariff /
     # provider_capability_confirmed stay hard-False regardless).
     protection_use_observations: bool = False
+    # SECURITY-2D-1C-B: master switch for the READ-ONLY recovery sweep (detect + reconcile unfinished
+    # executor operations). OFF by default, NOT seller-controlled, no endpoint. On its own it starts NO
+    # work: no scheduler tick, no advisory lock, ZERO ExecutionLog queries and ZERO provider calls while
+    # false. It NEVER issues a provider WRITE, never re-runs an operation, never changes ExecutionLog.status
+    # or claim_generation. It only gates the reconciliation classification (writes reconciliation_status +
+    # the three scheduling columns). Independent of automation_enabled / api_data_sync_enabled.
+    recovery_reaper_enabled: bool = False
+    # SECURITY-2D-1C-B: fail-safe dry-run switch. Default True: even if recovery_reaper_enabled is turned
+    # on, the sweep may READ provider state for shadow analysis but writes NOTHING (no reconciliation_status,
+    # no attempt increment, no timestamps). Provider WRITE is 0 in every mode. NOT seller-controlled.
+    recovery_reaper_dry_run: bool = True
+    # SECURITY-2D-1C-B: conservative candidate-age thresholds (seconds). A row is a reconciliation
+    # candidate only when older than these. These are NOT used for any provider-write. The exact safe
+    # values are a PRE-ENABLE GATE: measure real provider HTTP timeouts + marketplace eventual-consistency
+    # lag before enabling. Defaults are deliberately large.
+    recovery_stale_pending_seconds: int = 900
+    recovery_stale_in_flight_seconds: int = 900
+    recovery_ambiguous_seconds: int = 900
+    # SECURITY-2D-1C-B: bounded per-user batch + how far in the future to schedule the next recheck.
+    recovery_batch_size: int = 200
+    recovery_max_reconcile_attempts: int = 5
+    recovery_recheck_backoff_seconds: int = 3600
 
     # How many products one connection's review auto-sync processes per scheduler cycle. A conservative
     # technical default (NOT an official WB/Ozon rate limit) that bounds the request burst; the cursor

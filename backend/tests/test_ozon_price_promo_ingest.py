@@ -49,7 +49,7 @@ from services.marketplace.ingest import ozon as oz
 from services.marketplace.ozon_client import ozon_client
 import tasks.api_sync as api_sync
 
-REV = "rcv1a2b3c4d01"
+REV = "rcb1a2b3c4d01"
 PRIOR = "mpo1a2b3c4d01"
 
 _LOOP = asyncio.new_event_loop()
