@@ -76,10 +76,17 @@ async def _fake_resolve(db, row):
 
 
 def _install(monkeypatch, *, enabled=True, dry_run=False, price=100):
+    import sqlalchemy as sa
     from config import settings
     from services.marketplace.recovery import recovery_sweep as rs
     from services.marketplace.recovery import reconcile_read
     import services.marketplace.wb_client as wbmod
+    # The PG schema is shared across tests (built once); start each test from a clean slate so candidate
+    # counts are deterministic — otherwise rows from earlier tests accumulate.
+    sync_eng = sa.create_engine(_pg_sync_url())
+    with sync_eng.begin() as c:
+        c.exec_driver_sql("TRUNCATE execution_logs, api_credentials, marketplace_connections CASCADE")
+    sync_eng.dispose()
     monkeypatch.setattr(settings, "recovery_reaper_enabled", enabled)
     monkeypatch.setattr(settings, "recovery_reaper_dry_run", dry_run)
     eng = create_async_engine(_pg_async_url())
