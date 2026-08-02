@@ -66,9 +66,10 @@ def test_events_routes_and_get_insights_removed_execute_kept():
     import main
     paths = {getattr(r, "path", "") for r in main.app.routes}
     assert not any(p.startswith("/api/events") for p in paths)          # collection endpoint gone
-    assert "/api/insights" not in paths                                  # dormant behavioural GET gone
-    # the live objective executor path stays
-    assert any(p.endswith("/insights/{insight_key:path}/execute") for p in paths)
+    # dormant behavioural GET /api/insights gone (no bare insights collection route)
+    assert not any(p.rstrip("/") == "/api/insights" for p in paths)
+    # the live objective executor path stays (match is robust to the path-converter rendering)
+    assert any("/insights/" in p and p.endswith("/execute") for p in paths)
 
 
 def test_action_engine_compute_path_intact_no_behavioral():
