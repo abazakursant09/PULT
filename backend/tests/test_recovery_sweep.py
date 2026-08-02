@@ -152,9 +152,9 @@ def test_not_observed_when_price_differs(monkeypatch):
         eng, Session, prov = await _install(monkeypatch, enabled=True, dry_run=False, price=555)
         uid = await _seed(Session)                       # target 100, provider returns 555
         r = await rs.run_recovery_sweep(dry_run=False)
-        assert r.not_observed == 1 and prov.writes == 0
+        assert r.target_not_observed == 1 and prov.writes == 0
         row = await _row(Session, uid)
-        assert row.reconciliation_status == "not_observed" and row.next_reconcile_at is not None
+        assert row.reconciliation_status == "target_not_observed" and row.next_reconcile_at is not None
         await eng.dispose()
     _run(go())
 

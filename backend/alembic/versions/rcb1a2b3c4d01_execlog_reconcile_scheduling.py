@@ -29,6 +29,19 @@ depends_on: Union[str, Sequence[str], None] = None
 _CK = "ck_execlog_reconciliation_attempts_nonneg"
 _CK_SQL = "reconciliation_attempts >= 0"
 
+# SECURITY-2D-1C-B renames the reconciliation_status value "not_observed" → "target_not_observed" (a
+# current-state mismatch is NOT proof the operation was never applied; the old name could be misread as
+# a retry authorisation). No rows use the column yet (the sweep is OFF), so this is a pure vocabulary swap.
+_CK_RECON = "ck_execlog_reconciliation_status"
+_RECON_OLD = ("('pending_recon','reconciling','intent_observed','not_observed','still_unknown',"
+              "'manual_attention','resolved')")
+_RECON_NEW = ("('pending_recon','reconciling','intent_observed','target_not_observed','still_unknown',"
+              "'manual_attention','resolved')")
+
+
+def _recon_sql(vals: str) -> str:
+    return f"reconciliation_status IS NULL OR reconciliation_status IN {vals}"
+
 
 def upgrade() -> None:
     if op.get_bind().dialect.name == "postgresql":
@@ -39,6 +52,8 @@ def upgrade() -> None:
         op.add_column("execution_logs",
                       sa.Column("next_reconcile_at", sa.DateTime(timezone=True), nullable=True))
         op.create_check_constraint(_CK, "execution_logs", _CK_SQL)
+        op.drop_constraint(_CK_RECON, "execution_logs", type_="check")           # swap enum vocabulary
+        op.create_check_constraint(_CK_RECON, "execution_logs", _recon_sql(_RECON_NEW))
     else:
         with op.batch_alter_table("execution_logs") as batch_op:
             batch_op.add_column(
@@ -48,16 +63,22 @@ def upgrade() -> None:
             batch_op.add_column(
                 sa.Column("next_reconcile_at", sa.DateTime(timezone=True), nullable=True))
             batch_op.create_check_constraint(_CK, _CK_SQL)
+            batch_op.drop_constraint(_CK_RECON, type_="check")
+            batch_op.create_check_constraint(_CK_RECON, _recon_sql(_RECON_NEW))
 
 
 def downgrade() -> None:
     if op.get_bind().dialect.name == "postgresql":
+        op.drop_constraint(_CK_RECON, "execution_logs", type_="check")           # restore old vocabulary
+        op.create_check_constraint(_CK_RECON, "execution_logs", _recon_sql(_RECON_OLD))
         op.drop_constraint(_CK, "execution_logs", type_="check")
         op.drop_column("execution_logs", "next_reconcile_at")
         op.drop_column("execution_logs", "last_reconciled_at")
         op.drop_column("execution_logs", "reconciliation_attempts")
     else:
         with op.batch_alter_table("execution_logs") as batch_op:
+            batch_op.drop_constraint(_CK_RECON, type_="check")
+            batch_op.create_check_constraint(_CK_RECON, _recon_sql(_RECON_OLD))
             batch_op.drop_constraint(_CK, type_="check")
             batch_op.drop_column("next_reconcile_at")
             batch_op.drop_column("last_reconciled_at")

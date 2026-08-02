@@ -219,8 +219,8 @@ def test_pg_not_observed_and_dry_run_and_mismatch(monkeypatch):
         try:
             uid = await _seed(Session)
             r = await rs.run_recovery_sweep(dry_run=False)
-            assert r.not_observed == 1 and prov.writes == 0
-            assert (await _row(Session, uid)).reconciliation_status == "not_observed"
+            assert r.target_not_observed == 1 and prov.writes == 0
+            assert (await _row(Session, uid)).reconciliation_status == "target_not_observed"
         finally:
             await eng.dispose()
         # dry-run writes nothing

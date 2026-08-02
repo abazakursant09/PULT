@@ -4,9 +4,15 @@ from datetime import datetime
 from sqlalchemy import Column, String, DateTime, JSON, Index, Integer, CheckConstraint, text
 from database import Base
 
-# SECURITY-2D-1C-A — the only allowed reconciliation_status values (recovery classification, 1C-B).
+# SECURITY-2D-1C-A/1C-B — the only allowed reconciliation_status values (recovery classification).
+# intent_observed = the target end-state is observed NOW (NOT proof PULT made the change — no attribution).
+# target_not_observed = the target end-state is NOT observed now. This is a CURRENT-STATE MISMATCH and is
+#   NOT proof the original operation was never applied (may have applied then drifted, or the read lags).
+#   It may only lead to manual_attention / still_unknown and NEVER by itself authorises a retry or a
+#   provider write. (Renamed from the dangerous "not_observed"; a current price/status read is NOT a
+#   per-operation "not applied" proof.)
 _RECON_STATUSES = (
-    "pending_recon", "reconciling", "intent_observed", "not_observed",
+    "pending_recon", "reconciling", "intent_observed", "target_not_observed",
     "still_unknown", "manual_attention", "resolved",
 )
 _RECON_IN = ", ".join(f"'{s}'" for s in _RECON_STATUSES)

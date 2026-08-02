@@ -5,14 +5,18 @@ operation, never mutates the ExecutionLog. It only calls existing provider READ 
 method — enforced by a source guard test) and compares the CURRENT marketplace state to the operation's
 saved intent.
 
-Honest semantics (Inal):
-  * intent_observed — the intended end-state is observed NOW. This does NOT prove PULT made the change.
-  * not_observed    — the intended end-state is NOT observed (may be lag/drift, NOT proof it never applied).
-  * still_unknown   — not enough evidence (no read path, incomplete/eventual data, or any error).
-No verdict changes ExecutionLog.status and no verdict authorises a provider write.
-
-Only marketplaces/actions with a PROVEN existing READ path are reconciled; everything else is
-still_unknown with ZERO provider calls.
+Honest semantics (Inal) — a verdict is a CLASSIFICATION, never an authorisation:
+  * intent_observed     — the target end-state is observed NOW. NOT attribution: it does NOT prove PULT
+                          made the change, only that the target is currently observed.
+  * target_not_observed — the target end-state is NOT observed now. This is a CURRENT-STATE MISMATCH and
+                          is NOT proof the original operation was never applied (it may have applied then
+                          drifted, or the read lags). It may only lead to manual_attention / still_unknown
+                          and NEVER by itself authorises a retry or a provider write. A plain current
+                          price/status read is NOT a per-operation "not applied" proof.
+  * still_unknown       — not enough evidence (no read path, incomplete/eventual data, or any error).
+No verdict changes ExecutionLog.status, no verdict authorises a provider write, and NO verdict is a
+"proven_not_applied" / "safe to retry" signal. Only actions with a PROVEN existing READ path are
+reconciled; everything else is still_unknown with ZERO provider calls.
 """
 from __future__ import annotations
 
@@ -29,7 +33,7 @@ from services.marketplace.executor import _money  # pure, read-only helper (same
 log = logging.getLogger(__name__)
 
 INTENT_OBSERVED = "intent_observed"
-NOT_OBSERVED = "not_observed"
+TARGET_NOT_OBSERVED = "target_not_observed"
 STILL_UNKNOWN = "still_unknown"
 
 # Actions with NO authoritative read path (see the 2D-1C design): never call a provider, never guess.
@@ -110,7 +114,7 @@ async def _observe_price(db, row) -> str:
         return STILL_UNKNOWN
     if current is None:
         return STILL_UNKNOWN
-    return INTENT_OBSERVED if _money(current) == target else NOT_OBSERVED
+    return INTENT_OBSERVED if _money(current) == target else TARGET_NOT_OBSERVED
 
 
 async def _observe_ad_state(db, row) -> str:
@@ -142,7 +146,7 @@ async def _observe_ad_state(db, row) -> str:
     if want == "pause" and paused:
         return INTENT_OBSERVED
     if (want == "start" and paused) or (want == "pause" and running):
-        return NOT_OBSERVED
+        return TARGET_NOT_OBSERVED
     return STILL_UNKNOWN
 
 

@@ -59,6 +59,21 @@ def test_no_operator_recovery_endpoint():
         assert not re.search(r"/recovery|recovery_sweep|run_recovery", p.read_text(encoding="utf-8")), p.name
 
 
+def test_target_not_observed_semantic_lock():
+    # SECURITY-2D-1C-B final safety review: the dangerous "not_observed" value is renamed to the neutral
+    # "target_not_observed", and its meaning is locked in code — a current-state mismatch is NOT proof the
+    # operation was never applied and NEVER authorises a retry.
+    from models.execution_log import _RECON_STATUSES
+    from services.marketplace.recovery import reconcile_read
+    assert "target_not_observed" in _RECON_STATUSES
+    assert "not_observed" not in _RECON_STATUSES               # bare dangerous name gone from the enum
+    assert reconcile_read.TARGET_NOT_OBSERVED == "target_not_observed"
+    assert not hasattr(reconcile_read, "NOT_OBSERVED")         # old constant removed
+    lock = "NOT proof the original operation was never applied"
+    assert lock in _src("services/marketplace/recovery/reconcile_read.py")
+    assert lock in _src("models/execution_log.py")
+
+
 def test_recovery_reads_only_read_client_methods():
     # reconcile_read imports must be read helpers / clients, never the executor's execute/revert
     src = _src("services/marketplace/recovery/reconcile_read.py")

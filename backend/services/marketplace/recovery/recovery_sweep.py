@@ -49,7 +49,7 @@ DEFAULT_MAX_DURATION_SECONDS = 600
 
 _CANDIDATE_STATUSES = ("pending", "in_flight", "ambiguous")
 _IO = reconcile_read.INTENT_OBSERVED
-_NO = reconcile_read.NOT_OBSERVED
+_NO = reconcile_read.TARGET_NOT_OBSERVED
 _SU = reconcile_read.STILL_UNKNOWN
 
 
@@ -60,7 +60,7 @@ class RecoverySweepResult:
     dry_run: bool
     candidates: int = 0
     intent_observed: int = 0
-    not_observed: int = 0
+    target_not_observed: int = 0
     still_unknown: int = 0
     reconciled: int = 0                 # rows whose reconciliation fields were written (non-dry-run)
     fingerprint_mismatches: int = 0
@@ -150,9 +150,9 @@ async def run_recovery_sweep(*, dry_run: Optional[bool] = None, now: Optional[da
     finally:
         result.duration_ms = int((time.monotonic() - started) * 1000)
 
-    logger.info("recovery sweep%s: candidates=%d reconciled=%d io=%d no=%d su=%d fpm=%d failed_users=%d "
+    logger.info("recovery sweep%s: candidates=%d reconciled=%d io=%d tno=%d su=%d fpm=%d failed_users=%d "
                 "timed_out=%d dur=%dms", " dry-run" if dry_run else "", result.candidates,
-                result.reconciled, result.intent_observed, result.not_observed, result.still_unknown,
+                result.reconciled, result.intent_observed, result.target_not_observed, result.still_unknown,
                 result.fingerprint_mismatches, result.failed_users, int(result.timed_out),
                 result.duration_ms)
     return result
@@ -183,7 +183,7 @@ async def _sweep(dry_run, now, batch_size, dialect, result: RecoverySweepResult,
                     if verdict == _IO:
                         result.intent_observed += 1
                     elif verdict == _NO:
-                        result.not_observed += 1
+                        result.target_not_observed += 1
                     else:
                         result.still_unknown += 1
                     verdicts.append((row.id, int(row.reconciliation_attempts or 0), verdict))
