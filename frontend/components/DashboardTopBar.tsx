@@ -22,7 +22,6 @@ const BREADCRUMBS: Record<string, string> = {
   '/dashboard/settings':        'Настройки',
   '/dashboard/security':        'Безопасность',
   '/dashboard/finance':         'Финансы',
-  '/dashboard/chat':            'Чат',
   '/dashboard/account':         'Аккаунт',
   '/dashboard/monitor':         'Мониторинг',
   '/dashboard/referrals':       'Рефералы',

@@ -34,8 +34,6 @@ class UserResponse(BaseModel):
     email:            str
     name:             str
     plan:             str
-    chat_violations:  int
-    chat_blocked:     bool
     is_verified:      bool
     created_at:       datetime
 

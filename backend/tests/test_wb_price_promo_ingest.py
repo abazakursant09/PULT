@@ -48,7 +48,7 @@ from services.marketplace.ingest import wb as wb_ingest
 from services.marketplace.wb_client import wb_client
 import tasks.api_sync as api_sync
 
-REV = "rcv1a2b3c4d01"
+REV = "lch1a2b3c4d01"
 PRIOR = "ozp1a2b3c4d01"
 
 _LOOP = asyncio.new_event_loop()
