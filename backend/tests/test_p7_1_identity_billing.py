@@ -28,7 +28,6 @@ from models.payment import Payment
 
 import routers.auth as auth
 import routers.payments as payments
-import routers.chat as chat
 from schemas.auth import UserRegister, RegisterResponse, ForgotPasswordResponse
 from routers.auth import (
     register, forgot_password, verify_email, reset_password,
@@ -165,9 +164,12 @@ def test_oauth_disabled():
 # ── 6. free self-upgrade endpoint removed ────────────────────────────────────
 
 def test_set_plan_endpoint_removed():
-    assert not hasattr(chat, "set_plan")
+    # LEGAL-1A removed the whole "Биржа" chat router, so the old free self-upgrade endpoint
+    # POST /api/chat/set-plan is gone along with every other /api/chat/* route.
     import main
-    assert "/api/chat/set-plan" not in set(main.app.openapi()["paths"])
+    paths = set(main.app.openapi()["paths"])
+    assert "/api/chat/set-plan" not in paths
+    assert not any(p.startswith("/api/chat") for p in paths)
 
 
 # ── 7. webhook does not activate on unverified event; activates on verified ──

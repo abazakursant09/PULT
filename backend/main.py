@@ -17,7 +17,7 @@ from services.sentry_setup import init_sentry
 init_sentry()
 
 from database import init_db
-from routers import auth, products, reviews, pricing, monitor, finance, legal, startup, assistant, chat, mfa, notifications, success_stories, telegram_settings, supplier_verification, suppliers_catalog, logistics, deals, supplier_reviews, promo, referrals, marking, ideas, payments, ai_image_service, csv_import, seo_projects, action_engine, rebuild_tracker, seo_intelligence, creative, events, connections, marketplace_accounts, store_catalog, source_policy, execution, automation, advertising, seo_execution, product_graph, decisions, analytics, learning, seo, advertising_engine, review_engine, growth_engine, legal_engine, decision_outcome, decision_feed, decision_apply, promotion_activation, today, presentation
+from routers import auth, products, reviews, pricing, monitor, finance, legal, startup, assistant, mfa, notifications, success_stories, telegram_settings, supplier_verification, suppliers_catalog, logistics, deals, supplier_reviews, promo, referrals, marking, ideas, payments, ai_image_service, csv_import, seo_projects, action_engine, rebuild_tracker, seo_intelligence, creative, events, connections, marketplace_accounts, store_catalog, source_policy, execution, automation, advertising, seo_execution, product_graph, decisions, analytics, learning, seo, advertising_engine, review_engine, growth_engine, legal_engine, decision_outcome, decision_feed, decision_apply, promotion_activation, today, presentation
 from routers.ai_image_service import queue_worker as ai_queue_worker
 from tasks.health_monitor import run_health_monitor
 from tasks.seed_catalog import seed_catalog
@@ -150,7 +150,6 @@ app.include_router(finance.router,   prefix="/api",          tags=["finance"])
 app.include_router(legal.router,     prefix="/api",          tags=["legal"])
 app.include_router(startup.router,   prefix="/api",          tags=["startup"])
 app.include_router(assistant.router, prefix="/api",          tags=["assistant"])
-app.include_router(chat.router,          prefix="/api",          tags=["chat"])
 app.include_router(notifications.router,       prefix="/api", tags=["notifications"])
 app.include_router(success_stories.router,    prefix="/api", tags=["success-stories"])
 app.include_router(telegram_settings.router,     prefix="/api", tags=["telegram"])

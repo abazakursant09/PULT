@@ -41,7 +41,7 @@ from services.marketplace.ingest import yandex as yx
 from services.marketplace.yandex_client import yandex_client
 import tasks.api_sync as api_sync
 
-HEAD = "rcb1a2b3c4d01"
+HEAD = "lch1a2b3c4d01"
 
 _LOOP = asyncio.new_event_loop()
 

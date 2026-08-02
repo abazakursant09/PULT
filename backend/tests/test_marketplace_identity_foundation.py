@@ -47,7 +47,7 @@ from schemas.marketplace import ConnectionCreate
 from services.marketplace import executor
 from services.workspace_resolver import WorkspaceMissing, resolve_workspace_id
 
-REV = "rcb1a2b3c4d01"
+REV = "lch1a2b3c4d01"
 PRIOR = "wsp1a2b3c4d01"
 TABLE = "marketplace_accounts"
 CONNS = "marketplace_connections"
@@ -102,9 +102,9 @@ def _seed_legacy(sync_url, *, connections):
                 c.execute(
                     sa.text(
                         "INSERT INTO users (id, email, name, hashed_password, created_at, "
-                        "plan, chat_violations, chat_blocked, is_verified, was_referrer, "
+                        "plan, is_verified, was_referrer, "
                         "was_referred, is_restored) "
-                        "VALUES (:id, :email, :name, 'x', :created, 'master', 0, 0, 1, 0, 0, 0)"
+                        "VALUES (:id, :email, :name, 'x', :created, 'master', 1, 0, 0, 0)"
                     ),
                     {"id": user_id, "email": f"legacy{i}@b.com", "name": f"L{i}",
                      "created": datetime.utcnow()},

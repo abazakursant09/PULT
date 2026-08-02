@@ -219,8 +219,6 @@ export interface User {
   name: string
   plan: 'master' | 'profi' | 'maximum'
   subscription_end_date?: string | null
-  chat_violations: number
-  chat_blocked: boolean
   is_verified: boolean
   created_at: string
   referral_code?: string
@@ -355,20 +353,6 @@ export interface ResendVerificationResponse {
   // any address, so a delivery flag here would tell an anonymous caller which addresses exist.
   // Registration reports delivery honestly instead — there the caller owns the account.
   message: string
-}
-
-export interface ChatMessage {
-  id:         string
-  user_id:    string
-  user_name:  string
-  message:    string
-  created_at: string
-}
-
-export interface SendMessageResult {
-  ok:      boolean
-  message: ChatMessage | null
-  warning: string | null
 }
 
 export interface AuthResponse {
@@ -1469,16 +1453,6 @@ export const api = {
       req<AssistantResponse>('/api/assistant/ask', {
         method: 'POST',
         body: JSON.stringify({ question, product_id: product_id ?? null }),
-      }),
-  },
-
-  chat: {
-    messages: () =>
-      req<ChatMessage[]>('/api/chat/messages'),
-    send: (message: string) =>
-      req<SendMessageResult>('/api/chat/messages', {
-        method: 'POST',
-        body: JSON.stringify({ message }),
       }),
   },
 

@@ -24,7 +24,6 @@ from .pricing_rule import PricingRule, PriceChangeLog
 from .monitor_event import MonitorEvent
 from .financial_snapshot import FinancialSnapshot
 from .legal_case import LegalCase
-from .chat_message import ChatMessage
 from .mfa_secret import MFASecret
 from .auth_rate_limit_bucket import AuthRateLimitBucket  # SECURITY-2C-2 auth throttle state
 from .notification import Notification
