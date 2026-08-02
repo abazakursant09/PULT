@@ -128,7 +128,9 @@ def test_checks_accept_all_seven_and_null(monkeypatch, tmp_path):
     import db_migrations as dbm
     dbfile = tmp_path / "ok.db"
     monkeypatch.setenv("ALEMBIC_DATABASE_URL", f"sqlite+aiosqlite:///{dbfile.as_posix()}")
-    command.upgrade(dbm._alembic_config(), "rcv1a2b3c4d01")
+    # HEAD (rcb) — the reconciliation_status vocabulary is finalised in 1C-B (not_observed →
+    # target_not_observed), so the accept-all is checked against the current enum, not the frozen rcv one.
+    command.upgrade(dbm._alembic_config(), "rcb1a2b3c4d01")
     assert len(_RECON_STATUSES) == 7
     c = sqlite3.connect(str(dbfile))
     try:

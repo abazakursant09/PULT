@@ -17,7 +17,7 @@ DOWNGRADE recreates ONLY the empty table structure. It does NOT and CANNOT resto
 the messages are gone by design.
 
 Revision ID: lch1a2b3c4d01
-Revises: rcv1a2b3c4d01
+Revises: rcb1a2b3c4d01
 Create Date: 2026-08-02
 """
 from typing import Sequence, Union
@@ -27,7 +27,7 @@ import sqlalchemy as sa
 
 
 revision: str = "lch1a2b3c4d01"
-down_revision: Union[str, None] = "rcv1a2b3c4d01"
+down_revision: Union[str, None] = "rcb1a2b3c4d01"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
