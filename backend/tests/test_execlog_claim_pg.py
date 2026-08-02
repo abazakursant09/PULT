@@ -307,13 +307,17 @@ def test_pg_migration_duplicate_v1_preflight_fails_closed(monkeypatch):
     key = "v1:client:" + str(uuid.uuid4())
 
     async def seed():
+        import sqlalchemy as _sa
         eng, Session = _sessionmaker()
         uid = await _seed_user(Session)
+        # Raw INSERT (explicit columns) — the schema is downgraded below rcv, so the ORM ExecutionLog
+        # (which now carries claim_generation) must NOT be used here.
         async with Session() as db:
             for _ in range(2):
-                db.add(ExecutionLog(id=str(uuid.uuid4()), user_id=uid, action_type="set_price",
-                                    mode="manual_l3", payload={}, status="success",
-                                    idempotency_key=key))
+                await db.execute(_sa.text(
+                    "INSERT INTO execution_logs(id,user_id,action_type,mode,payload,status,"
+                    "idempotency_key) VALUES(:id,:u,'set_price','manual_l3','{}','success',:k)"),
+                    {"id": str(uuid.uuid4()), "u": uid, "k": key})
             await db.commit()
         await eng.dispose()
         return uid
