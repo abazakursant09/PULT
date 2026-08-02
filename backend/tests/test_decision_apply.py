@@ -71,18 +71,22 @@ def test_loads_and_calls_executor(monkeypatch):
         assert kw["action_type"] == "set_price"               # 2
         assert kw["payload"] == {"offer_id": "1", "price": 100}  # 3
         assert kw["decision_id"] == d.id                      # 4
-        assert kw["idempotency_key"] == f"decision:{d.id}"    # 5
+        # SECURITY-2D-1B-B: the executor key is ALWAYS server-derived v1:decision:<id>.
+        assert kw["idempotency_key"] == f"v1:decision:{d.id}"  # 5
     _run(go())
 
 
-def test_explicit_idempotency_key_preserved(monkeypatch):
+def test_explicit_idempotency_key_ignored_server_derived(monkeypatch):
+    # SECURITY-2D-1B-B: a client-supplied idempotency_key is accepted for backward
+    # compatibility but is NOT used for the executor claim — the key is always the
+    # server-derived v1:decision:<id>.
     spy = _Spy(_ok()); monkeypatch.setattr(executor, "execute", spy)
 
     async def go():
         db = await _engine(); uid = str(uuid.uuid4()); d = await _decision(db, uid)
         await decision_apply.apply_decision(
             db=db, user_id=uid, decision_id=d.id, overrides={"x": 1}, idempotency_key="custom-key")
-        assert spy.calls[0]["idempotency_key"] == "custom-key"
+        assert spy.calls[0]["idempotency_key"] == f"v1:decision:{d.id}"
     _run(go())
 
 

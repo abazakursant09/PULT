@@ -39,7 +39,7 @@ def test_handler_passes_through(monkeypatch):
 
     body = ApplyDecisionRequest(overrides={"offer_id": "1", "price": 100},
                                 mode="manual_l3", connection_id="c1",
-                                idempotency_key="k1", dry_run=False)
+                                dry_run=False)
     resp = _run(apply_decision_endpoint(decision_id="d1", body=body, current_user=_User(), db="DB"))
 
     assert isinstance(resp, ApplyDecisionResponse)
@@ -50,7 +50,9 @@ def test_handler_passes_through(monkeypatch):
     assert kw["overrides"] == {"offer_id": "1", "price": 100}
     assert kw["mode"] == "manual_l3"
     assert kw["connection_id"] == "c1"
-    assert kw["idempotency_key"] == "k1"
+    # SECURITY-2D-1B-B: the endpoint no longer forwards a client idempotency_key to the
+    # service (the executor key is server-derived v1:decision:<id>).
+    assert "idempotency_key" not in kw
     assert kw["dry_run"] is False
     # apply-only: endpoint never forwards measurement context
     assert "measure" not in kw and "token" not in kw and "entity_id" not in kw

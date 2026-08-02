@@ -209,7 +209,7 @@ def test_no_producer_not_in_feed_and_head_unchanged():
     from alembic.config import Config
     from alembic.script import ScriptDirectory
     heads = ScriptDirectory.from_config(Config("alembic.ini")).get_heads()
-    assert heads == ["efp1a2b3c4d01"], heads
+    assert heads == ["uqc1a2b3c4d01"], heads
 
 
 def test_staleness_constant_is_fixed():

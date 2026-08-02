@@ -29,7 +29,7 @@ from models.engine_signal_decision_link import EngineSignalDecisionLink
 from models.operations_signal import OperationsSignal
 from models.decision import Decision
 
-from services.marketplace import credential_vault, executor
+from services.marketplace import credential_vault, executor, operation_key
 from services.decision_outcome.decision_bridge import (
     capability_supported, bridge_links_to_decisions, SKIPPED_NO_CAPABILITY,
 )
@@ -243,7 +243,8 @@ def test_confirmed_actions_not_broken(monkeypatch):
         await _connected(db, uid, "wildberries")
         res = await executor.execute(db=db, user_id=uid, action_type="set_price",
                                      payload={"marketplace": "wildberries", "offer_id": "123",
-                                              "price": 1500})
+                                              "price": 1500},
+                                     idempotency_key=operation_key.client_key(str(uuid.uuid4())))
         assert res.ok and res.status == "success"
         assert calls == [("123", 1500)]
     _run(go())

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, String, DateTime, JSON, Index
+from sqlalchemy import Column, String, DateTime, JSON, Index, text
 from database import Base
 
 
@@ -24,7 +24,7 @@ class ExecutionLog(Base):
     mode           = Column(String(20), nullable=False)        # manual_l3 | automated_l4
     payload        = Column(JSON, nullable=False, default=dict) # secrets stripped
     api_request_id = Column(String(120), nullable=True)
-    status         = Column(String(20), nullable=False, default="pending")  # pending|running|success|failed|rejected|reverted
+    status         = Column(String(20), nullable=False, default="pending")  # pending|in_flight|success|failed|ambiguous|rejected|reverted (2D-1B-B: in_flight = claimed, dispatch_started_at set)
     result         = Column(JSON, nullable=True)
     error_code     = Column(String(60), nullable=True)
     reverted_from  = Column(String(36), nullable=True)         # id of the log this reverts
@@ -47,4 +47,10 @@ class ExecutionLog(Base):
         Index("ix_execlog_user_action", "user_id", "action_type"),
         Index("ix_execlog_idem", "user_id", "action_type", "idempotency_key"),
         Index("ix_execlog_decision", "decision_id"),
+        # SECURITY-2D-1B-B — DB-enforced at-most-one claim per (user, v1 operation key). Scoped to
+        # 'v1:%' so legacy content-derived keys (which repeat across time) and NULL keys are exempt and
+        # cannot cause a migration collision. Same predicate on SQLite + PostgreSQL.
+        Index("uq_execlog_op_claim", "user_id", "idempotency_key", unique=True,
+              sqlite_where=text("idempotency_key LIKE 'v1:%'"),
+              postgresql_where=text("idempotency_key LIKE 'v1:%'")),
     )

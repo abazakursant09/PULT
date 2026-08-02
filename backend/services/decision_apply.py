@@ -24,7 +24,7 @@ from typing import Any, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from services.marketplace import executor
+from services.marketplace import executor, operation_key
 from services import decision_measurement
 from models.decision import Decision
 
@@ -91,7 +91,10 @@ async def apply_decision(
     # 4) payload = overrides, exactly (no normalization from Decision text)
     payload = dict(overrides)
 
-    # 5) apply through the single executor entry point
+    # 5) apply through the single executor entry point.
+    # SECURITY-2D-1B-B — the executor idempotency key is ALWAYS server-derived from Decision.id, never
+    # from a client-supplied UUID or content. The `idempotency_key` param is accepted for backward
+    # compatibility but is NOT used for the executor claim (the caller's intent ledger is separate).
     res = await executor.execute(
         db=db,
         user_id=user_id,
@@ -101,7 +104,7 @@ async def apply_decision(
         connection_id=connection_id,
         insight_key=None,
         decision_id=decision.id,
-        idempotency_key=idempotency_key or f"decision:{decision.id}",
+        idempotency_key=operation_key.decision_key(decision.id),
         dry_run=dry_run,
     )
 

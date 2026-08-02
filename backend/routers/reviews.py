@@ -18,7 +18,7 @@ from models.api_credential import ApiCredential
 from schemas.review import (ReviewResponseOut, ReviewResponseUpdate,
     ReviewQueueResponse, ReviewHistoryEntry, ReviewHistoryResponse)
 from services.review.state import derive_state
-from services.marketplace import executor, credential_vault
+from services.marketplace import executor, credential_vault, operation_key
 from services.marketplace.wb_client import wb_client
 from services.marketplace.reviews import get_review_provider, review_credential
 from services.review.draft import classify_review, build_draft
@@ -278,7 +278,7 @@ async def publish_review_response(
         },
         mode="manual_l3",
         insight_key="rating_good",
-        idempotency_key=f"review:{review.id}",
+        idempotency_key=operation_key.review_key(review.id),
     )
 
     if res.status in ("ambiguous", "needs_reconcile"):
@@ -330,11 +330,14 @@ async def review_history(
     user_id and this review's idempotency key. Read-only; touches no marketplace.
     """
     review, _product = await _owned_review_or_404(product_id, review_id, current_user.id, db)
+    # SECURITY-2D-1B-B — dual-match: see both the new v1 key and any pre-1B-B legacy `review:<id>` row,
+    # so publish history survives the cutover. Legacy rows are read-only (never rewritten or deleted).
     logs = (await db.execute(
         select(ExecutionLog).where(
             ExecutionLog.user_id == current_user.id,
             ExecutionLog.action_type == "publish_review_response",
-            ExecutionLog.idempotency_key == f"review:{review.id}",
+            ExecutionLog.idempotency_key.in_(
+                [f"review:{review.id}", operation_key.review_key(review.id)]),
         ).order_by(ExecutionLog.created_at.desc())
     )).scalars().all()
     return ReviewHistoryResponse(

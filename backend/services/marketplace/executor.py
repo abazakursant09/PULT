@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
+from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.marketplace_connection import MarketplaceConnection
@@ -19,7 +21,8 @@ from models.execution_log import ExecutionLog
 from config import settings
 from services import capability_registry
 
-from . import action_catalog, guard, credential_vault
+from . import action_catalog, guard, credential_vault, operation_key
+from .request_fingerprint import request_fingerprint
 from .errors import ExecutionError
 from .ozon_performance_auth import PERFORMANCE_SCOPE
 
@@ -166,6 +169,7 @@ async def execute(
     insight_key: str | None = None,
     decision_id: str | None = None,
     idempotency_key: str | None = None,
+    reverted_from: str | None = None,
     rule: dict | None = None,
     dry_run: bool = False,
 ) -> ExecutionResult:
@@ -277,44 +281,64 @@ async def execute(
                                result={"would_send": _safe_payload(payload)},
                                reversible=spec.reversible)
 
+    # SECURITY-2D-1B-B — operation key is MANDATORY on every executable (non-dry-run) path and must be a
+    # well-formed v1 identity (client/decision/review/revert). A manual route with no Idempotency-Key,
+    # or an automated_l4 caller with no server-owned key, is rejected HERE — 0 provider calls. The key is
+    # never derived from content.
+    if not operation_key.is_valid_v1_key(idempotency_key):
+        err = ExecutionError.guard("OPERATION_KEY_REQUIRED", "operation key required")
+        rec = _new_log(user_id, action_type, target_mp, mode, payload, insight_key,
+                       None, status="rejected", error_code=err.code,
+                       connection_id=conn.id, decision_id=decision_id)
+        db.add(rec)
+        await db.commit()
+        return ExecutionResult(rec.id, "rejected", action_type, target_mp, error=err.to_dict())
+
+    # request fingerprint = WHAT this operation does (contents); the KEY = WHICH operation.
+    fp = _fingerprint(user_id, conn.id, target_mp, action_type, mode, payload, reverted_from)
+
+    # Legacy-transition guard: a pre-1B-B row for the SAME provable identity (review.id / decision.id)
+    # blocks a new dispatch regardless of its status — old rows have no trustworthy dispatch_started_at,
+    # so we cannot prove the provider was not already called. 0 provider calls, no new claim, no leak.
+    if await _legacy_alias_hit(db, user_id, idempotency_key, decision_id):
+        return ExecutionResult(None, "needs_reconcile", action_type, target_mp,
+                               error={"code": "LEGACY_OPERATION_NEEDS_RECONCILE",
+                                      "detail": "операция найдена в прежнем формате — проверьте кабинет",
+                                      "retryable": False},
+                               reversible=spec.reversible)
+
+    # Claim-before-dispatch: INSERT a pending row; the partial-UNIQUE(user_id, v1-key) lets exactly one
+    # concurrent request win. The loser gets IntegrityError → rollback → resolve against the winner.
+    rec = _new_log(user_id, action_type, target_mp, mode, payload, insight_key,
+                   idempotency_key, status="pending", connection_id=conn.id,
+                   decision_id=decision_id, request_fingerprint=fp)
+    db.add(rec)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()   # MANDATORY before any SELECT — the aborted txn must be rolled back first
+        existing = (
+            await db.execute(
+                select(ExecutionLog).where(
+                    ExecutionLog.user_id == user_id,
+                    ExecutionLog.idempotency_key == idempotency_key,
+                )
+            )
+        ).scalars().first()
+        return _resolve_existing(existing, fp, spec, action_type, target_mp)
+    await db.refresh(rec)
+
+    # Winner → in_flight; stamp dispatch_started_at (tz-aware) in the SAME commit, immediately before the
+    # provider call, so a crash after this point is provably post-claim and is never auto-retried.
+    rec.status = "in_flight"
+    rec.dispatch_started_at = datetime.now(timezone.utc)
+    await db.commit()
+
     ctx = {"marketplace": conn.marketplace, "ozon_client_id": conn.ozon_client_id,
            "db": db, "connection_id": conn.id,
            # Discovered once during sync and cached on the credential row; a provider that scopes
            # its calls to an account (Yandex addresses reviews by cabinet) needs it to publish too.
            "account_ref": await _account_ref(db, conn.id, spec.required_scope)}
-
-    # 5) idempotency: never re-dispatch a key that already succeeded OR whose delivery is unknown.
-    # A prior "ambiguous" (TIMEOUT/5XX after the request left) may have committed on the
-    # marketplace, so re-calling could double-post — return needs_reconcile instead (AR5).
-    if idempotency_key:
-        prior = (
-            await db.execute(
-                select(ExecutionLog).where(
-                    ExecutionLog.user_id == user_id,
-                    ExecutionLog.action_type == action_type,
-                    ExecutionLog.idempotency_key == idempotency_key,
-                    ExecutionLog.status.in_(("success", "ambiguous")),
-                ).order_by(ExecutionLog.created_at.desc())
-            )
-        ).scalars().first()
-        if prior is not None and prior.status == "success":
-            return ExecutionResult(prior.id, "success", action_type, target_mp,
-                                   api_request_id=prior.api_request_id,
-                                   result=prior.result or {}, reversible=spec.reversible)
-        if prior is not None and prior.status == "ambiguous":
-            return ExecutionResult(prior.id, "needs_reconcile", action_type, target_mp,
-                                   error={"code": "AMBIGUOUS_PRIOR",
-                                          "detail": "предыдущая попытка не подтверждена — проверьте кабинет",
-                                          "retryable": False},
-                                   reversible=spec.reversible)
-
-    # 6) write pending log BEFORE dispatch (crash visibility)
-    rec = _new_log(user_id, action_type, target_mp, mode, payload,
-                   insight_key, idempotency_key, status="pending", connection_id=conn.id,
-                   decision_id=decision_id)
-    db.add(rec)
-    await db.commit()
-    await db.refresh(rec)
 
     # 7) fetch token (vault) + 8) dispatch
     try:
@@ -344,11 +368,23 @@ async def execute(
         return ExecutionResult(rec.id, "failed", action_type, target_mp,
                                error={"code": "DISPATCH_ERROR", "detail": "internal dispatch error", "retryable": False})
 
-    # 9) persist success
+    # 9) persist success. SECURITY-2D-1B-B — when this is the inverse of a revert (reverted_from set),
+    # the inverse's terminal success, its reverted_from link, AND the original's status='reverted' are
+    # written in ONE commit. It is therefore structurally impossible to observe a succeeded inverse whose
+    # original is still 'success': either all three land or none do. A terminal-commit failure after the
+    # provider call leaves the inverse at in_flight and the original unchanged, and a later retry hits the
+    # v1:revert claim (in_flight) → needs_reconcile, never a second dispatch.
     rec.status = "success"
     rec.api_request_id = result.get("api_request_id")
     rec.result = _safe_result(result)
     rec.finished_at = datetime.utcnow()
+    if reverted_from:
+        rec.reverted_from = reverted_from
+        original = (await db.execute(select(ExecutionLog).where(
+            ExecutionLog.id == reverted_from,
+            ExecutionLog.user_id == user_id))).scalars().first()
+        if original is not None and original.status == "success":
+            original.status = "reverted"
     await db.commit()
     log.info("execution success: user=%s action=%s mode=%s log=%s",
              user_id, action_type, mode, rec.id)
@@ -358,29 +394,34 @@ async def execute(
 
 
 async def revert(*, db: AsyncSession, user_id: str, log_id: str) -> ExecutionResult:
-    """Issue the inverse of a prior successful, reversible action."""
+    """Issue the inverse of a prior successful, reversible action, exactly once per original."""
     rec = (
         await db.execute(select(ExecutionLog).where(ExecutionLog.id == log_id,
                                                      ExecutionLog.user_id == user_id))
     ).scalars().first()
     if rec is None:
         raise ExecutionError(ExecutionError.VALIDATION, "log not found")
+    # SECURITY-2D-1B-B — an inverse may run only against a genuinely-succeeded, not-yet-reverted
+    # original. This blocks reverting a failed/ambiguous/rejected/pending original (never happened, or
+    # unknown) and double-reverting an already-reverted one.
+    if rec.status != "success":
+        raise ExecutionError.guard("NOT_REVERTIBLE_STATUS",
+                                   f"cannot revert an action with status={rec.status}")
     spec = action_catalog.get(rec.action_type)
     if not spec.reversible or spec.reverter is None:
         raise ExecutionError.guard("NOT_REVERSIBLE", f"{rec.action_type} cannot be reverted")
     inverse_action, inverse_payload = spec.reverter(rec.payload or {}, rec.result or {})
+    # The inverse claims its OWN key in a separate namespace (never collides with the original execute
+    # key); two concurrent reverts of the same original → one wins the claim, the other → needs_reconcile,
+    # so at most one inverse provider dispatch happens. Original mode is passed back so the 2D-1A
+    # automation choke still applies to the inverse of an automated action.
+    # The inverse's success, its reverted_from link, and original.status='reverted' are committed
+    # ATOMICALLY inside execute() (single terminal commit) — revert() adds no second commit, so the
+    # "inverse succeeded but original still success" window is structurally impossible. A rejected /
+    # failed / ambiguous inverse never reaches that success path, so the original stays as-is.
     res = await execute(db=db, user_id=user_id, action_type=inverse_action,
-                        payload=inverse_payload, mode=rec.mode, connection_id=rec.connection_id)
-    # Only a SUCCESSFUL inverse may mark the original reverted. A rejected inverse (e.g. a
-    # 2.1A-contained stop_auto_promotion) reached no provider, so the original must stay as-is —
-    # never a false "reverted" on an action that did not actually run.
-    if res.ok and res.log_id:
-        # link the revert
-        rv = (await db.execute(select(ExecutionLog).where(ExecutionLog.id == res.log_id))).scalars().first()
-        if rv:
-            rv.reverted_from = rec.id
-            rec.status = "reverted"
-            await db.commit()
+                        payload=inverse_payload, mode=rec.mode, connection_id=rec.connection_id,
+                        idempotency_key=operation_key.revert_key(rec.id), reverted_from=rec.id)
     return res
 
 
@@ -393,13 +434,141 @@ def _safe_result(result: dict) -> dict:
     return {k: v for k, v in result.items() if k != "token"}
 
 
+# ── SECURITY-2D-1B-B — fingerprint / legacy-alias / claim-resolve helpers ─────
+_FP_VOLATILE = {"old_price", "old_cpm", "step_pct", "old_card", "insight_key", "rating"}
+
+
+def _money(v):
+    """Money/price/cpm → a scale-preserving string (never a float — the fp1 helper rejects floats)."""
+    if v is None or isinstance(v, str) or isinstance(v, bool):
+        return v                                # bool is an int subclass — keep it distinct, not money
+    if isinstance(v, (float, Decimal)):
+        return str(Decimal(str(v)))
+    return v                                    # int kept exact
+
+
+def _clean_floats(obj):
+    """Recursively convert any float to a scale-preserving string; list order preserved."""
+    if isinstance(obj, bool):
+        return obj
+    if isinstance(obj, float):
+        return str(Decimal(str(obj)))
+    if isinstance(obj, dict):
+        return {k: _clean_floats(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_clean_floats(v) for v in obj]
+    return obj
+
+
+def _fp_inputs(action_type: str, payload: dict) -> tuple[dict, dict]:
+    """(target, params) for the fingerprint — curated per action, volatile evidence excluded, money
+    normalized to strings. The KEY (identity) is NOT here; this describes only WHAT the op does."""
+    p = payload or {}
+    if action_type == "set_price":
+        return {"offer_id": p.get("offer_id")}, {"price": _money(p.get("price"))}
+    if action_type == "publish_review_response":
+        return {"feedback_id": p.get("feedback_id")}, {"text": p.get("text")}
+    if action_type == "ad_set_bid":
+        return ({"campaign_id": p.get("campaign_id"), "adv_type": p.get("adv_type")},
+                {"cpm": _money(p.get("cpm"))})
+    if action_type == "ad_set_state":
+        return {"campaign_id": p.get("campaign_id")}, {"action": p.get("action")}
+    if action_type == "update_card":
+        return {"offer_id": p.get("offer_id")}, {"card": _clean_floats(p.get("card"))}
+    # generic (decision overrides / /execute): exclude known-volatile keys, normalize floats.
+    params = {k: _clean_floats(v) for k, v in p.items()
+              if k not in _FP_VOLATILE and k != "marketplace"}
+    return {}, params
+
+
+def _fingerprint(user_id, connection_id, marketplace, action_type, mode, payload, reverted_from) -> str:
+    target, params = _fp_inputs(action_type, payload)
+    return request_fingerprint(
+        user_id=user_id, connection_id=connection_id, marketplace=marketplace,
+        action_type=action_type, mode=mode, target=target, params=params,
+        reverted_from=reverted_from,
+    )
+
+
+async def _legacy_alias_hit(db, user_id, op_key, decision_id) -> bool:
+    """True iff a pre-1B-B row for the SAME provable identity exists (ANY status — old rows have no
+    trustworthy dispatch_started_at). Only v1:review / v1:decision have a legacy predecessor."""
+    if op_key.startswith("v1:review:"):
+        rid = op_key[len("v1:review:"):]
+        row = (await db.execute(
+            select(ExecutionLog.id).where(
+                ExecutionLog.user_id == user_id,
+                ExecutionLog.action_type == "publish_review_response",
+                ExecutionLog.idempotency_key == "review:" + rid,
+            ).limit(1)
+        )).first()
+        return row is not None
+    if op_key.startswith("v1:decision:"):
+        did = op_key[len("v1:decision:"):]
+        row = (await db.execute(
+            select(ExecutionLog.id).where(
+                ExecutionLog.user_id == user_id,
+                ExecutionLog.decision_id == did,
+                or_(ExecutionLog.idempotency_key.is_(None),
+                    ExecutionLog.idempotency_key.notlike("v1:%")),
+            ).limit(1)
+        )).first()
+        return row is not None
+    return False
+
+
+def _reconcile(log_id, action_type, target_mp, spec, code, detail) -> ExecutionResult:
+    return ExecutionResult(log_id, "needs_reconcile", action_type, target_mp,
+                           error={"code": code, "detail": detail, "retryable": False},
+                           reversible=spec.reversible)
+
+
+def _resolve_existing(existing, fp, spec, action_type, target_mp) -> ExecutionResult:
+    """Decide the response when the claim INSERT lost the UNIQUE race. NEVER dispatches."""
+    if existing is None:
+        return _reconcile(None, action_type, target_mp, spec, "TRANSIENT_CONFLICT",
+                          "конкурентная операция — повторите позже")
+    efp = existing.request_fingerprint
+    if efp is None:
+        return _reconcile(existing.id, action_type, target_mp, spec, "NEEDS_RECONCILE",
+                          "содержимое прежней операции не подтверждено")
+    if efp != fp:
+        return _reconcile(existing.id, action_type, target_mp, spec, "IDEMPOTENCY_MISMATCH",
+                          "тот же ключ операции с другим содержимым")
+    st = existing.status
+    if st == "success":
+        return ExecutionResult(existing.id, "success", action_type, target_mp,
+                               api_request_id=existing.api_request_id,
+                               result=existing.result or {}, reversible=spec.reversible)
+    if st in ("pending", "in_flight"):
+        return _reconcile(existing.id, action_type, target_mp, spec, "OPERATION_IN_PROGRESS",
+                          "операция уже выполняется")
+    if st == "ambiguous":
+        return _reconcile(existing.id, action_type, target_mp, spec, "AMBIGUOUS_PRIOR",
+                          "предыдущая попытка не подтверждена — проверьте кабинет")
+    if st == "reverted":
+        return _reconcile(existing.id, action_type, target_mp, spec, "ALREADY_REVERTED",
+                          "операция уже отменена")
+    # failed / any other terminal: controlled safe re-own is 1C — 1B-B never auto-retries.
+    return _reconcile(existing.id, action_type, target_mp, spec, "PRIOR_FAILED",
+                      "предыдущая попытка не удалась — начните новую операцию")
+
+
 def _new_log(user_id, action_type, marketplace, mode, payload, insight_key,
              idempotency_key, *, status, error_code=None, connection_id=None,
-             decision_id=None) -> ExecutionLog:
+             decision_id=None, request_fingerprint=None,
+             dispatch_started_at=None) -> ExecutionLog:
+    # SECURITY-2D-1B-B — only the pending CLAIM row carries the operation key + fingerprint, so it is
+    # the sole occupant of the partial-UNIQUE(user_id, idempotency_key WHERE 'v1:%'). A rejected /
+    # contained / automation-disabled row never dispatched and needs no dedup identity → NULL key, so
+    # a later legitimate attempt with the same deterministic key can still claim.
+    claim = status == "pending"
     return ExecutionLog(
         user_id=user_id, connection_id=connection_id, insight_key=insight_key,
         decision_id=decision_id,
         action_type=action_type, marketplace=marketplace, mode=mode,
         payload=_safe_payload(payload), status=status, error_code=error_code,
-        idempotency_key=idempotency_key,
+        idempotency_key=idempotency_key if claim else None,
+        request_fingerprint=request_fingerprint if claim else None,
+        dispatch_started_at=dispatch_started_at if claim else None,
     )

@@ -13,6 +13,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { api, type InsightExecuteResult } from '@/lib/api'
+import { newOperationKey } from '@/lib/opkey'
 import { T } from '@/lib/tokens'
 import { trackEvent } from '@/lib/events'
 
@@ -59,7 +60,9 @@ export default function InsightActionBlock({ insightKey }: Props) {
   const run = useCallback(async (dry: boolean) => {
     setBusy(true)
     try {
-      const r = await api.actionEngine.executeInsight(insightKey, { dry_run: dry, overrides: buildOverrides() })
+      // SECURITY-2D-1B-B: a real execution mints ONE client operation key per click (dry-run needs none).
+      const opKey = dry ? undefined : newOperationKey()
+      const r = await api.actionEngine.executeInsight(insightKey, { dry_run: dry, overrides: buildOverrides() }, opKey)
       trackEvent(dry ? 'insight_checked' : 'insight_executed', 'action_engine', insightKey, { status: r.status })
       if (dry) { setCheck(r); setPlan(r); setDone(null) }
       else { setDone(r); setCheck(null); setPlan(r) }

@@ -11,7 +11,7 @@ from models.marketplace_connection import MarketplaceConnection
 from models.api_credential import ApiCredential
 from models.execution_log import ExecutionLog          # noqa: F401
 from models.automation_rule import AutomationRule      # noqa: F401
-from services.marketplace import executor, credential_vault
+from services.marketplace import executor, credential_vault, operation_key
 from services.marketplace.wb_client import wb_client
 
 
@@ -47,6 +47,7 @@ def test_set_price_success():
         res = await executor.execute(
             db=db, user_id=uid, action_type="set_price",
             payload={"marketplace": "wildberries", "offer_id": "12345", "price": 1990, "old_price": 1500},
+            idempotency_key=operation_key.client_key(str(uuid.uuid4())),
         )
         assert res.status == "success", res.error
         assert calls["n"] == 1 and calls["price"] == 1990
@@ -91,6 +92,7 @@ def test_set_price_reversible_and_revert():
         res = await executor.execute(
             db=db, user_id=uid, action_type="set_price",
             payload={"marketplace": "wildberries", "offer_id": "1", "price": 2000, "old_price": 1500},
+            idempotency_key=operation_key.client_key(str(uuid.uuid4())),
         )
         assert res.status == "success" and res.reversible
         rev = await executor.revert(db=db, user_id=uid, log_id=res.log_id)
@@ -111,6 +113,7 @@ def test_dispatcher_exception_becomes_failed_not_500():
         res = await executor.execute(
             db=db, user_id=uid, action_type="set_price",
             payload={"marketplace": "wildberries", "offer_id": "VRF-001", "price": 1500},
+            idempotency_key=operation_key.client_key(str(uuid.uuid4())),
         )
         assert res.status == "failed"
         assert res.error["code"] == "DISPATCH_ERROR"
@@ -123,6 +126,7 @@ def test_ozon_requires_client_id():
         res = await executor.execute(
             db=db, user_id=uid, action_type="set_price",
             payload={"marketplace": "ozon", "offer_id": "off-1", "price": 1000},
+            idempotency_key=operation_key.client_key(str(uuid.uuid4())),
         )
         assert res.status == "failed"
         assert res.error["code"] == "AUTH"   # Ozon needs client_id

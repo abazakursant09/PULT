@@ -6,7 +6,7 @@ recommendation -> Apply -> Updated Card.
 """
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,6 +15,7 @@ from dependencies import get_current_user
 from models.user import User
 from schemas.marketplace import ExecuteResponse
 from services.marketplace import executor
+from ._op_http import resolve_client_key, raise_if_reconcile
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -34,16 +35,19 @@ async def apply_card(
     body: ApplyCardRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
 ):
     """L3 — apply SEO changes to the real marketplace card."""
+    op_key = resolve_client_key(idempotency_key, dry_run=body.dry_run)
     res = await executor.execute(
         db=db, user_id=current_user.id, action_type="update_card",
         payload={"marketplace": body.marketplace, "offer_id": body.offer_id,
                  "card": body.card, "old_card": body.old_card},
         mode="manual_l3", insight_key=body.insight_key,
-        idempotency_key=f"card:{body.offer_id}:{hash(str(sorted(body.card.items())))}",
+        idempotency_key=op_key,
         dry_run=body.dry_run,
     )
+    raise_if_reconcile(res)
     if not res.ok and res.status == "failed":
         raise HTTPException(502, detail={"error": res.error, "log_id": res.log_id})
     return ExecuteResponse(

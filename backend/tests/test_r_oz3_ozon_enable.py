@@ -22,7 +22,7 @@ from models.user import User
 from models.product import Product
 from models.marketplace_connection import MarketplaceConnection
 from models.api_credential import ApiCredential
-from services.marketplace import executor, credential_vault
+from services.marketplace import executor, credential_vault, operation_key
 from services.marketplace import ozon_client as ozon_mod
 from services.marketplace.errors import ExecutionError
 from routers import reviews as reviews_router
@@ -91,14 +91,15 @@ def test_ozon_publish_timeout_is_ambiguous_and_not_retried(monkeypatch):
         monkeypatch.setattr(ozon_mod.ozon_client, "publish_feedback_answer", raiser)
 
         payload = {"marketplace": "ozon", "feedback_id": "OZ-R1", "text": "Спасибо!", "rating": 5}
+        oz_key = operation_key.review_key("3160454f-4ae4-48fb-8d4c-116bcc2ef25a")
         r1 = await executor.execute(db=db, user_id=uid, action_type="publish_review_response",
-                                    payload=payload, idempotency_key="review:oz1")
+                                    payload=payload, idempotency_key=oz_key)
         assert r1.status == "ambiguous" and calls["n"] == 1
         # retry same key — even if Ozon would now answer, we must not call it again
         async def ok(*, token, client_id, review_id, text):
             calls["n"] += 1; return {"requestId": "x"}
         monkeypatch.setattr(ozon_mod.ozon_client, "publish_feedback_answer", ok)
         r2 = await executor.execute(db=db, user_id=uid, action_type="publish_review_response",
-                                    payload=payload, idempotency_key="review:oz1")
+                                    payload=payload, idempotency_key=oz_key)
         assert r2.status == "needs_reconcile" and calls["n"] == 1     # NO second Ozon call
     _run(go())

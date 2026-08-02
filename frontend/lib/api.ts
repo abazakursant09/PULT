@@ -1338,8 +1338,9 @@ export const api = {
       req<ReviewResponse>(`/api/reviews/${productId}/${reviewId}/draft`, { method: 'POST' }),
     approve: (productId: string, reviewId: string) =>
       req<ReviewResponse>(`/api/reviews/${productId}/${reviewId}/approve`, { method: 'POST' }),
-    publish: (productId: string, reviewId: string) =>
-      req<ReviewResponse>(`/api/reviews/${productId}/${reviewId}/publish`, { method: 'POST' }),
+    publish: (productId: string, reviewId: string, opKey: string) =>
+      req<ReviewResponse>(`/api/reviews/${productId}/${reviewId}/publish`,
+        { method: 'POST', headers: { 'Idempotency-Key': opKey } }),
     history: (productId: string, reviewId: string) =>
       req<ReviewHistoryResponse>(`/api/reviews/${productId}/${reviewId}/history`),
   },
@@ -1684,14 +1685,21 @@ export const api = {
         `/api/insights/${encodeURIComponent(insightKey)}/status`,
         { method: 'POST', body: JSON.stringify({ status }) },
       ),
-    // ME-6: execute an insight (dry_run=true for "Проверить", false for "Выполнить")
+    // ME-6: execute an insight (dry_run=true for "Проверить", false for "Выполнить").
+    // SECURITY-2D-1B-B: a real (non-dry) single-action execution requires a client operation key sent
+    // as the Idempotency-Key header. Dry-run needs none (no provider dispatch is possible).
     executeInsight: (
       insightKey: string,
       opts: { dry_run: boolean; overrides?: Record<string, unknown> } = { dry_run: false },
+      opKey?: string,
     ) =>
       req<InsightExecuteResult>(
         `/api/insights/${encodeURIComponent(insightKey)}/execute`,
-        { method: 'POST', body: JSON.stringify({ dry_run: opts.dry_run, overrides: opts.overrides ?? {} }) },
+        {
+          method: 'POST',
+          body: JSON.stringify({ dry_run: opts.dry_run, overrides: opts.overrides ?? {} }),
+          ...(opKey ? { headers: { 'Idempotency-Key': opKey } } : {}),
+        },
       ),
   },
 
@@ -2057,7 +2065,10 @@ export const api = {
       if (params.sku) q.set('sku', params.sku)
       return req<DecisionApplyPreview>(`/api/decision-apply/preview/${encodeURIComponent(decisionId)}?${q}`)
     },
-    confirm: (decisionId: string, body: { marketplace: string; sku?: string; idempotency_key: string }) =>
+    // SECURITY-2D-1B-B: the executor key is server-derived (v1:decision:<id>). No client idempotency_key
+    // is sent in the body (a body key is now rejected 422); at-most-one dispatch is enforced server-side
+    // by the Decision.id claim, so a double-submit of the same decision cannot double-dispatch.
+    confirm: (decisionId: string, body: { marketplace: string; sku?: string }) =>
       req<DecisionApplyConfirmResult>(`/api/decision-apply/confirm/${encodeURIComponent(decisionId)}`,
         { method: 'POST', body: JSON.stringify(body) }),
   },

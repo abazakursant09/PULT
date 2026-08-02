@@ -15,7 +15,7 @@ from models.api_credential import ApiCredential
 from models.execution_log import ExecutionLog          # noqa: F401
 from models.automation_rule import AutomationRule      # noqa: F401
 from models.review_response import ReviewResponse       # noqa: F401
-from services.marketplace import insight_mapping, executor, credential_vault
+from services.marketplace import insight_mapping, executor, credential_vault, operation_key
 
 
 def _run(c):
@@ -130,7 +130,8 @@ def test_plan_executes_through_shared_executor():
         plan = await insight_mapping.resolve_plan(db, uid, "margin_crisis:wildberries:42")
         res = await executor.execute(db=db, user_id=uid, action_type=plan.action_type,
                                      payload=plan.payload, mode="manual_l3",
-                                     insight_key="margin_crisis:wildberries:42")
+                                     insight_key="margin_crisis:wildberries:42",
+                                     idempotency_key=operation_key.client_key(str(uuid.uuid4())))
         assert res.status == "success"
         assert calls["n"] == 1
         # execution log carries the insight_key (traceability requirement)

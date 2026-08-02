@@ -136,7 +136,7 @@ def test_confirm_success():
         confirm_mod.execute_bound_decision = _fake_exec(ok=True, log_id="logA")
         try:
             r = await decision_apply_confirm(
-                did, ConfirmRequest(marketplace="wildberries", sku="SKU1", idempotency_key="k1"),
+                did, ConfirmRequest(marketplace="wildberries", sku="SKU1"),
                 current_user=_User(uid), db=db)
         finally:
             confirm_mod.execute_bound_decision = orig
@@ -155,7 +155,7 @@ def test_confirm_rejected():
         confirm_mod.execute_bound_decision = _fake_exec(ok=False, status="rejected")
         try:
             r = await decision_apply_confirm(
-                did, ConfirmRequest(marketplace="wildberries", sku="SKU1", idempotency_key="k2"),
+                did, ConfirmRequest(marketplace="wildberries", sku="SKU1"),
                 current_user=_User(uid), db=db)
         finally:
             confirm_mod.execute_bound_decision = orig
@@ -163,20 +163,22 @@ def test_confirm_rejected():
     _run(go())
 
 
-# ── 6. confirm requires idempotency_key ──────────────────────────────────────
+# ── 6. confirm forbids a body idempotency_key (executor key is server-derived) ─
 
-def test_confirm_requires_idempotency():
-    # pydantic enforces the field at the model boundary
-    with pytest.raises(Exception):
-        ConfirmRequest(marketplace="wildberries", sku="SKU1")   # missing idempotency_key
+def test_confirm_forbids_body_idempotency_key():
+    # SECURITY-2D-1B-B: idempotency_key is now Optional at the model boundary (no pydantic
+    # error), but if a client still sends it the route rejects it with HTTP 422 — the executor
+    # key is always server-derived (v1:decision:<id>), never client-supplied.
+    ConfirmRequest(marketplace="wildberries", sku="SKU1")   # optional now → constructs fine
 
     async def go():
         db = await _engine(); uid = str(uuid.uuid4())
         did = await _seed(db, uid)
-        r = await decision_apply_confirm(
-            did, ConfirmRequest(marketplace="wildberries", sku="SKU1", idempotency_key=""),
-            current_user=_User(uid), db=db)
-        assert r.ok is False and r.reason == "idempotency_key_required"
+        with pytest.raises(HTTPException) as ei:
+            await decision_apply_confirm(
+                did, ConfirmRequest(marketplace="wildberries", sku="SKU1", idempotency_key="k"),
+                current_user=_User(uid), db=db)
+        assert ei.value.status_code == 422
     _run(go())
 
 
@@ -192,7 +194,7 @@ def test_owner_scope_404():
         assert ei.value.status_code == 404
         with pytest.raises(HTTPException) as ei2:
             await decision_apply_confirm(
-                did, ConfirmRequest(marketplace="wildberries", sku="SKU1", idempotency_key="k"),
+                did, ConfirmRequest(marketplace="wildberries", sku="SKU1"),
                 current_user=_User(attacker), db=db)
         assert ei2.value.status_code == 404
     _run(go())
