@@ -166,7 +166,7 @@ def test_migration_backfill_and_check(tmp_path):
 def test_single_head():
     from alembic.config import Config
     from alembic.script import ScriptDirectory
-    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["uqc1a2b3c4d01"]
+    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["rcv1a2b3c4d01"]
 
 
 # ── per-row conflict, safe rows still import, confirmed ────────────────────────
