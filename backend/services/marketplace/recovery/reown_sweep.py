@@ -95,6 +95,9 @@ def _candidate_where(cut_naive: datetime, cut_tz: datetime):
 # stale predicate compares the NAIVE created_at against a naive cutoff and the tz last_reowned_at against
 # a tz cutoff (no untyped COALESCE). RETURNING a row → exactly one transfer; empty → skip (lost the race
 # or no longer eligible). Never touches status / dispatch_started_at / attempt_count / reconciliation.
+# TOCTOU defence-in-depth: idempotency_key / request_fingerprint are immutable after the claim INSERT
+# (no production writer ever changes them), but the CAS re-checks the exact key + fingerprint it validated
+# so that even a hypothetical concurrent change of either → RETURNING empty (0 mutation).
 _REOWN_CAS = text(
     "UPDATE execution_logs "
     "SET claim_generation = claim_generation + 1, "
@@ -103,6 +106,7 @@ _REOWN_CAS = text(
     "WHERE id = :id AND user_id = :uid "
     "  AND status = 'pending' AND dispatch_started_at IS NULL "
     "  AND claim_generation = :seen AND reown_count < :max "
+    "  AND idempotency_key = :seen_key AND request_fingerprint = :seen_fp "
     "  AND ((last_reowned_at IS NULL AND created_at < :cut_naive) "
     "       OR (last_reowned_at IS NOT NULL AND last_reowned_at < :cut_tz)) "
     "RETURNING id, claim_generation, reown_count, last_reowned_at"
@@ -113,6 +117,11 @@ _REOWN_CAS = text(
     bindparam("seen", type_=Integer()),
     bindparam("max", type_=Integer()),
 )
+
+# Bound the number of rows any single user's batch may SCAN in one run (keyset advances past invalid /
+# race rows so they can never starve valid candidates behind them; this cap keeps a pathological volume
+# of poison rows from blowing the run's deadline). Realistic candidate sets are far smaller.
+_MAX_SCAN_PER_USER = 10_000
 
 
 async def run_reown_sweep(*, dry_run: Optional[bool] = None, now: Optional[datetime] = None,
@@ -184,29 +193,52 @@ async def _sweep(dry_run, now, batch_size, dialect, result: ReownSweepResult, de
                 if dialect == "postgresql":
                     await db.execute(text(f"SET LOCAL statement_timeout = '{_STATEMENT_TIMEOUT}'"))
                     await db.execute(text(f"SET LOCAL lock_timeout = '{_LOCK_TIMEOUT}'"))
-                rows = (await db.execute(
-                    select(ExecutionLog.id, ExecutionLog.claim_generation,
-                           ExecutionLog.idempotency_key, ExecutionLog.request_fingerprint)
-                    .where(ExecutionLog.user_id == uid)
-                    .where(_candidate_where(cut_naive, cut_tz))
-                    .order_by(ExecutionLog.created_at).limit(batch_size))).all()
-                for rid, seen_gen, key, fp in rows:
-                    result.candidates += 1
-                    # Canonical validation is the final eligibility gate (coarse SQL LIKE is not enough).
-                    if not (is_valid_v1_key(key) and is_valid_fingerprint(fp)):
-                        result.skipped_invalid += 1
-                        continue
-                    result.eligible += 1
-                    if dry_run:
-                        continue
-                    res = await db.execute(_REOWN_CAS, {
-                        "id": rid, "uid": uid, "seen": int(seen_gen),
-                        "max": settings.recovery_max_reowns, "now": now_tz,
-                        "cut_naive": cut_naive, "cut_tz": cut_tz})
-                    if res.fetchone() is not None:
-                        result.reowned += 1
-                    else:
-                        result.skipped_race += 1
+                # Keyset pagination on the stable, indexable (created_at, id) order. The cursor advances
+                # past EVERY row it scans — invalid (skipped) and race-lost (CAS empty) rows included — so a
+                # poison row at the front of the order can never starve valid candidates behind it. Each row
+                # is scanned at most once per run. Bounded by _MAX_SCAN_PER_USER and the deadline.
+                last_created = None
+                last_id = None
+                scanned = 0
+                while scanned < _MAX_SCAN_PER_USER:
+                    if deadline is not None and time.monotonic() >= deadline:
+                        result.timed_out = True
+                        break
+                    q = (select(ExecutionLog.id, ExecutionLog.claim_generation,
+                                ExecutionLog.idempotency_key, ExecutionLog.request_fingerprint,
+                                ExecutionLog.created_at)
+                         .where(ExecutionLog.user_id == uid)
+                         .where(_candidate_where(cut_naive, cut_tz)))
+                    if last_id is not None:
+                        q = q.where(or_(ExecutionLog.created_at > last_created,
+                                        and_(ExecutionLog.created_at == last_created,
+                                             ExecutionLog.id > last_id)))
+                    rows = (await db.execute(
+                        q.order_by(ExecutionLog.created_at, ExecutionLog.id).limit(batch_size))).all()
+                    if not rows:
+                        break
+                    for rid, seen_gen, key, fp, created in rows:
+                        scanned += 1
+                        last_created, last_id = created, rid    # advance past this row regardless of outcome
+                        result.candidates += 1
+                        # Canonical validation is the final eligibility gate (coarse SQL LIKE is not enough).
+                        if not (is_valid_v1_key(key) and is_valid_fingerprint(fp)):
+                            result.skipped_invalid += 1
+                            continue
+                        result.eligible += 1
+                        if dry_run:
+                            continue
+                        res = await db.execute(_REOWN_CAS, {
+                            "id": rid, "uid": uid, "seen": int(seen_gen),
+                            "max": settings.recovery_max_reowns, "now": now_tz,
+                            "cut_naive": cut_naive, "cut_tz": cut_tz,
+                            "seen_key": key, "seen_fp": fp})
+                        if res.fetchone() is not None:
+                            result.reowned += 1
+                        else:
+                            result.skipped_race += 1
+                    if len(rows) < batch_size:
+                        break
                 if not dry_run:
                     await db.commit()
         except Exception:  # noqa: BLE001 — SAFE: no exception text/ids logged; the next user still runs

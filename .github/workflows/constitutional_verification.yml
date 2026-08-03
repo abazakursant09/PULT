@@ -215,7 +215,11 @@ jobs:
             tests/test_reown_sweep_pg.py::test_pg_reown_revert_inverse \
             tests/test_reown_sweep_pg.py::test_pg_reown_advisory_lock_distinct_from_reconcile \
             tests/test_reown_sweep_pg.py::test_pg_reown_advisory_collision_skips \
-            tests/test_reown_sweep_pg.py::test_pg_reown_migration_seeded_roundtrip
+            tests/test_reown_sweep_pg.py::test_pg_reown_migration_seeded_roundtrip \
+            tests/test_reown_sweep_pg.py::test_pg_reown_poison_does_not_starve_valid \
+            tests/test_reown_sweep_pg.py::test_pg_reown_dry_run_paginates_no_dup \
+            tests/test_reown_sweep_pg.py::test_pg_reown_all_invalid_terminates \
+            tests/test_reown_sweep_pg.py::test_pg_reown_cas_pins_key_and_fingerprint
 
   # Proves the FULL Alembic chain runs on the database production actually uses. The chain was
   # historically only exercised on SQLite, which has no strict boolean type and silently accepted an

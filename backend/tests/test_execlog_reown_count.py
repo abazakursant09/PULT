@@ -249,3 +249,38 @@ def test_invalid_key_or_fingerprint_skipped(monkeypatch, key, fp):
         assert (await _only(S)).claim_generation == 0
         await eng.dispose()
     _run(go())
+
+
+def test_poison_rows_do_not_starve_valid(monkeypatch):
+    # 5 poison candidates (valid v1 key, INVALID fingerprint) OLDER than 1 valid candidate; batch_size=2.
+    # Keyset pagination must advance past the poison and re-own the valid row (no starvation).
+    async def go():
+        eng, S = await _install(monkeypatch, enabled=True, dry_run=False)
+        for i in range(5):
+            await _seed(S, key=operation_key.review_key(str(uuid.uuid4())),
+                        fp="fp1:" + "z" * 64, age_s=4000 + i)          # older, canonically invalid
+        valid = operation_key.review_key(str(uuid.uuid4()))
+        await _seed(S, key=valid, fp=_FP, age_s=3600)                   # newer, valid
+        r = await rw.run_reown_sweep(batch_size=2)
+        assert r.candidates == 6 and r.skipped_invalid == 5 and r.reowned == 1
+        # the valid row (and only it) was re-owned
+        from models.execution_log import ExecutionLog as _EL
+        async with S() as db:
+            reowned = (await db.execute(select(_EL).where(_EL.reown_count == 1))).scalars().all()
+        assert len(reowned) == 1 and reowned[0].idempotency_key == valid
+        await eng.dispose()
+    _run(go())
+
+
+def test_all_invalid_terminates_no_mutation(monkeypatch):
+    async def go():
+        eng, S = await _install(monkeypatch, enabled=True, dry_run=False)
+        for i in range(7):
+            await _seed(S, key=operation_key.review_key(str(uuid.uuid4())), fp="fp1:" + "z" * 64, age_s=4000 + i)
+        r = await rw.run_reown_sweep(batch_size=2)
+        assert r.candidates == 7 and r.skipped_invalid == 7 and r.reowned == 0
+        from models.execution_log import ExecutionLog as _EL
+        async with S() as db:
+            assert (await db.execute(select(_EL).where(_EL.claim_generation > 0))).scalars().first() is None
+        await eng.dispose()
+    _run(go())

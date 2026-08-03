@@ -403,3 +403,93 @@ def test_pg_reown_migration_seeded_roundtrip(monkeypatch):
             assert "reown_count" in _cols(c)
     finally:
         eng.dispose()
+
+
+# A. poison rows must not starve valid candidates behind them (real PG, batch_size=2)
+def test_pg_reown_poison_does_not_starve_valid(monkeypatch):
+    from services.marketplace import operation_key
+    _ensure_schema(monkeypatch); prov = _stub_provider(monkeypatch)
+    rw, eng, S = _install(monkeypatch, enabled=True, dry_run=False)
+
+    async def go():
+        try:
+            for i in range(5):
+                await _seed(S, key=operation_key.review_key(str(uuid.uuid4())),
+                            fp="fp1:" + "z" * 64, age_s=4000 + i)     # older, canonically invalid
+            valid = operation_key.review_key(str(uuid.uuid4()))
+            await _seed(S, key=valid, fp=_FP, age_s=3600)             # newer, valid
+            r = await rw.run_reown_sweep(batch_size=2)
+            assert r.candidates == 6 and r.skipped_invalid == 5 and r.reowned == 1 and prov["n"] == 0
+            from models.execution_log import ExecutionLog
+            async with S() as db:
+                won = (await db.execute(select(ExecutionLog).where(ExecutionLog.reown_count == 1))).scalars().all()
+            assert len(won) == 1 and won[0].idempotency_key == valid
+        finally:
+            await eng.dispose()
+    _run(go())
+
+
+# B. dry-run with candidates > batch_size: each counted once, 0 mutation
+def test_pg_reown_dry_run_paginates_no_dup(monkeypatch):
+    from services.marketplace import operation_key
+    _ensure_schema(monkeypatch); _stub_provider(monkeypatch)
+    rw, eng, S = _install(monkeypatch, enabled=True, dry_run=True)
+
+    async def go():
+        try:
+            for i in range(7):
+                await _seed(S, key=operation_key.review_key(str(uuid.uuid4())), fp=_FP, age_s=3600 + i)
+            r = await rw.run_reown_sweep(batch_size=2)
+            assert r.candidates == 7 and r.eligible == 7 and r.reowned == 0     # each once, no mutation
+            from models.execution_log import ExecutionLog
+            async with S() as db:
+                assert (await db.execute(select(ExecutionLog).where(ExecutionLog.claim_generation > 0))
+                        ).scalars().first() is None
+        finally:
+            await eng.dispose()
+    _run(go())
+
+
+# C. all-invalid batch terminates, counts every unique row once, 0 mutation
+def test_pg_reown_all_invalid_terminates(monkeypatch):
+    from services.marketplace import operation_key
+    _ensure_schema(monkeypatch); _stub_provider(monkeypatch)
+    rw, eng, S = _install(monkeypatch, enabled=True, dry_run=False)
+
+    async def go():
+        try:
+            for i in range(7):
+                await _seed(S, key=operation_key.review_key(str(uuid.uuid4())), fp="fp1:" + "z" * 64, age_s=4000 + i)
+            r = await rw.run_reown_sweep(batch_size=2)
+            assert r.candidates == 7 and r.skipped_invalid == 7 and r.reowned == 0
+        finally:
+            await eng.dispose()
+    _run(go())
+
+
+# TOCTOU defence-in-depth: fingerprint changes after validation → the CAS (pinned key+fp) returns empty
+def test_pg_reown_cas_pins_key_and_fingerprint(monkeypatch):
+    _ensure_schema(monkeypatch)
+    rw, eng, S = _install(monkeypatch, enabled=True, dry_run=False)
+
+    async def go():
+        try:
+            rid = await _seed(S, gen=0, fp=_FP)
+            now = datetime.now(timezone.utc)
+            binds = dict(id=rid, uid="u1", seen=0, max=5, now=now,
+                         cut_naive=datetime.utcnow() + timedelta(seconds=60),
+                         cut_tz=now + timedelta(seconds=60))
+            async with S() as db:                                    # stale fingerprint → empty
+                res = await db.execute(rw._REOWN_CAS, {**binds, "seen_key": _V1, "seen_fp": "fp1:" + "b" * 64})
+                assert res.fetchone() is None; await db.commit()
+            async with S() as db:                                    # stale key → empty
+                res = await db.execute(rw._REOWN_CAS, {**binds, "seen_key": "v1:review:00000000-0000-0000-0000-000000000000", "seen_fp": _FP})
+                assert res.fetchone() is None; await db.commit()
+            assert (await _row(S, rid)).claim_generation == 0        # untouched
+            async with S() as db:                                    # exact key+fp → transfer
+                res = await db.execute(rw._REOWN_CAS, {**binds, "seen_key": _V1, "seen_fp": _FP})
+                assert res.fetchone() is not None; await db.commit()
+            assert (await _row(S, rid)).claim_generation == 1
+        finally:
+            await eng.dispose()
+    _run(go())
