@@ -118,6 +118,23 @@ async def _row(Session, uid):
         return (await db.execute(select(ExecutionLog).where(ExecutionLog.user_id == uid))).scalars().first()
 
 
+async def _publish_tolerant(Session, uid, key, text="Спасибо!"):
+    """Run the executor with an explicit session whose close tolerates the async-driver teardown noise a
+    CAS-phase DB error can leave behind (the executor already returned its safe result before teardown)."""
+    from services.marketplace import executor
+    db = Session()
+    try:
+        return await executor.execute(
+            db=db, user_id=uid, action_type="publish_review_response",
+            payload={"marketplace": "wildberries", "feedback_id": "fb1", "text": text, "rating": 5},
+            idempotency_key=key)
+    finally:
+        try:
+            await db.close()
+        except Exception:  # noqa: BLE001 — teardown after a CAS-phase driver error is not under test
+            pass
+
+
 async def _seed_pending_claim(Session, uid, cid, key, *, gen=0, dsa=False,
                               action_type="publish_review_response", fp="fp1:x"):
     from models.execution_log import ExecutionLog
@@ -458,7 +475,7 @@ def test_pg_fencing_cas_lock_timeout_zero_dispatch(monkeypatch):
 
         try:
             uid, _ = await _seed_user(SB)
-            r = await _publish(SB, uid, _rk())     # the real _FENCE_CAS UPDATE blocks on A's lock → lock_timeout
+            r = await _publish_tolerant(SB, uid, _rk())   # the real _FENCE_CAS UPDATE blocks on A's lock → lock_timeout
             assert c["n"] == 0                                   # provider never reached
             assert r.status == "needs_reconcile" and r.error["code"] == "CLAIM_CAS_ERROR"
             row = await _row(SB, uid)
@@ -507,7 +524,7 @@ def test_pg_fencing_cas_commit_failure_zero_dispatch(monkeypatch):
         S = sessionmaker(eng, class_=_CASCommitFailSession, expire_on_commit=False)
         try:
             uid, _ = await _seed_user(S)
-            r = await _publish(S, uid, _rk())
+            r = await _publish_tolerant(S, uid, _rk())
             assert c["n"] == 0                                   # provider never reached
             assert r.status == "needs_reconcile" and r.error["code"] == "CLAIM_CAS_ERROR"
             # a separate, normal verification session sees the fully-rolled-back CAS

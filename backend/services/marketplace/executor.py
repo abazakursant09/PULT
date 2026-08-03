@@ -382,7 +382,16 @@ async def execute(
             _FENCE_CAS, {"id": rec.id, "now": now, "gen": owned_generation})).first()
         await db.commit()
     except SQLAlchemyError:
-        await db.rollback()
+        # A CAS-phase DB error (lock timeout, connection loss, a failing commit) is fail-closed: the CAS
+        # neither committed in_flight nor dispatched, so the row is already a safe un-dispatched pending
+        # claim. Roll back BEST-EFFORT — some async-driver error states cannot roll back cleanly on the
+        # same connection (the session is discarded by its caller's context manager, which returns the
+        # connection and drops the uncommitted CAS); a secondary rollback error must NEVER mask the safe
+        # needs_reconcile return. Provider dispatch stays structurally unreachable (0 calls).
+        try:
+            await db.rollback()
+        except Exception:  # noqa: BLE001 — never surface a secondary teardown error over the safe result
+            pass
         log.warning("execution fencing CAS infra error: user=%s action=%s", user_id, action_type)
         return ExecutionResult(rec.id, "needs_reconcile", action_type, target_mp,
                                error={"code": "CLAIM_CAS_ERROR",
