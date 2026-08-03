@@ -199,8 +199,7 @@ jobs:
             tests/test_execlog_fencing_cas_pg.py::test_pg_fencing_crash_after_cas_no_auto_retry \
             tests/test_execlog_fencing_cas_pg.py::test_pg_fencing_ambiguous_keeps_fields_no_retry \
             tests/test_execlog_fencing_cas_pg.py::test_pg_fencing_migration_seeded_roundtrip \
-            tests/test_execlog_fencing_cas_pg.py::test_pg_fencing_cas_update_error_zero_dispatch \
-            tests/test_execlog_fencing_cas_pg.py::test_pg_fencing_cas_commit_error_zero_dispatch \
+            tests/test_execlog_fencing_cas_pg.py::test_pg_fencing_cas_db_error_zero_dispatch \
             tests/test_execlog_fencing_cas_pg.py::test_pg_fencing_business_failure_then_retry_zero \
             tests/test_execlog_fencing_cas_pg.py::test_pg_fencing_terminal_commit_failure_after_provider
 
