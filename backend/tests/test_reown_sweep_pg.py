@@ -193,7 +193,8 @@ def test_pg_reown_two_concurrent_one_winner(monkeypatch):
             async def cas():
                 async with S() as db:
                     res = await db.execute(rw._REOWN_CAS, {"id": rid, "uid": "u1", "seen": 0, "max": 5,
-                                                           "now": now, "cut_naive": cut_naive, "cut_tz": cut_tz})
+                                                           "now": now, "cut_naive": cut_naive, "cut_tz": cut_tz,
+                                                           "seen_key": _V1, "seen_fp": _FP})
                     won = res.fetchone() is not None
                     await db.commit()
                     return won
@@ -285,7 +286,8 @@ def test_pg_reown_invalid_or_cross_user_zero(monkeypatch, key, fp, uid_cas):
                 now = datetime.now(timezone.utc)
                 async with S() as db:
                     res = await db.execute(rw._REOWN_CAS, {"id": rid, "uid": "OTHER", "seen": 0, "max": 5,
-                        "now": now, "cut_naive": datetime.utcnow()+timedelta(60), "cut_tz": now+timedelta(60)})
+                        "now": now, "cut_naive": datetime.utcnow()+timedelta(60), "cut_tz": now+timedelta(60),
+                        "seen_key": _V1, "seen_fp": _FP})
                     assert res.fetchone() is None; await db.commit()
             else:
                 r = await rw.run_reown_sweep(); assert r.reowned == 0
