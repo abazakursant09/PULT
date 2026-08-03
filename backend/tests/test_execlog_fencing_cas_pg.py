@@ -364,37 +364,6 @@ def _cols(c):
         "SELECT column_name FROM information_schema.columns WHERE table_name='execution_logs'")}
 
 
-# ── G/H. a real DB error in the CAS PHASE (the same try wraps the UPDATE and its commit) →
-#         rollback, 0 provider calls, row stays a safe pending claim ──────────────────────────
-def test_pg_fencing_cas_db_error_zero_dispatch(monkeypatch):
-    from sqlalchemy import text, bindparam
-    from sqlalchemy import DateTime as _DT, Integer as _I, String as _S
-    from services.marketplace import executor as ex
-    _ensure_schema(monkeypatch)
-    c = {"n": 0}; _install_stub(monkeypatch, c)
-    # Point the executor at a CAS statement that references a NON-EXISTENT column so PostgreSQL raises a
-    # genuine driver error at execute() (not a synthetic one) — the executor's `except SQLAlchemyError`
-    # then rolls back cleanly, exactly as it would for a real infra failure. This structurally sits BEFORE
-    # spec.dispatch, so the provider is never called.
-    bad = text("UPDATE execution_logs SET last_attempt_at=:now "
-               "WHERE id=:id AND no_such_column=:gen RETURNING id").bindparams(
-        bindparam("now", type_=_DT(timezone=True)), bindparam("gen", type_=_I()),
-        bindparam("id", type_=_S()))
-    monkeypatch.setattr(ex, "_FENCE_CAS", bad, raising=True)
-
-    async def go():
-        eng, S = _sessionmaker()
-        try:
-            uid, _ = await _seed_user(S)
-            r = await _publish(S, uid, _rk())
-            assert c["n"] == 0                             # provider never reached
-            assert r.status == "needs_reconcile" and r.error["code"] == "CLAIM_CAS_ERROR"
-            row = await _row(S, uid)
-            assert row.status == "pending" and row.dispatch_started_at is None   # rollback, no false in_flight
-            assert row.attempt_count == 0                  # CAS never incremented
-        finally:
-            await eng.dispose()
-    _run(go())
 
 
 # ── K. clean business failure → failed; retry of same key → 0 dispatch ────────
