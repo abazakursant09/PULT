@@ -95,3 +95,17 @@ def request_fingerprint(*, user_id: str, connection_id: str | None, marketplace:
         "reverted_from": reverted_from,
     }
     return _PREFIX + hashlib.sha256(canonical_json(obj)).hexdigest()
+
+
+_HEXDIGEST_LEN = 64                       # sha256 hex
+_FP_LEN = len(_PREFIX) + _HEXDIGEST_LEN   # "fp1:" + 64 = 68
+
+
+def is_valid_fingerprint(fp: str | None) -> bool:
+    """True iff `fp` is a well-formed canonical fingerprint: the exact "fp1:" prefix followed by 64
+    lowercase hex chars (the shape produced by request_fingerprint()). Fail-closed: anything else — None,
+    wrong length, wrong prefix, uppercase or non-hex — is invalid. Pure; logs nothing."""
+    if not isinstance(fp, str) or len(fp) != _FP_LEN or not fp.startswith(_PREFIX):
+        return False
+    digest = fp[len(_PREFIX):]
+    return all(c in "0123456789abcdef" for c in digest)

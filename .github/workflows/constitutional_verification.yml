@@ -202,7 +202,24 @@ jobs:
             tests/test_execlog_fencing_cas_pg.py::test_pg_fencing_cas_lock_timeout_zero_dispatch \
             tests/test_execlog_fencing_cas_pg.py::test_pg_fencing_cas_commit_failure_zero_dispatch \
             tests/test_execlog_fencing_cas_pg.py::test_pg_fencing_business_failure_then_retry_zero \
-            tests/test_execlog_fencing_cas_pg.py::test_pg_fencing_terminal_commit_failure_after_provider
+            tests/test_execlog_fencing_cas_pg.py::test_pg_fencing_terminal_commit_failure_after_provider \
+            tests/test_reown_sweep_pg.py::test_pg_reown_flag_off_zero \
+            tests/test_reown_sweep_pg.py::test_pg_reown_dry_run_no_mutation \
+            tests/test_reown_sweep_pg.py::test_pg_reown_stale_pending_transferred \
+            tests/test_reown_sweep_pg.py::test_pg_reown_ineligible_zero \
+            tests/test_reown_sweep_pg.py::test_pg_reown_two_concurrent_one_winner \
+            tests/test_reown_sweep_pg.py::test_pg_reown_old_worker_fenced_new_passes_c1 \
+            tests/test_reown_sweep_pg.py::test_pg_reown_lock_timeout_rolls_back \
+            tests/test_reown_sweep_pg.py::test_pg_reown_max_boundary \
+            tests/test_reown_sweep_pg.py::test_pg_reown_invalid_or_cross_user_zero \
+            tests/test_reown_sweep_pg.py::test_pg_reown_revert_inverse \
+            tests/test_reown_sweep_pg.py::test_pg_reown_advisory_lock_distinct_from_reconcile \
+            tests/test_reown_sweep_pg.py::test_pg_reown_advisory_collision_skips \
+            tests/test_reown_sweep_pg.py::test_pg_reown_migration_seeded_roundtrip \
+            tests/test_reown_sweep_pg.py::test_pg_reown_poison_does_not_starve_valid \
+            tests/test_reown_sweep_pg.py::test_pg_reown_dry_run_paginates_no_dup \
+            tests/test_reown_sweep_pg.py::test_pg_reown_all_invalid_terminates \
+            tests/test_reown_sweep_pg.py::test_pg_reown_cas_pins_key_and_fingerprint
 
   # Proves the FULL Alembic chain runs on the database production actually uses. The chain was
   # historically only exercised on SQLite, which has no strict boolean type and silently accepted an
