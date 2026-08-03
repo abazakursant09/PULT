@@ -362,3 +362,131 @@ def test_pg_fencing_migration_seeded_roundtrip(monkeypatch):
 def _cols(c):
     return {r[0] for r in c.exec_driver_sql(
         "SELECT column_name FROM information_schema.columns WHERE table_name='execution_logs'")}
+
+
+# ── G. SQLAlchemyError DURING the CAS UPDATE (before provider) → rollback, 0 dispatch ──
+def test_pg_fencing_cas_update_error_zero_dispatch(monkeypatch):
+    from sqlalchemy.exc import SQLAlchemyError
+    from services.marketplace import executor as ex
+    _ensure_schema(monkeypatch)
+    c = {"n": 0}; _install_stub(monkeypatch, c)
+    real_execute = AsyncSession.execute
+
+    async def _exe(self, statement, *a, **k):
+        if statement is ex._FENCE_CAS:                     # phase = the fencing CAS UPDATE itself
+            raise SQLAlchemyError("injected CAS UPDATE error")
+        return await real_execute(self, statement, *a, **k)
+    monkeypatch.setattr(AsyncSession, "execute", _exe, raising=True)
+
+    async def go():
+        eng, S = _sessionmaker()
+        try:
+            uid, _ = await _seed_user(S)
+            r = await _publish(S, uid, _rk())
+            assert c["n"] == 0                             # provider never reached
+            assert r.status == "needs_reconcile" and r.error["code"] == "CLAIM_CAS_ERROR"
+            row = await _row(S, uid)
+            assert row.status == "pending" and row.dispatch_started_at is None   # rollback, no false in_flight
+        finally:
+            await eng.dispose()
+    _run(go())
+
+
+# ── H. error at the CAS COMMIT (after the UPDATE, before provider) → rollback, 0 dispatch ──
+def test_pg_fencing_cas_commit_error_zero_dispatch(monkeypatch):
+    from sqlalchemy.exc import SQLAlchemyError
+    from services.marketplace import executor as ex
+    _ensure_schema(monkeypatch)
+    c = {"n": 0}; _install_stub(monkeypatch, c)
+    st = {"cas_executed": False, "dispatched": False}
+    real_execute = AsyncSession.execute; real_commit = AsyncSession.commit
+
+    async def _exe(self, statement, *a, **k):
+        res = await real_execute(self, statement, *a, **k)
+        if statement is ex._FENCE_CAS:
+            st["cas_executed"] = True
+        return res
+
+    async def _com(self, *a, **k):
+        if st["cas_executed"] and not st["dispatched"]:    # phase = the commit right after the CAS UPDATE
+            st["cas_executed"] = False
+            raise SQLAlchemyError("injected CAS COMMIT error")
+        return await real_commit(self, *a, **k)
+    monkeypatch.setattr(AsyncSession, "execute", _exe, raising=True)
+    monkeypatch.setattr(AsyncSession, "commit", _com, raising=True)
+
+    async def go():
+        eng, S = _sessionmaker()
+        try:
+            uid, _ = await _seed_user(S)
+            r = await _publish(S, uid, _rk())
+            assert c["n"] == 0                             # commit failed before dispatch → no provider call
+            assert r.status == "needs_reconcile" and r.error["code"] == "CLAIM_CAS_ERROR"
+            row = await _row(S, uid)
+            assert row.status == "pending" and row.dispatch_started_at is None
+        finally:
+            await eng.dispose()
+    _run(go())
+
+
+# ── K. clean business failure → failed; retry of same key → 0 dispatch ────────
+def test_pg_fencing_business_failure_then_retry_zero(monkeypatch):
+    _ensure_schema(monkeypatch)
+    c = {"n": 0}; _install_stub(monkeypatch, c, fail="VALIDATION")   # non-ambiguous → 'failed'
+
+    async def go():
+        eng, S = _sessionmaker()
+        try:
+            uid, _ = await _seed_user(S)
+            key = _rk()
+            r1 = await _publish(S, uid, key)
+            assert r1.status == "failed" and c["n"] == 1
+            row = await _row(S, uid)
+            assert row.status == "failed" and row.dispatch_started_at is not None and row.attempt_count == 1
+            c["n"] = 0
+            r2 = await _publish(S, uid, key)               # same key → never re-dispatch
+            assert c["n"] == 0 and r2.status == "needs_reconcile"
+        finally:
+            await eng.dispose()
+    _run(go())
+
+
+# ── L. terminal commit FAILS after the provider call → dispatch=1; retry → 0 ──
+def test_pg_fencing_terminal_commit_failure_after_provider(monkeypatch):
+    from sqlalchemy.exc import SQLAlchemyError
+    _ensure_schema(monkeypatch)
+    c = {"n": 0}
+    st = {"dispatched": False}
+    from services.marketplace.wb_client import wb_client
+
+    async def _fake(*, token, feedback_id, text):
+        c["n"] += 1
+        st["dispatched"] = True
+        return {"api_request_id": "req"}
+    monkeypatch.setattr(wb_client, "publish_feedback_answer", _fake)
+    real_commit = AsyncSession.commit
+
+    async def _com(self, *a, **k):
+        if st["dispatched"]:                               # phase = the FIRST commit after the provider call
+            st["dispatched"] = False
+            raise SQLAlchemyError("injected terminal COMMIT error")
+        return await real_commit(self, *a, **k)
+    monkeypatch.setattr(AsyncSession, "commit", _com, raising=True)
+
+    async def go():
+        eng, S = _sessionmaker()
+        try:
+            uid, _ = await _seed_user(S)
+            key = _rk()
+            with pytest.raises(SQLAlchemyError):
+                await _publish(S, uid, key)                # dispatch=1, terminal commit raises (uncaught by design)
+            assert c["n"] == 1
+            row = await _row(S, uid)
+            # CAS-set state survived; terminal 'success' never landed → row is in_flight, retry-safe
+            assert row.status == "in_flight" and row.dispatch_started_at is not None and row.attempt_count == 1
+            c["n"] = 0
+            r2 = await _publish(S, uid, key)               # in_flight → OPERATION_IN_PROGRESS, 0 dispatch
+            assert c["n"] == 0 and r2.status == "needs_reconcile"
+        finally:
+            await eng.dispose()
+    _run(go())
