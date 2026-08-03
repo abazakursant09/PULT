@@ -1,6 +1,7 @@
 import logging
 import sys
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
 logger = logging.getLogger(__name__)
@@ -143,6 +144,37 @@ class Settings(BaseSettings):
     recovery_batch_size: int = 200
     recovery_max_reconcile_attempts: int = 5
     recovery_recheck_backoff_seconds: int = 3600
+
+    # SECURITY-2D-1C-C2 — OFF-by-default controlled re-own. On its own it starts NO work: no scheduler
+    # tick, no advisory lock, ZERO ExecutionLog queries, ZERO provider/executor calls while false. It
+    # NEVER dispatches, never calls the executor, never sets in_flight, never changes status /
+    # dispatch_started_at / attempt_count / reconciliation. It ONLY transfers ownership of a stuck safe
+    # pending claim (status='pending' AND dispatch_started_at IS NULL) by incrementing claim_generation
+    # (+ reown_count + last_reowned_at). MUST stay OFF in beta until the 1C-C3 operator re-dispatch exists.
+    recovery_reown_enabled: bool = False
+    # Separate fail-safe from recovery_reaper_dry_run (C2 is a WRITE path). Default True: even if
+    # recovery_reown_enabled is on, dry-run counts candidates but changes NOTHING.
+    recovery_reown_dry_run: bool = True
+    # A pending claim is a re-own candidate only when its (last_reowned_at, else created_at) anchor is
+    # older than this. Deliberately large: a claim still pending this long is almost certainly a dead
+    # worker; fencing a merely-slow live worker is safe (its C1 CAS returns empty → 0 dispatch).
+    recovery_reown_stale_seconds: int = 900
+    recovery_max_reowns: int = 5              # bound the number of ownership transfers per operation
+    recovery_reown_batch_size: int = 200      # bounded per-user candidate batch
+
+    @field_validator("recovery_reown_stale_seconds", "recovery_max_reowns")
+    @classmethod
+    def _reown_positive(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError("must be > 0")
+        return v
+
+    @field_validator("recovery_reown_batch_size")
+    @classmethod
+    def _reown_batch_bounded(cls, v: int) -> int:
+        if not (0 < v <= 10_000):            # safe upper bound: never sweep an unbounded batch
+            raise ValueError("recovery_reown_batch_size must be in 1..10000")
+        return v
 
     # How many products one connection's review auto-sync processes per scheduler cycle. A conservative
     # technical default (NOT an official WB/Ozon rate limit) that bounds the request burst; the cursor

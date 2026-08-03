@@ -77,6 +77,14 @@ class ExecutionLog(Base):
     attempt_count  = Column(Integer, nullable=False, server_default="0", default=0)
     last_attempt_at = Column(DateTime(timezone=True), nullable=True)
 
+    # SECURITY-2D-1C-C2 — controlled-re-own accounting, written ONLY by the OFF-by-default re-own sweep's
+    # atomic ownership-transfer CAS (never the executor). reown_count bounds how many times a stuck safe
+    # pending claim may have its ownership transferred (claim_generation bumped); last_reowned_at is when
+    # the last transfer happened and, together with created_at, is the stale anchor. Distinct from
+    # attempt_count (which counts DISPATCH attempts). No PII.
+    reown_count    = Column(Integer, nullable=False, server_default="0", default=0)
+    last_reowned_at = Column(DateTime(timezone=True), nullable=True)
+
     __table_args__ = (
         Index("ix_execlog_user", "user_id"),
         Index("ix_execlog_user_action", "user_id", "action_type"),
@@ -97,4 +105,6 @@ class ExecutionLog(Base):
         CheckConstraint("reconciliation_attempts >= 0", name="ck_execlog_reconciliation_attempts_nonneg"),
         # SECURITY-2D-1C-C1 — dispatch-attempt counter is non-negative.
         CheckConstraint("attempt_count >= 0", name="ck_execlog_attempt_count_nonneg"),
+        # SECURITY-2D-1C-C2 — re-own counter is non-negative.
+        CheckConstraint("reown_count >= 0", name="ck_execlog_reown_count_nonneg"),
     )
