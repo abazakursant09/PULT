@@ -353,6 +353,10 @@ async def execute(
     # Captured here and never re-read right before the CAS: re-reading could adopt a generation a
     # concurrent re-own just bumped, defeating the fence.
     owned_generation = rec.claim_generation
+    # Capture the log id into a local BEFORE the CAS: a CAS-phase rollback EXPIRES the ORM instance, so
+    # reading rec.id afterwards would trigger a sync lazy-load (MissingGreenlet on async drivers) and mask
+    # the safe needs_reconcile. The id is immutable, so the local is always correct.
+    log_id = rec.id
 
     # Resolve the dispatch context + token BEFORE the fencing CAS, so between the CAS commit and the
     # provider call there are ZERO further DB reads. A credential/token failure here happens while the row
@@ -393,7 +397,7 @@ async def execute(
         except Exception:  # noqa: BLE001 — never surface a secondary teardown error over the safe result
             pass
         log.warning("execution fencing CAS infra error: user=%s action=%s", user_id, action_type)
-        return ExecutionResult(rec.id, "needs_reconcile", action_type, target_mp,
+        return ExecutionResult(log_id, "needs_reconcile", action_type, target_mp,
                                error={"code": "CLAIM_CAS_ERROR",
                                       "detail": "не удалось подтвердить владение операцией — повторите позже",
                                       "retryable": False},
@@ -401,7 +405,7 @@ async def execute(
     if fenced is None:
         # Lost ownership between claim and CAS → never dispatch, never write a terminal/reconciliation
         # field, never create a second log; the row stays owned by whoever holds the current generation.
-        return _reconcile(rec.id, action_type, target_mp, spec, "OPERATION_IN_PROGRESS",
+        return _reconcile(log_id, action_type, target_mp, spec, "OPERATION_IN_PROGRESS",
                           "операция уже выполняется")
     # Sync the ORM identity to the committed CAS state WITHOUT DB I/O (set_committed_value does not mark
     # the columns dirty), so the later terminal commit writes only status/result/finished_at and can never
