@@ -427,3 +427,95 @@ def test_pg_fencing_terminal_commit_failure_after_provider(monkeypatch):
         finally:
             await eng.dispose()
     _run(go())
+
+
+# ── G. REAL PostgreSQL lock_timeout at the CAS UPDATE (real row lock, not malformed SQL) → 0 dispatch ──
+def test_pg_fencing_cas_lock_timeout_zero_dispatch(monkeypatch):
+    from sqlalchemy import text
+    from services.marketplace import executor as ex
+    _ensure_schema(monkeypatch)
+    c = {"n": 0}; _install_stub(monkeypatch, c)
+    orig_token = ex._resolve_token
+
+    async def go():
+        engB, SB = _sessionmaker()
+        engA, SA = _sessionmaker()          # independent connection for the lock holder
+        holder = {"db": None}
+
+        async def _barrier(db, connection_id, scope):
+            # TEST BARRIER ONLY (reuses the existing pre-CAS token resolver; no production hook added).
+            # Runs AFTER the claim commit and BEFORE the fencing CAS. Here: (1) a SEPARATE session A takes
+            # a real FOR UPDATE row lock on B's pending claim; (2) B's session gets a tiny lock_timeout.
+            rid = (await db.execute(text(
+                "SELECT id FROM execution_logs WHERE connection_id=:c AND status='pending' "
+                "AND dispatch_started_at IS NULL"), {"c": connection_id})).scalar()
+            dbA = SA()
+            await dbA.execute(text("SELECT id FROM execution_logs WHERE id=:id FOR UPDATE"), {"id": rid})
+            holder["db"] = dbA              # A holds the lock in an open transaction (idle, not awaiting)
+            await db.execute(text("SET lock_timeout = '150ms'"))   # session-level, persists to the CAS
+            return await orig_token(db, connection_id, scope)
+        monkeypatch.setattr(ex, "_resolve_token", _barrier)
+
+        try:
+            uid, _ = await _seed_user(SB)
+            r = await _publish(SB, uid, _rk())     # the real _FENCE_CAS UPDATE blocks on A's lock → lock_timeout
+            assert c["n"] == 0                                   # provider never reached
+            assert r.status == "needs_reconcile" and r.error["code"] == "CLAIM_CAS_ERROR"
+            row = await _row(SB, uid)
+            assert row.status == "pending" and row.dispatch_started_at is None
+            assert row.attempt_count == 0 and row.last_attempt_at is None      # CAS never landed
+            assert row.claim_generation == 0                     # unchanged
+        finally:
+            if holder["db"] is not None:
+                await holder["db"].rollback(); await holder["db"].close()
+            await engA.dispose(); await engB.dispose()
+    _run(go())
+
+
+# ── H. deterministic failure of the CAS COMMIT itself (2nd commit) via a test-only Session subclass ──
+def test_pg_fencing_cas_commit_failure_zero_dispatch(monkeypatch):
+    from sqlalchemy.exc import SQLAlchemyError
+    _ensure_schema(monkeypatch)
+    c = {"n": 0}
+    st = {"dispatched": False}
+    from services.marketplace.wb_client import wb_client
+
+    async def _fake(*, token, feedback_id, text):        # provider must never be reached
+        c["n"] += 1; st["dispatched"] = True
+        return {"api_request_id": "req"}
+    monkeypatch.setattr(wb_client, "publish_feedback_answer", _fake)
+
+    class _CASCommitFailSession(AsyncSession):
+        # commit #1 = the claim INSERT commit (runs for real); commit #2 = the fencing-CAS commit
+        # (structurally after the real CAS UPDATE, before spec.dispatch) → deterministically fail it,
+        # raising BEFORE any real commit IO so the connection stays healthy for the executor's rollback.
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            self._n_commit = 0
+
+        async def commit(self):
+            self._n_commit += 1
+            if self._n_commit == 1:
+                return await super().commit()            # real claim commit
+            assert self._n_commit == 2                   # phase: the 2nd commit IS the CAS commit
+            assert not st["dispatched"]                  # phase: provider not yet called
+            raise SQLAlchemyError("injected CAS COMMIT failure (2nd commit)")
+
+    async def go():
+        from sqlalchemy.orm import sessionmaker
+        eng = create_async_engine(_pg_async_url())
+        S = sessionmaker(eng, class_=_CASCommitFailSession, expire_on_commit=False)
+        try:
+            uid, _ = await _seed_user(S)
+            r = await _publish(S, uid, _rk())
+            assert c["n"] == 0                                   # provider never reached
+            assert r.status == "needs_reconcile" and r.error["code"] == "CLAIM_CAS_ERROR"
+            # a separate, normal verification session sees the fully-rolled-back CAS
+            _, SV = _sessionmaker()
+            row = await _row(SV, uid)
+            assert row.status == "pending" and row.dispatch_started_at is None
+            assert row.attempt_count == 0 and row.last_attempt_at is None   # CAS UPDATE ran then rolled back
+            assert row.claim_generation == 0
+        finally:
+            await eng.dispose()
+    _run(go())
