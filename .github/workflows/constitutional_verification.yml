@@ -190,7 +190,19 @@ jobs:
             tests/test_recovery_sweep_pg.py::test_pg_read_timeout_is_still_unknown \
             tests/test_recovery_sweep_pg.py::test_pg_flag_off_zero_everything \
             tests/test_legal_1a_chat_migration_pg.py::test_pg_legal1a_seeded_roundtrip \
-            tests/test_legal_1b_remove_behavioral_migration_pg.py::test_pg_legal1b_seeded_roundtrip
+            tests/test_legal_1b_remove_behavioral_migration_pg.py::test_pg_legal1b_seeded_roundtrip \
+            tests/test_execlog_fencing_cas_pg.py::test_pg_fencing_single_dispatch_sets_fields \
+            tests/test_execlog_fencing_cas_pg.py::test_pg_fencing_concurrent_one_dispatch \
+            tests/test_execlog_fencing_cas_pg.py::test_pg_fencing_cas_predicate_generation \
+            tests/test_execlog_fencing_cas_pg.py::test_pg_fencing_cas_rejects_dsa_set \
+            tests/test_execlog_fencing_cas_pg.py::test_pg_fencing_reown_during_execute_zero_dispatch \
+            tests/test_execlog_fencing_cas_pg.py::test_pg_fencing_crash_after_cas_no_auto_retry \
+            tests/test_execlog_fencing_cas_pg.py::test_pg_fencing_ambiguous_keeps_fields_no_retry \
+            tests/test_execlog_fencing_cas_pg.py::test_pg_fencing_migration_seeded_roundtrip \
+            tests/test_execlog_fencing_cas_pg.py::test_pg_fencing_cas_lock_timeout_zero_dispatch \
+            tests/test_execlog_fencing_cas_pg.py::test_pg_fencing_cas_commit_failure_zero_dispatch \
+            tests/test_execlog_fencing_cas_pg.py::test_pg_fencing_business_failure_then_retry_zero \
+            tests/test_execlog_fencing_cas_pg.py::test_pg_fencing_terminal_commit_failure_after_provider
 
   # Proves the FULL Alembic chain runs on the database production actually uses. The chain was
   # historically only exercised on SQLite, which has no strict boolean type and silently accepted an

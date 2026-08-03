@@ -70,6 +70,13 @@ class ExecutionLog(Base):
     last_reconciled_at      = Column(DateTime(timezone=True), nullable=True)
     next_reconcile_at       = Column(DateTime(timezone=True), nullable=True)
 
+    # SECURITY-2D-1C-C1 — dispatch-attempt accounting, written ONLY by the executor's fencing CAS
+    # (pending→in_flight). attempt_count is incremented inside the same atomic UPDATE that takes
+    # in_flight, so it counts provable dispatch attempts (each a won ownership CAS); last_attempt_at
+    # records when. A future controlled re-own (1C-C2) bounds retries on attempt_count. No PII.
+    attempt_count  = Column(Integer, nullable=False, server_default="0", default=0)
+    last_attempt_at = Column(DateTime(timezone=True), nullable=True)
+
     __table_args__ = (
         Index("ix_execlog_user", "user_id"),
         Index("ix_execlog_user_action", "user_id", "action_type"),
@@ -88,4 +95,6 @@ class ExecutionLog(Base):
             f"reconciliation_status IS NULL OR reconciliation_status IN ({_RECON_IN})",
             name="ck_execlog_reconciliation_status"),
         CheckConstraint("reconciliation_attempts >= 0", name="ck_execlog_reconciliation_attempts_nonneg"),
+        # SECURITY-2D-1C-C1 — dispatch-attempt counter is non-negative.
+        CheckConstraint("attempt_count >= 0", name="ck_execlog_attempt_count_nonneg"),
     )

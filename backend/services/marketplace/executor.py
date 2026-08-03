@@ -10,9 +10,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import or_, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import or_, select, text, bindparam
+from sqlalchemy import DateTime as _SA_DateTime, Integer as _SA_Integer, String as _SA_String
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import set_committed_value
 
 from models.marketplace_connection import MarketplaceConnection
 from models.api_credential import ApiCredential
@@ -27,6 +29,26 @@ from .errors import ExecutionError
 from .ozon_performance_auth import PERFORMANCE_SCOPE
 
 log = logging.getLogger(__name__)
+
+# SECURITY-2D-1C-C1 — fencing ownership CAS. The pending→in_flight transition is a SINGLE atomic guarded
+# UPDATE: it takes in_flight (and stamps dispatch_started_at + increments attempt_count) ONLY while the
+# row is still an un-dispatched claim (status='pending', dispatch_started_at IS NULL) that THIS worker
+# owns (claim_generation = the generation on its own claim). A worker that lost ownership to a future
+# controlled re-own (which increments claim_generation) matches nothing → RETURNING is empty → it makes
+# ZERO provider calls. No SELECT→UPDATE, no Python read-modify-write. Binds are typed so it runs on real
+# PostgreSQL (asyncpg) as well as SQLite.
+_FENCE_CAS = text(
+    "UPDATE execution_logs "
+    "SET status='in_flight', dispatch_started_at=:now, "
+    "    attempt_count=attempt_count+1, last_attempt_at=:now "
+    "WHERE id=:id AND status='pending' AND dispatch_started_at IS NULL "
+    "  AND claim_generation=:gen "
+    "RETURNING id, status, dispatch_started_at, attempt_count, last_attempt_at, claim_generation"
+).bindparams(
+    bindparam("now", type_=_SA_DateTime(timezone=True)),
+    bindparam("gen", type_=_SA_Integer()),
+    bindparam("id", type_=_SA_String()),
+)
 
 # action_type → capability_registry key (existing vocabulary only). Actions with
 # no registry write-capability key (set_price, update_card) are intentionally
@@ -327,24 +349,74 @@ async def execute(
         ).scalars().first()
         return _resolve_existing(existing, fp, spec, action_type, target_mp)
     await db.refresh(rec)
+    # SECURITY-2D-1C-C1 — the generation THIS worker owns is the one on its own freshly-created claim.
+    # Captured here and never re-read right before the CAS: re-reading could adopt a generation a
+    # concurrent re-own just bumped, defeating the fence.
+    owned_generation = rec.claim_generation
+    # Capture the log id into a local BEFORE the CAS: a CAS-phase rollback EXPIRES the ORM instance, so
+    # reading rec.id afterwards would trigger a sync lazy-load (MissingGreenlet on async drivers) and mask
+    # the safe needs_reconcile. The id is immutable, so the local is always correct.
+    log_id = rec.id
 
-    # Winner → in_flight; stamp dispatch_started_at (tz-aware) in the SAME commit, immediately before the
-    # provider call, so a crash after this point is provably post-claim and is never auto-retried.
-    rec.status = "in_flight"
-    rec.dispatch_started_at = datetime.now(timezone.utc)
-    await db.commit()
-
-    ctx = {"marketplace": conn.marketplace, "ozon_client_id": conn.ozon_client_id,
-           "db": db, "connection_id": conn.id,
-           # Discovered once during sync and cached on the credential row; a provider that scopes
-           # its calls to an account (Yandex addresses reviews by cabinet) needs it to publish too.
-           "account_ref": await _account_ref(db, conn.id, spec.required_scope)}
-
-    # 7) fetch token (vault) + 8) dispatch
+    # Resolve the dispatch context + token BEFORE the fencing CAS, so between the CAS commit and the
+    # provider call there are ZERO further DB reads. A credential/token failure here happens while the row
+    # is still an un-dispatched pending claim (no provider call) and is recorded as a clean 'failed'.
     try:
-        # Ozon campaign_control resolves its bearer in-dispatch (Performance OAuth);
-        # no static scoped token to fetch. All other actions fetch as before.
+        account_ref = await _account_ref(db, conn.id, spec.required_scope)
+        # Ozon campaign_control resolves its bearer in-dispatch (Performance OAuth); no static token.
         token = None if ozon_perf else await _resolve_token(db, conn.id, spec.required_scope)
+    except ExecutionError as e:
+        rec.status = "failed"
+        rec.error_code = e.code
+        rec.finished_at = datetime.utcnow()
+        await db.commit()
+        log.warning("execution pre-dispatch failed: user=%s action=%s code=%s",
+                    user_id, action_type, e.code)
+        return ExecutionResult(rec.id, "failed", action_type, target_mp, error=e.to_dict())
+    ctx = {"marketplace": conn.marketplace, "ozon_client_id": conn.ozon_client_id,
+           "db": db, "connection_id": conn.id, "account_ref": account_ref}
+
+    # FENCING CAS — take in_flight ONLY if we still own the un-dispatched claim (status pending,
+    # dispatch_started_at NULL, our generation). RETURNING empty → ownership lost → ZERO provider calls.
+    # The commit completes BEFORE dispatch, so a crash after this point is provably post-claim
+    # (in_flight, dispatch_started_at set) and is never auto-retried.
+    now = datetime.now(timezone.utc)
+    try:
+        fenced = (await db.execute(
+            _FENCE_CAS, {"id": rec.id, "now": now, "gen": owned_generation})).first()
+        await db.commit()
+    except SQLAlchemyError:
+        # A CAS-phase DB error (lock timeout, connection loss, a failing commit) is fail-closed: the CAS
+        # neither committed in_flight nor dispatched, so the row is already a safe un-dispatched pending
+        # claim. Roll back BEST-EFFORT — some async-driver error states cannot roll back cleanly on the
+        # same connection (the session is discarded by its caller's context manager, which returns the
+        # connection and drops the uncommitted CAS); a secondary rollback error must NEVER mask the safe
+        # needs_reconcile return. Provider dispatch stays structurally unreachable (0 calls).
+        try:
+            await db.rollback()
+        except Exception:  # noqa: BLE001 — never surface a secondary teardown error over the safe result
+            pass
+        log.warning("execution fencing CAS infra error: user=%s action=%s", user_id, action_type)
+        return ExecutionResult(log_id, "needs_reconcile", action_type, target_mp,
+                               error={"code": "CLAIM_CAS_ERROR",
+                                      "detail": "не удалось подтвердить владение операцией — повторите позже",
+                                      "retryable": False},
+                               reversible=spec.reversible)
+    if fenced is None:
+        # Lost ownership between claim and CAS → never dispatch, never write a terminal/reconciliation
+        # field, never create a second log; the row stays owned by whoever holds the current generation.
+        return _reconcile(log_id, action_type, target_mp, spec, "OPERATION_IN_PROGRESS",
+                          "операция уже выполняется")
+    # Sync the ORM identity to the committed CAS state WITHOUT DB I/O (set_committed_value does not mark
+    # the columns dirty), so the later terminal commit writes only status/result/finished_at and can never
+    # clobber the CAS-set dispatch_started_at / attempt_count / last_attempt_at / claim_generation.
+    set_committed_value(rec, "status", "in_flight")
+    set_committed_value(rec, "dispatch_started_at", now)
+    set_committed_value(rec, "attempt_count", fenced.attempt_count)
+    set_committed_value(rec, "last_attempt_at", now)
+
+    # 8) dispatch — NO DB query between the CAS commit above and this provider call.
+    try:
         result = await spec.dispatch(token, payload, ctx)
     except ExecutionError as e:
         # AR5: a TIMEOUT / 5XX after the request left is AMBIGUOUS — the write may have committed,
