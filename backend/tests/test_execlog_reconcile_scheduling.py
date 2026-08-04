@@ -100,4 +100,4 @@ def test_create_all_parity(tmp_path):
 def test_single_head_rcb():
     from alembic.config import Config
     from alembic.script import ScriptDirectory
-    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["rwn1a2b3c4d01"]
+    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["rop1a2b3c4d01"]

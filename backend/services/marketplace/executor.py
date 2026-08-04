@@ -8,7 +8,6 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from decimal import Decimal
 
 from sqlalchemy import or_, select, text, bindparam
 from sqlalchemy import DateTime as _SA_DateTime, Integer as _SA_Integer, String as _SA_String
@@ -24,7 +23,13 @@ from config import settings
 from services import capability_registry
 
 from . import action_catalog, guard, credential_vault, operation_key
-from .request_fingerprint import request_fingerprint
+# SECURITY-2D-1C-C3A — the pure fingerprint helpers were relocated to operation_fingerprint (no executor
+# import cycle) so a read-only consumer can recompute a stored row's fingerprint WITHOUT importing this
+# module. Re-exported here UNCHANGED so every existing `executor._money` / `_fingerprint` / `_fp_inputs`
+# caller keeps working and the fp1 goldens are byte-identical.
+from .operation_fingerprint import (  # noqa: F401 — re-exported for backward-compatible callers
+    _FP_VOLATILE, _money, _clean_floats, _fp_inputs, compute_fingerprint as _fingerprint,
+)
 from .errors import ExecutionError
 from .ozon_performance_auth import PERFORMANCE_SCOPE
 
@@ -506,60 +511,9 @@ def _safe_result(result: dict) -> dict:
     return {k: v for k, v in result.items() if k != "token"}
 
 
-# ── SECURITY-2D-1B-B — fingerprint / legacy-alias / claim-resolve helpers ─────
-_FP_VOLATILE = {"old_price", "old_cpm", "step_pct", "old_card", "insight_key", "rating"}
-
-
-def _money(v):
-    """Money/price/cpm → a scale-preserving string (never a float — the fp1 helper rejects floats)."""
-    if v is None or isinstance(v, str) or isinstance(v, bool):
-        return v                                # bool is an int subclass — keep it distinct, not money
-    if isinstance(v, (float, Decimal)):
-        return str(Decimal(str(v)))
-    return v                                    # int kept exact
-
-
-def _clean_floats(obj):
-    """Recursively convert any float to a scale-preserving string; list order preserved."""
-    if isinstance(obj, bool):
-        return obj
-    if isinstance(obj, float):
-        return str(Decimal(str(obj)))
-    if isinstance(obj, dict):
-        return {k: _clean_floats(v) for k, v in obj.items()}
-    if isinstance(obj, (list, tuple)):
-        return [_clean_floats(v) for v in obj]
-    return obj
-
-
-def _fp_inputs(action_type: str, payload: dict) -> tuple[dict, dict]:
-    """(target, params) for the fingerprint — curated per action, volatile evidence excluded, money
-    normalized to strings. The KEY (identity) is NOT here; this describes only WHAT the op does."""
-    p = payload or {}
-    if action_type == "set_price":
-        return {"offer_id": p.get("offer_id")}, {"price": _money(p.get("price"))}
-    if action_type == "publish_review_response":
-        return {"feedback_id": p.get("feedback_id")}, {"text": p.get("text")}
-    if action_type == "ad_set_bid":
-        return ({"campaign_id": p.get("campaign_id"), "adv_type": p.get("adv_type")},
-                {"cpm": _money(p.get("cpm"))})
-    if action_type == "ad_set_state":
-        return {"campaign_id": p.get("campaign_id")}, {"action": p.get("action")}
-    if action_type == "update_card":
-        return {"offer_id": p.get("offer_id")}, {"card": _clean_floats(p.get("card"))}
-    # generic (decision overrides / /execute): exclude known-volatile keys, normalize floats.
-    params = {k: _clean_floats(v) for k, v in p.items()
-              if k not in _FP_VOLATILE and k != "marketplace"}
-    return {}, params
-
-
-def _fingerprint(user_id, connection_id, marketplace, action_type, mode, payload, reverted_from) -> str:
-    target, params = _fp_inputs(action_type, payload)
-    return request_fingerprint(
-        user_id=user_id, connection_id=connection_id, marketplace=marketplace,
-        action_type=action_type, mode=mode, target=target, params=params,
-        reverted_from=reverted_from,
-    )
+# ── SECURITY-2D-1B-B — legacy-alias / claim-resolve helpers ───────────────────
+# (the pure fingerprint helpers now live in operation_fingerprint and are re-exported at the top of this
+#  module: _FP_VOLATILE, _money, _clean_floats, _fp_inputs, _fingerprint.)
 
 
 async def _legacy_alias_hit(db, user_id, op_key, decision_id) -> bool:

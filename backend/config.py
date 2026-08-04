@@ -176,6 +176,19 @@ class Settings(BaseSettings):
             raise ValueError("recovery_reown_batch_size must be in 1..10000")
         return v
 
+    # ── SECURITY-2D-1C-C3A — READ-ONLY operator recovery perimeter ───────────────────────────────────
+    # A separate machine-to-machine security boundary for the internal operator recovery view, kept
+    # DISTINCT from the shared internal_api_key (promo / cron) so the operator credential can be rotated
+    # and scoped on its own. C3A is READ-ONLY: with recovery_operator_enabled False the endpoints do not
+    # exist (neutral 404 before any DB query); when on they still only LIST/READ disputed ExecutionLog
+    # rows — no mutation, no executor/provider call, no redispatch (that is a future C3C behind its own
+    # separate flag). fail-closed: any of the three settings empty → every caller rejected. The actor id
+    # and the tenant user_id are taken ONLY from this server-side config — never from a client header.
+    recovery_operator_enabled: bool = False
+    recovery_operator_api_key: str = ""      # personal operator key; compared constant-time; never logged
+    recovery_operator_id: str = ""           # server-side actor identity written into the audit trail
+    recovery_operator_user_id: str = ""      # the single tenant this operator key may read; forced server-side
+
     # How many products one connection's review auto-sync processes per scheduler cycle. A conservative
     # technical default (NOT an official WB/Ozon rate limit) that bounds the request burst; the cursor
     # advances by this many products each 15-min sync so a large store is covered over several cycles

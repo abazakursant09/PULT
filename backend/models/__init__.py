@@ -52,6 +52,9 @@ from .store_data_source_policy import StoreDataSourcePolicy
 # ExecutionLog is registered in the package so execution_logs is always in Base.metadata
 # (protection_action_states carries a real FK to it, and create_all must be able to resolve it).
 from .execution_log import ExecutionLog
+# SECURITY-2D-1C-C3A — append-only operator recovery audit (schema only; no writer in C3A). Registered
+# here so execution_recovery_audit is in Base.metadata and its FK to execution_logs resolves at create_all.
+from .execution_recovery_audit import ExecutionRecoveryAudit
 # Loss-promotion protection — schema foundation, feature OFF (PULT-LAUNCH-2.3)
 from .protection import (
     ProtectionPolicy, ProtectionTaxSetting, ProtectionAdditionalCost,

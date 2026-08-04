@@ -182,4 +182,4 @@ def test_existing_finance_summary_unaffected():
 def test_single_head():
     from alembic.config import Config
     from alembic.script import ScriptDirectory
-    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["rwn1a2b3c4d01"]
+    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["rop1a2b3c4d01"]
