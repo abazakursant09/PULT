@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, Float, Integer, Index, ForeignKey
+from sqlalchemy import Column, String, DateTime, Float, Integer, Index, ForeignKey, CheckConstraint
 from database import Base
 
 
@@ -36,4 +36,8 @@ class ImportedFinanceRow(Base):
     __table_args__ = (
         Index("ix_imp_finance_user_mp", "user_id", "marketplace"),
         Index("ix_imp_finance_product_id", "product_id"),
+        # PULT-LAUNCH-1.4.4 parity — declare the link_status CHECK the imp4 migration already created
+        # in the DB, so model metadata matches the Alembic head (alembic check clean). No DB change.
+        CheckConstraint("link_status IN ('linked','unassigned','conflict')",
+                        name="ck_imported_finance_rows_link_status"),
     )

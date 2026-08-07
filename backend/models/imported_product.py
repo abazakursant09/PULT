@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, Float, Integer, Index, ForeignKey, text
+from sqlalchemy import Column, String, DateTime, Float, Integer, Index, ForeignKey, text, CheckConstraint
 from database import Base
 
 
@@ -47,4 +47,8 @@ class ImportedProductRow(Base):
               "source", "external_row_id", unique=True,
               sqlite_where=text("external_row_id IS NOT NULL"),
               postgresql_where=text("external_row_id IS NOT NULL")),
+        # PULT-LAUNCH-1.4.4 parity — declare the link_status CHECK the imp4 migration already created
+        # in the DB, so model metadata matches the Alembic head (alembic check clean). No DB change.
+        CheckConstraint("link_status IN ('linked','unassigned','conflict')",
+                        name="ck_imported_product_rows_link_status"),
     )
