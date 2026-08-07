@@ -238,12 +238,16 @@ def test_no_dispatch_execute_reown_reconcile_calls():
             assert name not in src, f"read-only contour must not reference {name}"
 
 
-def test_router_not_added_to_csrf_exemptions():
-    csrf = _src("csrf.py")
-    assert "internal/recovery" not in csrf and "internal_recovery" not in csrf
+def test_router_not_added_to_broad_csrf_exemption():
+    # C3A GET is not a state method (never CSRF-checked). C3B adds a NARROW POST exemption for exactly the
+    # three resolution routes (test_operator_resolve.test_csrf_exemption_is_narrow proves the scope); this
+    # guard only forbids a BROAD prefix/exact bypass of the /api/internal/recovery tree.
+    from csrf import _EXEMPT_PREFIX, _EXEMPT_EXACT
+    assert not any("internal/recovery" in p for p in _EXEMPT_PREFIX)
+    assert not any("internal/recovery" in p for p in _EXEMPT_EXACT)
 
 
 def test_alembic_single_head_is_rop():
     from alembic.config import Config
     from alembic.script import ScriptDirectory
-    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["rop1a2b3c4d01"]
+    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["rob1a2b3c4d01"]

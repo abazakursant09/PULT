@@ -16,17 +16,18 @@ from __future__ import annotations
 
 import hmac
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
-from pydantic import BaseModel
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Response, status
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import and_, or_, select
 
 from config import settings
 from database import AsyncSessionLocal
 from models.execution_log import ExecutionLog
-from services.marketplace.recovery import operator_view
+from services.marketplace.operation_key import canonical_client_uuid, OperationKeyError
+from services.marketplace.recovery import operator_view, operator_resolve
 
 router = APIRouter()
 
@@ -183,3 +184,103 @@ async def get_operation(
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
     return _project(row)
+
+
+# ── SECURITY-2D-1C-C3B — manual operator resolution (POST) ────────────────────────────────────────────
+class ResolveBody(BaseModel):
+    """Optional body — ONLY an allowlisted reason_code. No manual_resolution / action / correlation_id /
+    actor_id / user_id / free comment; unknown fields are rejected."""
+    model_config = ConfigDict(extra="forbid")
+    reason_code: Optional[str] = None
+
+
+class _AuditOutcome(BaseModel):
+    audit_id: str
+    execution_log_id: str
+    action: str
+    previous_status: Optional[str] = None
+    previous_resolution: Optional[str] = None
+    new_resolution: Optional[str] = None
+    reason_code: str
+    actor_id: str
+    correlation_id: str
+    created_at: Optional[datetime] = None
+    result_code: str            # APPLIED | CACHED
+
+
+class ResolveResponse(BaseModel):
+    # The idempotent record of THIS request (reconstructed from the immutable audit row — never faked from
+    # the current denormalized resolution, which a later correction may already have changed).
+    idempotent_result: _AuditOutcome
+    # The current safe read-only projection of the operation (may reflect a later correction).
+    current_operation: OperatorOperationView
+
+
+async def _current_projection(log_id: str, tenant_user_id: str) -> Optional[OperatorOperationView]:
+    async with AsyncSessionLocal() as db:
+        row = (await db.execute(select(ExecutionLog).where(
+            ExecutionLog.id == log_id, ExecutionLog.user_id == tenant_user_id))).scalars().first()
+    return _project(row) if row is not None else None
+
+
+async def _do_resolve(action: str, log_id: str, ctx: _OperatorContext,
+                      idem_key: Optional[str], body: Optional[ResolveBody]) -> ResolveResponse:
+    # Mandatory canonical UUIDv4 Idempotency-Key (header only; never body/server-generated/target_reference).
+    try:
+        correlation_id = canonical_client_uuid(idem_key)
+    except OperationKeyError:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail="Idempotency-Key must be a canonical lowercase UUIDv4")
+    # Optional reason_code — only from THIS action's allowlist (client can't use another action's reason).
+    reason_code = body.reason_code if body is not None else None
+    if reason_code is not None and reason_code not in operator_resolve.allowed_reasons(action):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid reason_code")
+
+    out = await operator_resolve.resolve(
+        log_id=log_id, tenant_user_id=ctx.user_id, action=action, actor_id=ctx.operator_id,
+        correlation_id=correlation_id, reason_code=reason_code, now=datetime.now(timezone.utc))
+
+    if out.status == "not_found":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
+    if out.status == "not_open":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail="OPERATION_NOT_OPEN_FOR_MANUAL_RESOLUTION")
+    if out.status == "unverified":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail="UNVERIFIED_OPERATION_ONLY_CLOSE_ALLOWED")
+    if out.status == "mismatch":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="IDEMPOTENCY_MISMATCH")
+    if out.status not in ("ok", "cached") or out.audit is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail="could not record resolution — retry later")
+    current = await _current_projection(out.log_id, ctx.user_id)
+    if current is None:                                   # row vanished between commit and re-read
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
+    return ResolveResponse(idempotent_result=_AuditOutcome(**out.audit), current_operation=current)
+
+
+@router.post("/operations/{log_id}/confirm-applied", response_model=ResolveResponse)
+async def confirm_applied(log_id: str, response: Response,
+                          ctx: _OperatorContext = Depends(_require_operator),
+                          idem_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+                          body: Optional[ResolveBody] = Body(default=None)):
+    response.headers["Cache-Control"] = "no-store"
+    return await _do_resolve("confirm_applied", log_id, ctx, idem_key, body)
+
+
+@router.post("/operations/{log_id}/confirm-not-applied", response_model=ResolveResponse)
+async def confirm_not_applied(log_id: str, response: Response,
+                              ctx: _OperatorContext = Depends(_require_operator),
+                              idem_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+                              body: Optional[ResolveBody] = Body(default=None)):
+    response.headers["Cache-Control"] = "no-store"
+    return await _do_resolve("confirm_not_applied", log_id, ctx, idem_key, body)
+
+
+@router.post("/operations/{log_id}/close", response_model=ResolveResponse)
+async def close_operation(log_id: str, response: Response,
+                          ctx: _OperatorContext = Depends(_require_operator),
+                          idem_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+                          body: Optional[ResolveBody] = Body(default=None)):
+    response.headers["Cache-Control"] = "no-store"
+    return await _do_resolve("close", log_id, ctx, idem_key, body)

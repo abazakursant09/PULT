@@ -29,7 +29,7 @@ _SENSITIVE_KEY_PARTS = (
     "authorization", "cookie", "token", "secret", "password", "passwd", "pwd",
     "api_key", "apikey", "api-key", "client-id", "client_id", "client-secret", "client_secret",
     "credential", "jwt", "otp", "dsn", "private", "x-internal-key", "internal-key", "internal_key",
-    "session", "csrf", "signature",
+    "session", "csrf", "signature", "idempotency",
 )
 
 
