@@ -219,7 +219,19 @@ jobs:
             tests/test_reown_sweep_pg.py::test_pg_reown_poison_does_not_starve_valid \
             tests/test_reown_sweep_pg.py::test_pg_reown_dry_run_paginates_no_dup \
             tests/test_reown_sweep_pg.py::test_pg_reown_all_invalid_terminates \
-            tests/test_reown_sweep_pg.py::test_pg_reown_cas_pins_key_and_fingerprint
+            tests/test_reown_sweep_pg.py::test_pg_reown_cas_pins_key_and_fingerprint \
+            tests/test_operator_recovery_pg.py::test_pg_flag_off_neutral_404 \
+            tests/test_operator_recovery_pg.py::test_pg_wrong_or_missing_key_403 \
+            tests/test_operator_recovery_pg.py::test_pg_cookie_or_bearer_denied \
+            tests/test_operator_recovery_pg.py::test_pg_tenant_scope_only_configured_user \
+            tests/test_operator_recovery_pg.py::test_pg_cross_tenant_detail_404 \
+            tests/test_operator_recovery_pg.py::test_pg_list_keyset_pagination \
+            tests/test_operator_recovery_pg.py::test_pg_response_has_no_forbidden_field_or_value \
+            tests/test_operator_recovery_pg.py::test_pg_target_reference_stable_after_key_rotation \
+            tests/test_operator_recovery_pg.py::test_pg_target_reference_distinct_targets \
+            tests/test_operator_recovery_pg.py::test_pg_supported_for_retry_matrix \
+            tests/test_operator_recovery_pg.py::test_pg_get_does_not_mutate \
+            tests/test_operator_recovery_pg.py::test_pg_migration_seeded_roundtrip
 
   # Proves the FULL Alembic chain runs on the database production actually uses. The chain was
   # historically only exercised on SQLite, which has no strict boolean type and silently accepted an

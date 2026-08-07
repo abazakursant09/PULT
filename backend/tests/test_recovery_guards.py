@@ -52,11 +52,16 @@ def test_recovery_flags_default_off():
     assert s.recovery_reaper_dry_run is True          # fail-safe
 
 
-def test_no_operator_recovery_endpoint():
-    # no HTTP surface for recovery in 1C-B (operator workflow is 1C-C)
+def test_no_recovery_sweep_wired_to_http():
+    # 1C-B invariant retained under C3A: no recovery SWEEP (reaper / reconcile / re-own) is ever exposed
+    # over HTTP. The 1C-C3A read-only operator VIEW (routers/internal_recovery.py) is a SEPARATE, strictly
+    # read-only surface behind its own machine-to-machine key perimeter and its own guards
+    # (test_operator_recovery_readonly / _pg) — it lists/reads disputed rows and calls no sweep.
     routers = (_BE / "routers")
     for p in routers.glob("*.py"):
-        assert not re.search(r"/recovery|recovery_sweep|run_recovery", p.read_text(encoding="utf-8")), p.name
+        src = p.read_text(encoding="utf-8")
+        assert "recovery_sweep" not in src and "run_recovery" not in src \
+            and "run_reown_sweep" not in src, p.name
 
 
 def test_target_not_observed_semantic_lock():

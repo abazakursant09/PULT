@@ -17,6 +17,16 @@ _RECON_STATUSES = (
 )
 _RECON_IN = ", ".join(f"'{s}'" for s in _RECON_STATUSES)
 
+# SECURITY-2D-1C-C3A — the only allowed operator manual-resolution values (an operator's CONCLUSION about
+# a disputed op, distinct from the runtime `status`). ADDITIVE + UNWIRED in C3A (nothing writes them yet).
+# confirmed_applied / confirmed_not_applied are operator OBSERVATIONS with NO attribution to PULT and (per
+# the 1C design) NEVER by themselves authorise a retry; retry_authorized / manual_closed are terminal
+# operator dispositions. Longest value "confirmed_not_applied" is 21 chars → the column is String(24).
+_MANUAL_RESOLUTIONS = (
+    "confirmed_applied", "confirmed_not_applied", "retry_authorized", "manual_closed",
+)
+_MANUAL_RES_IN = ", ".join(f"'{s}'" for s in _MANUAL_RESOLUTIONS)
+
 
 class ExecutionLog(Base):
     """
@@ -85,6 +95,15 @@ class ExecutionLog(Base):
     reown_count    = Column(Integer, nullable=False, server_default="0", default=0)
     last_reowned_at = Column(DateTime(timezone=True), nullable=True)
 
+    # SECURITY-2D-1C-C3A — operator manual-resolution fields. ADDITIVE and UNWIRED in C3A: no runtime path
+    # writes them (the read-only operator view only READS). A future C3B operator action will set
+    # manual_resolution (operator's CONCLUSION) alongside an append-only ExecutionRecoveryAudit row; it is
+    # kept DISTINCT from status (runtime/provider state) so an operator conclusion never silently rewrites
+    # what actually happened at the provider. No PII.
+    manual_resolution = Column(String(24), nullable=True)
+    resolved_by       = Column(String(64), nullable=True)
+    resolved_at       = Column(DateTime(timezone=True), nullable=True)
+
     __table_args__ = (
         Index("ix_execlog_user", "user_id"),
         Index("ix_execlog_user_action", "user_id", "action_type"),
@@ -107,4 +126,8 @@ class ExecutionLog(Base):
         CheckConstraint("attempt_count >= 0", name="ck_execlog_attempt_count_nonneg"),
         # SECURITY-2D-1C-C2 — re-own counter is non-negative.
         CheckConstraint("reown_count >= 0", name="ck_execlog_reown_count_nonneg"),
+        # SECURITY-2D-1C-C3A — manual_resolution is NULL or one of the 4 allowed operator conclusions.
+        CheckConstraint(
+            f"manual_resolution IS NULL OR manual_resolution IN ({_MANUAL_RES_IN})",
+            name="ck_execlog_manual_resolution"),
     )
