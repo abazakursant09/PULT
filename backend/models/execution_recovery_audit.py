@@ -58,6 +58,12 @@ class ExecutionRecoveryAudit(Base):
         # the same correlation id + action is idempotent (no duplicate audit row).
         UniqueConstraint("execution_log_id", "correlation_id", "action",
                          name="uq_recovery_audit_op_corr_action"),
+        # SECURITY-2D-1C-C3B — GLOBAL idempotency: one operator Idempotency-Key (correlation_id) identifies
+        # exactly ONE logical request across the whole table. The composite above cannot detect the same
+        # key reused on a DIFFERENT log/action; this global UNIQUE makes such reuse a 409 mismatch instead
+        # of a silent second row. A genuine new intent always mints a fresh UUIDv4, so this never blocks
+        # legitimate work (a correction is a new key → a new audit row).
+        UniqueConstraint("correlation_id", name="uq_recovery_audit_correlation"),
         Index("ix_recovery_audit_execlog", "execution_log_id"),
         CheckConstraint(f"action IN ({_AUDIT_ACTION_IN})", name="ck_recovery_audit_action"),
         CheckConstraint(f"reason_code IN ({_REASON_CODE_IN})", name="ck_recovery_audit_reason_code"),

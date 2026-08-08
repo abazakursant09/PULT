@@ -40,6 +40,24 @@ _EXEMPT_EXACT = {
 }
 _EXEMPT_PREFIX = ("/api/admin/promo",)
 
+# SECURITY-2D-1C-C3B — NARROW exemption for the three machine-to-machine operator resolution POSTs. NOT a
+# broad `/api/internal/recovery` prefix bypass: only POST to exactly
+# /api/internal/recovery/operations/<log_id>/{confirm-applied|confirm-not-applied|close} is exempt. Every
+# such route is X-Internal-Key gated (routers.internal_recovery._require_operator) — no cookie-auth route
+# is ever released. Any other method, extra suffix, unknown action, or lookalike path stays protected.
+_RECOVERY_RESOLUTION_ACTIONS = frozenset({"confirm-applied", "confirm-not-applied", "close"})
+
+
+def _is_recovery_resolution_post(method: str, path: str) -> bool:
+    if method != "POST":
+        return False
+    parts = path.split("/")
+    # ['', 'api', 'internal', 'recovery', 'operations', '<log_id>', '<action>']
+    return (len(parts) == 7
+            and parts[:5] == ["", "api", "internal", "recovery", "operations"]
+            and parts[5] != ""
+            and parts[6] in _RECOVERY_RESOLUTION_ACTIONS)
+
 
 def _dev() -> bool:
     return (settings.app_env or "").strip().lower() in _DEV_ENVS
@@ -84,7 +102,9 @@ def _reject(reason: str) -> JSONResponse:
 class OriginCsrfMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         path = request.url.path
-        if request.method in _STATE_METHODS and path.startswith("/api/") and not _is_exempt(path):
+        if (request.method in _STATE_METHODS and path.startswith("/api/")
+                and not _is_exempt(path)
+                and not _is_recovery_resolution_post(request.method, path)):
             allowed = _allowed()
             origin = request.headers.get("origin")
             if origin is not None:

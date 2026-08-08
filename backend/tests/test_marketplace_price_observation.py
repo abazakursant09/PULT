@@ -407,7 +407,7 @@ def test_active_and_ended_are_separate_immutable_rows(conn):
 # ── MIGRATION / SCHEMA ──────────────────────────────────────────────────────────
 def test_single_alembic_head():
     heads = ScriptDirectory.from_config(Config("alembic.ini")).get_heads()
-    assert heads == ["rop1a2b3c4d01"], heads
+    assert heads == ["rob1a2b3c4d01"], heads
 
 
 def test_old_tables_preserved(conn):

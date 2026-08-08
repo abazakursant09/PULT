@@ -231,7 +231,32 @@ jobs:
             tests/test_operator_recovery_pg.py::test_pg_target_reference_distinct_targets \
             tests/test_operator_recovery_pg.py::test_pg_supported_for_retry_matrix \
             tests/test_operator_recovery_pg.py::test_pg_get_does_not_mutate \
-            tests/test_operator_recovery_pg.py::test_pg_migration_seeded_roundtrip
+            tests/test_operator_recovery_pg.py::test_pg_migration_seeded_roundtrip \
+            tests/test_operator_resolve_pg.py::test_pg_flag_off_neutral_404 \
+            tests/test_operator_resolve_pg.py::test_pg_wrong_or_missing_key_403 \
+            tests/test_operator_resolve_pg.py::test_pg_cookie_or_bearer_denied \
+            tests/test_operator_resolve_pg.py::test_pg_cross_tenant_404 \
+            tests/test_operator_resolve_pg.py::test_pg_confirm_applied_atomic \
+            tests/test_operator_resolve_pg.py::test_pg_confirm_not_applied_atomic \
+            tests/test_operator_resolve_pg.py::test_pg_close_atomic \
+            tests/test_operator_resolve_pg.py::test_pg_duplicate_idempotency_one_audit \
+            tests/test_operator_resolve_pg.py::test_pg_concurrent_same_request_one_audit \
+            tests/test_operator_resolve_pg.py::test_pg_same_key_different_action_or_log_or_reason_mismatch \
+            tests/test_operator_resolve_pg.py::test_pg_concurrent_different_decisions_serialize \
+            tests/test_operator_resolve_pg.py::test_pg_previous_captured_from_locked_row \
+            tests/test_operator_resolve_pg.py::test_pg_technical_fields_unchanged \
+            tests/test_operator_resolve_pg.py::test_pg_zero_provider_executor_calls \
+            tests/test_operator_resolve_pg.py::test_pg_response_no_forbidden_values \
+            tests/test_operator_resolve_pg.py::test_pg_correction_new_audit_old_unchanged \
+            tests/test_operator_resolve_pg.py::test_pg_manual_closed_transition_matrix \
+            tests/test_operator_resolve_pg.py::test_pg_unverified_confirm_denied_close_allowed \
+            tests/test_operator_resolve_pg.py::test_pg_non_disputed_409_not_open \
+            tests/test_operator_resolve_pg.py::test_pg_csrf_only_three_posts_exempt \
+            tests/test_operator_resolve_pg.py::test_pg_mismatch_path_no_greenlet_error \
+            tests/test_operator_resolve_pg.py::test_pg_migration_seeded_roundtrip \
+            tests/test_operator_resolve_pg.py::test_pg_commit_failure_before_rolls_back_both \
+            tests/test_operator_resolve_pg.py::test_pg_lost_ack_after_commit_persists_both_retry_cached \
+            tests/test_operator_resolve_pg.py::test_pg_audit_flush_failure_rolls_back
 
   # Proves the FULL Alembic chain runs on the database production actually uses. The chain was
   # historically only exercised on SQLite, which has no strict boolean type and silently accepted an
