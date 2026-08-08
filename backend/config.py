@@ -189,6 +189,18 @@ class Settings(BaseSettings):
     recovery_operator_id: str = ""           # server-side actor identity written into the audit trail
     recovery_operator_user_id: str = ""      # the single tenant this operator key may read; forced server-side
 
+    # SECURITY-2D-1C-C3C — master switch for the REAL operator authorize-and-resume of a stuck safe pending
+    # operation (the first contour that can reach a provider write). DECLARED here in C3C1, which builds
+    # ONLY the read-only eligibility foundation and creates NO dispatch path — this flag is not read by any
+    # runtime path in C3C1. The actual authorize+fencing+dispatch (guarded by this flag, fail-closed
+    # `is not True`) arrives in C3C2 and additionally requires recovery_operator_enabled is True; an
+    # automated_l4 row additionally requires automation_enabled is True. It is a SEPARATE gate:
+    # recovery_reown_enabled / api_data_sync_enabled / recovery_reaper_enabled do NOT substitute for it.
+    # OFF → the C3C2 endpoint is a neutral 404 before any DB/provider work. No seller control, no runtime
+    # enable endpoint. (No dry-run flag: a fake provider preview is forbidden, and C3A supported_for_retry
+    # already gives the preliminary indicator.)
+    recovery_redispatch_enabled: bool = False
+
     # How many products one connection's review auto-sync processes per scheduler cycle. A conservative
     # technical default (NOT an official WB/Ozon rate limit) that bounds the request burst; the cursor
     # advances by this many products each 15-min sync so a large store is covered over several cycles

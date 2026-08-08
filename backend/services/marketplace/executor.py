@@ -412,12 +412,28 @@ async def execute(
         # field, never create a second log; the row stays owned by whoever holds the current generation.
         return _reconcile(log_id, action_type, target_mp, spec, "OPERATION_IN_PROGRESS",
                           "операция уже выполняется")
+    # SECURITY-2D-1C-C3C1 — the post-fencing dispatch+terminal sequence is factored into ONE shared helper
+    # so there is exactly ONE provider-dispatch call-site in the whole backend (a guard test enforces this).
+    # The behaviour is byte-identical to the previous inline block; the future operator resume (C3C2) will
+    # call the SAME helper after its own fencing CAS, keeping a single provider-dispatch point.
+    return await _dispatch_and_finalize(
+        db, rec, spec, token, payload, ctx, reverted_from=reverted_from, user_id=user_id,
+        action_type=action_type, target_mp=target_mp, mode=mode, now=now,
+        fenced_attempt_count=fenced.attempt_count)
+
+
+async def _dispatch_and_finalize(db, rec, spec, token, payload, ctx, *, reverted_from, user_id,
+                                 action_type, target_mp, mode, now, fenced_attempt_count) -> ExecutionResult:
+    """The SINGLE provider-dispatch + terminal-persist sequence, shared by execute() (after its fencing
+    CAS commit) and — later — the operator resume (C3C2). Must be called ONLY after the row is already
+    committed in_flight with dispatch_started_at set; it performs exactly one provider dispatch and writes
+    the terminal state. Byte-identical to the pre-extraction inline block."""
     # Sync the ORM identity to the committed CAS state WITHOUT DB I/O (set_committed_value does not mark
     # the columns dirty), so the later terminal commit writes only status/result/finished_at and can never
     # clobber the CAS-set dispatch_started_at / attempt_count / last_attempt_at / claim_generation.
     set_committed_value(rec, "status", "in_flight")
     set_committed_value(rec, "dispatch_started_at", now)
-    set_committed_value(rec, "attempt_count", fenced.attempt_count)
+    set_committed_value(rec, "attempt_count", fenced_attempt_count)
     set_committed_value(rec, "last_attempt_at", now)
 
     # 8) dispatch — NO DB query between the CAS commit above and this provider call.
