@@ -174,13 +174,14 @@ def test_idempotency_cached_and_mismatch(monkeypatch):
 def test_csrf_exemption_is_narrow():
     from csrf import _is_recovery_resolution_post as ex
     uid = "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
-    for act in ("confirm-applied", "confirm-not-applied", "close"):
+    # authorize-retry became a valid exempt action in C3C2 (still one exact POST pattern per action).
+    for act in ("confirm-applied", "confirm-not-applied", "close", "authorize-retry"):
         assert ex("POST", f"/api/internal/recovery/operations/{uid}/{act}") is True
     # not POST
     assert ex("GET", f"/api/internal/recovery/operations/{uid}/close") is False
     assert ex("DELETE", f"/api/internal/recovery/operations/{uid}/close") is False
     # unknown action / extra suffix / missing log id / lookalikes
-    assert ex("POST", f"/api/internal/recovery/operations/{uid}/authorize-retry") is False
+    assert ex("POST", f"/api/internal/recovery/operations/{uid}/some-other-action") is False
     assert ex("POST", f"/api/internal/recovery/operations/{uid}/close/extra") is False
     assert ex("POST", "/api/internal/recovery/operations//close") is False
     assert ex("POST", f"/api/internal/recovery/operations/{uid}") is False
@@ -215,12 +216,14 @@ def test_writer_and_router_no_executor_or_provider_imports():
 
 
 def test_no_dispatch_retry_authorize_tokens():
-    for src in (_src("services", "marketplace", "recovery", "operator_resolve.py"),
-                _src("routers", "internal_recovery.py")):
-        for tok in ("executor.execute", ".execute(db=", "spec.dispatch", ".dispatch(", ".revert(",
-                    "publish_feedback_answer", "run_reown_sweep", "retry_authorized", "authorize_retry",
-                    "supported_for_retry ="):
-            assert tok not in src, f"C3B must not reference {tok}"
+    # The C3B writer must never dispatch or authorize a retry. Scoped to operator_resolve.py only — the
+    # router now also hosts the SEPARATE C3C2 authorize-retry endpoint (its own module/guards), so the
+    # router legitimately references authorize_retry / retry_authorized.
+    src = _src("services", "marketplace", "recovery", "operator_resolve.py")
+    for tok in ("executor.execute", ".execute(db=", "spec.dispatch", ".dispatch(", ".revert(",
+                "publish_feedback_answer", "run_reown_sweep", "retry_authorized", "authorize_retry",
+                "supported_for_retry ="):
+        assert tok not in src, f"C3B writer must not reference {tok}"
 
 
 def test_audit_is_append_only_in_source():

@@ -470,11 +470,13 @@ def test_pg_non_disputed_409_not_open(monkeypatch):
 
 
 # 25. lookalike CSRF paths are not exempt (predicate)
-def test_pg_csrf_only_three_posts_exempt():
+def test_pg_csrf_only_resolution_posts_exempt():
     from csrf import _is_recovery_resolution_post as ex
     uid = str(uuid.uuid4())
     assert ex("POST", f"/api/internal/recovery/operations/{uid}/close") is True
-    assert ex("POST", f"/api/internal/recovery/operations/{uid}/authorize-retry") is False
+    # authorize-retry is an exempt resolution POST as of C3C2
+    assert ex("POST", f"/api/internal/recovery/operations/{uid}/authorize-retry") is True
+    assert ex("POST", f"/api/internal/recovery/operations/{uid}/unknown-action") is False
     assert ex("PATCH", f"/api/internal/recovery/operations/{uid}/close") is False
 
 

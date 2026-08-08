@@ -251,7 +251,7 @@ jobs:
             tests/test_operator_resolve_pg.py::test_pg_manual_closed_transition_matrix \
             tests/test_operator_resolve_pg.py::test_pg_unverified_confirm_denied_close_allowed \
             tests/test_operator_resolve_pg.py::test_pg_non_disputed_409_not_open \
-            tests/test_operator_resolve_pg.py::test_pg_csrf_only_three_posts_exempt \
+            tests/test_operator_resolve_pg.py::test_pg_csrf_only_resolution_posts_exempt \
             tests/test_operator_resolve_pg.py::test_pg_mismatch_path_no_greenlet_error \
             tests/test_operator_resolve_pg.py::test_pg_migration_seeded_roundtrip \
             tests/test_operator_resolve_pg.py::test_pg_commit_failure_before_rolls_back_both \
@@ -261,7 +261,18 @@ jobs:
             tests/test_resume_eligibility_pg.py::test_pg_live_connection_credential_matrix \
             tests/test_resume_eligibility_pg.py::test_pg_live_automation_off_for_l4 \
             tests/test_resume_eligibility_pg.py::test_pg_revert_original_matrix \
-            tests/test_resume_eligibility_pg.py::test_pg_evaluate_resume_no_mutation_no_dispatch
+            tests/test_resume_eligibility_pg.py::test_pg_evaluate_resume_no_mutation_no_dispatch \
+            tests/test_operator_resume_pg.py::test_pg_safe_pending_one_dispatch \
+            tests/test_operator_resume_pg.py::test_pg_concurrent_authorize_one_dispatch \
+            tests/test_operator_resume_pg.py::test_pg_retry_same_request_no_second_dispatch \
+            tests/test_operator_resume_pg.py::test_pg_stale_generation_zero_dispatch \
+            tests/test_operator_resume_pg.py::test_pg_reown_between_read_and_cas_zero_stale \
+            tests/test_operator_resume_pg.py::test_pg_eligibility_denials_zero_dispatch \
+            tests/test_operator_resume_pg.py::test_pg_connection_credential_denials \
+            tests/test_operator_resume_pg.py::test_pg_audit_flush_failure_rolls_back \
+            tests/test_operator_resume_pg.py::test_pg_lost_ack_persists_no_second_dispatch \
+            tests/test_operator_resume_pg.py::test_pg_revert_resume_supported_and_unsupported \
+            tests/test_operator_resume_pg.py::test_pg_response_no_secret_leak
 
   # Proves the FULL Alembic chain runs on the database production actually uses. The chain was
   # historically only exercised on SQLite, which has no strict boolean type and silently accepted an
