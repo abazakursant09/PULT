@@ -275,18 +275,20 @@ def test_resume_eligibility_ast_no_mutation_calls():
             assert node.func.attr not in banned_attr, f"forbidden ORM mutation call .{node.func.attr}()"
 
 
-def test_no_c3c_endpoint_yet():
+def test_c3c2_authorize_endpoint_present_and_gated():
+    # C3C2 added the authorize-retry endpoint behind the redispatch gate. (This supersedes the C3C1
+    # "no endpoint yet" guard.)
     router = _src("routers", "internal_recovery.py")
-    assert "authorize-retry" not in router and "authorize_retry" not in router
+    assert "authorize-retry" in router and "_require_operator_redispatch" in router
 
 
-def test_flag_default_off_and_unread_in_c3c1_runtime():
+def test_flag_default_off_and_eligibility_flag_agnostic():
     from config import Settings
     assert Settings().recovery_redispatch_enabled is False
-    # C3C1 declares the flag but no runtime module reads it yet (real gate is C3C2).
-    for rel in (("services", "marketplace", "recovery", "resume_eligibility.py"),
-                ("routers", "internal_recovery.py")):
-        assert "recovery_redispatch_enabled" not in _src(*rel)
+    # The read-only eligibility module stays flag-agnostic (the real gate is the C3C2 router dependency,
+    # which DOES read recovery_redispatch_enabled).
+    assert "recovery_redispatch_enabled" not in _src("services", "marketplace", "recovery",
+                                                     "resume_eligibility.py")
 
 
 def test_reason_codes_closed_and_short():

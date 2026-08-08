@@ -40,12 +40,14 @@ _EXEMPT_EXACT = {
 }
 _EXEMPT_PREFIX = ("/api/admin/promo",)
 
-# SECURITY-2D-1C-C3B — NARROW exemption for the three machine-to-machine operator resolution POSTs. NOT a
-# broad `/api/internal/recovery` prefix bypass: only POST to exactly
-# /api/internal/recovery/operations/<log_id>/{confirm-applied|confirm-not-applied|close} is exempt. Every
-# such route is X-Internal-Key gated (routers.internal_recovery._require_operator) — no cookie-auth route
-# is ever released. Any other method, extra suffix, unknown action, or lookalike path stays protected.
-_RECOVERY_RESOLUTION_ACTIONS = frozenset({"confirm-applied", "confirm-not-applied", "close"})
+# SECURITY-2D-1C-C3B/C3C2 — NARROW exemption for the machine-to-machine operator POSTs. NOT a broad
+# `/api/internal/recovery` prefix bypass: only POST to exactly
+# /api/internal/recovery/operations/<log_id>/{confirm-applied|confirm-not-applied|close|authorize-retry}
+# is exempt. Every such route is X-Internal-Key gated (routers.internal_recovery._require_operator /
+# _require_operator_redispatch) — no cookie-auth route is ever released. Any other method, extra suffix,
+# unknown action, or lookalike path stays protected.
+_RECOVERY_RESOLUTION_ACTIONS = frozenset({"confirm-applied", "confirm-not-applied", "close",
+                                          "authorize-retry"})
 
 
 def _is_recovery_resolution_post(method: str, path: str) -> bool:

@@ -27,7 +27,7 @@ from config import settings
 from database import AsyncSessionLocal
 from models.execution_log import ExecutionLog
 from services.marketplace.operation_key import canonical_client_uuid, OperationKeyError
-from services.marketplace.recovery import operator_view, operator_resolve
+from services.marketplace.recovery import operator_view, operator_resolve, operator_resume
 
 router = APIRouter()
 
@@ -60,6 +60,20 @@ def _require_operator(x_internal_key: Optional[str] = Header(default=None, alias
     if not x_internal_key or not hmac.compare_digest(x_internal_key, key):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="internal access required")
     return _OperatorContext(operator_id=oid, user_id=uid)
+
+
+def _require_operator_redispatch(x_internal_key: Optional[str] = Header(default=None, alias="X-Internal-Key")
+                                 ) -> _OperatorContext:
+    """SECURITY-2D-1C-C3C2 — perimeter for the authorize-and-resume endpoint (the only provider-write
+    contour). BOTH master switches must be on, checked BEFORE any DB work: recovery_operator_enabled AND
+    recovery_redispatch_enabled. Either off → neutral 404 (0 DB / 0 token decrypt / 0 audit / 0 provider).
+    Then the same fail-closed operator-key check as the read-only perimeter. The automated_l4 automation
+    gate is row-specific and enforced inside resume()/evaluate_resume (a row's mode is not known here)."""
+    if settings.recovery_operator_enabled is not True:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
+    if settings.recovery_redispatch_enabled is not True:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
+    return _require_operator(x_internal_key)
 
 
 # ── strict allowlist response schemas (built field-by-field; the ORM row is NEVER model_dumped) ──────
@@ -284,3 +298,57 @@ async def close_operation(log_id: str, response: Response,
                           body: Optional[ResolveBody] = Body(default=None)):
     response.headers["Cache-Control"] = "no-store"
     return await _do_resolve("close", log_id, ctx, idem_key, body)
+
+
+# ── SECURITY-2D-1C-C3C2 — authorize-and-resume (the ONLY provider-write contour) ──────────────────────
+_AUTHORIZE_REASONS = frozenset({"operator_authorized_retry"})
+
+
+class AuthorizeResumeResponse(BaseModel):
+    # The idempotent record of THIS authorize request (from the immutable audit row).
+    idempotent_result: _AuditOutcome
+    # True only when THIS request performed the single provider dispatch. None = UNKNOWN — a CACHED replay
+    # of an already-recorded authorize: whether the original dispatch ran (or its result) is not knowable,
+    # so we never assert True/False. The honest signal is current_operation.status (e.g. in_flight →
+    # needs reconcile).
+    dispatch_attempted: Optional[bool] = None
+    # Terminal classification when THIS request dispatched (success | failed | ambiguous | ...); None on a
+    # cached replay — never a provider result attributed to a request that did not run the dispatch.
+    terminal_status: Optional[str] = None
+    # Current safe read-only projection of the operation (the honest current technical state).
+    current_operation: OperatorOperationView
+
+
+@router.post("/operations/{log_id}/authorize-retry", response_model=AuthorizeResumeResponse)
+async def authorize_retry(log_id: str, response: Response,
+                          ctx: _OperatorContext = Depends(_require_operator_redispatch),
+                          idem_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+                          body: Optional[ResolveBody] = Body(default=None)):
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        correlation_id = canonical_client_uuid(idem_key)
+    except OperationKeyError:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail="Idempotency-Key must be a canonical lowercase UUIDv4")
+    reason_code = body.reason_code if body is not None else None
+    if reason_code is not None and reason_code not in _AUTHORIZE_REASONS:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid reason_code")
+
+    out = await operator_resume.resume(
+        log_id=log_id, tenant_user_id=ctx.user_id, actor_id=ctx.operator_id,
+        correlation_id=correlation_id, reason_code=reason_code, now=datetime.now(timezone.utc))
+
+    if out.status == "not_found":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
+    if out.status == "conflict":
+        # Neutral 409 — the safe reason code never reveals which specific gate was lost.
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=(out.reason_code or "conflict"))
+    if out.status not in ("dispatched", "cached") or out.audit is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail="could not authorize resume — retry later")
+    current = await _current_projection(out.log_id, ctx.user_id)
+    if current is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
+    return AuthorizeResumeResponse(idempotent_result=_AuditOutcome(**out.audit),
+                                   dispatch_attempted=out.dispatch_attempted,
+                                   terminal_status=out.terminal_status, current_operation=current)
