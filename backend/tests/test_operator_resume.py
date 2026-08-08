@@ -154,7 +154,7 @@ def test_idempotency_cached_no_second_dispatch(monkeypatch):
             a = await _resume(rid, cid=cid)
             assert a.status == "dispatched" and prov["n"] == 1
             b = await _resume(rid, cid=cid)
-            assert b.status == "cached" and b.dispatch_attempted is False and prov["n"] == 1
+            assert b.status == "cached" and b.dispatch_attempted is None and prov["n"] == 1
             assert b.audit["audit_id"] == a.audit["audit_id"]
             assert await _audit_count(S) == 1
         finally:

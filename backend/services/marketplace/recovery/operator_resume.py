@@ -82,7 +82,11 @@ class ResumeResult:
     status: str                     # dispatched | cached | not_found | conflict | error
     reason_code: Optional[str] = None
     log_id: Optional[str] = None
-    dispatch_attempted: bool = False
+    # True only when THIS request performed the single dispatch. None = UNKNOWN — used for a CACHED
+    # replay: whether the ORIGINAL authorize's dispatch ran (or its result) is NOT knowable from the
+    # audit alone (e.g. a lost ACK after the pre-dispatch commit), so we never assert False/True here;
+    # the honest current state is current_operation.status.
+    dispatch_attempted: Optional[bool] = None
     terminal_status: Optional[str] = None   # success | failed | ambiguous | needs_reconcile | ...
     audit: Optional[dict] = None
 
@@ -218,8 +222,10 @@ async def _resolve_correlation(log_id: str, tenant_user_id: str, actor_id: str, 
                           and existing.reason_code == rc
                           and existing.actor_id == actor_id)
             if equivalent:
+                # CACHED replay: dispatch_attempted stays None (unknown) — we never claim the original's
+                # dispatch did/didn't happen; the caller reads current_operation.status to reconcile.
                 return ResumeResult(status="cached", log_id=existing.execution_log_id,
-                                    dispatch_attempted=False, audit=_audit_snapshot(existing, "CACHED"))
+                                    audit=_audit_snapshot(existing, "CACHED"))
             return ResumeResult(status="conflict", reason_code="idempotency_mismatch")
     except SQLAlchemyError:
         logger.warning("operator resume: idempotency-resolve infra error action=%s", _AUDIT_ACTION)

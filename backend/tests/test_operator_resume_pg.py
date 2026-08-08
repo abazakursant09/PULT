@@ -212,7 +212,7 @@ def test_pg_retry_same_request_no_second_dispatch(monkeypatch):
             cid = _cid()
             await _resume(orr, rid, cid=cid)
             b = await _resume(orr, rid, cid=cid)
-            assert b.status == "cached" and b.dispatch_attempted is False and prov["n"] == 1
+            assert b.status == "cached" and b.dispatch_attempted is None and prov["n"] == 1
             assert await _naudit(S) == 1
         finally:
             await eng.dispose()
@@ -389,7 +389,7 @@ def test_pg_lost_ack_persists_no_second_dispatch(monkeypatch):
             # the ack-lost happened at the pre-dispatch commit, before _dispatch_and_finalize)
             monkeypatch.setattr(m, "AsyncSessionLocal", S)
             b = await _resume(orr, rid, cid=cid)
-            assert b.status == "cached" and b.dispatch_attempted is False
+            assert b.status == "cached" and b.dispatch_attempted is None
             assert await _naudit(S) == 1
         finally:
             await eng.dispose()

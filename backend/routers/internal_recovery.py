@@ -307,11 +307,15 @@ _AUTHORIZE_REASONS = frozenset({"operator_authorized_retry"})
 class AuthorizeResumeResponse(BaseModel):
     # The idempotent record of THIS authorize request (from the immutable audit row).
     idempotent_result: _AuditOutcome
-    # Whether this request actually attempted a single provider dispatch (False on cached/conflict).
-    dispatch_attempted: bool
-    # Terminal classification of the dispatch, if attempted (success | failed | ambiguous | ...).
+    # True only when THIS request performed the single provider dispatch. None = UNKNOWN — a CACHED replay
+    # of an already-recorded authorize: whether the original dispatch ran (or its result) is not knowable,
+    # so we never assert True/False. The honest signal is current_operation.status (e.g. in_flight →
+    # needs reconcile).
+    dispatch_attempted: Optional[bool] = None
+    # Terminal classification when THIS request dispatched (success | failed | ambiguous | ...); None on a
+    # cached replay — never a provider result attributed to a request that did not run the dispatch.
     terminal_status: Optional[str] = None
-    # Current safe read-only projection of the operation.
+    # Current safe read-only projection of the operation (the honest current technical state).
     current_operation: OperatorOperationView
 
 
