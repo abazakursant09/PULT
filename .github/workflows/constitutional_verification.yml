@@ -256,7 +256,12 @@ jobs:
             tests/test_operator_resolve_pg.py::test_pg_migration_seeded_roundtrip \
             tests/test_operator_resolve_pg.py::test_pg_commit_failure_before_rolls_back_both \
             tests/test_operator_resolve_pg.py::test_pg_lost_ack_after_commit_persists_both_retry_cached \
-            tests/test_operator_resolve_pg.py::test_pg_audit_flush_failure_rolls_back
+            tests/test_operator_resolve_pg.py::test_pg_audit_flush_failure_rolls_back \
+            tests/test_resume_eligibility_pg.py::test_pg_live_connected_valid_preliminary_eligible \
+            tests/test_resume_eligibility_pg.py::test_pg_live_connection_credential_matrix \
+            tests/test_resume_eligibility_pg.py::test_pg_live_automation_off_for_l4 \
+            tests/test_resume_eligibility_pg.py::test_pg_revert_original_matrix \
+            tests/test_resume_eligibility_pg.py::test_pg_evaluate_resume_no_mutation_no_dispatch
 
   # Proves the FULL Alembic chain runs on the database production actually uses. The chain was
   # historically only exercised on SQLite, which has no strict boolean type and silently accepted an
