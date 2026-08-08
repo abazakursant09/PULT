@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 import pytest
 from fastapi import HTTPException, Response
 from sqlalchemy import create_engine, text, select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 
@@ -545,3 +546,147 @@ def test_pg_migration_seeded_roundtrip(monkeypatch):
     finally:
         eng.dispose()
         _SCHEMA_READY = False
+
+
+# ── fault-injection proofs (atomicity + lost-ACK honesty) ──────────────────────────────────────────────
+class _FaultSession(AsyncSession):
+    """AsyncSession whose flush/commit can be made to fail. mode:
+    None            -> normal
+    'flush'         -> flush() raises before any INSERT lands
+    'commit_before' -> commit() raises WITHOUT reaching the real underlying commit (nothing persists)
+    'commit_after'  -> commit() performs the REAL underlying commit, THEN raises (ACK lost to the app)
+    """
+    mode = None
+
+    async def flush(self, *a, **k):
+        if type(self).mode == "flush":
+            raise OperationalError("injected flush failure", None, Exception("boom"))
+        return await super().flush(*a, **k)
+
+    async def commit(self):
+        if type(self).mode == "commit_before":
+            raise OperationalError("injected pre-commit failure", None, Exception("boom"))
+        if type(self).mode == "commit_after":
+            await super().commit()
+            raise OperationalError("injected post-commit ACK loss", None, Exception("lost"))
+        return await super().commit()
+
+
+def _install_fault(monkeypatch, *, tenant=_TENANT):
+    ir = _set_perimeter(monkeypatch, enabled=True, key="OP-KEY", tenant=tenant)
+    eng = create_async_engine(_pg_async_url())
+    FaultSession = sessionmaker(eng, class_=_FaultSession, expire_on_commit=False)
+    ReadSession = sessionmaker(eng, class_=AsyncSession, expire_on_commit=False)
+    from services.marketplace.recovery import operator_resolve as orv
+    monkeypatch.setattr(orv, "AsyncSessionLocal", FaultSession)
+    monkeypatch.setattr(ir, "AsyncSessionLocal", FaultSession)
+    ctx = ir._OperatorContext(operator_id="operator-1", user_id=tenant)
+    return ir, eng, FaultSession, ReadSession, ctx
+
+
+async def _snapshot(ReadSession, rid):
+    async with ReadSession() as db:
+        row = (await db.execute(text(
+            "SELECT manual_resolution,resolved_by,resolved_at,status,dispatch_started_at,claim_generation,"
+            "attempt_count,reown_count,reconciliation_status,reconciliation_attempts FROM execution_logs "
+            "WHERE id=:i"), {"i": rid})).first()
+        n = (await db.execute(text("SELECT count(*) FROM execution_recovery_audit"
+                                   " WHERE execution_log_id=:i"), {"i": rid})).scalar()
+    return tuple(row), n
+
+
+# Design item 14/15 (before-commit failure): real rollback, nothing persists, retry works once.
+def test_pg_commit_failure_before_rolls_back_both(monkeypatch):
+    _ensure_schema(monkeypatch)
+    ir, eng, FaultSession, ReadSession, ctx = _install_fault(monkeypatch)
+
+    async def go():
+        try:
+            rid = await _seed(ReadSession, uid=_TENANT)
+            before, n0 = await _snapshot(ReadSession, rid)
+            assert before[0] is None and n0 == 0
+            cid = _idem()
+            _FaultSession.mode = "commit_before"
+            with pytest.raises(HTTPException) as e:
+                await ir.confirm_applied(rid, Response(), ctx, cid, None)
+            assert e.value.status_code == 503
+            # REAL rollback: a NEW independent session sees no projection change and no audit row.
+            after, n1 = await _snapshot(ReadSession, rid)
+            assert after == before and n1 == 0
+            # retry after clearing the fault, same Idempotency-Key -> exactly one audit + one resolution.
+            _FaultSession.mode = None
+            r = await ir.confirm_applied(rid, Response(), ctx, cid, None)
+            assert r.idempotent_result.result_code == "APPLIED"
+            done, n2 = await _snapshot(ReadSession, rid)
+            assert done[0] == "confirmed_applied" and n2 == 1
+        finally:
+            _FaultSession.mode = None
+            await eng.dispose()
+    _run(go())
+
+
+# Design lost-ACK: real commit succeeded, ACK lost -> BOTH persisted together; retry -> CACHED, no dup.
+def test_pg_lost_ack_after_commit_persists_both_retry_cached(monkeypatch):
+    _ensure_schema(monkeypatch)
+    ir, eng, FaultSession, ReadSession, ctx = _install_fault(monkeypatch)
+    import services.marketplace.executor as ex
+
+    def _boom(*a, **k):
+        raise AssertionError("executor.execute must never be called")
+    monkeypatch.setattr(ex, "execute", _boom)
+
+    async def go():
+        try:
+            rid = await _seed(ReadSession, uid=_TENANT)
+            cid = _idem()
+            _FaultSession.mode = "commit_after"
+            with pytest.raises(HTTPException) as e:
+                await ir.confirm_applied(rid, Response(), ctx, cid, None)
+            assert e.value.status_code == 503                     # ACK lost -> neutral 503
+            # The underlying commit DID happen: projection AND audit both persisted together.
+            after, n1 = await _snapshot(ReadSession, rid)
+            assert after[0] == "confirmed_applied" and after[1] == "operator-1" and n1 == 1
+            # retry same key (fault cleared) -> CACHED, no second audit, no projection change.
+            _FaultSession.mode = None
+            r = await ir.confirm_applied(rid, Response(), ctx, cid, None)
+            assert r.idempotent_result.result_code == "CACHED"
+            assert r.idempotent_result.new_resolution == "confirmed_applied"
+            same, n2 = await _snapshot(ReadSession, rid)
+            assert same == after and n2 == 1
+            # same key + different action/reason -> mismatch, still one audit.
+            with pytest.raises(HTTPException) as e2:
+                await ir.close_operation(rid, Response(), ctx, cid, None)
+            assert e2.value.status_code == 409 and e2.value.detail == "IDEMPOTENCY_MISMATCH"
+            _, n3 = await _snapshot(ReadSession, rid)
+            assert n3 == 1
+        finally:
+            _FaultSession.mode = None
+            await eng.dispose()
+    _run(go())
+
+
+# Design item 15 (audit flush failure before projection mutation): 503, nothing persists, retry works.
+def test_pg_audit_flush_failure_rolls_back(monkeypatch):
+    _ensure_schema(monkeypatch)
+    ir, eng, FaultSession, ReadSession, ctx = _install_fault(monkeypatch)
+
+    async def go():
+        try:
+            rid = await _seed(ReadSession, uid=_TENANT)
+            before, n0 = await _snapshot(ReadSession, rid)
+            cid = _idem()
+            _FaultSession.mode = "flush"
+            with pytest.raises(HTTPException) as e:
+                await ir.close_operation(rid, Response(), ctx, cid, None)
+            assert e.value.status_code == 503
+            after, n1 = await _snapshot(ReadSession, rid)
+            assert after == before and n1 == 0                    # projection untouched, no audit row
+            _FaultSession.mode = None
+            r = await ir.close_operation(rid, Response(), ctx, cid, None)
+            assert r.idempotent_result.result_code == "APPLIED"
+            done, n2 = await _snapshot(ReadSession, rid)
+            assert done[0] == "manual_closed" and n2 == 1
+        finally:
+            _FaultSession.mode = None
+            await eng.dispose()
+    _run(go())

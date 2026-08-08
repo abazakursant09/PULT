@@ -8,6 +8,18 @@ reconciliation_* / idempotency_key / request_fingerprint / payload / result / re
 writes the C3C-only retry resolution value or the C3C-only retry audit action.
 
 No executor / provider / dispatch / credential imports (an AST guard test enforces this).
+
+Atomicity + honest lost-ACK semantics (the audit row and the three denormalized fields live in ONE
+PostgreSQL transaction, one commit):
+  * A failure BEFORE the underlying commit (validation, audit flush, or a pre-commit error) rolls the
+    whole transaction back — neither the audit row nor the projection change persists — and returns an
+    'error' status (HTTP 503). Nothing is saved.
+  * If the underlying commit SUCCEEDS but the acknowledgement is lost to the app (a post-commit error),
+    the HTTP result may be 503, yet BOTH the audit row AND the projection change ARE persisted together.
+    We do NOT (and cannot) promise a rollback after a completed commit. What is guaranteed is that the two
+    can never diverge (one without the other is impossible), and that a retry with the same
+    Idempotency-Key is safe: it returns the CACHED original outcome (reconstructed from the immutable audit
+    row) without a second audit row or any further projection change.
 """
 from __future__ import annotations
 
