@@ -41,12 +41,16 @@ async def _seed_conn(S, *, uid="tenant-A", cid="c1", marketplace="wb", status="c
     from models.marketplace_connection import MarketplaceConnection
     from models.api_credential import ApiCredential
     scopes = [scope] if scopes is None else scopes
+    # Commit the connection FIRST (the api_credentials FK is enforced on real PG; no ORM relationship
+    # orders the unit-of-work INSERTs).
     async with S() as db:
         db.add(MarketplaceConnection(id=cid, user_id=uid, marketplace=marketplace, status=status,
                                      scopes=scopes))
-        if with_cred:
-            db.add(ApiCredential(id="cr-" + cid, connection_id=cid, scope=scope, secret_enc=b"x"))
         await db.commit()
+    if with_cred:
+        async with S() as db:
+            db.add(ApiCredential(id="cr-" + cid, connection_id=cid, scope=scope, secret_enc=b"x"))
+            await db.commit()
 
 
 async def _seed_row(S, *, rid=None, uid="tenant-A", cid="c1", marketplace="wb", action="set_price",
