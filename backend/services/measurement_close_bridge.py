@@ -76,7 +76,13 @@ async def close_due_measurements(
 
     for decision_id in decision_ids:
         try:
-            outcome = await outcome_repo.get_by_decision_id(db, decision_id)
+            # SECURITY-2D-2-C: take the outcome row lock and re-read its FRESH committed label before
+            # closing. select_due_outcomes above loaded this row as still_open into the session, so the
+            # locked fetch forces populate_existing to defeat the stale identity-map copy. Two concurrent
+            # close passes serialize here: the loser waits for the winner's commit, then sees the terminal
+            # label and skips BEFORE any realized Observation insert or DecisionMemory write. The lock is
+            # held to the close commit below.
+            outcome = await outcome_repo.get_by_decision_id_for_update(db, decision_id)
             if outcome is None or outcome.outcome_label != _STILL_OPEN:
                 summary.skipped += 1
                 continue
