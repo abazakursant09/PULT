@@ -36,6 +36,26 @@ async def get_by_decision_id(db: AsyncSession, decision_id: str) -> Optional[Dec
     return res.scalar_one_or_none()
 
 
+async def get_by_decision_id_for_update(db: AsyncSession, decision_id: str) -> Optional[DecisionOutcome]:
+    """SECURITY-2D-2-C — fetch the outcome under a row-level lock for an atomic close.
+
+    Two concurrent close passes must not both see 'still_open'. This takes SELECT ... FOR UPDATE so the
+    second waiter blocks until the first commits. Crucially it ALSO forces a fresh load with
+    populate_existing=True: the outcome is already in this AsyncSession's identity map (select_due_outcomes
+    loaded it as still_open), and without populate_existing the ORM would hand back that STALE cached row
+    even after the lock is granted — the loser would still see 'still_open' and double-close. With it, the
+    returned row reflects the row's committed state after the lock is granted, so the loser observes the
+    terminal label the winner wrote and skips. The lock is held until the caller's next commit/rollback.
+    """
+    res = await db.execute(
+        select(DecisionOutcome)
+        .where(DecisionOutcome.decision_id == decision_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    return res.scalar_one_or_none()
+
+
 async def create_still_open_outcome(
     db: AsyncSession,
     *,
