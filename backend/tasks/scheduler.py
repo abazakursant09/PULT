@@ -432,11 +432,11 @@ async def run_scheduler() -> None:
     tick (Marketplace Execution Layer), gated by settings.automation_enabled."""
     global _last_retention_at, _reconcile_next_due_at, _reown_next_due_at
     logger.info("Scheduler started (reports + L4 automation tick + measurement close)")
-    now0 = time.monotonic()
-    _last_retention_at = now0                     # first observation-retention run waits a FULL hour
+    _last_retention_at = time.monotonic()         # first observation-retention run waits a FULL hour
     # First recovery runs wait their (short) initial delay from THIS start; a restart re-applies it.
-    _reconcile_next_due_at = now0 + settings.recovery_reconcile_initial_delay_seconds
-    _reown_next_due_at = now0 + settings.recovery_reown_initial_delay_seconds
+    _now0 = time.monotonic()
+    _reconcile_next_due_at = _now0 + settings.recovery_reconcile_initial_delay_seconds
+    _reown_next_due_at = _now0 + settings.recovery_reown_initial_delay_seconds
     try:
         while True:
             try:

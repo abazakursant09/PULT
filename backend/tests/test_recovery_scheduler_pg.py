@@ -132,11 +132,14 @@ def test_pg_three_sweeps_have_distinct_advisory_ops():
 
 # ── reconcile + re-own run concurrently: both acquire, disjoint columns, safe fields ──
 
-def test_pg_concurrent_reconcile_and_reown_disjoint_no_block():
-    async def body(monkeypatch):
-        _ensure_schema(monkeypatch)
-        rc, rw, eng, Session = _install(monkeypatch, dry_run=False)
-        prov = _stub_provider(monkeypatch)
+def test_pg_concurrent_reconcile_and_reown_disjoint_no_block(monkeypatch):
+    # schema + engine + stubs are set up SYNCHRONOUSLY (alembic's async env uses asyncio.run, which cannot
+    # run inside a running loop) — only the DB work runs under _run.
+    _ensure_schema(monkeypatch)
+    rc, rw, eng, Session = _install(monkeypatch, dry_run=False)
+    prov = _stub_provider(monkeypatch)
+
+    async def go():
         try:
             rid = await _seed(Session)
             r_res, o_res = await asyncio.gather(
@@ -163,18 +166,15 @@ def test_pg_concurrent_reconcile_and_reown_disjoint_no_block():
             assert prov["n"] == 0
         finally:
             await eng.dispose()
-    mp = pytest.MonkeyPatch()
-    try:
-        _run(body(mp))
-    finally:
-        mp.undo()
+    _run(go())
 
 
-def test_pg_dry_run_mutates_nothing():
-    async def body(monkeypatch):
-        _ensure_schema(monkeypatch)
-        rc, rw, eng, Session = _install(monkeypatch, dry_run=True)
-        prov = _stub_provider(monkeypatch)
+def test_pg_dry_run_mutates_nothing(monkeypatch):
+    _ensure_schema(monkeypatch)
+    rc, rw, eng, Session = _install(monkeypatch, dry_run=True)
+    prov = _stub_provider(monkeypatch)
+
+    async def go():
         try:
             rid = await _seed(Session)
             await asyncio.gather(
@@ -194,8 +194,4 @@ def test_pg_dry_run_mutates_nothing():
             assert prov["n"] == 0
         finally:
             await eng.dispose()
-    mp = pytest.MonkeyPatch()
-    try:
-        _run(body(mp))
-    finally:
-        mp.undo()
+    _run(go())
