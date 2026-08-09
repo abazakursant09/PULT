@@ -62,12 +62,16 @@ def test_flag_defaults_off():
     assert s.recovery_reown_dry_run is True
 
 
-def test_scheduler_and_routers_do_not_call_reown_sweep():
-    for rel in ("tasks/scheduler.py",):
-        p = _BE / rel
-        if p.exists():
-            assert "reown_sweep" not in p.read_text(encoding="utf-8") and \
-                   "run_reown_sweep" not in p.read_text(encoding="utf-8")
+def test_scheduler_wires_reown_flag_gated_but_routers_do_not():
+    # SECURITY-2D-1C-D: the safe re-own sweep is now wired into the single scheduler behind its fail-closed
+    # master flag (superseding the pre-C1-D "not wired" assertion). No router ever calls a sweep — the
+    # only HTTP surface remains the read-only / manual-resolution operator perimeter.
+    src = (_BE / "tasks/scheduler.py").read_text(encoding="utf-8")
+    assert "run_reown_sweep" in src                                     # wired into the scheduler
+    assert "settings.recovery_reown_enabled is not True" in src          # fail-closed gate before create_task
+    for forbidden in ("spec.dispatch", "_dispatch_and_finalize", "operator_resume",
+                      "executor.execute", "executor.revert"):
+        assert forbidden not in src, forbidden                            # never reaches a provider write
     for p in (_BE / "routers").glob("*.py"):
         txt = p.read_text(encoding="utf-8")
         assert "reown_sweep" not in txt and "run_reown_sweep" not in txt, p.name

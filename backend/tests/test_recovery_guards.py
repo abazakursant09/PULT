@@ -40,9 +40,16 @@ def test_executor_does_not_reference_recovery():
     assert "recovery" not in src and "recovery_sweep" not in src and "reconcile_read" not in src
 
 
-def test_scheduler_does_not_call_recovery_sweep():
+def test_scheduler_wires_recovery_sweep_flag_gated():
+    # SECURITY-2D-1C-D: the read-only reconciliation sweep is now wired into the single scheduler, but ONLY
+    # behind its fail-closed master flag and never onto a provider-write path. (The pre-C1-D "not wired at
+    # all" assertion is superseded by this gated wiring.)
     src = _src("tasks/scheduler.py")
-    assert "recovery_sweep" not in src and "run_recovery_sweep" not in src
+    assert "run_recovery_sweep" in src                                   # wired
+    assert "settings.recovery_reaper_enabled is not True" in src          # fail-closed gate before create_task
+    for forbidden in ("spec.dispatch", "_dispatch_and_finalize", "operator_resume",
+                      "executor.execute", "executor.revert"):
+        assert forbidden not in src, forbidden                            # never reaches a provider write
 
 
 def test_recovery_flags_default_off():
