@@ -54,9 +54,25 @@ jobs:
         with:
           context: ./backend
           push: false
-          load: false
+          load: true
+          tags: pult-backend:ci
           cache-from: type=gha,scope=backend
           cache-to: type=gha,scope=backend,mode=max
+
+      # SECURITY-2D-3C2 — prove the backend image runs non-root with a narrow writable allowlist. Pure
+      # filesystem/id checks — no server start, no DATABASE_URL, no secrets, no provider calls, no push.
+      - name: Backend non-root + writable-allowlist checks
+        run: |
+          set -e
+          test "$(docker inspect -f '{{.Config.User}}' pult-backend:ci)" = "10001:10001"
+          docker run --rm --entrypoint sh pult-backend:ci -c '
+            set -e
+            [ "$(id -u)" -ne 0 ] || { echo "FAIL: running as root"; exit 1; }
+            touch /app/uploads/.canary && rm /app/uploads/.canary
+            touch /tmp/.canary && rm /tmp/.canary
+            if touch /app/main.py.canary 2>/dev/null; then echo "FAIL: /app writable"; rm -f /app/main.py.canary; exit 1; fi
+            if touch /app/.canary 2>/dev/null; then echo "FAIL: /app root writable"; rm -f /app/.canary; exit 1; fi
+          '
 
       - name: Build frontend image
         uses: docker/build-push-action@v6
