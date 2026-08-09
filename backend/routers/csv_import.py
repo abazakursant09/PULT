@@ -610,6 +610,46 @@ async def _persist_import_rows(db: AsyncSession, rec: ImportRecord, result, *, m
     return c
 
 
+async def _guard_new_duplicate(db: AsyncSession, rec: ImportRecord) -> None:
+    """SECURITY-2D-2-B — confirmed-duplicate guard for a mode='new' confirm (called only for 'new').
+
+    Acquires the canonical owner row-lock for the record's scope — the store for store-scoped types, the
+    account for cabinet-level card_content (the SAME row _persist_import_rows locks for an overwrite) —
+    held to the persist commit. Then, UNDER that lock and in this same transaction, it looks for another
+    ALREADY-confirmed ImportRecord with the identical raw-bytes SHA-256 in the exact tenant scope
+    (account [+ store for store-scoped types] + import_type + source='csv'), excluding this record. If one
+    exists the file is a duplicate: raise 409 (the confirm handler rolls back and marks THIS record
+    'failed' — no rows are written). The query is scoped to this record's own account, so it can neither
+    see nor be blocked by another tenant's import.
+    """
+    if rec.import_type == "card_content":
+        # cabinet-level: lock the account row; scope omits store (matches the upload-time dup contract)
+        await db.execute(
+            select(MarketplaceAccount.id)
+            .where(MarketplaceAccount.id == rec.marketplace_account_id).with_for_update())
+        scope = [ImportRecord.marketplace_account_id == rec.marketplace_account_id]
+        detail = "Этот файл уже импортирован в этот кабинет"
+    else:
+        await db.execute(
+            select(MarketplaceStore.id)
+            .where(MarketplaceStore.id == rec.marketplace_store_id).with_for_update())
+        scope = [ImportRecord.marketplace_account_id == rec.marketplace_account_id,
+                 ImportRecord.marketplace_store_id == rec.marketplace_store_id]
+        detail = "Этот файл уже импортирован в этот магазин"
+
+    dup = (await db.execute(
+        select(ImportRecord.id).where(
+            ImportRecord.file_hash == rec.file_hash,
+            ImportRecord.status == "confirmed",
+            ImportRecord.import_type == rec.import_type,
+            ImportRecord.source == "csv",
+            ImportRecord.id != rec.id,
+            *scope,
+        ).limit(1))).first()
+    if dup is not None:
+        raise HTTPException(409, detail)
+
+
 @router.post("/import/{import_id}/confirm", response_model=ConfirmResponse)
 async def confirm_import(
     import_id: str,
@@ -675,6 +715,15 @@ async def confirm_import(
                 "В файле не распознано ни одной строки — импортировать нечего. "
                 "Проверьте, что колонки заполнены, и загрузите файл заново.",
             )
+
+        # SECURITY-2D-2-B (IMP-1): a mode='new' confirm must not append a second copy of a file that is
+        # already confirmed in this exact tenant scope. The guard takes the canonical owner row-lock and
+        # re-checks for a confirmed same-hash import UNDER that lock, in this persist transaction — so two
+        # concurrent 'new' confirms of the same raw-bytes file serialize and only one commits (the other
+        # gets 409 and is left 'failed'). 'overwrite' is a deliberate replace and skips the guard; it takes
+        # the SAME owner lock inside _persist_import_rows, so new-vs-overwrite of one scope also serialize.
+        if body.mode == "new":
+            await _guard_new_duplicate(db, rec)
 
         counts = await _persist_import_rows(db, rec, result, mode=body.mode, user=user)
 

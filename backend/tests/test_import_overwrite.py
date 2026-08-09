@@ -69,13 +69,20 @@ _CSV = (
     "2026-07-01,ART-1,Товар,1000,100,50,30,820,3\n"
 ).encode("utf-8")
 
+# A DIFFERENT report (distinct bytes → distinct SHA-256): a legitimate second import, not a re-upload.
+_CSV2 = (
+    "дата,артикул,название,выручка,комиссия,логистика,реклама,чистая прибыль,количество\n"
+    "2026-07-02,ART-2,Товар2,500,50,25,15,410,2\n"
+).encode("utf-8")
+
 # The finance dashboard's headline revenue for this file, per import.
 _REVENUE_ONE = 1000.0
+_REVENUE_TWO = 500.0
 
 
-def _upload_and_confirm(c, store_id, mode="new"):
+def _upload_and_confirm(c, store_id, mode="new", content=None):
     up = c.post("/api/import/upload",
-                files={"file": ("finance.csv", _CSV, "text/csv")},
+                files={"file": ("finance.csv", content or _CSV, "text/csv")},
                 data={"marketplace_store_id": store_id, "import_type": "finance"})
     assert up.status_code == 200, up.text
     import_id = up.json()["import_id"]
@@ -105,15 +112,16 @@ def test_overwrite_same_file_twice_does_not_double_totals():
 
 
 def test_new_mode_still_appends():
-    # "Импортировать как новый" keeps the additive behaviour.
+    # "Импортировать как новый" keeps the additive behaviour for DISTINCT reports. (Re-uploading the
+    # SAME file in new mode is now a duplicate → 409 under SECURITY-2D-2-B; see test_import_dup_confirm.)
     db = _run(_new_db())
     uid = str(uuid.uuid4())
     c = _client(db, uid)
     sid = _run(_seed_store(db, uid))
 
-    _upload_and_confirm(c, sid, mode="new")
-    _upload_and_confirm(c, sid, mode="new")
-    assert _run(_total_revenue(db, uid)) == 2 * _REVENUE_ONE
+    _upload_and_confirm(c, sid, mode="new")                       # report #1
+    _upload_and_confirm(c, sid, mode="new", content=_CSV2)        # report #2 (different bytes/hash)
+    assert _run(_total_revenue(db, uid)) == _REVENUE_ONE + _REVENUE_TWO
 
 
 def test_overwrite_only_touches_current_user():

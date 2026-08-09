@@ -286,7 +286,15 @@ jobs:
             tests/test_promo_atomic_cap_pg.py::test_pg_reserve_failure_persists_nothing_then_retry \
             tests/test_promo_atomic_cap_pg.py::test_pg_unexpected_integrity_not_masked \
             tests/test_promo_atomic_cap_pg.py::test_pg_retry_after_success_is_duplicate_no_second_effect \
-            tests/test_promo_atomic_cap_pg.py::test_pg_cross_user_isolation
+            tests/test_promo_atomic_cap_pg.py::test_pg_cross_user_isolation \
+            tests/test_import_dup_confirm_pg.py::test_pg_normal_new \
+            tests/test_import_dup_confirm_pg.py::test_pg_sequential_same_hash_second_409_no_double \
+            tests/test_import_dup_confirm_pg.py::test_pg_concurrent_two_same_hash_one_confirmed \
+            tests/test_import_dup_confirm_pg.py::test_pg_concurrent_ten_same_hash_one_confirmed \
+            tests/test_import_dup_confirm_pg.py::test_pg_different_store_same_tenant_both_confirmed \
+            tests/test_import_dup_confirm_pg.py::test_pg_cross_tenant_not_blocked \
+            tests/test_import_dup_confirm_pg.py::test_pg_new_vs_overwrite_serialized_one_set \
+            tests/test_import_dup_confirm_pg.py::test_pg_overwrite_vs_overwrite_one_set
 
   # Proves the FULL Alembic chain runs on the database production actually uses. The chain was
   # historically only exercised on SQLite, which has no strict boolean type and silently accepted an
