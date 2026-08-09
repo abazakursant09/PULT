@@ -14,3 +14,27 @@ __pycache__/
 venv/
 *.db
 *.sqlite3
+
+# SECURITY-2D-3C1 — secrets / VCS / keys must never enter the image via `COPY . .`. .gitignore does NOT
+# apply to the Docker build context, so these need their own rule here. (The backend reads config from the
+# process environment, not a copied .env, so excluding .env* changes nothing at runtime.)
+.env
+.env.*
+.git
+.github
+*.pem
+*.key
+*.p12
+*.crt
+
+# Logs / local caches / coverage — build artifacts, never a build input.
+*.log
+.coverage
+.mypy_cache/
+
+# Backups / archives that may sit on a build host — never shipped.
+backup*/
+*.zip
+*.tar
+*.tar.gz
+*.tgz

@@ -5,8 +5,10 @@ on:
   pull_request:
     paths:
       - backend/Dockerfile
+      - backend/.dockerignore
       - backend/requirements.txt
       - frontend/Dockerfile
+      - frontend/.dockerignore
       - frontend/package-lock.json
       - docker-compose.yml
       - .github/workflows/docker_build.yml
@@ -15,8 +17,10 @@ on:
       - master
     paths:
       - backend/Dockerfile
+      - backend/.dockerignore
       - backend/requirements.txt
       - frontend/Dockerfile
+      - frontend/.dockerignore
       - frontend/package-lock.json
       - docker-compose.yml
       - .github/workflows/docker_build.yml
