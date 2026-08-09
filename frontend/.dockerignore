@@ -1,0 +1,32 @@
+# SECURITY-2D-3C1 — Docker build context = ./frontend. .gitignore does NOT apply to the build context, so
+# `COPY . .` in the Dockerfile would otherwise ship whatever is on the build host's disk. This file keeps
+# the context to the source `npm ci` + `npm run build` + `next start` actually need. Test SOURCES are kept
+# (excluding only test ARTIFACTS) so `next build`'s TypeScript pass never breaks.
+
+# VCS / OS noise
+.git
+.github
+.DS_Store
+
+# Secrets / keys — never in the image (the app reads NEXT_PUBLIC_* baked at build via the Docker build arg,
+# and any server config from the process environment, not a copied .env).
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.crt
+
+# Host dependencies + host build output — Docker rebuilds these itself (`npm ci` → node_modules,
+# `npm run build` → .next). Copying the host copies would let a stale/foreign build shadow the clean one.
+node_modules
+.next
+out
+*.tsbuildinfo
+
+# Test / cache / log ARTIFACTS (not test sources — those stay so the build's typecheck is complete).
+coverage
+.nyc_output
+playwright-report
+test-results
+*.log
