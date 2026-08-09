@@ -1,8 +1,10 @@
 import hmac
+import logging
 from typing import Optional
 from datetime import datetime
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
-from sqlalchemy import select, func
+from fastapi import APIRouter, Depends, Header, HTTPException, status
+from sqlalchemy import select, text, bindparam, String
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 from config import settings
@@ -11,7 +13,21 @@ from models.promo_code import PromoCode, PromoCodeActivation
 from models.user import User
 from dependencies import get_current_user
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
+
+# SECURITY-2D-2-A — atomic aggregate-cap reservation. The ONLY authoritative enforcement of
+# max_activations: a single guarded UPDATE that increments the counter ONLY while a slot is free,
+# returning the row iff it won. Two concurrent activators (different users) can never both win a
+# last slot — one gets an empty RETURNING and is rejected. Replaces the previous Python-side
+# read-modify-write increment of the counter, which lost updates and let the cap be overrun.
+_CAP_RESERVE = text(
+    "UPDATE promo_codes SET current_activations = current_activations + 1 "
+    "WHERE id = :promo_id "
+    "  AND (max_activations IS NULL OR current_activations < max_activations) "
+    "RETURNING id, current_activations"
+).bindparams(bindparam("promo_id", type_=String(36)))
 
 
 def _require_internal_key(x_internal_key: str | None = Header(default=None)) -> None:
@@ -170,29 +186,64 @@ async def apply_promo(
     if not promo:
         raise HTTPException(404, "Промокод не найден")
 
+    # UX pre-filter only (activity / expiry / applicable-plan / a STALE cap read). This is NOT the
+    # cap guard — the aggregate limit is enforced solely by the atomic _CAP_RESERVE below.
     err = _check_promo(promo, body.plan)
     if err:
         raise HTTPException(400, err)
 
-    # Check duplicate
+    promo_id = promo.id                     # capture scalars before any rollback expires the ORM row
+
+    # Fast-path duplicate rejection (common, non-concurrent case). Not authoritative: the uq_promo_user
+    # constraint below is what actually prevents a second activation under a concurrent double-submit.
     dup = await db.execute(
-        select(PromoCodeActivation).where(
-            PromoCodeActivation.promo_id == promo.id,
+        select(PromoCodeActivation.id).where(
+            PromoCodeActivation.promo_id == promo_id,
             PromoCodeActivation.user_id  == current_user.id,
         )
     )
-    if dup.scalars().first():
+    if dup.first() is not None:
         raise HTTPException(400, "Вы уже использовали этот промокод")
 
-    # Record activation
-    activation = PromoCodeActivation(
-        promo_id=promo.id,
-        user_id=current_user.id,
-        plan=body.plan,
-    )
-    db.add(activation)
-    promo.current_activations += 1
-    await db.commit()
+    # ── One atomic transaction: activation INSERT + guarded cap reservation, one commit ──────────────
+    # (apply_promo grants NO plan/entitlement itself — it records the activation and returns the
+    #  discount preview used later at checkout — so the transaction spans exactly these two writes.)
+    try:
+        db.add(PromoCodeActivation(promo_id=promo_id, user_id=current_user.id, plan=body.plan))
+        await db.flush()                    # surface a uq_promo_user violation BEFORE the cap reserve
+    except IntegrityError:
+        # Expected ONLY for the (promo_id, user_id) unique — a concurrent same-user double-submit that
+        # lost the race. Confirm via a clean re-check rather than parse a non-portable constraint name;
+        # never mask an unrelated IntegrityError as "already used".
+        await db.rollback()
+        again = await db.execute(
+            select(PromoCodeActivation.id).where(
+                PromoCodeActivation.promo_id == promo_id,
+                PromoCodeActivation.user_id  == current_user.id,
+            )
+        )
+        if again.first() is not None:
+            raise HTTPException(400, "Вы уже использовали этот промокод")
+        logger.warning("promo apply: unexpected integrity error (details suppressed)")
+        raise HTTPException(503, "Сервис временно недоступен, повторите позже")
+    except SQLAlchemyError:
+        await db.rollback()
+        logger.warning("promo apply: db error before reserve (details suppressed)")
+        raise HTTPException(503, "Сервис временно недоступен, повторите позже")
+
+    try:
+        reserved = (await db.execute(_CAP_RESERVE, {"promo_id": promo_id})).first()
+        if reserved is None:
+            # No free slot: roll the whole transaction back so the activation row does NOT persist.
+            await db.rollback()
+            raise HTTPException(400, "Лимит активаций исчерпан")
+        await db.commit()                   # activation + counter increment persist together, once
+    except HTTPException:
+        raise
+    except SQLAlchemyError:
+        await db.rollback()
+        logger.warning("promo apply: db error at reserve/commit (details suppressed)")
+        raise HTTPException(503, "Сервис временно недоступен, повторите позже")
 
     original, final, discount = _calc(promo, body.plan)
     return {
