@@ -275,7 +275,18 @@ jobs:
             tests/test_operator_resume_pg.py::test_pg_response_no_secret_leak \
             tests/test_recovery_scheduler_pg.py::test_pg_three_sweeps_have_distinct_advisory_ops \
             tests/test_recovery_scheduler_pg.py::test_pg_concurrent_reconcile_and_reown_disjoint_no_block \
-            tests/test_recovery_scheduler_pg.py::test_pg_dry_run_mutates_nothing
+            tests/test_recovery_scheduler_pg.py::test_pg_dry_run_mutates_nothing \
+            tests/test_promo_atomic_cap_pg.py::test_pg_normal_success \
+            tests/test_promo_atomic_cap_pg.py::test_pg_concurrent_two_users_one_slot \
+            tests/test_promo_atomic_cap_pg.py::test_pg_concurrent_ten_users_cap_three \
+            tests/test_promo_atomic_cap_pg.py::test_pg_concurrent_same_user_two \
+            tests/test_promo_atomic_cap_pg.py::test_pg_concurrent_same_user_ten \
+            tests/test_promo_atomic_cap_pg.py::test_pg_unlimited_accepts_all \
+            tests/test_promo_atomic_cap_pg.py::test_pg_already_full_rejects \
+            tests/test_promo_atomic_cap_pg.py::test_pg_reserve_failure_persists_nothing_then_retry \
+            tests/test_promo_atomic_cap_pg.py::test_pg_unexpected_integrity_not_masked \
+            tests/test_promo_atomic_cap_pg.py::test_pg_retry_after_success_is_duplicate_no_second_effect \
+            tests/test_promo_atomic_cap_pg.py::test_pg_cross_user_isolation
 
   # Proves the FULL Alembic chain runs on the database production actually uses. The chain was
   # historically only exercised on SQLite, which has no strict boolean type and silently accepted an
