@@ -176,6 +176,24 @@ class Settings(BaseSettings):
             raise ValueError("recovery_reown_batch_size must be in 1..10000")
         return v
 
+    # SECURITY-2D-1C-D — scheduler cadence for wiring the (already OFF-by-default) recovery reconciliation
+    # and safe re-own sweeps into the single scheduler. These control ONLY timing, never behaviour: with
+    # recovery_reaper_enabled / recovery_reown_enabled false the ticks do NOTHING regardless of cadence.
+    # The initial delay is applied from monotonic deadlines set at EACH run_scheduler start (a process
+    # restart re-applies the full initial delay); the two sweeps run on fully independent schedules.
+    recovery_reconcile_interval_seconds: int = 3600      # steady-state cadence between reconciliation runs
+    recovery_reown_interval_seconds: int = 3600          # steady-state cadence between re-own runs
+    recovery_reconcile_initial_delay_seconds: int = 300  # first reconciliation run waits this long after start
+    recovery_reown_initial_delay_seconds: int = 600      # first re-own run waits this long (staggered after reconcile)
+
+    @field_validator("recovery_reconcile_interval_seconds", "recovery_reown_interval_seconds",
+                     "recovery_reconcile_initial_delay_seconds", "recovery_reown_initial_delay_seconds")
+    @classmethod
+    def _recovery_cadence_positive(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError("recovery scheduler cadence/delay must be > 0")
+        return v
+
     # ── SECURITY-2D-1C-C3A — READ-ONLY operator recovery perimeter ───────────────────────────────────
     # A separate machine-to-machine security boundary for the internal operator recovery view, kept
     # DISTINCT from the shared internal_api_key (promo / cron) so the operator credential can be rotated

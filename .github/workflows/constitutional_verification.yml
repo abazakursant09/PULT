@@ -272,7 +272,10 @@ jobs:
             tests/test_operator_resume_pg.py::test_pg_audit_flush_failure_rolls_back \
             tests/test_operator_resume_pg.py::test_pg_lost_ack_persists_no_second_dispatch \
             tests/test_operator_resume_pg.py::test_pg_revert_resume_supported_and_unsupported \
-            tests/test_operator_resume_pg.py::test_pg_response_no_secret_leak
+            tests/test_operator_resume_pg.py::test_pg_response_no_secret_leak \
+            tests/test_recovery_scheduler_pg.py::test_pg_three_sweeps_have_distinct_advisory_ops \
+            tests/test_recovery_scheduler_pg.py::test_pg_concurrent_reconcile_and_reown_disjoint_no_block \
+            tests/test_recovery_scheduler_pg.py::test_pg_dry_run_mutates_nothing
 
   # Proves the FULL Alembic chain runs on the database production actually uses. The chain was
   # historically only exercised on SQLite, which has no strict boolean type and silently accepted an

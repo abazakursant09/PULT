@@ -407,13 +407,36 @@ _last_retention_at: float | None = None          # set at run_scheduler START (n
 _retention_task: asyncio.Task | None = None
 _retention_consecutive_failures = 0
 
+# ── SECURITY-2D-1C-D — recovery reconciliation + safe re-own wiring ──────────────────────────────────
+# Both sweeps already exist, are OFF by default, take their own DISTINCT PostgreSQL advisory-lock op-code
+# and NEVER touch a provider write. Here they are wired into the SINGLE scheduler with the same tracked-
+# task pattern as observation retention: each minute tick only checks a gate + a monotonic cadence
+# deadline and, if due, spawns ONE tracked task — the sweep is never awaited inline. Reconciliation and
+# re-own have fully independent schedules and separate consecutive-failure counters. The scheduler contour
+# only ever reaches the read-only classification / ownership-transfer sweeps; the real operator resume
+# contour (C3C2) is unreachable from here — no import, no call.
+_RECOVERY_ALERT_AFTER = 3                         # one Sentry alert once N consecutive runs have failed
+# Cadence uses MONOTONIC DEADLINES (not a last-run + interval check) so the SHORT initial delay is honoured
+# on the very first run instead of being swallowed by the full steady-state interval. Set at each
+# run_scheduler start -> a process restart re-applies the full initial delay.
+_reconcile_next_due_at: float | None = None
+_reown_next_due_at: float | None = None
+_reconcile_task: asyncio.Task | None = None
+_reown_task: asyncio.Task | None = None
+_reconcile_consecutive_failures = 0
+_reown_consecutive_failures = 0
+
 
 async def run_scheduler() -> None:
     """Main scheduler loop — checks every minute. Also drives the L4 automation
     tick (Marketplace Execution Layer), gated by settings.automation_enabled."""
-    global _last_retention_at
+    global _last_retention_at, _reconcile_next_due_at, _reown_next_due_at
     logger.info("Scheduler started (reports + L4 automation tick + measurement close)")
-    _last_retention_at = time.monotonic()         # first observation-retention run waits a FULL hour
+    now0 = time.monotonic()
+    _last_retention_at = now0                     # first observation-retention run waits a FULL hour
+    # First recovery runs wait their (short) initial delay from THIS start; a restart re-applies it.
+    _reconcile_next_due_at = now0 + settings.recovery_reconcile_initial_delay_seconds
+    _reown_next_due_at = now0 + settings.recovery_reown_initial_delay_seconds
     try:
         while True:
             try:
@@ -425,12 +448,16 @@ async def run_scheduler() -> None:
                 await _advisory_runtime_tick()
                 await _uploads_cleanup_tick()
                 _observation_retention_tick()     # spawns/tracks a task; never awaits the sweep inline
+                _recovery_reconcile_tick()        # spawns/tracks a task; never awaits the sweep inline
+                _reown_tick()                     # spawns/tracks a task; never awaits the sweep inline
             except Exception:
                 logger.exception("Scheduler iteration error")
             now = datetime.now()
             await asyncio.sleep(60 - now.second)
     finally:
         await _shutdown_retention()               # on cancel/shutdown: cancel + await the retention task
+        await _shutdown_reconcile()               # cancel + await the reconciliation task
+        await _shutdown_reown()                   # cancel + await the re-own task
 
 
 def _observation_retention_tick() -> None:
@@ -515,6 +542,163 @@ async def _shutdown_retention() -> None:
             await task
         except (asyncio.CancelledError, Exception):
             pass
+
+
+# ── SECURITY-2D-1C-D — recovery reconciliation tick (READ-ONLY classification) ───────────────────────
+
+def _recovery_reconcile_tick() -> None:
+    """Non-blocking. Feature OFF -> return (no task/lock/SQL/provider). Not yet due (monotonic deadline)
+    -> return. A run still active -> return (never a second task). Otherwise set the next deadline from
+    NOW + interval (so even a lock-skipped run waits a full interval — no tight loop) and spawn ONE tracked
+    task. The reconciliation sweep only ever READs the provider and writes reconciliation_status + the three
+    scheduling columns; it never dispatches."""
+    global _reconcile_next_due_at, _reconcile_task
+    if settings.recovery_reaper_enabled is not True:      # fail-closed master gate, before create_task
+        return
+    if _reconcile_next_due_at is None or time.monotonic() < _reconcile_next_due_at:
+        return
+    if _reconcile_task is not None and not _reconcile_task.done():
+        return
+    _reconcile_next_due_at = time.monotonic() + settings.recovery_reconcile_interval_seconds
+    _reconcile_task = asyncio.create_task(_reconcile_run())
+    _reconcile_task.add_done_callback(_reconcile_done)
+
+
+async def _reconcile_run():
+    from services.marketplace.recovery.recovery_sweep import (
+        DEFAULT_MAX_DURATION_SECONDS, run_recovery_sweep)
+    # dry_run from the operator config; now=None -> production UTC; bounded to one scheduler slot.
+    return await run_recovery_sweep(
+        dry_run=settings.recovery_reaper_dry_run, now=None,
+        max_duration=DEFAULT_MAX_DURATION_SECONDS)
+
+
+def _reconcile_done(task: "asyncio.Task") -> None:
+    """Consume the finished task's result/exception (never 'never retrieved'), log SAFE numbers only, and
+    maintain the reconciliation consecutive-failure counter (separate from re-own). A shutdown cancellation
+    is NOT a failed run; a disabled feature / busy advisory lock leave the counter unchanged."""
+    global _reconcile_task, _reconcile_consecutive_failures
+    if task is _reconcile_task:
+        _reconcile_task = None
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.warning("recovery reconcile: run error (details suppressed)")   # no exc/SQL/params/ids
+        failed = True
+    else:
+        res = task.result()
+        if not res.enabled or not res.lock_acquired:
+            logger.info("recovery reconcile: skipped (disabled or another run active)")
+            return                                # neither success nor failure -> counter unchanged
+        logger.info("recovery reconcile%s: candidates %d; reconciled %d; failed_users %d; timed_out %s; "
+                    "duration %d ms", " dry-run" if res.dry_run else "", res.candidates, res.reconciled,
+                    res.failed_users, res.timed_out, res.duration_ms)
+        failed = res.failed_users > 0 or res.timed_out
+    if failed:
+        _reconcile_consecutive_failures += 1
+        if _reconcile_consecutive_failures == _RECOVERY_ALERT_AFTER:   # exactly at N -> ONE alert
+            logger.error("recovery reconcile: %d consecutive failed runs", _reconcile_consecutive_failures)
+            _recovery_sentry_alert("recovery reconcile", _reconcile_consecutive_failures)
+    else:
+        _reconcile_consecutive_failures = 0       # a fully successful run resets the streak
+
+
+async def _shutdown_reconcile() -> None:
+    """On shutdown: cancel a running reconciliation task and await it so its current uncommitted batch rolls
+    back (committed batches stay). Never leaves a background task alive."""
+    task = _reconcile_task
+    if task is not None and not task.done():
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
+
+
+# ── SECURITY-2D-1C-D — safe re-own tick (ownership transfer only, stays pending) ─────────────────────
+
+def _reown_tick() -> None:
+    """Non-blocking. Feature OFF -> return (no task/lock/SQL/provider/executor). Not yet due (monotonic
+    deadline) -> return. A run still active -> return (never a second task). Otherwise set the next deadline
+    from NOW + interval and spawn ONE tracked task. The re-own sweep only bumps claim_generation/reown_count/
+    last_reowned_at on a stuck SAFE pending claim; it leaves status='pending' and dispatch_started_at NULL,
+    never dispatches and never calls the executor."""
+    global _reown_next_due_at, _reown_task
+    if settings.recovery_reown_enabled is not True:       # fail-closed master gate, before create_task
+        return
+    if _reown_next_due_at is None or time.monotonic() < _reown_next_due_at:
+        return
+    if _reown_task is not None and not _reown_task.done():
+        return
+    _reown_next_due_at = time.monotonic() + settings.recovery_reown_interval_seconds
+    _reown_task = asyncio.create_task(_reown_run())
+    _reown_task.add_done_callback(_reown_done)
+
+
+async def _reown_run():
+    from services.marketplace.recovery.reown_sweep import (
+        DEFAULT_MAX_DURATION_SECONDS, run_reown_sweep)
+    # dry_run from the operator config; now=None -> production UTC; bounded to one scheduler slot.
+    return await run_reown_sweep(
+        dry_run=settings.recovery_reown_dry_run, now=None,
+        max_duration=DEFAULT_MAX_DURATION_SECONDS)
+
+
+def _reown_done(task: "asyncio.Task") -> None:
+    """Consume the finished task's result/exception (never 'never retrieved'), log SAFE numbers only, and
+    maintain the re-own consecutive-failure counter (separate from reconciliation). A shutdown cancellation
+    is NOT a failed run; a disabled feature / busy advisory lock leave the counter unchanged."""
+    global _reown_task, _reown_consecutive_failures
+    if task is _reown_task:
+        _reown_task = None
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.warning("recovery re-own: run error (details suppressed)")   # no exc/SQL/params/ids
+        failed = True
+    else:
+        res = task.result()
+        if not res.enabled or not res.lock_acquired:
+            logger.info("recovery re-own: skipped (disabled or another run active)")
+            return                                # neither success nor failure -> counter unchanged
+        logger.info("recovery re-own%s: candidates %d; eligible %d; reowned %d; skipped_invalid %d; "
+                    "skipped_race %d; failed_batches %d; timed_out %s; duration %d ms",
+                    " dry-run" if res.dry_run else "", res.candidates, res.eligible, res.reowned,
+                    res.skipped_invalid, res.skipped_race, res.failed_batches, res.timed_out,
+                    res.duration_ms)
+        failed = res.failed_batches > 0 or res.timed_out
+    if failed:
+        _reown_consecutive_failures += 1
+        if _reown_consecutive_failures == _RECOVERY_ALERT_AFTER:   # exactly at N -> ONE alert
+            logger.error("recovery re-own: %d consecutive failed runs", _reown_consecutive_failures)
+            _recovery_sentry_alert("recovery re-own", _reown_consecutive_failures)
+    else:
+        _reown_consecutive_failures = 0           # a fully successful run resets the streak
+
+
+async def _shutdown_reown() -> None:
+    """On shutdown: cancel a running re-own task and await it so its current uncommitted batch rolls back
+    (committed batches stay). Never leaves a background task alive."""
+    task = _reown_task
+    if task is not None and not task.done():
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
+
+
+def _recovery_sentry_alert(label: str, count: int) -> None:
+    """One explicit Sentry event (the existing channel). No-op without a DSN / sentry-sdk; never carries
+    account/store/product/SKU/external ids, operation keys, fingerprints, payloads, tokens, exception
+    objects, SQL, or SQL params — only the safe label and the failure count."""
+    try:
+        import sentry_sdk
+        sentry_sdk.capture_message("%s: %d consecutive failed runs" % (label, count), level="error")
+    except Exception:
+        pass                                      # missing sdk / no DSN -> scheduler keeps running
 
 
 async def _uploads_cleanup_tick() -> None:
