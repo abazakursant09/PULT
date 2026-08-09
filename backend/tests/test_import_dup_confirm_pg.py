@@ -25,7 +25,13 @@ from models.import_record import ImportRecord
 from models.imported_finance import ImportedFinanceRow
 from models.marketplace_account import MarketplaceAccount
 from models.marketplace_store import MarketplaceStore
+from models.user import User
 from models.workspace import Workspace
+
+
+def _mk_user(uid):
+    # real users row — workspaces.owner_user_id and import_records.user_id are FK→users on PostgreSQL
+    return User(id=uid, email=f"{uid}@t.test", name="T", hashed_password="x")
 
 _FINANCE = (
     "дата,артикул,название,выручка,комиссия,логистика,реклама,чистая прибыль,количество\n"
@@ -52,7 +58,7 @@ pytestmark = pytest.mark.skipif(
 
 _SCHEMA_READY = False
 _TABLES = ("import_records", "imported_finance_rows", "marketplace_stores",
-           "marketplace_accounts", "workspaces", "products", "product_placements")
+           "marketplace_accounts", "workspaces", "products", "product_placements", "users")
 
 
 def _ensure_schema(monkeypatch):
@@ -84,7 +90,9 @@ async def _tenant(Session, *, uid, marketplace="wildberries", store_key="primary
     acc = str(uuid.uuid4())
     store = str(uuid.uuid4())
     async with Session() as s:
+        s.add(_mk_user(uid))
         s.add(Workspace(id=ws, owner_user_id=uid))
+        await s.flush()                            # parents (user, workspace) before the account FK
         s.add(MarketplaceAccount(id=acc, workspace_id=ws, marketplace=marketplace,
                                  identity_status="unverified", label="Кабинет"))
         s.add(MarketplaceStore(id=store, marketplace_account_id=acc, marketplace=marketplace,
@@ -260,7 +268,9 @@ def test_pg_different_store_same_tenant_both_confirmed(monkeypatch):
             # one workspace, two WB cabinets (keyless → NULL external id, both allowed), one store each
             t = []
             async with S() as s:
+                s.add(_mk_user(uid))
                 s.add(Workspace(id=ws, owner_user_id=uid))
+                await s.flush()
                 for _ in range(2):
                     acc = str(uuid.uuid4())
                     store = str(uuid.uuid4())
