@@ -16,5 +16,10 @@ pydantic-settings>=2.1.0,<3.0.0
 python-dotenv>=1.0.0,<2.0.0
 email-validator>=2.1.0,<3.0.0
 httpx>=0.27.0,<1.0.0
-alembic>=1.13,<2.0.0
+# SECURITY-2D-3A: EXACT pin (not a range) for reproducibility. The schema-drift gate depends on the
+# Alembic version — an unpinned minor bump (1.13→1.19) previously changed `alembic check` / the SQLite
+# CHECK-constraint comparison and reddened master. 1.19.1 is the version the green master CI installs and
+# on which test_schema_drift + the base→rob PostgreSQL migration pass; it is NOT an older version masking
+# drift (it keeps the strict CHECK comparison). Full transitive lock is SECURITY-2D-3B.
+alembic==1.19.1
 sentry-sdk[fastapi]>=1.40.0,<3.0.0
