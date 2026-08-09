@@ -85,8 +85,10 @@ async def _seed(Session, *, uid=None, net_profit=900.0, baseline=500.0):
         await s.flush()
         s.add(ImportedFinanceRow(import_id=str(uuid.uuid4()), user_id=uid, marketplace="wb",
                                  date="2026-06-19", sku=SKU, net_profit=net_profit))
+        # physical_product_id/listing_id are FK→physical_products/product_listings (enforced on PG);
+        # the net_profit compute close reads finance by sku and needs neither, so leave them NULL.
         s.add(Decision(id=did, user_id=uid, problem="p", status="open", action_key="set_price",
-                       insight_key=f"margin_crisis:wb:{SKU}", physical_product_id="phys-1",
+                       insight_key=f"margin_crisis:wb:{SKU}", physical_product_id=None,
                        decision_chain_id="ch1", step_in_chain=0))
         base = Observation(id=str(uuid.uuid4()), user_id=uid, entity_grain="listing", entity_id=SKU,
                            metric_name="net_profit", marketplace="wb", value=baseline, unit="rub",
