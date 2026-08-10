@@ -79,8 +79,51 @@ jobs:
         with:
           context: ./frontend
           push: false
-          load: false
+          load: true
+          tags: pult-frontend:ci
           build-args: |
             NEXT_PUBLIC_API_URL=https://api.example.com
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,scope=frontend,mode=max
+
+      # SECURITY-2D-3C3 — prove the frontend image runs non-root with a narrow writable surface. Pure
+      # fs/id checks from the FINAL image user (no --user root); expected write failures are asserted,
+      # not swallowed. No secrets, no push.
+      - name: Frontend non-root + writable-allowlist checks
+        run: |
+          set -e
+          test "$(docker inspect -f '{{.Config.User}}' pult-frontend:ci)" = "node"
+          docker run --rm --entrypoint sh pult-frontend:ci -c '
+            set -e
+            [ "$(id -u)" -ne 0 ] || { echo "FAIL: running as root"; exit 1; }
+            [ "$(id -u)" -eq 1000 ] || { echo "FAIL: not uid 1000"; exit 1; }
+            touch /app/.next/cache/.canary && rm /app/.next/cache/.canary
+            touch /tmp/.canary && rm /tmp/.canary
+            if touch /app/.canary 2>/dev/null; then echo "FAIL: /app writable"; rm -f /app/.canary; exit 1; fi
+            if touch /app/package.json.canary 2>/dev/null; then echo "FAIL: package.json area writable"; rm -f /app/package.json.canary; exit 1; fi
+            if touch /app/node_modules/.canary 2>/dev/null; then echo "FAIL: node_modules writable"; rm -f /app/node_modules/.canary; exit 1; fi
+            if touch /app/.next/server/.canary 2>/dev/null; then echo "FAIL: .next/server writable"; rm -f /app/.next/server/.canary; exit 1; fi
+            if touch /app/.next/static/.canary 2>/dev/null; then echo "FAIL: .next/static writable"; rm -f /app/.next/static/.canary; exit 1; fi
+            # /home/node is image-native writable — record honestly, not asserted read-only
+            if touch /home/node/.canary 2>/dev/null; then echo "NOTE: /home/node writable (image-native design)"; rm -f /home/node/.canary; fi
+          '
+
+      # HTTP smoke of the FINAL image as its default non-root user (no backend, no real cookies/secrets).
+      - name: Frontend HTTP smoke (non-root)
+        run: |
+          set -e
+          docker run -d --name fe -p 3000:3000 pult-frontend:ci
+          for i in $(seq 1 30); do
+            if curl -fsS -o /dev/null http://localhost:3000/login 2>/dev/null; then break; fi
+            sleep 2
+          done
+          echo "container user:"; docker exec fe id
+          docker exec fe sh -c '[ "$(id -u)" -ne 0 ]'
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/)" = "200"
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/login)" = "200"
+          # no cookie → /dashboard must NOT render 200 (middleware redirects to /login)
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/dashboard)
+          echo "/dashboard (no cookie) → $code"; [ "$code" != "200" ] || { echo "FAIL: /dashboard 200 without auth"; exit 1; }
+          # no EACCES / permission errors in logs
+          if docker logs fe 2>&1 | grep -iE "EACCES|permission denied"; then echo "FAIL: permission error in logs"; exit 1; fi
+          docker stop fe && docker rm fe
