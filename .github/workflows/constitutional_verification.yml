@@ -24,16 +24,13 @@ jobs:
         with:
           python-version: "3.13"
 
+      # SECURITY-2D-3B — install the SINGLE fully-hashed runtime+CI lock in one call. --require-hashes
+      # refuses any artifact whose SHA-256 does not match the lock, and refuses if any requirement lacks
+      # a hash, so no dependency (incl. ruff==0.15.22, pinned in requirements-ci.in) can float or be
+      # swapped. `pip install --upgrade pip` is deliberately removed: an upgraded pip is itself a
+      # floating input. No ad-hoc `pip install <pkg>` — every tool is in the lock.
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          # Ruff is pinned: unpinned, every run picked up whatever release existed that day,
-          # so a new Ruff turned this job red on files no PR had touched (0.16.0 found 42
-          # errors in the constitutional packages that 0.15.22 did not). 0.15.22 is the
-          # version the last green master run (29861338041, commit 3068f3c) actually used.
-          # Raising it is a deliberate decision, made in its own PR, never a surprise.
-          pip install "ruff==0.15.22" pytest pytest-cov coverage
+        run: pip install --require-hashes -r requirements-ci.lock
 
       - name: Ruff (constitutional packages)
         run: |
@@ -88,11 +85,9 @@ jobs:
         with:
           python-version: "3.13"
 
+      # SECURITY-2D-3B — same single hash-pinned lock (psycopg2-binary/asyncpg/pytest are all in it).
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install psycopg2-binary asyncpg pytest
+        run: pip install --require-hashes -r requirements-ci.lock
 
       - name: Real Alembic migration + EXPLAIN index gate + retention DELETE (real PostgreSQL)
         env:
@@ -344,11 +339,9 @@ jobs:
         with:
           python-version: "3.13"
 
+      # SECURITY-2D-3B — same single hash-pinned lock (asyncpg is a runtime dependency in it).
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install asyncpg
+        run: pip install --require-hashes -r requirements-ci.lock
 
       - name: Alembic upgrade base->head (real PostgreSQL)
         env:

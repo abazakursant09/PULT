@@ -6,8 +6,13 @@ ENV PYTHONDONTWRITEBYTECODE=1
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# SECURITY-2D-3B — reproducible, hash-pinned install. requirements.lock is the fully resolved Linux
+# runtime graph (exact == versions + SHA-256 for every artifact), generated from requirements.in.
+# --require-hashes makes pip refuse to install ANY package whose downloaded artifact does not match a
+# recorded hash, and refuse if any requirement is missing a hash — no floating versions, no silent swap.
+# Only the runtime lock is copied and installed here: the CI lock and CI tools never enter this image.
+COPY requirements.lock .
+RUN pip install --require-hashes --no-cache-dir -r requirements.lock
 
 # Source is copied AS ROOT (no --chown): /app and the installed site-packages stay root-owned and are only
 # readable/executable by the app user — the application can never rewrite its own code.

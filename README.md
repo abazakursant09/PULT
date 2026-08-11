@@ -35,7 +35,10 @@ business-pult/
 │   │   └── collect_competitors.py   # Фоновая задача: 12-20 конкурентов
 │   ├── migrations/
 │   │   └── 001_initial.sql           # DDL: users, products, competitor_analysis
-│   ├── requirements.txt
+│   ├── requirements.in                 # runtime deps INPUT (edit here; Windows/local installs this)
+│   ├── requirements.lock               # Linux hash-pinned runtime lock (CI + Docker only)
+│   ├── requirements-ci.in              # CI deps INPUT (runtime + test/lint tools)
+│   ├── requirements-ci.lock            # Linux hash-pinned runtime+CI lock (CI only)
 │   ├── Dockerfile
 │   └── .env.example
 ├── frontend/
@@ -94,7 +97,11 @@ docker compose up --build
 cd backend
 python -m venv .venv
 .venv\Scripts\activate          # Windows
-pip install -r requirements.txt
+# Локальная/Windows-разработка ставит ВХОД (диапазоны) requirements.in.
+# НЕ ставьте requirements.lock на Windows: это Linux-lock (uvicorn[standard]→uvloop,
+# у которого нет Windows-колеса). Linux-lock используют только CI и Docker
+# (pip install --require-hashes -r requirements.lock).
+pip install -r requirements.in
 copy .env.example .env          # и заполните переменные
 uvicorn main:app --reload
 ```
