@@ -593,7 +593,10 @@ def test_no_redis_and_no_advisory_runtime_registration():
     from pathlib import Path
     root = Path(__file__).resolve().parents[1]
 
-    reqs = (root / "requirements.txt").read_text(encoding="utf-8").lower()
+    # SECURITY-2D-3B: requirements.txt was replaced by requirements.in (input) +
+    # requirements.lock (full hashed graph). The lock is the strongest place to assert
+    # a dependency is absent — it lists every transitive package, not just direct ones.
+    reqs = (root / "requirements.lock").read_text(encoding="utf-8").lower()
     assert "redis" not in reqs and "aioredis" not in reqs
 
     for rel in ("routers/connections.py", "models/api_credential.py",
