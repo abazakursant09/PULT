@@ -8,12 +8,25 @@ is gone, that every installable pin in each lock is exact and carries a SHA-256 
 that no index/VCS/URL escape hatch sneaks in, that the headers record the generator and
 its version, and that Docker + every backend CI job install a hash-pinned lock with
 `--require-hashes` and nothing ad hoc.
+
+CORRECTION (guard mutation gaps closed):
+  A. Exact-pin validation no longer uses a `==`-only regex. Every non-comment logical
+     line of each lock is *reconstructed* (backslash + `--hash` continuations joined) and
+     parsed with `packaging.requirements.Requirement`. A line that is not an exact
+     `name==version` — a range (`>=`,`<=`,`<`,`>`,`~=`,`!=`, wildcard), an editable/VCS/URL,
+     or anything malformed — now FAILS instead of being silently skipped.
+  B. The docker_build path-filter is validated *per event*: `push` and `pull_request` are
+     each required to track all four requirements files. A whole-workflow substring check
+     could not see a lock removed from just one trigger; the per-event check can.
 """
 
 from __future__ import annotations
 
 import re
 from pathlib import Path
+
+import yaml
+from packaging.requirements import InvalidRequirement, Requirement
 
 BACKEND = Path(__file__).resolve().parents[1]
 REPO = BACKEND.parent
@@ -28,34 +41,84 @@ DOCKERFILE = BACKEND / "Dockerfile"
 CONSTITUTIONAL_YML = WORKFLOWS / "constitutional_verification.yml"
 DOCKER_BUILD_YML = WORKFLOWS / "docker_build.yml"
 
-# A package declaration line: `name==version` at column 0 (optionally with a trailing
-# ` \` continuation and/or inline `--hash=` tokens).
-_PKG_RE = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)==([^\s\\]+)")
-_HASH_RE = re.compile(r"--hash=(sha256:[0-9a-fA-F]{64})")
+REQUIREMENT_FILES = (
+    "backend/requirements.in",
+    "backend/requirements.lock",
+    "backend/requirements-ci.in",
+    "backend/requirements-ci.lock",
+)
+
+_HASH_FULL = re.compile(r"^sha256:[0-9a-fA-F]{64}$")
+# Substrings that must never appear inside a lock requirement (direct URL / VCS / index).
+_ESCAPE_SUBSTRINGS = ("git+", "hg+", "svn+", "bzr+", "://")
 
 
-def _parse_lock(path: Path) -> dict[str, dict]:
-    """Return {name: {'version': str, 'hashes': [str, ...]}} from a lock file.
+# ----------------------------------------------------------------- lock line parsing
 
-    Deliberately simple: split into per-package blocks and collect the `--hash=` lines
-    that belong to each. No resolution, no network — pip does the real validation.
+def _logical_lines(path: Path) -> list[str]:
+    """Reconstruct each logical requirement line of a generated lock.
+
+    Joins backslash continuations and the indented `--hash=` continuation lines so that a
+    package and every one of its hashes become ONE logical string. Whole-line comments and
+    blank lines are dropped. Nothing installable is ever skipped: whatever is left is handed
+    to the validator, so a stray/unexpected line fails loudly rather than vanishing.
     """
-    records: dict[str, dict] = {}
-    current: str | None = None
+    out: list[str] = []
+    buf = ""
     for raw in path.read_text(encoding="utf-8").splitlines():
-        stripped = raw.strip()
-        if not stripped or stripped.startswith("#"):
+        s = raw.rstrip("\r")
+        # A comment or blank line only counts as a boundary when we are not mid-continuation.
+        if not buf and (not s.strip() or s.strip().startswith("#")):
             continue
-        m = _PKG_RE.match(stripped)
-        if m:
-            current = m.group(1).lower()
-            records[current] = {"version": m.group(2), "hashes": []}
-            records[current]["hashes"].extend(_HASH_RE.findall(stripped))
+        if s.rstrip().endswith("\\"):
+            buf += s.rstrip()[:-1] + " "
             continue
-        found = _HASH_RE.findall(stripped)
-        if found and current is not None:
-            records[current]["hashes"].extend(found)
+        buf += s
+        if buf.strip():
+            out.append(buf.strip())
+        buf = ""
+    if buf.strip():
+        out.append(buf.strip())
+    return out
+
+
+def _installable_records(path: Path) -> list[tuple[str, str, list[str], str]]:
+    """Parse every logical requirement of a lock, asserting strict hash-lock invariants.
+
+    Returns [(name, version, hashes, raw), ...]. Raises AssertionError on the FIRST line that
+    violates any invariant — an unexpected option line, a VCS/URL escape hatch, a malformed
+    requirement, a non-exact pin (range/wildcard), or a pin with no sha256 hash. This is what
+    stops a `==`→range edit from being silently accepted.
+    """
+    records: list[tuple[str, str, list[str], str]] = []
+    for raw in _logical_lines(path):
+        assert not raw.startswith("-"), f"{path.name}: unexpected option/escape line: {raw!r}"
+        parts = raw.split("--hash=")
+        req_part = parts[0].strip()
+        hashes = [p.strip() for p in parts[1:]]
+        for bad in _ESCAPE_SUBSTRINGS:
+            assert bad not in req_part, f"{path.name}: VCS/URL/index escape hatch in {raw!r}"
+        try:
+            req = Requirement(req_part)
+        except InvalidRequirement as exc:
+            raise AssertionError(f"{path.name}: malformed requirement {raw!r}: {exc}") from exc
+        assert not req.url, f"{path.name}: direct URL for {req.name}: {req.url}"
+        specifiers = list(req.specifier)
+        assert len(specifiers) == 1 and specifiers[0].operator == "==", (
+            f"{path.name}: {req.name} is not exact-pinned with '==' "
+            f"(got {str(req.specifier)!r}) — ranges/wildcards are forbidden in a hash-lock"
+        )
+        version = specifiers[0].version
+        assert "*" not in version, f"{path.name}: {req.name} uses a wildcard pin {version!r}"
+        assert hashes, f"{path.name}: {req.name}=={version} has no --hash=sha256:"
+        for h in hashes:
+            assert _HASH_FULL.match(h), f"{path.name}: {req.name} has a non-sha256 hash {h!r}"
+        records.append((req.name.lower(), version, hashes, raw))
     return records
+
+
+def _pin_map(path: Path) -> dict[str, str]:
+    return {name: version for name, version, _hashes, _raw in _installable_records(path)}
 
 
 def _noncomment_lines(path: Path) -> list[str]:
@@ -73,6 +136,25 @@ def _yaml_noncomment_text(path: Path) -> str:
     real YAML directives and never trip over prose in an explanatory comment (e.g. a
     comment that *documents* removing `pip install --upgrade pip`)."""
     return "\n".join(_noncomment_lines(path))
+
+
+def _event_path_filters(path: Path) -> dict[str, list[str] | None]:
+    """Return {event: paths-list-or-None} for the `push` and `pull_request` triggers.
+
+    Parses the workflow as YAML and inspects each trigger separately, so a requirements
+    file removed from ONE trigger's `paths:` is detectable. Note: PyYAML (YAML 1.1) parses a
+    bare `on:` key as the boolean True, so the trigger map is looked up under both keys.
+    """
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    triggers = data.get("on")
+    if triggers is None:
+        triggers = data.get(True)
+    assert isinstance(triggers, dict), f"{path.name}: no parseable 'on:' trigger map"
+    result: dict[str, list[str] | None] = {}
+    for event in ("push", "pull_request"):
+        node = triggers.get(event)
+        result[event] = node.get("paths") if isinstance(node, dict) else None
+    return result
 
 
 # --------------------------------------------------------------------------- files
@@ -101,15 +183,17 @@ def test_ci_in_pulls_in_runtime_intent():
 
 # ------------------------------------------------------------------- lock integrity
 
-def test_every_installable_pin_is_exact_and_hashed():
+def test_every_installable_line_is_exact_pinned_and_hashed():
+    """Gap A: reconstruct and parse EVERY logical line of each lock (not just `==` lines).
+
+    A range, wildcard, editable/VCS/URL, or malformed requirement now fails inside
+    _installable_records; a `==`→`>=` edit can no longer slip past by simply not matching a
+    package regex."""
     for lock in (RUNTIME_LOCK, CI_LOCK):
-        records = _parse_lock(lock)
-        assert records, f"{lock.name} parsed to zero packages"
-        for name, rec in records.items():
-            assert rec["version"], f"{lock.name}: {name} has no == version"
-            assert rec["hashes"], f"{lock.name}: {name}=={rec['version']} has no --hash=sha256:"
-            for h in rec["hashes"]:
-                assert h.startswith("sha256:"), f"{lock.name}: {name} non-sha256 hash {h}"
+        records = _installable_records(lock)
+        # Sanity floor: the runtime lock has 45 pins and the CI lock 54; a parser that
+        # silently produced nothing (or a truncated lock) must not pass.
+        assert len(records) >= 15, f"{lock.name}: only {len(records)} pins parsed"
 
 
 def test_locks_have_no_index_vcs_or_url_escape_hatch():
@@ -135,12 +219,12 @@ def test_lock_headers_record_generator_and_version():
 def test_ci_lock_is_a_consistent_superset_of_runtime_lock():
     """Single-resolver consistency: every runtime package is in the CI lock at the SAME
     version (the CI lock is generated from an input that includes requirements.in)."""
-    runtime = _parse_lock(RUNTIME_LOCK)
-    ci = _parse_lock(CI_LOCK)
-    for name, rec in runtime.items():
+    runtime = _pin_map(RUNTIME_LOCK)
+    ci = _pin_map(CI_LOCK)
+    for name, version in runtime.items():
         assert name in ci, f"runtime package {name} missing from CI lock"
-        assert ci[name]["version"] == rec["version"], (
-            f"version drift for {name}: runtime {rec['version']} != ci {ci[name]['version']}"
+        assert ci[name] == version, (
+            f"version drift for {name}: runtime {version} != ci {ci[name]}"
         )
 
 
@@ -178,9 +262,20 @@ def test_constitutional_backend_jobs_install_only_the_full_ci_lock():
     assert len(pip_installs) == 3, f"expected 3 backend hash-pinned installs, got {len(pip_installs)}"
 
 
-def test_docker_build_path_filter_covers_all_four_requirements_files():
+def test_docker_build_path_filter_covers_all_four_files_in_each_event():
+    """Gap B: `push` and `pull_request` are each required to track all four requirements
+    files. Removing any one path from either trigger fails this test — a whole-workflow
+    substring check could not tell which trigger the path belonged to."""
+    filters = _event_path_filters(DOCKER_BUILD_YML)
+    for event in ("push", "pull_request"):
+        paths = filters[event]
+        assert paths, f"docker_build.yml: '{event}' trigger has no 'paths:' filter"
+        for required in REQUIREMENT_FILES:
+            assert required in paths, (
+                f"docker_build.yml: '{event}.paths' does not track {required}"
+            )
+
+
+def test_docker_build_path_filter_has_no_stale_requirements_txt():
     text = DOCKER_BUILD_YML.read_text(encoding="utf-8")
-    for f in ("backend/requirements.in", "backend/requirements.lock",
-              "backend/requirements-ci.in", "backend/requirements-ci.lock"):
-        assert f in text, f"docker_build path-filter missing {f}"
     assert "backend/requirements.txt" not in text, "stale requirements.txt in docker_build path-filter"
