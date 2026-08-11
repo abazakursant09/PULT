@@ -118,12 +118,30 @@ jobs:
             sleep 2
           done
           echo "container user:"; docker exec fe id
-          docker exec fe sh -c '[ "$(id -u)" -ne 0 ]'
+          docker exec fe sh -c '[ "$(id -u)" -eq 1000 ]'          # runs as the non-root node user
           test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/)" = "200"
           test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/login)" = "200"
-          # no cookie → /dashboard must NOT render 200 (middleware redirects to /login)
-          code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/dashboard)
-          echo "/dashboard (no cookie) → $code"; [ "$code" != "200" ] || { echo "FAIL: /dashboard 200 without auth"; exit 1; }
-          # no EACCES / permission errors in logs
+          # /dashboard without a cookie → the middleware redirect to /login (NextResponse.redirect = 307).
+          # Assert BOTH the exact redirect status AND the Location target — "not 200" alone is too weak.
+          hdr=$(curl -s -D - -o /dev/null http://localhost:3000/dashboard)
+          code=$(printf '%s' "$hdr" | awk 'NR==1{print $2}')
+          loc=$(printf '%s' "$hdr" | tr -d '\r' | awk 'tolower($1)=="location:"{print $2}')
+          echo "/dashboard (no cookie) → $code  Location: $loc"
+          case "$code" in 307|308) : ;; *) echo "FAIL: expected 307/308 redirect, got $code"; exit 1;; esac
+          echo "$loc" | grep -q '/login' || { echo "FAIL: redirect Location is not /login"; exit 1; }
+          # a real hashed JS chunk referenced by the home HTML must serve 200
+          curl -s http://localhost:3000/ > home.html
+          js=$(grep -oE '/_next/static/[^"]+\.js' home.html | head -1)
+          echo "js chunk: $js"; test -n "$js" || { echo "FAIL: no /_next/static JS in home HTML"; exit 1; }
+          test "$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:3000$js")" = "200"
+          # a CSS asset if the build emits one (App Router usually does); if inlined/absent, record honestly
+          css=$(grep -oE '/_next/static/css/[^"]+\.css' home.html | head -1)
+          if [ -n "$css" ]; then
+            echo "css asset: $css"
+            test "$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:3000$css")" = "200"
+          else
+            echo "NOTE: no external /_next/static/css asset in home HTML (inlined) — CSS check skipped honestly"
+          fi
+          # no permission/startup errors in the non-root container logs
           if docker logs fe 2>&1 | grep -iE "EACCES|permission denied"; then echo "FAIL: permission error in logs"; exit 1; fi
           docker stop fe && docker rm fe
