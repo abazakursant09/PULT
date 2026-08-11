@@ -30,10 +30,14 @@ what BuildKit selects on the amd64 CI runner and the amd64 deploy target.
 - **A bot (Dependabot/Renovate) may only open a PR — auto-merge is forbidden.** No such bot
   is configured in 3E1; adding one is a separate, later decision.
 
-## Open item — `postgres:15-alpine` (NOT pinned here)
+## Open item — `postgres:16-alpine` (NOT pinned here)
 
-`docker-compose.yml` references `postgres:15-alpine`, a third-party **stateful** data-service
-image that this repository does not build. It is deliberately **out of scope for 3E1**:
-pinning a database engine has different rollback semantics (the engine version is coupled to
-on-disk data). It remains an **open, unpinned stateful-image item** that must be investigated
-and pinned before deploy, with an explicit data-compatibility and rollback procedure.
+`docker-compose.yml` references `postgres:16-alpine`, a third-party **stateful** data-service
+image that this repository does not build. Its major/variant is already aligned to the
+CI-proven canonical (SECURITY-2D-3E1B-1; see `docs/postgresql-version-policy.md`), but it is
+still a **tag-only reference, NOT pinned by digest**. Pinning a database engine has different
+rollback semantics (the engine version is coupled to on-disk data), so it stays out of scope
+for the application-image digest pin (3E1). It remains an **open, unpinned stateful-image
+item** to close before deploy: the digest pin is tracked as **3E1B-2**, and automated
+backup/PITR/verified restore as **3E1B-3** — neither is implemented yet, so deployment is not
+fully immutable and disaster recovery is not yet in place.
