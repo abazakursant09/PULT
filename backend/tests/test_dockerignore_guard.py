@@ -25,7 +25,7 @@ def test_backend_dockerignore_excludes_secrets_and_keeps_build_inputs():
     for required in (".env", ".env.*", ".git", "*.pem", "*.key", "*.db", "uploads/"):
         assert required in pats, f"backend/.dockerignore missing {required!r}"
     # must NOT exclude the files the backend image build/startup needs
-    for keep in ("requirements.txt", "alembic.ini", "alembic", "alembic/", "main.py", "config.py",
+    for keep in ("requirements.lock", "alembic.ini", "alembic", "alembic/", "main.py", "config.py",
                  "models", "models/", "routers", "routers/"):
         assert keep not in pats, f"backend/.dockerignore must not exclude build input {keep!r}"
 

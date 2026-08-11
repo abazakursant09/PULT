@@ -6,7 +6,11 @@ on:
     paths:
       - backend/Dockerfile
       - backend/.dockerignore
-      - backend/requirements.txt
+      # SECURITY-2D-3B — any change to a runtime input or either lock must re-verify the image build.
+      - backend/requirements.in
+      - backend/requirements.lock
+      - backend/requirements-ci.in
+      - backend/requirements-ci.lock
       - frontend/Dockerfile
       - frontend/.dockerignore
       - frontend/package-lock.json
@@ -18,7 +22,11 @@ on:
     paths:
       - backend/Dockerfile
       - backend/.dockerignore
-      - backend/requirements.txt
+      # SECURITY-2D-3B — any change to a runtime input or either lock must re-verify the image build.
+      - backend/requirements.in
+      - backend/requirements.lock
+      - backend/requirements-ci.in
+      - backend/requirements-ci.lock
       - frontend/Dockerfile
       - frontend/.dockerignore
       - frontend/package-lock.json

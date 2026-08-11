@@ -515,7 +515,9 @@ def test_recording_an_attempt_never_decrypts(monkeypatch):
 
 
 def test_no_redis_dependency_added():
-    reqs = (Path(__file__).resolve().parents[1] / "requirements.txt").read_text(
+    # SECURITY-2D-3B: assert against requirements.lock (full transitive graph) now that
+    # requirements.txt is gone; the lock catches a redis dep even if pulled in indirectly.
+    reqs = (Path(__file__).resolve().parents[1] / "requirements.lock").read_text(
         encoding="utf-8").lower()
     assert "redis" not in reqs and "aioredis" not in reqs
 

@@ -1,0 +1,27 @@
+# SECURITY-2D-3B — authoritative CI dependency INPUT (runtime + CI tooling).
+#
+# CI installs the SINGLE fully-resolved lock generated from THIS file
+# (requirements-ci.lock) with one `pip install --require-hashes` call. That lock is a
+# superset of requirements.lock: the exact same runtime graph plus the test/lint tools
+# below, resolved together in one pass so the two locks can never disagree on a shared
+# transitive version.
+#
+# Regenerate after editing (clean Linux / Python 3.13 environment — CI runs 3.13):
+#     uv pip compile requirements-ci.in --generate-hashes \
+#         --python-version 3.13 --python-platform linux -o requirements-ci.lock
+#
+# The production Docker image installs requirements.lock ONLY — it never receives these
+# CI tools.
+
+# Runtime intent (ranges + the alembic exact pin) comes from the runtime input verbatim.
+-r requirements.in
+
+# CI-only tooling. ruff is EXACT-pinned for the same reason alembic is: an unpinned bump
+# reddened master on files no PR had touched (0.16.0 flagged 42 errors 0.15.22 did not).
+ruff==0.15.22
+pytest
+pytest-cov
+coverage
+# psycopg2-binary: the real-PostgreSQL migration/EXPLAIN jobs connect over psycopg2.
+# asyncpg is NOT repeated here — it is already a runtime dependency via requirements.in.
+psycopg2-binary
