@@ -9,8 +9,12 @@ from __future__ import annotations
 
 import os
 import re
+import subprocess
+
+import pytest
 
 _HERE = os.path.dirname(__file__)
+_REPO_ROOT = os.path.abspath(os.path.join(_HERE, "..", ".."))
 _WF_DIR = os.path.join(_HERE, "..", "..", ".github", "workflows")
 
 _USES = re.compile(r"^\s*(?:-\s*)?uses:\s*(\S+)")
@@ -79,3 +83,25 @@ def test_no_pull_request_target():
     for wf in _workflows():
         assert "pull_request_target" not in open(wf, encoding="utf-8").read(), \
             f"{os.path.basename(wf)} uses pull_request_target"
+
+
+def test_no_orphan_submodule_gitlinks():
+    # A tracked gitlink (git tree mode 160000) whose module has no `.gitmodules` URL breaks
+    # `actions/checkout` the moment persist-credentials: false runs its submodule-aware auth
+    # cleanup (`git submodule foreach` → "No url found for submodule path ... in .gitmodules",
+    # exit 128). The dead `gstack` gitlink caused exactly that. Assert the checked-out git tree
+    # carries no such orphan gitlink. Tree state is authoritative — do NOT key off a physical
+    # directory that may or may not be populated in a given worktree.
+    try:
+        out = subprocess.run(
+            ["git", "ls-files", "--stage"],
+            cwd=_REPO_ROOT, capture_output=True, text=True, check=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError) as exc:  # not a git checkout / git absent
+        pytest.skip(f"git tree unavailable: {exc}")
+    gitlinks = [ln.split("\t", 1)[-1] for ln in out.splitlines() if ln.startswith("160000 ")]
+    has_gitmodules = os.path.exists(os.path.join(_REPO_ROOT, ".gitmodules"))
+    # Any gitlink is only safe if a real `.gitmodules` registers its URL; with none present, any
+    # gitlink is an orphan. Keep the check strict: no gitlinks unless `.gitmodules` exists.
+    assert not gitlinks or has_gitmodules, \
+        f"orphan submodule gitlink(s) with no .gitmodules URL: {gitlinks}"
