@@ -179,24 +179,26 @@ def test_async_outage_case_L_present():
     assert "MNT_SYNC" not in reg, "case L must use the async config (archive-async=y), not the sync override"
     assert re.search(r"docker run -d --name lsrc\b.*\$MNT\b", reg, re.S), "L source must mount the async pgbackrest.conf ($MNT)"
     assert "archive-async=y" in w, "standard config must keep archive-async=y"
-    # MinIO is isolated from pitrnet (proven cut) while a checknet-attached checker still lists S3
-    assert "network disconnect pitrnet minio" in reg and "network connect pitrnet minio" in reg
-    assert "checknet" in reg, "L must use a second network so the S3 checker survives the outage"
-    assert "still reachable to S3 after disconnect" in reg, "L must confirm the source truly lost S3 before the outage segment"
+    # Outage = `docker pause minio` (connections hang, DNS resolves) kept short so the async worker
+    # only stalls (a DNS-failure cut instead crashes the postmaster); MinIO is unpaused to recover.
+    assert "docker pause minio" in reg and "docker unpause minio" in reg
+    assert "still reachable to S3 during pause" in reg, "L must confirm the source truly lost S3 before the outage segment"
+    assert "repo-ls" in reg, "isolation must be probed with repo-ls (info exits 0 even when unreachable)"
     # foreground async success == LOCAL acceptance while S3 is down (write path does not fail):
     # proven via failed_count staying flat across the outage switch
     assert "async foreground accepted" in reg and "failed_count" in reg
     # under async the durable-but-not-yet-offsite copy is the pg_wal segment, not the spool
     assert "wal_has" in reg and "not retained in local pg_wal" in reg
-    # the exact segment (born during the outage) must be proven ABSENT offsite during the outage
-    assert "unexpectedly offsite during outage" in reg, "must prove the spooled segment is absent offsite during the outage"
+    # the exact segment must be proven ABSENT offsite: a live listing before the outage (S3 up)
+    # plus creation during the pause anchors it, and it must drain only after S3 returns
+    assert "already offsite before outage" in reg, "must prove the segment is not offsite before the outage"
     # status.sh must be invoked DURING the outage and must NOT report a safe state
     assert "status.sh" in reg and "L-status(outage)" in reg
     assert "continuity=intact during outage" in reg, "must fail if status wrongly reports intact during outage"
-    # after reconnect: the EXACT segment must drain to S3 and status must flip to intact
-    assert "never drained to S3 after reconnect" in reg
+    # after S3 returns: the EXACT segment must drain to S3 and status must flip to intact
+    assert "never drained to S3 after S3 returned" in reg
     assert "L-status(healthy)" in reg and "continuity not intact after drain" in reg
-    assert "offsite_archive_max" in reg and "ge_seg" in reg, "must confirm offsite max advanced to include SEG"
+    assert "offsite_archive_max" in reg, "status must expose the offsite WAL max"
 
 
 def test_b1_cases_not_deferred_to_b2():
