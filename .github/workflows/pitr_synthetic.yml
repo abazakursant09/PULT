@@ -113,9 +113,9 @@ jobs:
           # create bucket (mc-free): use pgbackrest? pgbackrest can't mkbucket. Use a pinned minio mc? Instead let MinIO auto-make via first stanza? pgBackRest needs the bucket to exist.
           docker run --rm --network pitrnet -v "$W/certs/public.crt":/ca.crt:ro --entrypoint sh "$MINIO_IMAGE" -c "mc alias set m https://minio:9000 $S3_KEY $S3_SECRET --insecure >/dev/null 2>&1 || true; mc --insecure mb m/$BUCKET || true"
           # stanza + base backup
-          docker exec pgsrc pgbackrest --stanza=$STANZA stanza-create
-          docker exec pgsrc pgbackrest --stanza=$STANZA check
-          docker exec pgsrc pgbackrest --stanza=$STANZA --type=full backup
+          docker exec -u postgres pgsrc pgbackrest --stanza=$STANZA stanza-create
+          docker exec -u postgres pgsrc pgbackrest --stanza=$STANZA check
+          docker exec -u postgres pgsrc pgbackrest --stanza=$STANZA --type=full backup
           # alembic + seed + markers
           docker exec pgsrc psql -U postgres -d business_pult -c "CREATE TABLE pitr_marker(id int primary key, v text)"
           docker exec pgsrc psql -U postgres -d business_pult -c "INSERT INTO pitr_marker VALUES (1,'T1')"
@@ -127,14 +127,15 @@ jobs:
           docker exec pgsrc psql -U postgres -d business_pult -c "INSERT INTO pitr_marker VALUES (3,'T3')"
           docker exec pgsrc psql -U postgres -d business_pult -c "SELECT pg_switch_wal()"
           sleep 3
-          docker exec pgsrc pgbackrest --stanza=$STANZA check
+          docker exec -u postgres pgsrc pgbackrest --stanza=$STANZA check
           # destroy source (container + its exact synthetic volume)
           docker rm -f pgsrc
           docker volume rm pitr_src
           # restore into NEW empty target to LSN after T2 (before T3), promote
           docker run -d --name pgtgt --network pitrnet $PGENV $MNT -v pitr_tgt:/var/lib/postgresql/data \
             -e POSTGRES_PASSWORD="$PGPW" --entrypoint sh pult-pitr:ci -c 'sleep 600'
-          docker exec -e PITR_SYNTHETIC_MARKER=synthetic-3b1 -e PGDATA=/var/lib/postgresql/data -e PITR_STANZA=$STANZA -e PITR_TARGET_LSN="$TARGET_LSN" pgtgt restore.sh
+          docker exec pgtgt chown postgres:postgres /var/lib/postgresql/data
+          docker exec -u postgres -e PITR_SYNTHETIC_MARKER=synthetic-3b1 -e PGDATA=/var/lib/postgresql/data -e PITR_STANZA=$STANZA -e PITR_TARGET_LSN="$TARGET_LSN" pgtgt restore.sh
           docker exec -u postgres pgtgt sh -c 'pg_ctl -D /var/lib/postgresql/data -w -t 120 start'
           for i in $(seq 1 60); do docker exec pgtgt pg_isready -U postgres && break || sleep 2; done
           # assertions
