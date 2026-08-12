@@ -189,9 +189,9 @@ def test_async_outage_case_L_present():
     assert "async foreground accepted" in reg and "failed_count" in reg
     # under async the durable-but-not-yet-offsite copy is the pg_wal segment, not the spool
     assert "wal_has" in reg and "not retained in local pg_wal" in reg
-    # the exact segment must be proven ABSENT offsite: a live listing before the outage (S3 up)
-    # plus creation during the pause anchors it, and it must drain only after S3 returns
-    assert "already offsite before outage" in reg, "must prove the segment is not offsite before the outage"
+    # offsite must be UNCONFIRMABLE during the outage (nothing new reaches S3), then the exact
+    # segment drains only after S3 returns
+    assert "offsite max not 'unknown' during outage" in reg, "must assert offsite is unconfirmable during the outage"
     # status.sh must be invoked DURING the outage and must NOT report a safe state
     assert "status.sh" in reg and "L-status(outage)" in reg
     assert "continuity=intact during outage" in reg, "must fail if status wrongly reports intact during outage"

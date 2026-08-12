@@ -351,26 +351,26 @@ jobs:
           docker exec -u postgres lsrc psql -U postgres -d business_pult -c "CREATE TABLE l(x int); INSERT INTO l VALUES (0); SELECT pg_switch_wal()" >/dev/null || { echo "L FAIL: baseline write"; ldump; exit 1; }
           base_ok=0; for k in $(seq 1 20); do docker exec -u postgres lsrc pgbackrest --stanza=pult check >/dev/null 2>&1 && { base_ok=1; break; }; sleep 3; done
           [ "$base_ok" = 1 ] || { echo "L FAIL: baseline archive to S3 not confirmed"; exit 1; }
-          # SEG = a FRESH current segment (in-progress, not yet archived); verify it is NOT offsite
-          # while S3 is still up, so 'absent offsite' is anchored by a live listing before the outage.
-          docker exec -u postgres lsrc psql -U postgres -c "SELECT pg_switch_wal()" >/dev/null || true
-          sleep 3
-          SEG="$(docker exec -u postgres lsrc psql -U postgres -tAc 'SELECT pg_walfile_name(pg_current_wal_lsn())' 2>/dev/null || echo '')"
-          [ -n "$SEG" ] || { echo "L FAIL: could not resolve SEG"; ldump; exit 1; }
-          if seg_in_s3 "$SEG"; then echo "L FAIL: SEG $SEG already offsite before outage"; exit 1; fi
+          OFF0="$(docker exec -u postgres -e PGBACKREST_REPO1_PATH=/pult-outl -e PGBACKREST_STANZA=pult lsrc status.sh 2>/dev/null | sed -n 's/^pitr_offsite_archive_max=//p')"
+          echo "L: offsite WAL max before outage = ${OFF0:-unknown}"
           L0="$(docker exec -u postgres lsrc psql -U postgres -tAc 'SELECT failed_count FROM pg_stat_archiver' 2>/dev/null || echo 0)"
           # OUTAGE: pause MinIO — connections HANG, DNS still resolves. Short window (< io-timeout).
           docker pause minio
           # confirm the source truly cannot reach S3 now (repo-ls hangs then fails fast).
           iso=0; for k in $(seq 1 12); do docker exec -u postgres lsrc pgbackrest --stanza=pult --io-timeout=5 repo-ls >/dev/null 2>&1 || { iso=1; break; }; sleep 1; done
           [ "$iso" = 1 ] || { echo "L FAIL: source still reachable to S3 during pause"; docker unpause minio >/dev/null 2>&1 || true; exit 1; }
-          # complete SEG during the outage; under async the foreground archive-push accepts it LOCALLY
+          # SEG = the segment written DURING the outage. Advance MID-segment first (a committed write)
+          # so pg_walfile_name resolves the in-progress segment (not the prior one at a boundary),
+          # THEN complete SEG with a switch. Under async the foreground archive-push accepts it LOCALLY
           # (spool) and returns success — failed_count stays flat although S3 is unreachable.
-          docker exec -u postgres lsrc psql -U postgres -d business_pult -c "INSERT INTO l VALUES (1); SELECT pg_switch_wal()" >/dev/null || { echo "L FAIL: outage switch"; docker unpause minio >/dev/null 2>&1 || true; ldump; exit 1; }
+          docker exec -u postgres lsrc psql -U postgres -d business_pult -c "INSERT INTO l VALUES (1)" >/dev/null || { echo "L FAIL: outage write"; docker unpause minio >/dev/null 2>&1 || true; ldump; exit 1; }
+          SEG="$(docker exec -u postgres lsrc psql -U postgres -tAc 'SELECT pg_walfile_name(pg_current_wal_lsn())' 2>/dev/null || echo '')"
+          [ -n "$SEG" ] || { echo "L FAIL: could not resolve SEG during outage"; docker unpause minio >/dev/null 2>&1 || true; ldump; exit 1; }
+          docker exec -u postgres lsrc psql -U postgres -d business_pult -c "SELECT pg_switch_wal()" >/dev/null || { echo "L FAIL: outage switch"; docker unpause minio >/dev/null 2>&1 || true; ldump; exit 1; }
           L1="$(docker exec -u postgres lsrc psql -U postgres -tAc 'SELECT failed_count FROM pg_stat_archiver' 2>/dev/null || echo err)"
           [ "$L1" = "$L0" ] || { echo "L FAIL: foreground archive failed during outage (failed_count $L0->$L1); expected async local spool-accept"; docker unpause minio >/dev/null 2>&1 || true; ldump; exit 1; }
           echo "L: async foreground accepted SEG=$SEG locally (failed_count $L0->$L1) — NOT yet offsite"
-          # SEG retained locally (pg_wal, same VDS); it is NOT offsite (S3 paused since before SEG existed).
+          # SEG retained locally (pg_wal, same VDS); it is NOT offsite (S3 paused throughout SEG's life).
           wal_has "$SEG" || { echo "L FAIL: SEG $SEG not retained in local pg_wal"; docker unpause minio >/dev/null 2>&1 || true; ldump; exit 1; }
           # status.sh must report the DANGEROUS state despite the foreground success (bounded probes).
           LST="$(docker exec -u postgres -e PGBACKREST_REPO1_PATH=/pult-outl -e PGBACKREST_STANZA=pult -e PITR_STATUS_TIMEOUT=6 lsrc status.sh || true)"
@@ -379,7 +379,7 @@ jobs:
           echo "$LST" | grep -q '^pitr_check_status=ok$' && { echo "L FAIL: status check_status=ok during outage"; docker unpause minio >/dev/null 2>&1 || true; exit 1; }
           echo "$LST" | grep -q '^pitr_continuity=intact$' && { echo "L FAIL: status continuity=intact during outage"; docker unpause minio >/dev/null 2>&1 || true; exit 1; }
           echo "$LST" | grep -q '^pitr_archive_lag=ok$' && { echo "L FAIL: status archive_lag=ok during outage"; docker unpause minio >/dev/null 2>&1 || true; exit 1; }
-          echo "$LST" | grep -q '^pitr_offsite_archive_max=' || { echo "L FAIL: status missing offsite signal"; docker unpause minio >/dev/null 2>&1 || true; exit 1; }
+          echo "$LST" | grep -q '^pitr_offsite_archive_max=unknown$' || { echo "L FAIL: offsite max not 'unknown' during outage (S3 must be unconfirmable, nothing new offsite)"; docker unpause minio >/dev/null 2>&1 || true; exit 1; }
           # END outage: unpause; the stalled async worker resumes and the EXACT segment drains to S3.
           docker unpause minio
           lready
