@@ -360,7 +360,10 @@ jobs:
           # CONFIRM the source truly lost S3 (repo probe fails) BEFORE producing the outage segment,
           # so neither the foreground nor the async worker can upload it — closes the in-flight race
           # where a segment already queued at disconnect time sneaks offsite.
-          iso=0; for k in $(seq 1 20); do docker exec -u postgres lsrc pgbackrest --stanza=pult --io-timeout=8 info >/dev/null 2>&1 || { iso=1; break; }; sleep 2; done
+          # NB: `pgbackrest info` exits 0 even when the repo is unreachable (it reports status in its
+          # output), so it is useless as a reachability probe. `repo-ls` actually lists the S3 repo and
+          # exits nonzero when it cannot reach it.
+          iso=0; for k in $(seq 1 20); do docker exec -u postgres lsrc pgbackrest --stanza=pult --io-timeout=8 repo-ls >/dev/null 2>&1 || { iso=1; break; }; sleep 2; done
           [ "$iso" = 1 ] || { echo "L FAIL: source still reachable to S3 after disconnect"; exit 1; }
           # baseline archived tip AT isolation time; the outage switch must advance past it.
           L0="$(docker exec -u postgres lsrc psql -U postgres -tAc 'SELECT failed_count FROM pg_stat_archiver' 2>/dev/null || echo 0)"
