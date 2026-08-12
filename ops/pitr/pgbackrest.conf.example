@@ -1,0 +1,28 @@
+# SECURITY-2D-3E1B-3B1 — pgBackRest config template (NON-SECRET only; placeholders).
+# Real credentials + cipher passphrase are injected via pgBackRest's supported environment
+# variables (NOT here, NOT in argv, NOT in Git):
+#   PGBACKREST_REPO1_S3_KEY          — S3 access key id
+#   PGBACKREST_REPO1_S3_KEY_SECRET   — S3 secret access key
+#   PGBACKREST_REPO1_CIPHER_PASS     — repository cipher passphrase
+# In production these come from secret files exported into the postgres process env by a
+# non-logging wrapper (documented in docs/pitr-policy.md); the synthetic CI sets them job-local.
+[global]
+repo1-type=s3
+repo1-s3-endpoint=s3.example-ru-region.selectel.invalid   # production MUST be a real https S3 endpoint
+repo1-s3-region=ru-1
+repo1-s3-bucket=pult-pitr-REPLACE
+repo1-s3-uri-style=path
+repo1-path=/pult-pitr
+repo1-storage-verify-tls=y
+repo1-cipher-type=aes-256-cbc
+# retention is a DOCUMENTED PLACEHOLDER only — no production auto-expire in 3B1 (that is 3C).
+repo1-retention-full=2
+spool-path=/var/spool/pgbackrest
+archive-async=y
+process-max=2
+compress-type=zst
+log-level-console=info
+log-path=/var/log/pgbackrest
+
+[pult]
+pg1-path=/var/lib/postgresql/data

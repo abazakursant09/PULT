@@ -1,0 +1,8 @@
+# SECURITY-2D-3E1B-3B1 — PITR build context: ship only Dockerfile + configs/scripts.
+Dockerfile.discovery
+secrets/
+*cipher*pass*
+*.s3-secret
+*.key
+.env
+.env.*

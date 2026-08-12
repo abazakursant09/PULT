@@ -1,0 +1,156 @@
+name: PITR Synthetic
+
+# SECURITY-2D-3E1B-3B1 — proves pgBackRest base backup + continuous WAL archive + point-in-time
+# (LSN) restore on SYNTHETIC data only, against a pinned MinIO served over TLS (so pgBackRest
+# keeps repo1-storage-verify-tls=y with a mounted CA — TLS verification is NOT disabled).
+# No real Selectel, no real secrets, no PII, no image publish, no WAL/repo/key artifacts.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ops/pitr/**
+      - docker-compose.pitr.yml
+      - docs/pitr-policy.md
+      - backend/tests/test_pitr_contract_guard.py
+      - backend/alembic/**
+      - .github/workflows/pitr_synthetic.yml
+  push:
+    branches: [master]
+    paths:
+      - ops/pitr/**
+      - .github/workflows/pitr_synthetic.yml
+
+permissions:
+  contents: read
+
+jobs:
+  pitr-synthetic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      MINIO_IMAGE: "minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e"
+      S3_KEY: ciminio
+      S3_SECRET: ciminiosecret123
+      CIPHER_PASS: cisyntheticcipherpass
+      PGPW: cipg
+      BUCKET: pult-pitr-ci
+      STANZA: pult
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.13"
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.9.0
+
+      - name: Offline PITR contract guard
+        working-directory: backend
+        run: |
+          pip install --require-hashes -r requirements-ci.lock
+          python -m pytest tests/test_pitr_contract_guard.py tests/test_base_image_digest_pin_guard.py -q
+
+      - name: Build PITR image (exact-pinned) + prove closure
+        run: |
+          set -euo pipefail
+          docker buildx build --load -t pult-pitr:ci ops/pitr
+          docker run --rm --entrypoint sh pult-pitr:ci -c 'pgbackrest version; ldd /usr/bin/pgbackrest; ldd /usr/bin/pgbackrest | grep -q "not found" && exit 1 || true; command -v gcc && exit 1 || true'
+
+      - name: TLS MinIO + network + S3 config
+        run: |
+          set -euo pipefail
+          W="$RUNNER_TEMP/pitr"; mkdir -p "$W/certs" "$W/repo-conf"
+          docker network create pitrnet
+          # self-signed CA/cert for MinIO host "minio"
+          openssl req -x509 -newkey rsa:2048 -sha256 -days 2 -nodes \
+            -keyout "$W/certs/private.key" -out "$W/certs/public.crt" \
+            -subj "/CN=minio" -addext "subjectAltName=DNS:minio"
+          docker run -d --name minio --network pitrnet \
+            -e MINIO_ROOT_USER="$S3_KEY" -e MINIO_ROOT_PASSWORD="$S3_SECRET" \
+            -v "$W/certs":/root/.minio/certs:ro "$MINIO_IMAGE" server /data
+          # bucket via aws-less rclone-free path: use the pitr image's pgbackrest? no — create with a tiny mc-free step:
+          for i in $(seq 1 30); do docker run --rm --network pitrnet --entrypoint sh pult-pitr:ci -c "true" && break; sleep 1; done
+          echo "$W" > "$RUNNER_TEMP/wdir"
+
+      - name: Run synthetic PITR (base + WAL + T1/T2/T3 LSN restore)
+        run: |
+          set -euo pipefail
+          W="$(cat "$RUNNER_TEMP/wdir")"
+          # pgBackRest config for CI: S3=MinIO over TLS, CA trusted (verify-tls stays y).
+          cat > "$W/repo-conf/pgbackrest.conf" <<CONF
+          [global]
+          repo1-type=s3
+          repo1-s3-endpoint=minio:9000
+          repo1-s3-region=us-east-1
+          repo1-s3-bucket=$BUCKET
+          repo1-s3-uri-style=path
+          repo1-path=/pult-pitr
+          repo1-storage-verify-tls=y
+          repo1-storage-ca-file=/etc/pgbackrest/minio-ca.crt
+          repo1-cipher-type=aes-256-cbc
+          spool-path=/var/spool/pgbackrest
+          archive-async=y
+          process-max=2
+          compress-type=zst
+          log-level-console=info
+          log-path=/var/log/pgbackrest
+          [pult]
+          pg1-path=/var/lib/postgresql/data
+          CONF
+          PGENV="-e PGBACKREST_REPO1_S3_KEY=$S3_KEY -e PGBACKREST_REPO1_S3_KEY_SECRET=$S3_SECRET -e PGBACKREST_REPO1_CIPHER_PASS=$CIPHER_PASS"
+          MNT="-v $W/repo-conf/pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro -v $W/certs/public.crt:/etc/pgbackrest/minio-ca.crt:ro"
+          # source postgres (PITR image) with archive_mode on
+          docker run -d --name pgsrc --network pitrnet $PGENV $MNT \
+            -v pitr_src:/var/lib/postgresql/data \
+            -v "$PWD/ops/pitr/postgresql.conf":/etc/postgresql/postgresql.conf:ro \
+            -e POSTGRES_PASSWORD="$PGPW" -e POSTGRES_DB=business_pult \
+            pult-pitr:ci postgres -c config_file=/etc/postgresql/postgresql.conf
+          for i in $(seq 1 60); do docker exec pgsrc pg_isready -U postgres && break || sleep 2; done
+          docker exec pgsrc sh -c 'pgbackrest version; postgres --version'
+          # create bucket (mc-free): use pgbackrest? pgbackrest can't mkbucket. Use a pinned minio mc? Instead let MinIO auto-make via first stanza? pgBackRest needs the bucket to exist.
+          docker run --rm --network pitrnet -v "$W/certs/public.crt":/ca.crt:ro --entrypoint sh "$MINIO_IMAGE" -c "mc alias set m https://minio:9000 $S3_KEY $S3_SECRET --insecure >/dev/null 2>&1 || true; mc --insecure mb m/$BUCKET || true"
+          # stanza + base backup
+          docker exec pgsrc pgbackrest --stanza=$STANZA stanza-create
+          docker exec pgsrc pgbackrest --stanza=$STANZA check
+          docker exec pgsrc pgbackrest --stanza=$STANZA --type=full backup
+          # alembic + seed + markers
+          docker exec pgsrc psql -U postgres -d business_pult -c "CREATE TABLE pitr_marker(id int primary key, v text)"
+          docker exec pgsrc psql -U postgres -d business_pult -c "INSERT INTO pitr_marker VALUES (1,'T1')"
+          docker exec pgsrc psql -U postgres -d business_pult -c "SELECT pg_switch_wal()"
+          sleep 3
+          docker exec pgsrc psql -U postgres -d business_pult -c "INSERT INTO pitr_marker VALUES (2,'T2')"
+          TARGET_LSN="$(docker exec pgsrc psql -U postgres -d business_pult -tAc 'SELECT pg_current_wal_lsn()')"
+          echo "TARGET_LSN=$TARGET_LSN"
+          docker exec pgsrc psql -U postgres -d business_pult -c "INSERT INTO pitr_marker VALUES (3,'T3')"
+          docker exec pgsrc psql -U postgres -d business_pult -c "SELECT pg_switch_wal()"
+          sleep 3
+          docker exec pgsrc pgbackrest --stanza=$STANZA check
+          # destroy source (container + its exact synthetic volume)
+          docker rm -f pgsrc
+          docker volume rm pitr_src
+          # restore into NEW empty target to LSN after T2 (before T3), promote
+          docker run -d --name pgtgt --network pitrnet $PGENV $MNT -v pitr_tgt:/var/lib/postgresql/data \
+            -e POSTGRES_PASSWORD="$PGPW" --entrypoint sh pult-pitr:ci -c 'sleep 600'
+          docker exec -e PITR_SYNTHETIC_MARKER=synthetic-3b1 -e PGDATA=/var/lib/postgresql/data -e PITR_STANZA=$STANZA -e PITR_TARGET_LSN="$TARGET_LSN" pgtgt restore.sh
+          docker exec -u postgres pgtgt sh -c 'pg_ctl -D /var/lib/postgresql/data -w -t 120 start'
+          for i in $(seq 1 60); do docker exec pgtgt pg_isready -U postgres && break || sleep 2; done
+          # assertions
+          REC="$(docker exec pgtgt psql -U postgres -d business_pult -tAc 'SELECT pg_is_in_recovery()')"
+          test "$REC" = "f" || { echo "still in recovery"; exit 1; }
+          T1="$(docker exec pgtgt psql -U postgres -d business_pult -tAc "SELECT count(*) FROM pitr_marker WHERE v='T1'")"
+          T2="$(docker exec pgtgt psql -U postgres -d business_pult -tAc "SELECT count(*) FROM pitr_marker WHERE v='T2'")"
+          T3="$(docker exec pgtgt psql -U postgres -d business_pult -tAc "SELECT count(*) FROM pitr_marker WHERE v='T3'")"
+          echo "T1=$T1 T2=$T2 T3=$T3"
+          test "$T1" = "1" && test "$T2" = "1" && test "$T3" = "0" || { echo "PITR target wrong (expected T1,T2 present, T3 absent)"; exit 1; }
+          docker exec pgtgt psql -U postgres -d business_pult -c "INSERT INTO pitr_marker VALUES (4,'T4')"
+          echo "PITR SYNTHETIC OK: base+WAL+LSN-restore, T1/T2 present, T3 absent, promoted, T4 write ok"
+
+      - name: Teardown
+        if: always()
+        run: |
+          docker rm -f pgsrc pgtgt minio 2>/dev/null || true
+          docker volume rm pitr_src pitr_tgt 2>/dev/null || true
+          docker network rm pitrnet 2>/dev/null || true

@@ -23,10 +23,13 @@ REPO = BACKEND.parent
 
 # Reviewed allowlist of production Dockerfiles (repo-relative, POSIX). A new tracked
 # Dockerfile that is not classified here must fail the guard until it is reviewed.
-ALLOWLISTED_DOCKERFILES = ("backend/Dockerfile", "frontend/Dockerfile", "ops/backup/Dockerfile")
+ALLOWLISTED_DOCKERFILES = ("backend/Dockerfile", "frontend/Dockerfile", "ops/backup/Dockerfile",
+                           "ops/pitr/Dockerfile")
 
-# Each production Dockerfile is single-stage today.
-EXPECTED_STAGE_COUNT = {"backend/Dockerfile": 1, "frontend/Dockerfile": 1, "ops/backup/Dockerfile": 1}
+# Stage counts: single-stage app/backup images; the PITR runner is a 2-stage source build
+# (builder + final), both FROM the same pinned PostgreSQL base.
+EXPECTED_STAGE_COUNT = {"backend/Dockerfile": 1, "frontend/Dockerfile": 1, "ops/backup/Dockerfile": 1,
+                        "ops/pitr/Dockerfile": 2}
 
 # Known-good pinned references (image:tag@sha256:digest), verified against the Docker
 # Registry v2 API and the Docker Hub API on 2026-08-11 (both agree; the python index
@@ -45,6 +48,11 @@ EXPECTED_REFS = {
     # only pinned+hash-verified rclone/age). Classified here because it is a tracked,
     # production-relevant Dockerfile that must stay digest-pinned.
     "ops/backup/Dockerfile": (
+        "postgres:16-alpine@sha256:"
+        "57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777"
+    ),
+    # SECURITY-2D-3E1B-3B1 PITR runner — both stages FROM the pinned PostgreSQL base.
+    "ops/pitr/Dockerfile": (
         "postgres:16-alpine@sha256:"
         "57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777"
     ),
@@ -140,10 +148,14 @@ def test_stage_counts_match_expected():
 def test_known_good_references_match():
     for rel, expected in EXPECTED_REFS.items():
         froms = _from_directives(rel)
-        assert len(froms) == 1, f"{rel}: expected a single FROM for the known-good check"
-        assert _image_ref(froms[0]) == expected, (
-            f"{rel}: pinned reference drifted from the reviewed known-good value.\n"
-            f"  expected: {expected}\n  found:    {_image_ref(froms[0])}\n"
-            "A digest bump must be a deliberate, separately reviewed change that updates "
-            "this constant in the same PR."
-        )
+        assert froms, f"{rel}: no FROM directive found"
+        # Every stage's base (1 for single-stage, N for multi-stage builds) must be exactly the
+        # reviewed known-good reference.
+        for line in froms:
+            ref = _image_ref(line)
+            assert ref == expected, (
+                f"{rel}: pinned reference drifted from the reviewed known-good value.\n"
+                f"  expected: {expected}\n  found:    {ref}\n"
+                "A digest bump must be a deliberate, separately reviewed change that updates "
+                "this constant in the same PR."
+            )

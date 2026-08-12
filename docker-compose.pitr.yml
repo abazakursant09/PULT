@@ -1,0 +1,43 @@
+# SECURITY-2D-3E1B-3B1 — DORMANT PITR compose (profile `pitr`; NOT started by a normal
+# `docker compose up -d`). Synthetic/local only. Does NOT modify the production postgres
+# service. Production activation (swapping the prod DB image to this PITR image + archive_mode
+# restart) is 3C, not here. The official postgres entrypoint/user/PGDATA semantics are kept
+# (a PostgreSQL server container is NOT hardened like the 3A one-shot backup runner unless a
+# real startup proves it — so no read-only rootfs / cap_drop ALL claims here).
+services:
+  pitr-postgres:
+    profiles: ["pitr"]
+    build:
+      context: ./ops/pitr
+      dockerfile: Dockerfile
+    restart: "no"
+    command:
+      - postgres
+      - -c
+      - config_file=/etc/postgresql/postgresql.conf
+    environment:
+      POSTGRES_DB: business_pult
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${PITR_PGPASSWORD:?synthetic password required}
+      # pgBackRest credentials + cipher pass arrive as env (from secret files in real use).
+      # NO marketplace/JWT/Sentry/provider secrets here.
+      PGBACKREST_REPO1_S3_KEY: ${PITR_S3_KEY:?}
+      PGBACKREST_REPO1_S3_KEY_SECRET: ${PITR_S3_SECRET:?}
+      PGBACKREST_REPO1_CIPHER_PASS: ${PITR_CIPHER_PASS:?}
+    volumes:
+      - pitr_pgdata:/var/lib/postgresql/data
+      - ./ops/pitr/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./ops/pitr/pgbackrest.conf.example:/etc/pgbackrest/pgbackrest.conf:ro
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - pult
+    # No published ports; no Docker socket; no host PGDATA bind. Only the exact synthetic volume.
+
+networks:
+  pult:
+    external: true
+    name: ${COMPOSE_PROJECT_NAME:-business-pult}_default
+
+volumes:
+  pitr_pgdata:
