@@ -330,31 +330,37 @@ jobs:
           seg_in_s3() { MC "mc --insecure --json ls --recursive m/$BUCKET/$LREPO/" | grep -q "$1"; }
           spool_has() { docker exec lsrc sh -c "find /var/spool/pgbackrest -type f -name '*$1*' 2>/dev/null | grep -q ."; }
           ge_seg() { [ "$(printf '%s\n%s\n' "$1" "$2" | LC_ALL=C sort | tail -1)" = "$2" ]; }  # true if $2 >= $1
+          ldump() { echo "---- lsrc postgres log (tail) ----"; docker logs lsrc --tail 80 2>&1 | sed 's/^/lsrc-log: /' || true; }
+          # block until the source primary accepts a read-write connection (tolerate a transient
+          # postmaster crash-recovery after a backend restart); dump the log + fail if it never does.
+          lready() { for a in $(seq 1 45); do if [ "$(docker exec -u postgres lsrc psql -U postgres -tAc 'SELECT 1' 2>/dev/null || true)" = 1 ]; then [ "$(docker exec -u postgres lsrc psql -U postgres -tAc 'SELECT pg_is_in_recovery()' 2>/dev/null || echo t)" = f ] && return 0; fi; sleep 2; done; echo "L FAIL: source DB not ready (crash-loop or stuck in recovery)"; ldump; exit 1; }
           docker run -d --name lsrc --network pitrnet \
             -e PGBACKREST_REPO1_S3_KEY="$S3_KEY" -e PGBACKREST_REPO1_S3_KEY_SECRET="$S3_SECRET" -e PGBACKREST_REPO1_CIPHER_PASS="$CIPHER_PASS" \
             -e PGBACKREST_REPO1_PATH=/pult-outl -e PGBACKREST_STANZA=pult $MNT -v pitr_lsrc:/var/lib/postgresql/data \
             -v "$PWD/ops/pitr/postgresql.conf":/etc/postgresql/postgresql.conf:ro \
             -e POSTGRES_PASSWORD="$PGPW" -e POSTGRES_DB=business_pult pult-pitr:ci postgres -c config_file=/etc/postgresql/postgresql.conf >/dev/null
           for k in $(seq 1 60); do docker exec lsrc pg_isready -U postgres >/dev/null 2>&1 && break || sleep 2; done
+          lready
           docker exec -u postgres lsrc pgbackrest --stanza=pult stanza-create
           docker exec -u postgres lsrc pgbackrest --stanza=pult --type=full backup
+          lready
           # baseline: one segment must actually reach S3 while connected (async worker healthy)
-          docker exec -u postgres lsrc psql -U postgres -d business_pult -c "CREATE TABLE l(x int); INSERT INTO l VALUES (0); SELECT pg_switch_wal()" >/dev/null
+          docker exec -u postgres lsrc psql -U postgres -d business_pult -c "CREATE TABLE l(x int); INSERT INTO l VALUES (0); SELECT pg_switch_wal()" >/dev/null || { echo "L FAIL: baseline write"; ldump; exit 1; }
           base_ok=0; for k in $(seq 1 20); do docker exec -u postgres lsrc pgbackrest --stanza=pult check >/dev/null 2>&1 && { base_ok=1; break; }; sleep 3; done
           [ "$base_ok" = 1 ] || { echo "L FAIL: baseline archive to S3 not confirmed"; exit 1; }
-          L0="$(docker exec -u postgres lsrc psql -U postgres -tAc 'SELECT failed_count FROM pg_stat_archiver')"
-          LAW0="$(docker exec -u postgres lsrc psql -U postgres -tAc "SELECT coalesce(last_archived_wal,'')::text FROM pg_stat_archiver")"
+          L0="$(docker exec -u postgres lsrc psql -U postgres -tAc 'SELECT failed_count FROM pg_stat_archiver' 2>/dev/null || echo 0)"
+          LAW0="$(docker exec -u postgres lsrc psql -U postgres -tAc "SELECT coalesce(last_archived_wal,'')::text FROM pg_stat_archiver" 2>/dev/null || echo '')"
           # isolate the SOURCE from the network FIRST; S3 stays reachable to the checker; async worker fails.
           docker network disconnect pitrnet lsrc
-          docker exec -u postgres lsrc psql -U postgres -d business_pult -c "INSERT INTO l VALUES (1); SELECT pg_switch_wal()" >/dev/null
+          docker exec -u postgres lsrc psql -U postgres -d business_pult -c "INSERT INTO l VALUES (1); SELECT pg_switch_wal()" >/dev/null || { echo "L FAIL: outage switch"; ldump; exit 1; }
           # SEG = the segment the foreground archive-push ACCEPTED during the outage. Read it
           # authoritatively from pg_stat_archiver (no guessing): it is the segment completed by the
           # switch AFTER isolation, so it was born during the outage and cannot possibly be offsite.
           # foreground async success == spool-accept: last_archived_wal advances, failed_count flat.
           fg_ok=0; SEG=""; L1="$L0"
           for k in $(seq 1 15); do
-            SEG="$(docker exec -u postgres lsrc psql -U postgres -tAc "SELECT coalesce(last_archived_wal,'')::text FROM pg_stat_archiver")"
-            L1="$(docker exec -u postgres lsrc psql -U postgres -tAc 'SELECT failed_count FROM pg_stat_archiver')"
+            SEG="$(docker exec -u postgres lsrc psql -U postgres -tAc "SELECT coalesce(last_archived_wal,'')::text FROM pg_stat_archiver" 2>/dev/null || echo '')"
+            L1="$(docker exec -u postgres lsrc psql -U postgres -tAc 'SELECT failed_count FROM pg_stat_archiver' 2>/dev/null || echo "$L0")"
             [ -n "$SEG" ] && [ "$SEG" != "$LAW0" ] && [ "$L1" = "$L0" ] && { fg_ok=1; break; }
             sleep 2
           done
