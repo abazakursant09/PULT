@@ -1,0 +1,56 @@
+# SECURITY-2D-3E1B-3A — one-shot backup runner. NOT part of the production stack: it lives
+# behind the `backup` compose profile, so a normal `docker compose up -d` never starts it.
+# 3A does NOT schedule this (scheduling = 3E1B-3C). Invoke explicitly, e.g.:
+#   docker compose -f docker-compose.yml -f docker-compose.backup.yml --profile backup run --rm pg-backup
+#
+# Hardened: non-root, no ports, no Docker socket, no PGDATA mount, no host dump mount,
+# read-only root fs with a private tmpfs for plaintext, dropped caps, no-new-privileges.
+services:
+  pg-backup:
+    profiles: ["backup"]
+    build:
+      context: ./ops/backup
+      dockerfile: Dockerfile
+    restart: "no"
+    command: ["backup.sh"]
+    read_only: true
+    tmpfs:
+      - /work:rw,noexec,nosuid,size=2g,mode=1700
+      - /tmp:rw,noexec,nosuid,size=64m,mode=1700
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    user: "10002:10002"
+    environment:
+      # Backup runner gets ONLY backup-scoped values (see ops/backup/.env.example).
+      # It MUST NOT receive marketplace/provider/JWT/Sentry secrets or the restore private key.
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: ${PGDATABASE:-business_pult}
+      PGUSER: ${BACKUP_DB_USER:?pult_backup role required}
+      PGPASSWORD_FILE: /run/secrets/backup_db_password
+      BACKUP_S3_ENDPOINT: ${BACKUP_S3_ENDPOINT:?}
+      BACKUP_S3_REGION: ${BACKUP_S3_REGION:-}
+      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:?}
+      BACKUP_S3_PREFIX: ${BACKUP_S3_PREFIX:?}
+      BACKUP_S3_PROVIDER: ${BACKUP_S3_PROVIDER:-Other}
+      BACKUP_S3_ACCESS_KEY_ID: ${BACKUP_S3_ACCESS_KEY_ID:?}
+      BACKUP_S3_SECRET_ACCESS_KEY: ${BACKUP_S3_SECRET_ACCESS_KEY:?}
+      BACKUP_ENCRYPTION_RECIPIENT: ${BACKUP_ENCRYPTION_RECIPIENT:?age public recipient}
+    secrets:
+      - backup_db_password
+    networks:
+      - pult
+    depends_on:
+      - postgres
+
+# The backup runner reaches the DB over the existing internal compose network only.
+networks:
+  pult:
+    external: true
+    name: ${COMPOSE_PROJECT_NAME:-business-pult}_default
+
+secrets:
+  backup_db_password:
+    file: ./ops/backup/secrets/backup_db_password

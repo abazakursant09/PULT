@@ -38,3 +38,12 @@ backup*/
 *.tar
 *.tar.gz
 *.tgz
+
+# SECURITY-2D-3E1B-3A — never ship dumps/ciphertext/keys into an image context.
+*.dump
+*.dump.age
+*.age
+*.pgdump
+*.manifest.json
+*age-identity*
+*.identity

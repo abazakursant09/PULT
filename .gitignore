@@ -61,3 +61,17 @@ frontend/tsconfig.tsbuildinfo
 # Transient: an uploaded CSV is consumed at confirm and deleted. Nothing here is source, and a
 # seller's financial export must never reach the repository by an absent-minded `git add`.
 backend/uploads/
+
+# ── SECURITY-2D-3E1B-3A backup artifacts / secrets (never commit) ─────────────
+# Database dumps, ciphertext, manifests, restore temp, local backup secret files, and
+# private age identities must never enter the repository.
+*.dump
+*.dump.age
+*.age
+*.pgdump
+*-globals.sql
+*.manifest.json
+ops/backup/secrets/
+*age-identity*
+*.identity
+restore-tmp/

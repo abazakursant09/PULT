@@ -1,0 +1,167 @@
+name: Backup Restore Synthetic
+
+# SECURITY-2D-3E1B-3A — proves the backup/restore PROTOCOL on SYNTHETIC data only, against a
+# pinned MinIO. No real Selectel, no real secrets, no PII, no PITR. Dumps/ciphertext/keys are
+# never uploaded as artifacts.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ops/backup/**
+      - docker-compose.backup.yml
+      - docs/backup-restore-policy.md
+      - backend/tests/test_backup_restore_contract_guard.py
+      - backend/alembic/**
+      - backend/models/**
+      - .github/workflows/backup_restore_synthetic.yml
+  push:
+    branches: [master]
+    paths:
+      - ops/backup/**
+      - docker-compose.backup.yml
+      - backend/tests/test_backup_restore_contract_guard.py
+      - .github/workflows/backup_restore_synthetic.yml
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PGDIGEST: "postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777"
+      MINIO_IMAGE: "minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e"
+      BUCKET: "pult-backup-ci"
+      PREFIX: "pult/pg"
+      S3_KEY: "ciminio"
+      S3_SECRET: "ciminiosecret123"
+      PGPW: "cipg"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.13"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.9.0
+
+      - name: Install backend deps + offline contract guard
+        working-directory: backend
+        run: |
+          pip install --require-hashes -r requirements-ci.lock
+          python -m pytest tests/test_backup_restore_contract_guard.py -q
+
+      - name: Build backup runner image (pinned base + pinned rclone/age, hash-verified)
+        run: docker buildx build --load -t pult-backup:ci ops/backup
+
+      - name: Network + MinIO + source PostgreSQL (pinned digests)
+        run: |
+          set -euo pipefail
+          docker network create pultbk
+          docker run -d --name minio --network pultbk \
+            -e MINIO_ROOT_USER="$S3_KEY" -e MINIO_ROOT_PASSWORD="$S3_SECRET" \
+            "$MINIO_IMAGE" server /data
+          docker run -d --name pgsource --network pultbk -p 55432:5432 \
+            -e POSTGRES_PASSWORD="$PGPW" -e POSTGRES_DB=business_pult "$PGDIGEST"
+          for i in $(seq 1 30); do docker exec minio sh -c 'exit 0' && \
+            docker run --rm --network pultbk --entrypoint sh pult-backup:ci -c \
+              "RCLONE_CONFIG_BK_TYPE=s3 RCLONE_CONFIG_BK_PROVIDER=Minio RCLONE_CONFIG_BK_ACCESS_KEY_ID=$S3_KEY RCLONE_CONFIG_BK_SECRET_ACCESS_KEY=$S3_SECRET RCLONE_CONFIG_BK_ENDPOINT=http://minio:9000 RCLONE_CONFIG_BK_FORCE_PATH_STYLE=true rclone mkdir bk:$BUCKET" && break || sleep 2; done
+          for i in $(seq 1 30); do docker exec pgsource pg_isready -U postgres && break || sleep 2; done
+          echo "PG16 server line:"; docker logs pgsource 2>&1 | grep -m1 "starting PostgreSQL 16" || true
+
+      - name: Alembic upgrade head on source (assert single head rob1a2b3c4d01)
+        working-directory: backend
+        env:
+          ALEMBIC_DATABASE_URL: postgresql+asyncpg://postgres:cipg@localhost:55432/business_pult
+        run: |
+          set -euo pipefail
+          alembic upgrade head
+          H="$(alembic heads | awk '{print $1}')"
+          test "$H" = "rob1a2b3c4d01" || { echo "unexpected head $H"; exit 1; }
+
+      - name: Create temp read-only backup role + seed synthetic data
+        run: |
+          set -euo pipefail
+          docker exec -e PGPASSWORD="$PGPW" pgsource psql -U postgres -d business_pult -v ON_ERROR_STOP=1 -c \
+            "CREATE ROLE pult_backup LOGIN PASSWORD 'cirolepw'; GRANT pg_read_all_data TO pult_backup;"
+          docker run --rm --network pultbk -e PGHOST=pgsource -e PGUSER=postgres -e PGPASSWORD="$PGPW" \
+            -e PGDATABASE=business_pult -e SEED_USER_COUNT=10 pult-backup:ci seed_synthetic.sh
+
+      - name: Capture expected source invariants + age keypair
+        id: cap
+        run: |
+          set -euo pipefail
+          q() { docker exec -e PGPASSWORD="$PGPW" pgsource psql -U postgres -d business_pult -tAc "$1"; }
+          TABLES="$(q "SELECT string_agg(table_name, ',' ORDER BY table_name) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'")"
+          SCHEMA_SHA="$(printf '%s' "$TABLES" | sha256sum | cut -d' ' -f1)"
+          UCOUNT="$(q "SELECT count(*) FROM users")"
+          UCKSUM="$(q "SELECT md5(coalesce(string_agg(id||'|'||email||'|'||name||'|'||hashed_password, ',' ORDER BY id),'')) FROM users")"
+          echo "schema_sha=$SCHEMA_SHA" >> "$GITHUB_OUTPUT"
+          echo "ucount=$UCOUNT" >> "$GITHUB_OUTPUT"
+          echo "ucksum=$UCKSUM" >> "$GITHUB_OUTPUT"
+          # age keypair (job-local; NEVER an artifact)
+          docker run --rm --entrypoint age-keygen pult-backup:ci -o /dev/stdout 2>/dev/null > "$RUNNER_TEMP/age.key" || \
+            docker run --rm --entrypoint sh pult-backup:ci -c 'age-keygen 2>/dev/null' > "$RUNNER_TEMP/age.key"
+          RECIP="$(docker run --rm --entrypoint sh -v "$RUNNER_TEMP/age.key":/k:ro pult-backup:ci -c 'age-keygen -y /k')"
+          echo "recipient=$RECIP" >> "$GITHUB_OUTPUT"
+
+      - name: Backup (pg_dump -> age -> S3) + capture key
+        id: bk
+        run: |
+          set -euo pipefail
+          OUT="$(docker run --rm --network pultbk \
+            -e PGHOST=pgsource -e PGUSER=pult_backup -e PGPASSWORD=cirolepw -e PGDATABASE=business_pult \
+            -e BACKUP_S3_ENDPOINT=http://minio:9000 -e BACKUP_S3_BUCKET="$BUCKET" -e BACKUP_S3_PREFIX="$PREFIX" \
+            -e BACKUP_S3_PROVIDER=Minio -e BACKUP_S3_ACCESS_KEY_ID="$S3_KEY" -e BACKUP_S3_SECRET_ACCESS_KEY="$S3_SECRET" \
+            -e BACKUP_ENCRYPTION_RECIPIENT="${{ steps.cap.outputs.recipient }}" \
+            pult-backup:ci backup.sh)"
+          echo "$OUT"
+          KEY="$(printf '%s\n' "$OUT" | sed -n 's/.*SUCCESS key=\([^ ]*\).*/\1/p' | head -1)"
+          test -n "$KEY" || { echo "no backup key parsed"; exit 1; }
+          echo "key=$KEY" >> "$GITHUB_OUTPUT"
+
+      - name: Destroy source, spin FRESH empty target
+        run: |
+          set -euo pipefail
+          docker rm -f pgsource
+          docker run -d --name pgtarget --network pultbk -e POSTGRES_PASSWORD="$PGPW" -e POSTGRES_DB=business_pult "$PGDIGEST"
+          for i in $(seq 1 30); do docker exec pgtarget pg_isready -U postgres && break || sleep 2; done
+
+      - name: Restore into new empty target + integrity
+        run: |
+          set -euo pipefail
+          docker run --rm --network pultbk -v "$RUNNER_TEMP/age.key":/ident:ro \
+            -e PGHOST=pgtarget -e PGUSER=postgres -e PGPASSWORD="$PGPW" -e PGDATABASE=business_pult \
+            -e RESTORE_S3_ENDPOINT=http://minio:9000 -e RESTORE_S3_BUCKET="$BUCKET" -e RESTORE_S3_PROVIDER=Minio \
+            -e RESTORE_S3_ACCESS_KEY_ID="$S3_KEY" -e RESTORE_S3_SECRET_ACCESS_KEY="$S3_SECRET" \
+            -e RESTORE_OBJECT_KEY="${{ steps.bk.outputs.key }}" -e BACKUP_RESTORE_IDENTITY_FILE=/ident \
+            -e EXPECTED_ALEMBIC_HEAD=rob1a2b3c4d01 -e EXPECTED_SCHEMA_SHA="${{ steps.cap.outputs.schema_sha }}" \
+            -e EXPECTED_USERS_COUNT="${{ steps.cap.outputs.ucount }}" -e EXPECTED_USERS_CKSUM="${{ steps.cap.outputs.ucksum }}" \
+            pult-backup:ci restore.sh
+
+      - name: Negative matrix (all must fail-closed)
+        run: |
+          set -euo pipefail
+          docker run --rm --network pultbk -v "$RUNNER_TEMP/age.key":/ident:ro \
+            -e PGHOST=pgtarget -e PGUSER=postgres -e PGPASSWORD="$PGPW" \
+            -e GOOD_KEY="${{ steps.bk.outputs.key }}" -e BACKUP_RESTORE_IDENTITY_FILE=/ident -e NEG_PREFIX="$PREFIX/neg" \
+            -e RESTORE_S3_ENDPOINT=http://minio:9000 -e RESTORE_S3_BUCKET="$BUCKET" -e RESTORE_S3_PROVIDER=Minio \
+            -e RESTORE_S3_ACCESS_KEY_ID="$S3_KEY" -e RESTORE_S3_SECRET_ACCESS_KEY="$S3_SECRET" \
+            -e BACKUP_S3_ENDPOINT=http://minio:9000 -e BACKUP_S3_BUCKET="$BUCKET" -e BACKUP_S3_PROVIDER=Minio \
+            -e BACKUP_S3_ACCESS_KEY_ID="$S3_KEY" -e BACKUP_S3_SECRET_ACCESS_KEY="$S3_SECRET" \
+            -e EXPECTED_SCHEMA_SHA="${{ steps.cap.outputs.schema_sha }}" \
+            -e EXPECTED_USERS_COUNT="${{ steps.cap.outputs.ucount }}" -e EXPECTED_USERS_CKSUM="${{ steps.cap.outputs.ucksum }}" \
+            pult-backup:ci ci_negative.sh
+
+      - name: Teardown
+        if: always()
+        run: |
+          docker rm -f minio pgsource pgtarget 2>/dev/null || true
+          docker network rm pultbk 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/age.key" || true

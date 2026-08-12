@@ -1,0 +1,13 @@
+# SECURITY-2D-3E1B-3A — backup runner build context. Ship only the runner scripts + Dockerfile.
+*.dump
+*.dump.age
+*.age
+*.pgdump
+*.manifest.json
+secrets/
+*age-identity*
+*.identity
+.env
+.env.*
+restore.env
+*.env.local

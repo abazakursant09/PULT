@@ -23,10 +23,10 @@ REPO = BACKEND.parent
 
 # Reviewed allowlist of production Dockerfiles (repo-relative, POSIX). A new tracked
 # Dockerfile that is not classified here must fail the guard until it is reviewed.
-ALLOWLISTED_DOCKERFILES = ("backend/Dockerfile", "frontend/Dockerfile")
+ALLOWLISTED_DOCKERFILES = ("backend/Dockerfile", "frontend/Dockerfile", "ops/backup/Dockerfile")
 
 # Each production Dockerfile is single-stage today.
-EXPECTED_STAGE_COUNT = {"backend/Dockerfile": 1, "frontend/Dockerfile": 1}
+EXPECTED_STAGE_COUNT = {"backend/Dockerfile": 1, "frontend/Dockerfile": 1, "ops/backup/Dockerfile": 1}
 
 # Known-good pinned references (image:tag@sha256:digest), verified against the Docker
 # Registry v2 API and the Docker Hub API on 2026-08-11 (both agree; the python index
@@ -40,6 +40,13 @@ EXPECTED_REFS = {
     "frontend/Dockerfile": (
         "node:20-alpine@sha256:"
         "fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293"
+    ),
+    # SECURITY-2D-3E1B-3A backup runner: FROM the pinned production PostgreSQL image (adds
+    # only pinned+hash-verified rclone/age). Classified here because it is a tracked,
+    # production-relevant Dockerfile that must stay digest-pinned.
+    "ops/backup/Dockerfile": (
+        "postgres:16-alpine@sha256:"
+        "57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777"
     ),
 }
 
