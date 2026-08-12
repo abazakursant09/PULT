@@ -30,15 +30,20 @@ Repository cipher = pgBackRest AES-256-**CBC**. This gives confidentiality + rep
 3A `pg_dump` = logical, portable recovery (different bucket/prefix/credentials/retention). 3B pgBackRest = physical base backup + WAL PITR. **Neither replaces the other**; both are required before launch. 3A is unchanged by 3B1.
 
 ## Failure coverage
-B1 (this PR, runtime-integration, PROVEN fail-closed in `pitr_synthetic.yml`): missing base
-backup / wrong stanza; wrong repository cipher key; non-empty restore target refused; missing
-synthetic marker refused. Each runs on a fresh disposable target and asserts a non-zero exit
-with no started DB. **B2 (still open — NOT proven, do not treat as closed):** missing/corrupt
-WAL or repo object; corrupt repo metadata; system-id mismatch; target-before-base recovery
-outcome; target past a WAL continuity gap; S3 unavailable during archive (archive-push nonzero,
-WAL retained on disk); major mismatch; long timeout / retry-exhaustion; spool/disk-full
-behavior; concurrent same-segment; extended timeline cases; partial multipart upload;
-quantitative backlog-model validation.
+B1 (this PR, runtime-integration, PROVEN fail-closed in `pitr_synthetic.yml`, `pass=N wrong=0`):
+A missing base backup / wrong stanza; B wrong repository cipher key; C non-empty restore target
+refused; D missing synthetic marker refused; E S3 unavailable during archive (network-isolate
+MinIO → `pg_switch_wal()` → `pg_stat_archiver.failed_count` increases + the WAL segment is
+retained in `pg_wal` → restore MinIO → drain proven via `pgbackrest check`); F missing required
+WAL (segment removed from a scratch repo copy → recovery cannot reach target); G corrupt required
+WAL object (mutated → recovery fails); H wrong system identifier (a foreign cluster's `pgbackrest
+check` against the repo fails on system-id mismatch); I target before available base backup
+(refused); J WAL continuity gap (mid segment removed → recovery does not silently reach the
+requested target); K major mismatch (restore wrapper refuses a target PGDATA stamped a foreign
+major). Each uses a disposable target/prefix and asserts fail-closed with no promoted target.
+**B2 (still open — genuine extended reliability only):** long timeout / retry-exhaustion;
+spool/disk-full behavior; concurrent same-segment stress; partial multipart-upload interruption;
+quantitative backlog-model validation; extended multi-timeline cases.
 
 ## Restore (fail-closed) & production
 `ops/pitr/restore.sh` (B1 synthetic, marker-gated) restores into a NEW empty PGDATA to a target LSN with repository/stanza/system-id check first, never `--clean`/over an existing DB, never deletes source/repo, no production cutover. A major upgrade is NOT a restore. Production activation (image swap + archive_mode restart + initial base backup + first-WAL wait + repo check) is 3C.

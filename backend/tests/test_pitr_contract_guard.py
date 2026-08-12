@@ -46,22 +46,23 @@ def test_dockerfile_pinned_source_and_exact_apk():
     assert df.count(f"FROM postgres:16-alpine@{PG_DIGEST}") == 2, "both stages must FROM the pinned base"
     assert f"--checksum=sha256:{PGBR_SRC_SHA}" in df, "pgBackRest source must be hash-verified"
     assert "pgbackrest-2.59.0.tar.gz" in df
-    # every apk-added package is pinned name=version-rN; no unversioned/edge/curl|sh/latest
-    for m in re.findall(r"apk add[^\n]*", _code(df)):
-        # each token that looks like a package must carry =version-rN
-        for tok in m.replace("--no-cache", "").split():
-            if tok in ("apk", "add", "\\"):
+    # Each `apk add` INSTALL block (incl. backslash continuations): every package pinned
+    # name=version-rN, and NO postgresql18 install (PG16 parity).
+    for blk in re.findall(r"apk add(?:[^\n]*\\\n)*[^\n]*", _code(df)):
+        assert "postgresql18" not in blk, "PG16 parity: must not `apk add` a postgresql18 package"
+        for tok in blk.split():
+            if tok in ("RUN", "apk", "add", "--no-cache", "\\"):
                 continue
             assert re.match(r"^[a-z0-9][a-z0-9._+-]*=[0-9][0-9A-Za-z._]*-r[0-9]+$", tok), f"unpinned apk package: {tok!r}"
     assert "edge" not in df.lower(), "no edge repository"
     assert "curl" not in _code(df) and "| sh" not in _code(df)
     # final stage must reject build tools + unresolved libs (guard lines present)
     assert "not found" in df and "build tools leaked" in df
-    # PG16/libpq parity: NO postgresql18 packages anywhere; parity evidence commands present.
-    assert "postgresql18" not in _code(df), "PG16 parity: no postgresql18 package in the PITR image"
+    # PG16/libpq parity evidence commands present + final image proven free of a PG18 install.
     assert "pg_config --version" in df and "PostgreSQL 16" in df, "must prove PG16 pg_config parity"
-    assert "readelf -d" in df and "libpq.so" in df, "must prove libpq linkage (readelf/ldd)"
+    assert "readelf -d" in df and "libpq" in df, "must prove libpq linkage (readelf/ldd)"
     assert "/usr/local/lib/" in df, "libpq must resolve to the base PG16 (/usr/local/lib), not an apk PG18"
+    assert "postgresql18-client" in df and "PG18 package in final image" in df, "final stage must assert no PG18 client"
 
 
 def test_postgresql_conf_valid_and_no_secrets():
@@ -133,6 +134,29 @@ def test_workflow_pinned_readonly_no_artifacts():
     assert "verify-tls=n" not in w, "TLS verify must not be disabled"
     for m in re.findall(r"path:\s*(.+)", w):
         assert not re.search(r"\.(dump|age|key|crt)|pgdata|repo|wal", m, re.I), f"must not upload sensitive artifact: {m}"
+
+
+def test_full_b1_negative_matrix_present():
+    w = _r(WORKFLOW)
+    # every mandatory B1 case must be present by a stable name
+    for case in ("A missing base", "B wrong cipher", "C non-empty target", "D missing synthetic",
+                 "E S3 outage", "F missing required WAL", "G corrupt required WAL",
+                 "H wrong system", "I target before", "J WAL continuity gap", "K major mismatch"):
+        assert case in w, f"B1 negative case missing from workflow: {case!r}"
+    # S3-outage must prove the real semantics, not a helper network error
+    assert "network disconnect pitrnet minio" in w and "failed_count" in w and "network connect pitrnet minio" in w, \
+        "E must isolate MinIO, prove archive failed_count + retained WAL, then drain"
+    assert "pg_wal" in w and "drain" in w
+    # (archive_command must never use `|| true` — enforced against postgresql.conf elsewhere.)
+    assert re.search(r'test "\$pass" = "\$n"', w), "must assert pass==n (wrong=0)"
+
+
+def test_b1_cases_not_deferred_to_b2():
+    p = _r(POLICY).lower()
+    b2 = p.split("b2")[-1] if "b2" in p else ""
+    for forbidden in ("s3 unavailable", "missing required wal", "corrupt", "system id",
+                      "target before", "continuity gap", "major mismatch"):
+        assert forbidden not in b2, f"mandatory B1 case wrongly listed under B2: {forbidden!r}"
 
 
 def test_policy_honest_foundation_only():
