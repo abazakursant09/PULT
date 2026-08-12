@@ -283,9 +283,17 @@ jobs:
           docker exec -u postgres -e PGBACKREST_REPO1_PATH=/pult-oute esrc pgbackrest --stanza=pult --type=full backup
           F0="$(docker exec -u postgres esrc psql -U postgres -tAc 'SELECT failed_count FROM pg_stat_archiver' 2>/dev/null||echo 0)"
           docker network disconnect pitrnet minio
-          docker exec -u postgres esrc psql -U postgres -d business_pult -c "CREATE TABLE e(x int); SELECT pg_switch_wal()" >/dev/null 2>&1 || true
-          sleep 12
-          F1="$(docker exec -u postgres esrc psql -U postgres -tAc 'SELECT failed_count FROM pg_stat_archiver' 2>/dev/null||echo 0)"
+          # archive-async=y (the real config): the primary archive-push returns 0 (spools the segment);
+          # the async worker then fails against the isolated S3 and records a spool .error, which a
+          # LATER archive-push reports back to PostgreSQL, incrementing pg_stat_archiver.failed_count.
+          # So one switch is not enough — generate several segments and poll (<=90s).
+          F1="$F0"
+          for k in $(seq 1 15); do
+            docker exec -u postgres esrc psql -U postgres -d business_pult -c "CREATE TABLE IF NOT EXISTS e(x int); INSERT INTO e VALUES ($k); SELECT pg_switch_wal()" >/dev/null 2>&1 || true
+            sleep 6
+            F1="$(docker exec -u postgres esrc psql -U postgres -tAc 'SELECT failed_count FROM pg_stat_archiver' 2>/dev/null||echo 0)"
+            [ "$F1" -gt "$F0" ] 2>/dev/null && break
+          done
           WALCNT="$(docker exec -u postgres esrc sh -c 'ls -1 /var/lib/postgresql/data/pg_wal/ | grep -E "^[0-9A-F]{24}$" | wc -l' 2>/dev/null||echo 0)"
           docker network connect pitrnet minio
           sleep 5
