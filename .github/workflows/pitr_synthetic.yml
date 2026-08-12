@@ -343,24 +343,23 @@ jobs:
           base_ok=0; for k in $(seq 1 20); do docker exec -u postgres lsrc pgbackrest --stanza=pult check >/dev/null 2>&1 && { base_ok=1; break; }; sleep 3; done
           [ "$base_ok" = 1 ] || { echo "L FAIL: baseline archive to S3 not confirmed"; exit 1; }
           L0="$(docker exec -u postgres lsrc psql -U postgres -tAc 'SELECT failed_count FROM pg_stat_archiver')"
-          # SEG = the segment currently being written; the next switch completes+archives exactly it.
-          SEG="$(docker exec -u postgres lsrc psql -U postgres -tAc 'SELECT pg_walfile_name(pg_current_wal_lsn())')"
-          [ -n "$SEG" ] || { echo "L FAIL: could not resolve SEG"; exit 1; }
-          if seg_in_s3 "$SEG"; then echo "L FAIL: SEG $SEG already offsite before outage"; exit 1; fi
-          # isolate the SOURCE from the network; S3 stays reachable to the checker; async worker fails.
+          LAW0="$(docker exec -u postgres lsrc psql -U postgres -tAc "SELECT coalesce(last_archived_wal,'')::text FROM pg_stat_archiver")"
+          # isolate the SOURCE from the network FIRST; S3 stays reachable to the checker; async worker fails.
           docker network disconnect pitrnet lsrc
           docker exec -u postgres lsrc psql -U postgres -d business_pult -c "INSERT INTO l VALUES (1); SELECT pg_switch_wal()" >/dev/null
-          # foreground archive_command must SUCCEED under async (spool-accept): last_archived_wal
-          # advances to SEG and failed_count does NOT grow.
-          fg_ok=0; LAW=""; L1="$L0"
-          for k in $(seq 1 10); do
-            LAW="$(docker exec -u postgres lsrc psql -U postgres -tAc "SELECT coalesce(last_archived_wal,'')::text FROM pg_stat_archiver")"
+          # SEG = the segment the foreground archive-push ACCEPTED during the outage. Read it
+          # authoritatively from pg_stat_archiver (no guessing): it is the segment completed by the
+          # switch AFTER isolation, so it was born during the outage and cannot possibly be offsite.
+          # foreground async success == spool-accept: last_archived_wal advances, failed_count flat.
+          fg_ok=0; SEG=""; L1="$L0"
+          for k in $(seq 1 15); do
+            SEG="$(docker exec -u postgres lsrc psql -U postgres -tAc "SELECT coalesce(last_archived_wal,'')::text FROM pg_stat_archiver")"
             L1="$(docker exec -u postgres lsrc psql -U postgres -tAc 'SELECT failed_count FROM pg_stat_archiver')"
-            [ "$LAW" = "$SEG" ] && [ "$L1" = "$L0" ] && { fg_ok=1; break; }
+            [ -n "$SEG" ] && [ "$SEG" != "$LAW0" ] && [ "$L1" = "$L0" ] && { fg_ok=1; break; }
             sleep 2
           done
-          [ "$fg_ok" = 1 ] || { echo "L FAIL: foreground async archive not accepted (last_archived_wal=$LAW SEG=$SEG failed_count $L0->$L1)"; exit 1; }
-          echo "L: foreground async archive-push accepted SEG=$SEG (last_archived_wal=$LAW, failed_count $L0->$L1) — LOCAL spool only"
+          [ "$fg_ok" = 1 ] || { echo "L FAIL: foreground async archive not accepted during outage (last_archived_wal=$SEG prev=$LAW0 failed_count $L0->$L1)"; exit 1; }
+          echo "L: foreground async archive-push accepted SEG=$SEG (advanced from '$LAW0', failed_count $L0->$L1) — LOCAL spool only"
           # SEG must be in the LOCAL durable spool, and NOT offsite (proven absent pre-outage; source
           # has had no S3 path since).
           spool_has "$SEG" || { echo "L FAIL: SEG $SEG not in local spool"; docker exec lsrc sh -c 'find /var/spool/pgbackrest -type f | head -50' || true; exit 1; }

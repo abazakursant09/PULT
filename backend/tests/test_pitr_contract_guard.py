@@ -184,8 +184,8 @@ def test_async_outage_case_L_present():
     # foreground async success == LOCAL spool acceptance, proven via pg_stat_archiver
     assert "last_archived_wal" in reg and "LOCAL spool only" in reg
     assert "spool_has" in reg and "not in local spool" in reg
-    # the exact segment must be proven ABSENT offsite before/during the outage
-    assert "already offsite before outage" in reg and "unexpectedly offsite during outage" in reg
+    # the exact segment (born during the outage) must be proven ABSENT offsite during the outage
+    assert "unexpectedly offsite during outage" in reg, "must prove the spooled segment is absent offsite during the outage"
     # status.sh must be invoked DURING the outage and must NOT report a safe state
     assert "status.sh" in reg and "L-status(outage)" in reg
     assert "continuity=intact during outage" in reg, "must fail if status wrongly reports intact during outage"
