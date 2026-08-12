@@ -1,19 +1,22 @@
-"""SECURITY-2D-3E1B-1 — guard PostgreSQL major/variant parity across prod and CI.
+"""SECURITY-2D-3E1B-1/-2 — guard PostgreSQL parity + digest pin across prod and CI.
 
 The production database runs as the docker-compose `postgres` service (self-hosted on the
 VDS per docs/LAUNCH_RUNBOOK.md), while the real-PostgreSQL security/concurrency matrix runs
-in the postgres-explain and postgres-migration CI jobs. If those drift apart on major or
-variant, the code is proven on one PostgreSQL but shipped on another. This guard asserts all
-three reference EXACTLY the canonical `postgres:16-alpine`.
+in the postgres-explain and postgres-migration CI jobs. If those drift apart on major,
+variant, or the pinned digest, the code is proven on one PostgreSQL but shipped on another.
+This guard asserts all three reference EXACTLY the canonical
+`postgres:16-alpine@sha256:<digest>` (readable tag kept for humans, immutable digest freezing
+the exact PostgreSQL 16.14 Alpine bytes the green master CI ran — SECURITY-2D-3E1B-2).
 
 It is OFFLINE and parses the compose / workflow YAML STRUCTURALLY (service image fields),
-never a global substring — a correct string in an unrelated job/service, or a version in a
-comment, cannot satisfy it. Registry availability and digest pinning are out of scope here
-(digest pin = 3E1B-2).
+never a global substring — a correct string in an unrelated job/service, or a digest in a
+comment, cannot satisfy it. Registry availability / by-digest resolution is proven separately
+by the CI Docker service actually pulling the pinned digest, not here.
 """
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import yaml
@@ -23,27 +26,44 @@ REPO = BACKEND.parent
 COMPOSE = REPO / "docker-compose.yml"
 CONSTITUTIONAL_YML = REPO / ".github" / "workflows" / "constitutional_verification.yml"
 
-CANONICAL = "postgres:16-alpine"
+# Canonical, digest-pinned PostgreSQL reference. The digest is the OCI image-index digest of
+# postgres:16-alpine (PostgreSQL 16.14, Alpine, linux/amd64) that the green master CI pulled
+# and ran after SECURITY-2D-3E1B-1; verified 2026-08-12 via Docker Registry v2 API + Docker
+# Hub API (both agree; by-digest HTTP 200). A digest bump is a deliberate, separately reviewed
+# maintenance change — update this constant in that same PR (see docs/postgresql-version-policy.md).
+EXPECTED_TAG = "16-alpine"
+EXPECTED_DIGEST = "sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777"
+CANONICAL = f"postgres:{EXPECTED_TAG}@{EXPECTED_DIGEST}"
 # CI jobs that must run the real-PostgreSQL matrix on the canonical image.
 EXPECTED_PG_CI_JOBS = {"postgres-explain", "postgres-migration"}
 
+_SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+
 
 def _is_postgres_image(image: str) -> bool:
-    """True for an official postgres image reference (library/postgres), any tag."""
+    """True for an official postgres image reference (library/postgres), any tag/digest."""
     name = image.split("@", 1)[0].split(":", 1)[0]
     return name in ("postgres", "library/postgres", "docker.io/library/postgres")
 
 
 def _assert_canonical(image: str, where: str) -> None:
-    assert image, f"{where}: PostgreSQL service has no image tag"
-    assert ":" in image, f"{where}: PostgreSQL image is missing a tag: {image!r}"
-    tag = image.split("@", 1)[0].split(":", 1)[1]
+    assert image, f"{where}: PostgreSQL service has no image reference"
+    name_tag, sep, digest = image.partition("@")
+    # digest pin is mandatory
+    assert sep == "@" and digest, f"{where}: PostgreSQL image is tag-only, not digest-pinned: {image!r}"
+    assert _SHA256_RE.match(digest), (
+        f"{where}: digest must be 'sha256:' + 64 lowercase hex (no uppercase/truncation): {digest!r}"
+    )
+    # readable tag is mandatory and must be exactly the canonical major+variant
+    assert ":" in name_tag, f"{where}: digest-only, no readable tag: {image!r}"
+    tag = name_tag.split(":", 1)[1]
     assert tag != "latest", f"{where}: 'latest' is forbidden for the DB image: {image!r}"
     assert not tag.startswith("15"), f"{where}: PostgreSQL 15 is forbidden (canonical is 16-alpine): {image!r}"
-    assert tag.endswith("-alpine"), f"{where}: variant must be -alpine (canonical parity): {image!r}"
+    assert tag == EXPECTED_TAG, f"{where}: tag must be exactly {EXPECTED_TAG!r}: {image!r}"
+    # full reference (tag + digest) must match the reviewed known-good constant
     assert image == CANONICAL, (
-        f"{where}: PostgreSQL image must be exactly {CANONICAL!r}, got {image!r} — "
-        "prod compose and both real-PG CI jobs must share major+variant"
+        f"{where}: PostgreSQL image must be exactly {CANONICAL!r}, got {image!r} — prod compose "
+        "and both real-PG CI jobs must share the same tag AND pinned digest"
     )
 
 

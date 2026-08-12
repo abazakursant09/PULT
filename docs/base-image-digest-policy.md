@@ -30,14 +30,16 @@ what BuildKit selects on the amd64 CI runner and the amd64 deploy target.
 - **A bot (Dependabot/Renovate) may only open a PR — auto-merge is forbidden.** No such bot
   is configured in 3E1; adding one is a separate, later decision.
 
-## Open item — `postgres:16-alpine` (NOT pinned here)
+## PostgreSQL (`postgres:16-alpine`) — pinned by digest
 
-`docker-compose.yml` references `postgres:16-alpine`, a third-party **stateful** data-service
-image that this repository does not build. Its major/variant is already aligned to the
-CI-proven canonical (SECURITY-2D-3E1B-1; see `docs/postgresql-version-policy.md`), but it is
-still a **tag-only reference, NOT pinned by digest**. Pinning a database engine has different
-rollback semantics (the engine version is coupled to on-disk data), so it stays out of scope
-for the application-image digest pin (3E1). It remains an **open, unpinned stateful-image
-item** to close before deploy: the digest pin is tracked as **3E1B-2**, and automated
-backup/PITR/verified restore as **3E1B-3** — neither is implemented yet, so deployment is not
-fully immutable and disaster recovery is not yet in place.
+`docker-compose.yml` references the `postgres:16-alpine` stateful data-service image (which
+this repository does not build). Its major/variant was aligned to the CI-proven canonical in
+SECURITY-2D-3E1B-1, and it is now **digest-pinned** in SECURITY-2D-3E1B-2 to
+`postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777`
+(the OCI index digest the green master CI ran — PostgreSQL 16.14, Alpine, linux/amd64). The
+full policy, verification, and digest-bump procedure live in `docs/postgresql-version-policy.md`.
+
+Still open (tracked, **not** implemented): automated backup / PITR / verified restore =
+**3E1B-3**. A digest pin freezes bytes and guarantees reproducibility; it is **not** a CVE
+audit, and deployment is **not** fully immutable and disaster recovery is **not** in place
+until 3E1B-3 lands.
