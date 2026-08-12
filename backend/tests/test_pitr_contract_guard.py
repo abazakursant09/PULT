@@ -183,7 +183,8 @@ def test_async_outage_case_L_present():
     assert "network disconnect pitrnet lsrc" in reg and "network connect pitrnet lsrc" in reg
     # foreground async success == LOCAL spool acceptance, proven via pg_stat_archiver
     assert "last_archived_wal" in reg and "LOCAL spool only" in reg
-    assert "spool_has" in reg and "not in local spool" in reg
+    # under async the durable-but-not-yet-offsite copy is the pg_wal segment, not the spool
+    assert "wal_has" in reg and "not retained in local pg_wal" in reg
     # the exact segment (born during the outage) must be proven ABSENT offsite during the outage
     assert "unexpectedly offsite during outage" in reg, "must prove the spooled segment is absent offsite during the outage"
     # status.sh must be invoked DURING the outage and must NOT report a safe state

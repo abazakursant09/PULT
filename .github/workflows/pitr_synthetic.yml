@@ -328,7 +328,9 @@ jobs:
           n=$((n+1))
           LREPO="pult-outl/archive/pult/16-1"
           seg_in_s3() { MC "mc --insecure --json ls --recursive m/$BUCKET/$LREPO/" | grep -q "$1"; }
-          spool_has() { docker exec lsrc sh -c "find /var/spool/pgbackrest -type f -name '*$1*' 2>/dev/null | grep -q ."; }
+          # under archive-async=y the not-yet-uploaded WAL BYTES stay in pg_wal (the spool holds only
+          # transient status), so the same-VDS durable copy to prove is the pg_wal segment itself.
+          wal_has() { docker exec lsrc sh -c "test -f /var/lib/postgresql/data/pg_wal/$1"; }
           ge_seg() { [ "$(printf '%s\n%s\n' "$1" "$2" | LC_ALL=C sort | tail -1)" = "$2" ]; }  # true if $2 >= $1
           ldump() { echo "---- lsrc postgres log (tail) ----"; docker logs lsrc --tail 80 2>&1 | sed 's/^/lsrc-log: /' || true; }
           # block until the source primary accepts a read-write connection (tolerate a transient
@@ -368,7 +370,7 @@ jobs:
           echo "L: foreground async archive-push accepted SEG=$SEG (advanced from '$LAW0', failed_count $L0->$L1) — LOCAL spool only"
           # SEG must be in the LOCAL durable spool, and NOT offsite (proven absent pre-outage; source
           # has had no S3 path since).
-          spool_has "$SEG" || { echo "L FAIL: SEG $SEG not in local spool"; docker exec lsrc sh -c 'find /var/spool/pgbackrest -type f | head -50' || true; exit 1; }
+          wal_has "$SEG" || { echo "L FAIL: SEG $SEG not retained in local pg_wal"; docker exec lsrc sh -c 'ls -1 /var/lib/postgresql/data/pg_wal | head -60; echo ---spool---; find /var/spool/pgbackrest -type f | head' || true; exit 1; }
           if seg_in_s3 "$SEG"; then echo "L FAIL: SEG $SEG unexpectedly offsite during outage"; exit 1; fi
           # status.sh (inside the source) must report the DANGEROUS state despite foreground success.
           LST="$(docker exec -u postgres -e PGBACKREST_REPO1_PATH=/pult-outl -e PGBACKREST_STANZA=pult lsrc status.sh || true)"
@@ -376,13 +378,13 @@ jobs:
           echo "$LST" | grep -q '^pitr_check_status=' || { echo "L FAIL: status.sh produced no output"; exit 1; }
           echo "$LST" | grep -q '^pitr_check_status=ok$' && { echo "L FAIL: status check_status=ok during outage"; exit 1; }
           echo "$LST" | grep -q '^pitr_continuity=intact$' && { echo "L FAIL: status continuity=intact during outage"; exit 1; }
-          echo "$LST" | grep -qE '^pitr_local_spool_bytes=[1-9]' || { echo "L FAIL: local spool bytes not shown non-zero during outage"; exit 1; }
+          echo "$LST" | grep -q '^pitr_archive_lag=ok$' && { echo "L FAIL: status archive_lag=ok during outage"; exit 1; }
+          echo "$LST" | grep -q '^pitr_offsite_archive_max=' || { echo "L FAIL: status missing offsite signal"; exit 1; }
           # reconnect; kick the async worker; the EXACT segment must drain to S3.
           docker network connect pitrnet lsrc
           docker exec -u postgres lsrc psql -U postgres -d business_pult -c "INSERT INTO l VALUES (2); SELECT pg_switch_wal()" >/dev/null 2>&1 || true
           drainL=0; for k in $(seq 1 30); do seg_in_s3 "$SEG" && { drainL=1; break; }; sleep 3; done
           [ "$drainL" = 1 ] || { echo "L FAIL: SEG $SEG never drained to S3 after reconnect"; exit 1; }
-          spool_has "$SEG" && { echo "L FAIL: SEG $SEG still in spool after drain"; exit 1; }
           checkL=0; for k in $(seq 1 20); do docker exec -u postgres lsrc pgbackrest --stanza=pult check >/dev/null 2>&1 && { checkL=1; break; }; sleep 3; done
           [ "$checkL" = 1 ] || { echo "L FAIL: pgbackrest check not ok after drain"; exit 1; }
           LST2="$(docker exec -u postgres -e PGBACKREST_REPO1_PATH=/pult-outl -e PGBACKREST_STANZA=pult lsrc status.sh || true)"

@@ -28,7 +28,7 @@ spool_bytes="$(du -sb "$SPOOL" 2>/dev/null | awk '{print $1}' || echo 0)"
 # archive_lag STATUS (not a raw count that could leak topology): ok when the repo is reachable AND
 # holds WAL; lagging when a local backlog exists but the repo is unconfirmed; unknown otherwise.
 if [ "$check_status" = ok ] && [ -n "$offsite_max" ]; then archive_lag=ok
-elif [ "${spool_bytes:-0}" -gt 0 ] 2>/dev/null && [ "$check_status" != ok ]; then archive_lag=lagging
+elif [ "$check_status" != ok ]; then archive_lag=lagging
 else archive_lag=unknown; fi
 
 # continuity is INTACT only on CONFIRMED remote continuity (check ok AND offsite WAL present).
