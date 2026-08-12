@@ -208,16 +208,26 @@ jobs:
             if [ "$ok" = "1" ]; then echo "NEG ok: $desc"; pass=$((pass+1)); else echo "NEG WRONG: '$desc' reached/promoted target"; docker rm -f "$c" >/dev/null 2>&1||true; docker volume rm "$v" >/dev/null 2>&1||true; exit 1; fi
             docker rm -f "$c" >/dev/null 2>&1 || true; docker volume rm "$v" >/dev/null 2>&1 || true
           }
-          WALDIR="pult-pitr/archive/pult/16-1/0000000100000000"
+          NEGDIR="pult-neg/archive/pult/16-1/0000000100000000"
+          # Resolve a scratch-repo WAL object basename for a segment suffix ON THE RUNNER:
+          # the minio image has no awk/grep, so `mc --json ls` output is parsed here (runner has both).
+          seg_obj() {
+            MC "mc --insecure --json ls m/$BUCKET/$NEGDIR/" \
+              | grep -o '"key":"[^"]*"' | sed 's/"key":"//; s/"$//' \
+              | grep "$1" | head -1
+          }
 
-          # F missing required WAL: drop the last archived segment from the scratch repo
+          # F missing required WAL: drop the target's own segment (06) → recovery cannot reach the LSN.
           scratch_repo
-          MC "mc --insecure rm --recursive --force m/$BUCKET/pult-neg/archive/pult/16-1/0000000100000000/000000010000000000000006 >/dev/null 2>&1; obj=\$(mc --insecure ls m/$BUCKET/pult-neg/archive/pult/16-1/0000000100000000/ | awk '{print \$NF}' | grep 0000000000000006 | head -1); [ -n \"\$obj\" ] && mc --insecure rm m/$BUCKET/pult-neg/archive/pult/16-1/0000000100000000/\$obj || true"
+          Fobj="$(seg_obj 000000010000000000000006)"; test -n "$Fobj"
+          MC "mc --insecure rm m/$BUCKET/$NEGDIR/$Fobj"
           expect_recovery_fail "F missing required WAL"
 
-          # G corrupt required WAL object
+          # G corrupt required WAL object: overwrite the target's segment (06) with garbage so
+          # pgBackRest archive-get checksum/decompress fails during recovery.
           scratch_repo
-          MC "obj=\$(mc --insecure ls m/$BUCKET/pult-neg/archive/pult/16-1/0000000100000000/ | awk '{print \$NF}' | grep 0000000000000006 | head -1); [ -n \"\$obj\" ] && (echo corrupt | mc --insecure pipe m/$BUCKET/pult-neg/archive/pult/16-1/0000000100000000/\$obj) || true"
+          Gobj="$(seg_obj 000000010000000000000006)"; test -n "$Gobj"
+          MC "echo corrupt-not-a-valid-wal-segment | mc --insecure pipe m/$BUCKET/$NEGDIR/$Gobj"
           expect_recovery_fail "G corrupt required WAL object"
 
           # I target before available base backup (LSN 0/1, before base)
@@ -253,9 +263,11 @@ jobs:
           fi
           echo "NEG ok: K major mismatch (non-empty/foreign-major target refused)"; pass=$((pass+1)); docker rm -f "$c">/dev/null 2>&1||true; docker volume rm "$v">/dev/null 2>&1||true
 
-          # J continuity gap: remove a MID segment from the scratch repo, recovery must not reach target
+          # J continuity gap: remove a REQUIRED predecessor segment (05) → a gap before the target,
+          # so recovery must NOT silently reach the requested LSN.
           scratch_repo
-          MC "obj=\$(mc --insecure ls m/$BUCKET/pult-neg/archive/pult/16-1/0000000100000000/ | awk '{print \$NF}' | grep 0000000000000004 | head -1); [ -n \"\$obj\" ] && mc --insecure rm m/$BUCKET/pult-neg/archive/pult/16-1/0000000100000000/\$obj || true"
+          Jobj="$(seg_obj 000000010000000000000005)"; test -n "$Jobj"
+          MC "mc --insecure rm m/$BUCKET/$NEGDIR/$Jobj"
           expect_recovery_fail "J WAL continuity gap"
 
           # E S3 unavailable during archive: dedicated source+stanza, isolate MinIO, prove archive
