@@ -161,6 +161,9 @@ jobs:
           set -euo pipefail
           W="$(cat "$RUNNER_TEMP/wdir")"
           MNT="-v $W/repo-conf/pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro -v $W/certs/public.crt:/etc/pgbackrest/minio-ca.crt:ro"
+          # synchronous conf for the E S3-outage source (each run: step is a fresh shell) — see setup step.
+          sed 's/^archive-async=y$/archive-async=n/' "$W/repo-conf/pgbackrest.conf" > "$W/repo-conf/pgbackrest-sync.conf"
+          MNT_SYNC="-v $W/repo-conf/pgbackrest-sync.conf:/etc/pgbackrest/pgbackrest.conf:ro -v $W/certs/public.crt:/etc/pgbackrest/minio-ca.crt:ro"
           GOOD_LSN="0/60000D0"
           n=0; pass=0
           # each negative: fresh disposable target, run restore.sh with a fault (extraenv overrides
