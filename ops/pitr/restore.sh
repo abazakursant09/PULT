@@ -15,8 +15,11 @@ fail() { echo "restore FAIL: $1" >&2; exit 1; }
 if [ -f "$PGDATA/PG_VERSION" ]; then fail "target PGDATA is not empty (has PG_VERSION) — refusing"; fi
 mkdir -p "$PGDATA"; chmod 0700 "$PGDATA"
 
-# Repository / stanza / system-id integrity before any restore.
-pgbackrest --stanza="$PITR_STANZA" check || fail "repository/stanza check failed"
+# Repository / stanza presence before any restore. NOTE: `pgbackrest check` needs a RUNNING
+# primary (it validates archive round-trip via a DB connection) — inappropriate on an empty
+# restore target. `info` confirms the repo + stanza + that a base backup exists, with no DB.
+pgbackrest --stanza="$PITR_STANZA" info || fail "repository/stanza info failed (repo unreachable)"
+pgbackrest --stanza="$PITR_STANZA" info | grep -q "full backup" || fail "no base backup in repository for stanza"
 
 # Restore to the target LSN and configure recovery to promote at target.
 pgbackrest --stanza="$PITR_STANZA" \
