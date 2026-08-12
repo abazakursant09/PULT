@@ -57,6 +57,11 @@ def test_dockerfile_pinned_source_and_exact_apk():
     assert "curl" not in _code(df) and "| sh" not in _code(df)
     # final stage must reject build tools + unresolved libs (guard lines present)
     assert "not found" in df and "build tools leaked" in df
+    # PG16/libpq parity: NO postgresql18 packages anywhere; parity evidence commands present.
+    assert "postgresql18" not in _code(df), "PG16 parity: no postgresql18 package in the PITR image"
+    assert "pg_config --version" in df and "PostgreSQL 16" in df, "must prove PG16 pg_config parity"
+    assert "readelf -d" in df and "libpq.so" in df, "must prove libpq linkage (readelf/ldd)"
+    assert "/usr/local/lib/" in df, "libpq must resolve to the base PG16 (/usr/local/lib), not an apk PG18"
 
 
 def test_postgresql_conf_valid_and_no_secrets():
