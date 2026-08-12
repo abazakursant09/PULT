@@ -1,0 +1,28 @@
+name: PITR Discovery
+
+# SECURITY-2D-3E1B-3B1 — TEMPORARY discovery job. Builds ops/pitr/Dockerfile.discovery on the
+# GitHub-hosted runner (clean disposable Alpine build env) and prints the dependency closure so
+# the final exact-pinned Dockerfile can be authored. Removed before the final PR head. No publish.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ops/pitr/Dockerfile.discovery
+      - .github/workflows/pitr_discovery.yml
+
+permissions:
+  contents: read
+
+jobs:
+  discovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.9.0
+      - name: Build discovery image (print closure)
+        run: docker buildx build --progress=plain --no-cache -f ops/pitr/Dockerfile.discovery ops/pitr
