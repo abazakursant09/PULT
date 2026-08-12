@@ -179,8 +179,10 @@ def test_async_outage_case_L_present():
     assert "MNT_SYNC" not in reg, "case L must use the async config (archive-async=y), not the sync override"
     assert re.search(r"docker run -d --name lsrc\b.*\$MNT\b", reg, re.S), "L source must mount the async pgbackrest.conf ($MNT)"
     assert "archive-async=y" in w, "standard config must keep archive-async=y"
-    # the SOURCE (not MinIO) is isolated, so the S3 checker can prove absence/presence live
-    assert "network disconnect pitrnet lsrc" in reg and "network connect pitrnet lsrc" in reg
+    # MinIO is isolated from pitrnet (proven cut) while a checknet-attached checker still lists S3
+    assert "network disconnect pitrnet minio" in reg and "network connect pitrnet minio" in reg
+    assert "checknet" in reg, "L must use a second network so the S3 checker survives the outage"
+    assert "still reachable to S3 after disconnect" in reg, "L must confirm the source truly lost S3 before the outage segment"
     # foreground async success == LOCAL spool acceptance, proven via pg_stat_archiver
     assert "last_archived_wal" in reg and "LOCAL spool only" in reg
     # under async the durable-but-not-yet-offsite copy is the pg_wal segment, not the spool

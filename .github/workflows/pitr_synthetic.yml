@@ -327,7 +327,12 @@ jobs:
           # No `|| true` on any assertion; any unproven phase fails the job.
           n=$((n+1))
           LREPO="pult-outl/archive/pult/16-1"
-          seg_in_s3() { MC "mc --insecure --json ls --recursive m/$BUCKET/$LREPO/" | grep -q "$1"; }
+          # dedicated S3 checker on a SECOND network (checknet): it can still list the repository while
+          # MinIO's pitrnet link to the SOURCE is severed during the outage. MinIO keeps container name
+          # "minio" on every network it joins, so the TLS CN still matches.
+          docker network create checknet >/dev/null 2>&1 || true
+          docker network connect checknet minio
+          seg_in_s3() { docker run --rm --network checknet --entrypoint sh "$MINIO_IMAGE" -c "mc --insecure alias set m https://minio:9000 $S3_KEY $S3_SECRET >/dev/null 2>&1; mc --insecure --json ls --recursive m/$BUCKET/$LREPO/" | grep -q "$1"; }
           # under archive-async=y the not-yet-uploaded WAL BYTES stay in pg_wal (the spool holds only
           # transient status), so the same-VDS durable copy to prove is the pg_wal segment itself.
           wal_has() { docker exec lsrc sh -c "test -f /var/lib/postgresql/data/pg_wal/$1"; }
@@ -350,8 +355,8 @@ jobs:
           docker exec -u postgres lsrc psql -U postgres -d business_pult -c "CREATE TABLE l(x int); INSERT INTO l VALUES (0); SELECT pg_switch_wal()" >/dev/null || { echo "L FAIL: baseline write"; ldump; exit 1; }
           base_ok=0; for k in $(seq 1 20); do docker exec -u postgres lsrc pgbackrest --stanza=pult check >/dev/null 2>&1 && { base_ok=1; break; }; sleep 3; done
           [ "$base_ok" = 1 ] || { echo "L FAIL: baseline archive to S3 not confirmed"; exit 1; }
-          # isolate the SOURCE from the network FIRST; S3 stays reachable to the checker.
-          docker network disconnect pitrnet lsrc
+          # isolate MinIO from pitrnet FIRST (proven to cut the source); the checker reaches it via checknet.
+          docker network disconnect pitrnet minio
           # CONFIRM the source truly lost S3 (repo probe fails) BEFORE producing the outage segment,
           # so neither the foreground nor the async worker can upload it — closes the in-flight race
           # where a segment already queued at disconnect time sneaks offsite.
@@ -373,8 +378,7 @@ jobs:
           done
           [ "$fg_ok" = 1 ] || { echo "L FAIL: foreground async archive not accepted during outage (last_archived_wal=$SEG prev=$LAW0 failed_count $L0->$L1)"; exit 1; }
           echo "L: foreground async archive-push accepted SEG=$SEG (advanced from '$LAW0', failed_count $L0->$L1) — LOCAL spool only"
-          # SEG must be in the LOCAL durable spool, and NOT offsite (proven absent pre-outage; source
-          # has had no S3 path since).
+          # SEG must be retained locally (pg_wal, same VDS) and NOT offsite (born after confirmed isolation).
           wal_has "$SEG" || { echo "L FAIL: SEG $SEG not retained in local pg_wal"; docker exec lsrc sh -c 'ls -1 /var/lib/postgresql/data/pg_wal | head -60; echo ---spool---; find /var/spool/pgbackrest -type f | head' || true; exit 1; }
           if seg_in_s3 "$SEG"; then echo "L FAIL: SEG $SEG unexpectedly offsite during outage"; exit 1; fi
           # status.sh (inside the source) must report the DANGEROUS state despite foreground success.
@@ -385,8 +389,8 @@ jobs:
           echo "$LST" | grep -q '^pitr_continuity=intact$' && { echo "L FAIL: status continuity=intact during outage"; exit 1; }
           echo "$LST" | grep -q '^pitr_archive_lag=ok$' && { echo "L FAIL: status archive_lag=ok during outage"; exit 1; }
           echo "$LST" | grep -q '^pitr_offsite_archive_max=' || { echo "L FAIL: status missing offsite signal"; exit 1; }
-          # reconnect; kick the async worker; the EXACT segment must drain to S3.
-          docker network connect pitrnet lsrc
+          # reconnect MinIO to pitrnet; kick the async worker; the EXACT segment must drain to S3.
+          docker network connect pitrnet minio
           docker exec -u postgres lsrc psql -U postgres -d business_pult -c "INSERT INTO l VALUES (2); SELECT pg_switch_wal()" >/dev/null 2>&1 || true
           drainL=0; for k in $(seq 1 30); do seg_in_s3 "$SEG" && { drainL=1; break; }; sleep 3; done
           [ "$drainL" = 1 ] || { echo "L FAIL: SEG $SEG never drained to S3 after reconnect"; exit 1; }
@@ -409,4 +413,4 @@ jobs:
         run: |
           docker rm -f pgsrc pgtgt minio esrc lsrc $(docker ps -aq --filter 'name=neg' --filter 'name=rneg' --filter 'name=ineg' --filter 'name=hneg' --filter 'name=kneg') 2>/dev/null || true
           docker volume rm pitr_src pitr_tgt pitr_esrc pitr_lsrc $(docker volume ls -q | grep -E '^pitr_(neg|rneg|ineg|hneg|kneg)') 2>/dev/null || true
-          docker network rm pitrnet 2>/dev/null || true
+          docker network rm pitrnet checknet 2>/dev/null || true
