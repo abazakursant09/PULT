@@ -100,6 +100,18 @@ def test_status_output_allowlisted():
     for bad in ("printenv", "env\n", "SELECT ", "s3-key", "PGBACKREST_REPO1_S3", "cipher"):
         assert bad.lower() not in s.lower(), f"status must not emit {bad!r}"
     assert "pitr_check_status=" in s and "pitr_pg_wal_bytes=" in s
+    # LOCAL vs OFFSITE must be separate signals; continuity must be gated on the REMOTE check.
+    assert "pitr_local_spool_bytes=" in s, "local spool must be a distinct, informational signal"
+    assert "pitr_offsite_archive_max=" in s, "offsite (in-repository) WAL max must be reported"
+    assert "pitr_continuity=" in s
+    code = _code(s)
+    # continuity=intact must require BOTH a passing remote check AND a non-empty offsite WAL max —
+    # in the SAME statement (never a local spool / foreground-exit alone, and not merely sharing an
+    # expression with an unrelated line).
+    assert re.search(r'\[\s*"\$check_status"\s*=\s*ok\s*\]\s*&&\s*\[\s*-n\s*"\$offsite_max"\s*\]\s*;\s*then\s+continuity=intact', code), \
+        "continuity=intact must be gated on remote check ok AND offsite WAL present in the same statement"
+    # both remote probes (info + check) must be timeout-bounded so an S3 outage cannot hang the caller
+    assert len(re.findall(r'timeout\s+"\$TMO"', code)) >= 2, "both remote probes must be timeout-bounded"
 
 
 def test_compose_pitr_profile_gated_and_no_bad_mounts():
@@ -149,6 +161,38 @@ def test_full_b1_negative_matrix_present():
     assert "pg_wal" in w and "drain" in w
     # (archive_command must never use `|| true` — enforced against postgresql.conf elsewhere.)
     assert re.search(r'test "\$pass" = "\$n"', w), "must assert pass==n (wrong=0)"
+    assert re.search(r'test "\$n" -ge 12', w), "matrix must include the async case L (n>=12)"
+
+
+def _l_region(w: str) -> str:
+    # the case-L block, from its banner to the matrix summary
+    start = w.index("L async S3 outage")
+    end = w.index("PITR negative-matrix:", start)
+    return w[start:end]
+
+
+def test_async_outage_case_L_present():
+    w = _r(WORKFLOW)
+    assert "L async S3 outage" in w, "async outage case L missing"
+    reg = _l_region(w)
+    # L must run the STANDARD async config, never the sync override used by E
+    assert "MNT_SYNC" not in reg, "case L must use the async config (archive-async=y), not the sync override"
+    assert re.search(r"docker run -d --name lsrc\b.*\$MNT\b", reg, re.S), "L source must mount the async pgbackrest.conf ($MNT)"
+    assert "archive-async=y" in w, "standard config must keep archive-async=y"
+    # the SOURCE (not MinIO) is isolated, so the S3 checker can prove absence/presence live
+    assert "network disconnect pitrnet lsrc" in reg and "network connect pitrnet lsrc" in reg
+    # foreground async success == LOCAL spool acceptance, proven via pg_stat_archiver
+    assert "last_archived_wal" in reg and "LOCAL spool only" in reg
+    assert "spool_has" in reg and "not in local spool" in reg
+    # the exact segment must be proven ABSENT offsite before/during the outage
+    assert "already offsite before outage" in reg and "unexpectedly offsite during outage" in reg
+    # status.sh must be invoked DURING the outage and must NOT report a safe state
+    assert "status.sh" in reg and "L-status(outage)" in reg
+    assert "continuity=intact during outage" in reg, "must fail if status wrongly reports intact during outage"
+    # after reconnect: the EXACT segment must drain to S3 and status must flip to intact
+    assert "never drained to S3 after reconnect" in reg
+    assert "L-status(healthy)" in reg and "continuity not intact after drain" in reg
+    assert "offsite_archive_max" in reg and "ge_seg" in reg, "must confirm offsite max advanced to include SEG"
 
 
 def test_b1_cases_not_deferred_to_b2():
@@ -164,3 +208,21 @@ def test_policy_honest_foundation_only():
     for phrase in ("synthetic", "not", "pitr", "production", "3c", "rpo"):
         assert phrase in p, f"policy missing honesty phrase: {phrase}"
     assert "signed alpine" in p or "alpine repo" in p, "policy must state the Alpine-repo residual"
+
+
+def test_policy_distinguishes_local_spool_vs_offsite():
+    p = _r(POLICY).lower()
+    # three states must be named distinctly
+    assert "local spool" in p and "offsite" in p, "policy must distinguish local spool from offsite durability"
+    assert "async" in p and "foreground" in p, "policy must explain async foreground exit=0 semantics"
+    # under async, a foreground exit=0 must NOT be equated with offsite durability
+    assert re.search(r"exit\s*0|exit=0|returns 0|success", p), "policy must describe the async foreground success signal"
+    # the same-VDS backlog loss risk + honest RPO caveat (specific caveat sentence, not a stray token)
+    assert "backlog" in p and "loss of the whole vds" in p, \
+        "policy must state that losing the whole VDS during backlog destroys spooled-not-yet-offsite WAL"
+    assert "rpo=0" in p, "policy must state RPO=0 is not promised during an S3 outage"
+    # restore.sh must not be overstated as doing an explicit system-id check
+    assert not re.search(r"system-id check first|stanza/system-id", p), \
+        "policy must not credit restore.sh with an explicit system-id check"
+    # K is a non-empty-target fail-closed refusal, not a dedicated major-version check
+    assert "non-empty guard" in p, "policy must document K as the non-empty-target guard (not a major check)"

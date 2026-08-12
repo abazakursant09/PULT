@@ -318,12 +318,83 @@ jobs:
           fi
           docker rm -f esrc >/dev/null 2>&1 || true; docker volume rm pitr_esrc >/dev/null 2>&1 || true
 
+          # L async S3 outage (THE STANDARD config: archive-async=y, NOT sync). Prove that a
+          # foreground archive_command success under async is only LOCAL spool acceptance — NOT
+          # offsite durability — and that status.sh reports NOT-intact during the outage even though
+          # archive-push returned 0; then prove the EXACT segment drains to S3 on reconnect and the
+          # signal flips to intact. The SOURCE (not MinIO) is network-isolated so the S3 checker can
+          # still list the repository and literally prove absence→presence of that segment.
+          # No `|| true` on any assertion; any unproven phase fails the job.
+          n=$((n+1))
+          LREPO="pult-outl/archive/pult/16-1"
+          seg_in_s3() { MC "mc --insecure --json ls --recursive m/$BUCKET/$LREPO/" | grep -q "$1"; }
+          spool_has() { docker exec lsrc sh -c "find /var/spool/pgbackrest -type f -name '*$1*' 2>/dev/null | grep -q ."; }
+          ge_seg() { [ "$(printf '%s\n%s\n' "$1" "$2" | LC_ALL=C sort | tail -1)" = "$2" ]; }  # true if $2 >= $1
+          docker run -d --name lsrc --network pitrnet \
+            -e PGBACKREST_REPO1_S3_KEY="$S3_KEY" -e PGBACKREST_REPO1_S3_KEY_SECRET="$S3_SECRET" -e PGBACKREST_REPO1_CIPHER_PASS="$CIPHER_PASS" \
+            -e PGBACKREST_REPO1_PATH=/pult-outl -e PGBACKREST_STANZA=pult $MNT -v pitr_lsrc:/var/lib/postgresql/data \
+            -v "$PWD/ops/pitr/postgresql.conf":/etc/postgresql/postgresql.conf:ro \
+            -e POSTGRES_PASSWORD="$PGPW" -e POSTGRES_DB=business_pult pult-pitr:ci postgres -c config_file=/etc/postgresql/postgresql.conf >/dev/null
+          for k in $(seq 1 60); do docker exec lsrc pg_isready -U postgres >/dev/null 2>&1 && break || sleep 2; done
+          docker exec -u postgres lsrc pgbackrest --stanza=pult stanza-create
+          docker exec -u postgres lsrc pgbackrest --stanza=pult --type=full backup
+          # baseline: one segment must actually reach S3 while connected (async worker healthy)
+          docker exec -u postgres lsrc psql -U postgres -d business_pult -c "CREATE TABLE l(x int); INSERT INTO l VALUES (0); SELECT pg_switch_wal()" >/dev/null
+          base_ok=0; for k in $(seq 1 20); do docker exec -u postgres lsrc pgbackrest --stanza=pult check >/dev/null 2>&1 && { base_ok=1; break; }; sleep 3; done
+          [ "$base_ok" = 1 ] || { echo "L FAIL: baseline archive to S3 not confirmed"; exit 1; }
+          L0="$(docker exec -u postgres lsrc psql -U postgres -tAc 'SELECT failed_count FROM pg_stat_archiver')"
+          # SEG = the segment currently being written; the next switch completes+archives exactly it.
+          SEG="$(docker exec -u postgres lsrc psql -U postgres -tAc 'SELECT pg_walfile_name(pg_current_wal_lsn())')"
+          [ -n "$SEG" ] || { echo "L FAIL: could not resolve SEG"; exit 1; }
+          if seg_in_s3 "$SEG"; then echo "L FAIL: SEG $SEG already offsite before outage"; exit 1; fi
+          # isolate the SOURCE from the network; S3 stays reachable to the checker; async worker fails.
+          docker network disconnect pitrnet lsrc
+          docker exec -u postgres lsrc psql -U postgres -d business_pult -c "INSERT INTO l VALUES (1); SELECT pg_switch_wal()" >/dev/null
+          # foreground archive_command must SUCCEED under async (spool-accept): last_archived_wal
+          # advances to SEG and failed_count does NOT grow.
+          fg_ok=0; LAW=""; L1="$L0"
+          for k in $(seq 1 10); do
+            LAW="$(docker exec -u postgres lsrc psql -U postgres -tAc "SELECT coalesce(last_archived_wal,'')::text FROM pg_stat_archiver")"
+            L1="$(docker exec -u postgres lsrc psql -U postgres -tAc 'SELECT failed_count FROM pg_stat_archiver')"
+            [ "$LAW" = "$SEG" ] && [ "$L1" = "$L0" ] && { fg_ok=1; break; }
+            sleep 2
+          done
+          [ "$fg_ok" = 1 ] || { echo "L FAIL: foreground async archive not accepted (last_archived_wal=$LAW SEG=$SEG failed_count $L0->$L1)"; exit 1; }
+          echo "L: foreground async archive-push accepted SEG=$SEG (last_archived_wal=$LAW, failed_count $L0->$L1) — LOCAL spool only"
+          # SEG must be in the LOCAL durable spool, and NOT offsite (proven absent pre-outage; source
+          # has had no S3 path since).
+          spool_has "$SEG" || { echo "L FAIL: SEG $SEG not in local spool"; docker exec lsrc sh -c 'find /var/spool/pgbackrest -type f | head -50' || true; exit 1; }
+          if seg_in_s3 "$SEG"; then echo "L FAIL: SEG $SEG unexpectedly offsite during outage"; exit 1; fi
+          # status.sh (inside the source) must report the DANGEROUS state despite foreground success.
+          LST="$(docker exec -u postgres -e PGBACKREST_REPO1_PATH=/pult-outl -e PGBACKREST_STANZA=pult lsrc status.sh || true)"
+          echo "$LST" | sed 's/^/L-status(outage): /'
+          echo "$LST" | grep -q '^pitr_check_status=' || { echo "L FAIL: status.sh produced no output"; exit 1; }
+          echo "$LST" | grep -q '^pitr_check_status=ok$' && { echo "L FAIL: status check_status=ok during outage"; exit 1; }
+          echo "$LST" | grep -q '^pitr_continuity=intact$' && { echo "L FAIL: status continuity=intact during outage"; exit 1; }
+          echo "$LST" | grep -qE '^pitr_local_spool_bytes=[1-9]' || { echo "L FAIL: local spool bytes not shown non-zero during outage"; exit 1; }
+          # reconnect; kick the async worker; the EXACT segment must drain to S3.
+          docker network connect pitrnet lsrc
+          docker exec -u postgres lsrc psql -U postgres -d business_pult -c "INSERT INTO l VALUES (2); SELECT pg_switch_wal()" >/dev/null 2>&1 || true
+          drainL=0; for k in $(seq 1 30); do seg_in_s3 "$SEG" && { drainL=1; break; }; sleep 3; done
+          [ "$drainL" = 1 ] || { echo "L FAIL: SEG $SEG never drained to S3 after reconnect"; exit 1; }
+          spool_has "$SEG" && { echo "L FAIL: SEG $SEG still in spool after drain"; exit 1; }
+          checkL=0; for k in $(seq 1 20); do docker exec -u postgres lsrc pgbackrest --stanza=pult check >/dev/null 2>&1 && { checkL=1; break; }; sleep 3; done
+          [ "$checkL" = 1 ] || { echo "L FAIL: pgbackrest check not ok after drain"; exit 1; }
+          LST2="$(docker exec -u postgres -e PGBACKREST_REPO1_PATH=/pult-outl -e PGBACKREST_STANZA=pult lsrc status.sh || true)"
+          echo "$LST2" | sed 's/^/L-status(healthy): /'
+          echo "$LST2" | grep -q '^pitr_check_status=ok$' || { echo "L FAIL: check_status not ok after drain"; exit 1; }
+          echo "$LST2" | grep -q '^pitr_continuity=intact$' || { echo "L FAIL: continuity not intact after drain"; exit 1; }
+          OMAX="$(echo "$LST2" | sed -n 's/^pitr_offsite_archive_max=//p')"
+          { [ -n "$OMAX" ] && [ "$OMAX" != unknown ] && ge_seg "$SEG" "$OMAX"; } || { echo "L FAIL: offsite_archive_max ($OMAX) does not include SEG ($SEG)"; exit 1; }
+          echo "NEG ok: L async S3 outage (foreground spool-accept, offsite-absent, status not-intact, then exact-segment drain + intact)"; pass=$((pass+1))
+          docker rm -f lsrc >/dev/null 2>&1 || true; docker volume rm pitr_lsrc >/dev/null 2>&1 || true
+
           echo "PITR negative-matrix: pass=$pass/$n"
-          test "$pass" = "$n" && test "$n" -ge 11
+          test "$pass" = "$n" && test "$n" -ge 12
 
       - name: Teardown
         if: always()
         run: |
-          docker rm -f pgsrc pgtgt minio esrc $(docker ps -aq --filter 'name=neg' --filter 'name=rneg' --filter 'name=ineg' --filter 'name=hneg' --filter 'name=kneg') 2>/dev/null || true
-          docker volume rm pitr_src pitr_tgt pitr_esrc $(docker volume ls -q | grep -E '^pitr_(neg|rneg|ineg|hneg|kneg)') 2>/dev/null || true
+          docker rm -f pgsrc pgtgt minio esrc lsrc $(docker ps -aq --filter 'name=neg' --filter 'name=rneg' --filter 'name=ineg' --filter 'name=hneg' --filter 'name=kneg') 2>/dev/null || true
+          docker volume rm pitr_src pitr_tgt pitr_esrc pitr_lsrc $(docker volume ls -q | grep -E '^pitr_(neg|rneg|ineg|hneg|kneg)') 2>/dev/null || true
           docker network rm pitrnet 2>/dev/null || true
