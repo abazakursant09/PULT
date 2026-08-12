@@ -22,7 +22,7 @@ GOT_SCHEMA_SHA="$(printf '%s' "$TABLES" | sha256sum | cut -d' ' -f1)"
 [ "$GOT_SCHEMA_SHA" = "$EXPECTED_SCHEMA_SHA" ] || fail "schema set sha $GOT_SCHEMA_SHA != $EXPECTED_SCHEMA_SHA"
 
 # 3. Explicit presence of the named critical tables (defence-in-depth over the set sha).
-for t in users workspaces execution_logs execution_recovery_audit auth_rate_limit_buckets imports decisions; do
+for t in users workspaces execution_logs execution_recovery_audit auth_rate_limit_buckets import_records decisions; do
   EX="$(q "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='$t'")"
   [ "$EX" = "1" ] || fail "critical table missing after restore: $t"
 done
