@@ -183,8 +183,9 @@ def test_async_outage_case_L_present():
     assert "network disconnect pitrnet minio" in reg and "network connect pitrnet minio" in reg
     assert "checknet" in reg, "L must use a second network so the S3 checker survives the outage"
     assert "still reachable to S3 after disconnect" in reg, "L must confirm the source truly lost S3 before the outage segment"
-    # foreground async success == LOCAL spool acceptance, proven via pg_stat_archiver
-    assert "last_archived_wal" in reg and "LOCAL spool only" in reg
+    # foreground async success == LOCAL acceptance while S3 is down (write path does not fail):
+    # proven via failed_count staying flat across the outage switch
+    assert "async foreground accepted" in reg and "failed_count" in reg
     # under async the durable-but-not-yet-offsite copy is the pg_wal segment, not the spool
     assert "wal_has" in reg and "not retained in local pg_wal" in reg
     # the exact segment (born during the outage) must be proven ABSENT offsite during the outage
