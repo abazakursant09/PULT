@@ -30,7 +30,15 @@ Repository cipher = pgBackRest AES-256-**CBC**. This gives confidentiality + rep
 3A `pg_dump` = logical, portable recovery (different bucket/prefix/credentials/retention). 3B pgBackRest = physical base backup + WAL PITR. **Neither replaces the other**; both are required before launch. 3A is unchanged by 3B1.
 
 ## Failure coverage
-B1 (this PR, runtime-integration): missing base backup; wrong cipher key; missing/corrupt WAL or repo object; wrong stanza/system-id; target before base; target past a continuity gap; S3 unavailable during archive (archive-push nonzero, WAL retained); non-empty target; major mismatch; corrupt repo metadata. **B2 (still open, NOT proven):** long timeout/retry-exhaustion, spool/disk-full behavior, concurrent same-segment, extended timeline cases, partial multipart upload, quantitative backlog-model validation.
+B1 (this PR, runtime-integration, PROVEN fail-closed in `pitr_synthetic.yml`): missing base
+backup / wrong stanza; wrong repository cipher key; non-empty restore target refused; missing
+synthetic marker refused. Each runs on a fresh disposable target and asserts a non-zero exit
+with no started DB. **B2 (still open — NOT proven, do not treat as closed):** missing/corrupt
+WAL or repo object; corrupt repo metadata; system-id mismatch; target-before-base recovery
+outcome; target past a WAL continuity gap; S3 unavailable during archive (archive-push nonzero,
+WAL retained on disk); major mismatch; long timeout / retry-exhaustion; spool/disk-full
+behavior; concurrent same-segment; extended timeline cases; partial multipart upload;
+quantitative backlog-model validation.
 
 ## Restore (fail-closed) & production
 `ops/pitr/restore.sh` (B1 synthetic, marker-gated) restores into a NEW empty PGDATA to a target LSN with repository/stanza/system-id check first, never `--clean`/over an existing DB, never deletes source/repo, no production cutover. A major upgrade is NOT a restore. Production activation (image swap + archive_mode restart + initial base backup + first-WAL wait + repo check) is 3C.

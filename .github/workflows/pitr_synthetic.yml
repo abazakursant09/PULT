@@ -149,6 +149,38 @@ jobs:
           docker exec pgtgt psql -U postgres -d business_pult -c "INSERT INTO pitr_marker VALUES (4,'T4')"
           echo "PITR SYNTHETIC OK: base+WAL+LSN-restore, T1/T2 present, T3 absent, promoted, T4 write ok"
 
+      - name: PITR B1 negative matrix (fail-closed)
+        run: |
+          set -euo pipefail
+          W="$(cat "$RUNNER_TEMP/wdir")"
+          MNT="-v $W/repo-conf/pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro -v $W/certs/public.crt:/etc/pgbackrest/minio-ca.crt:ro"
+          GOOD_LSN="0/60000D0"
+          n=0; pass=0
+          # each negative: fresh disposable target, run restore.sh with a fault (extraenv overrides
+          # a base -e), assert restore.sh exits NON-ZERO (fail-closed) and leaves no started DB.
+          neg() {
+            desc="$1"; extraenv="$2"; prep="${3:-}"
+            n=$((n+1)); c="neg$n"; v="pitr_$c"
+            docker run -d --name "$c" --network pitrnet \
+              -e PGBACKREST_REPO1_S3_KEY="$S3_KEY" -e PGBACKREST_REPO1_S3_KEY_SECRET="$S3_SECRET" -e PGBACKREST_REPO1_CIPHER_PASS="$CIPHER_PASS" \
+              $MNT -v "$v":/var/lib/postgresql/data --entrypoint sh pult-pitr:ci -c 'sleep 300' >/dev/null
+            docker exec "$c" chown postgres:postgres /var/lib/postgresql/data
+            [ "$prep" = "nonempty" ] && docker exec -u postgres "$c" sh -c 'echo 16 > /var/lib/postgresql/data/PG_VERSION'
+            if docker exec -u postgres \
+                 -e PITR_SYNTHETIC_MARKER=synthetic-3b1 -e PGDATA=/var/lib/postgresql/data -e PITR_STANZA=pult -e PITR_TARGET_LSN="$GOOD_LSN" \
+                 $extraenv "$c" restore.sh >/dev/null 2>&1; then
+              echo "NEG WRONG: '$desc' unexpectedly succeeded"; docker rm -f "$c" >/dev/null 2>&1 || true; docker volume rm "$v" >/dev/null 2>&1 || true; exit 1
+            fi
+            echo "NEG ok: $desc"; pass=$((pass+1))
+            docker rm -f "$c" >/dev/null 2>&1 || true; docker volume rm "$v" >/dev/null 2>&1 || true
+          }
+          neg "missing base backup / wrong stanza" "-e PITR_STANZA=ghost" ""
+          neg "wrong cipher key"                   "-e PGBACKREST_REPO1_CIPHER_PASS=totallywrongpass" ""
+          neg "non-empty target refused"           "" "nonempty"
+          neg "missing synthetic marker refused"   "-e PITR_SYNTHETIC_MARKER=" ""
+          echo "PITR negative-matrix: pass=$pass/$n"
+          test "$pass" = "$n"
+
       - name: Teardown
         if: always()
         run: |
