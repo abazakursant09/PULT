@@ -47,3 +47,11 @@ backup*/
 *.manifest.json
 *age-identity*
 *.identity
+
+# SECURITY-2D-3E1B-3B1 — never ship PITR repo/WAL/keys into an image context.
+pgdata/
+pg_wal/
+pgbackrest-repo/
+spool/
+*cipher*pass*
+*.s3-secret

@@ -75,3 +75,18 @@ ops/backup/secrets/
 *age-identity*
 *.identity
 restore-tmp/
+
+# ── SECURITY-2D-3E1B-3B1 PITR artifacts / secrets (never commit) ──────────────
+pgdata/
+pg_wal/
+*.pgdata
+pgbackrest-repo/
+*.pgbackrest
+spool/
+*cipher*pass*
+*.s3-secret
+recovery.signal
+standby.signal
+postgresql.auto.conf.pitr
+ops/pitr/secrets/
+*minio-ca*.key
