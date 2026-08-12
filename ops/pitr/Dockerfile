@@ -44,6 +44,8 @@ RUN apk add --no-cache \
       zlib=1.3.2-r0 \
       zstd-libs=1.5.7-r2
 COPY --from=builder /usr/bin/pgbackrest /usr/bin/pgbackrest
+# PITR runner scripts baked in (self-contained; no host bind mount of code at runtime).
+COPY --chmod=0755 restore.sh status.sh /usr/local/bin/
 # pgBackRest runtime dirs, owned by the image-native postgres user (uid 70). No recursive
 # chown of PGDATA. The official postgres entrypoint/user/CMD are inherited unchanged.
 RUN set -eux; \
