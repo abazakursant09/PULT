@@ -102,6 +102,13 @@ jobs:
           CONF
           PGENV="-e PGBACKREST_REPO1_S3_KEY=$S3_KEY -e PGBACKREST_REPO1_S3_KEY_SECRET=$S3_SECRET -e PGBACKREST_REPO1_CIPHER_PASS=$CIPHER_PASS"
           MNT="-v $W/repo-conf/pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro -v $W/certs/public.crt:/etc/pgbackrest/minio-ca.crt:ro"
+          # synchronous variant (archive-async=n) — used ONLY by the E S3-outage source so the
+          # archive_command's exit-code contract is directly observable (nonzero -> PostgreSQL
+          # retains the WAL and increments pg_stat_archiver.failed_count). Under async the foreground
+          # archive-push spools and returns 0, so failed_count never moves — async only defers the
+          # very same push to a background worker.
+          sed 's/^archive-async=y$/archive-async=n/' "$W/repo-conf/pgbackrest.conf" > "$W/repo-conf/pgbackrest-sync.conf"
+          MNT_SYNC="-v $W/repo-conf/pgbackrest-sync.conf:/etc/pgbackrest/pgbackrest.conf:ro -v $W/certs/public.crt:/etc/pgbackrest/minio-ca.crt:ro"
           # source postgres (PITR image) with archive_mode on
           docker run -d --name pgsrc --network pitrnet $PGENV $MNT \
             -v pitr_src:/var/lib/postgresql/data \
@@ -275,7 +282,7 @@ jobs:
           n=$((n+1))
           docker run -d --name esrc --network pitrnet \
             -e PGBACKREST_REPO1_S3_KEY="$S3_KEY" -e PGBACKREST_REPO1_S3_KEY_SECRET="$S3_SECRET" -e PGBACKREST_REPO1_CIPHER_PASS="$CIPHER_PASS" \
-            -e PGBACKREST_REPO1_PATH=/pult-oute $MNT -v pitr_esrc:/var/lib/postgresql/data \
+            -e PGBACKREST_REPO1_PATH=/pult-oute $MNT_SYNC -v pitr_esrc:/var/lib/postgresql/data \
             -v "$PWD/ops/pitr/postgresql.conf":/etc/postgresql/postgresql.conf:ro \
             -e POSTGRES_PASSWORD="$PGPW" -e POSTGRES_DB=business_pult pult-pitr:ci postgres -c config_file=/etc/postgresql/postgresql.conf >/dev/null
           for k in $(seq 1 60); do docker exec esrc pg_isready -U postgres >/dev/null 2>&1 && break || sleep 2; done
