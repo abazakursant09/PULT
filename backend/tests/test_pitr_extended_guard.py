@@ -90,6 +90,8 @@ def test_bounded_polling_no_asserted_or_true():
     # `|| true` is allowed ONLY on cleanup docker commands, never on an assertion/exit.
     assert "exit 1 || true" not in m and "|| true; then" not in m, "assertions/exits must not be swallowed with || true"
     assert not re.search(r'\]\s*\|\|\s*true', m), "a bracket-test assertion must not be swallowed with || true"
+    # floor on bounded loops so replacing a critical drain/appearance loop with a naked sleep drops it
+    assert m.count("for k in $(seq 1") >= 12, "critical drain/appearance loops must stay bounded (floor)"
     # the summary asserts all sections passed (no partial green)
     assert re.search(r'test "\$PASS" = 5', m), "must assert all 5 sections passed"
 
@@ -104,13 +106,16 @@ def test_long_outage_measured():
     m = _matrix(_r(EXT))
     assert "LONG async S3 outage" in m
     assert "docker pause minio" in m and "docker unpause minio" in m, "outage = pause (DNS ok), not network cut"
-    assert "N=8" in m, "long outage must generate >=8 segments"
+    assert "N=8;" in m, "long outage must set N=8 segments (assignment, not just an echo)"
     assert "still reachable during pause" in m, "must confirm true isolation before generating backlog"
     assert "failed_count moved" in m, "must assert foreground accept (failed_count flat) under async"
-    assert "not retained in pg_wal" in m, "must physically prove each exact seg retained locally"
+    # physical local-retention proof must be the ACTUAL guarded check, not just its message
+    assert 'wal_has longsrc "$s" ||' in m, "each exact seg must be physically proven retained in pg_wal"
     assert "offsite during outage" in m, "must prove each exact seg absent offsite during outage"
     assert "continuity intact during outage" in m, "status must be unsafe during outage"
-    assert "never drained after S3 return" in m, "must prove each exact seg drains after S3 returns"
+    # exact-segment remote drain must be the ACTUAL bounded loop + guarded assertion
+    assert 'for k in $(seq 1 60); do seg_in_s3 "$s" pult-long' in m, "drain must poll each exact seg in a bounded loop"
+    assert '[ "$d" = 1 ] || { echo "LONG FAIL: $s never drained after S3 return"' in m, "must assert each exact seg drained"
     assert "drain rate" in m and "NOT production RPO" in m.replace("RPO/RTO", "RPO"), "drain-rate measured but not sold as SLO"
     assert "max_tested_backlog_bytes" in m
 
@@ -119,8 +124,9 @@ def test_concurrent_multi_lsn_restore():
     m = _matrix(_r(EXT))
     # >=3 writers
     assert m.count("for i in \\$(seq 1 40)") >= 1 and "for wtr in 1 2 3" in m, ">=3 concurrent writers"
-    # 3 ordered LSN checkpoints
-    assert "LSN1=" in m and "LSN2=" in m and "LSN3=" in m
+    # 3 DISTINCT ordered LSN checkpoints — each from its own rec_point call (not aliased)
+    assert "rec_point M1" in m and "rec_point M2" in m and "rec_point M3" in m, "three distinct LSN checkpoints"
+    assert 'LSN3="$(rec_point M3)"' in m, "LSN3 must be its own checkpoint, not aliased to another LSN"
     assert "LSN not strictly increasing" in m, "must assert LSN1<LSN2<LSN3"
     assert "authoritative order = numeric LSN" in m, "must not assume commit/filename order == LSN order"
     # two independent restore targets to different LSN
