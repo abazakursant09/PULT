@@ -18,6 +18,14 @@ on:
   workflow_dispatch:
   schedule:
     - cron: "37 3 * * *"
+  # A brand-new workflow cannot be dispatched by name until it lands on the default branch, so PR
+  # evidence comes from a paths-scoped pull_request trigger (only when the PITR contour changes).
+  pull_request:
+    paths:
+      - .github/workflows/pitr_extended.yml
+      - ops/pitr/**
+      - docs/pitr-policy.md
+      - backend/tests/test_pitr_extended_guard.py
 
 permissions:
   contents: read
