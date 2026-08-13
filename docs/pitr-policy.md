@@ -55,9 +55,30 @@ acceptance — `last_archived_wal` advances, `failed_count` flat — while the e
 absent offsite and `status.sh` reports `continuity!=intact`; then reconnect, prove that exact
 segment drains to S3, and `status.sh` flips to `check=ok`/`continuity=intact`). Each uses a
 disposable target/prefix and asserts fail-closed with no promoted target and no false durability.
-**B2 (still open — genuine extended reliability only):** long timeout / retry-exhaustion;
-spool/disk-full behavior; concurrent same-segment stress; partial multipart-upload interruption;
-quantitative backlog-model validation; extended multi-timeline cases.
+**B2 COVERED synthetically (`.github/workflows/pitr_extended.yml`, workflow_dispatch + nightly; NOT
+production):** a **probe** proving the not-yet-offsite backlog physically lives in `pg_wal` (the
+spool holds only transient status); **long async S3 outage** with N=8 segments — foreground
+local-accept (`failed_count` flat), each exact segment retained in `pg_wal`, none offsite, status
+unsafe, then measured **sequential drain** of every exact segment after S3 returns (drain-rate is a
+SYNTHETIC measurement, NOT an SLO); **concurrent writers + multi-LSN restore** (≥3 writers, three
+ordered checkpoints LSN1<LSN2<LSN3, two independent restores to LSN2 and LSN3 with row assertions;
+authoritative order = numeric LSN + marker rows, NOT commit/filename/S3-appearance order);
+**restart/recreate/retry** (PG restart empty-backlog; PG restart WITH backlog preserving exact segs;
+source-container recreation on preserved volume; restore-retry into a non-empty target fail-closed);
+**corruption on a scratch repo copy** (truncation / zero-length / missing-middle WAL — all
+fail-closed, canonical repo untouched).
+
+**B2 attempted but DEFERRED to 3C (NOT faked here):** local **spool/disk-full** (bounding the real
+backlog filesystem needs a privileged mount / risks the shared runner disk — a small spool-only
+tmpfs would not create real WAL-backlog pressure since the backlog is in `pg_wal`); **`kill -9` of
+the async archive worker** (PID/timing not deterministically catchable without a race);
+**multipart-upload interruption**; **timeline switch**; extended multi-timeline cases.
+
+**3C production-only (unchanged):** real Selectel bucket, least-privilege **IAM** permutations
+(PUT/LIST/GET split), **Object Lock**/immutability, scheduling, retention enforcement,
+monitoring/dead-man alerts, production `archive_mode` activation, RPO/RTO. **MinIO ≠ Selectel** —
+B2 behavior on MinIO does not prove Selectel; test throughput/drain-rate are not production SLOs;
+production PITR is still NOT activated.
 
 ## Restore (fail-closed) & production
 `ops/pitr/restore.sh` (B1 synthetic, marker-gated) restores into a NEW empty PGDATA to a target LSN. Before restoring it runs `pgbackrest info` and requires that a `full backup` exists for the stanza (repository reachable + base backup present) — it does **not** perform a separate explicit system-id check (system-id mismatch is exercised at the workflow level, case H, via `pgbackrest check` on a foreign cluster). It never uses `--clean`/restores over an existing DB (refuses any target with a `PG_VERSION`), never deletes source/repo, and performs no production cutover. A major upgrade is NOT a restore. Production activation (image swap + archive_mode restart + initial base backup + first-WAL wait + repo check) is 3C.

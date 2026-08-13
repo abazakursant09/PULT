@@ -1,0 +1,385 @@
+name: PITR Extended
+
+# SECURITY-2D-3E1B-3B2/B2 — EXTENDED synthetic PITR fault matrix. Proves the merged 3B1 PITR
+# foundation under sustained/concurrent stress on SYNTHETIC data only, against a pinned MinIO over
+# TLS (repo1-storage-verify-tls=y kept). Heavy + slow → NOT on every PR: run via workflow_dispatch
+# (PR evidence) + nightly schedule (post-merge). No real Selectel, no real secrets/PII, no image
+# publish, no WAL/repo/key artifacts. Does NOT activate production PITR/scheduling/retention/alerts.
+#
+# COVERED here (deterministic, safe in GitHub Actions): probe of where backlog physically lives;
+# long async S3 outage with N segments + measured sequential drain; concurrent writers + multi-LSN
+# restore; restart matrix (PG empty backlog / PG with backlog / source-container recreation with
+# preserved volumes / restore-retry after a failed attempt); corruption on a scratch repo copy
+# (truncation / zero-length / missing-middle WAL); in-test backlog metrics.
+# DEFERRED to 3C (honest, see docs/pitr-policy.md): disk/spool-full (needs privileged mount or risks
+# host disk), kill -9 archive worker if not deterministically catchable, multipart interruption,
+# timeline switch, Selectel IAM permutations, Object Lock — none are faked here.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "37 3 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pitr-extended
+  cancel-in-progress: false
+
+jobs:
+  pitr-extended:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      MINIO_IMAGE: "minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e"
+      S3_KEY: ciminio
+      S3_SECRET: ciminiosecret123
+      CIPHER_PASS: cisyntheticcipherpass
+      PGPW: cipg
+      BUCKET: pult-pitr-ext
+      STANZA: pult
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.13"
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.9.0
+
+      - name: Offline guards (extended + B1 contract + base digest)
+        working-directory: backend
+        run: |
+          pip install --require-hashes -r requirements-ci.lock
+          python -m pytest tests/test_pitr_extended_guard.py tests/test_pitr_contract_guard.py tests/test_base_image_digest_pin_guard.py -q
+
+      - name: Build PITR image (exact-pinned)
+        run: |
+          set -euo pipefail
+          docker buildx build --load -t pult-pitr:ci ops/pitr
+
+      - name: TLS MinIO + network + S3 config
+        run: |
+          set -euo pipefail
+          W="$RUNNER_TEMP/pitrext"; mkdir -p "$W/certs" "$W/repo-conf"
+          docker network create pitrnet-ext
+          openssl req -x509 -newkey rsa:2048 -sha256 -days 2 -nodes \
+            -keyout "$W/certs/private.key" -out "$W/certs/public.crt" \
+            -subj "/CN=minio" -addext "subjectAltName=DNS:minio"
+          docker run -d --name minio --network pitrnet-ext \
+            -e MINIO_ROOT_USER="$S3_KEY" -e MINIO_ROOT_PASSWORD="$S3_SECRET" \
+            -v "$W/certs":/root/.minio/certs:ro "$MINIO_IMAGE" server /data
+          for i in $(seq 1 30); do docker run --rm --network pitrnet-ext --entrypoint sh pult-pitr:ci -c "true" && break; sleep 1; done
+          cat > "$W/repo-conf/pgbackrest.conf" <<CONF
+          [global]
+          repo1-type=s3
+          repo1-s3-endpoint=minio:9000
+          repo1-s3-region=us-east-1
+          repo1-s3-bucket=$BUCKET
+          repo1-s3-uri-style=path
+          repo1-path=/pult-pitr
+          repo1-storage-verify-tls=y
+          repo1-storage-ca-file=/etc/pgbackrest/minio-ca.crt
+          repo1-cipher-type=aes-256-cbc
+          spool-path=/var/spool/pgbackrest
+          archive-async=y
+          process-max=2
+          compress-type=zst
+          log-level-console=info
+          log-path=/var/log/pgbackrest
+          [pult]
+          pg1-path=/var/lib/postgresql/data
+          CONF
+          # create bucket
+          docker run --rm --network pitrnet-ext --entrypoint sh "$MINIO_IMAGE" -c "mc --insecure alias set m https://minio:9000 $S3_KEY $S3_SECRET >/dev/null 2>&1; mc --insecure mb m/$BUCKET || true"
+          echo "$W" > "$RUNNER_TEMP/wdir"
+
+      - name: Extended fault matrix (probe + long-outage + concurrent + restart + corruption)
+        run: |
+          set -euo pipefail
+          W="$(cat "$RUNNER_TEMP/wdir")"
+          MNT="-v $W/repo-conf/pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro -v $W/certs/public.crt:/etc/pgbackrest/minio-ca.crt:ro"
+
+          # ---------- helpers ----------
+          MC() { docker run --rm --network pitrnet-ext --entrypoint sh "$MINIO_IMAGE" -c "mc --insecure alias set m https://minio:9000 $S3_KEY $S3_SECRET >/dev/null 2>&1; $1"; }
+          # seg present offsite under a repo prefix? $1=segment $2=prefix(no leading slash)
+          seg_in_s3() { MC "mc --insecure --json ls --recursive m/$BUCKET/$2/archive/pult/16-1/" | grep -q "$1"; }
+          wal_has() { docker exec "$1" sh -c "test -f /var/lib/postgresql/data/pg_wal/$2"; }
+          off_max() { docker exec -u postgres -e PGBACKREST_REPO1_PATH="$2" -e PGBACKREST_STANZA=pult -e PITR_STATUS_TIMEOUT=6 "$1" status.sh 2>/dev/null | sed -n 's/^pitr_offsite_archive_max=//p'; }
+          statusline() { docker exec -u postgres -e PGBACKREST_REPO1_PATH="$2" -e PGBACKREST_STANZA=pult -e PITR_STATUS_TIMEOUT=6 "$1" status.sh 2>/dev/null; }
+          lready() { c="$1"; for a in $(seq 1 45); do if [ "$(docker exec -u postgres "$c" psql -U postgres -tAc 'SELECT 1' 2>/dev/null || true)" = 1 ]; then [ "$(docker exec -u postgres "$c" psql -U postgres -tAc 'SELECT pg_is_in_recovery()' 2>/dev/null || echo t)" = f ] && return 0; fi; sleep 2; done; echo "FAIL: $c not ready (crash/recovery)"; docker logs "$c" --tail 60 2>&1 | sed 's/^/log: /' || true; exit 1; }
+          cur_seg() { docker exec -u postgres "$1" psql -U postgres -tAc 'SELECT pg_walfile_name(pg_current_wal_lsn())' 2>/dev/null || echo ''; }
+          fcount() { docker exec -u postgres "$1" psql -U postgres -tAc 'SELECT failed_count FROM pg_stat_archiver' 2>/dev/null || echo err; }
+          # start an async PITR source: $1=name $2=repo-path(with leading slash) $3=volume
+          start_src() {
+            docker run -d --name "$1" --network pitrnet-ext \
+              -e PGBACKREST_REPO1_S3_KEY="$S3_KEY" -e PGBACKREST_REPO1_S3_KEY_SECRET="$S3_SECRET" -e PGBACKREST_REPO1_CIPHER_PASS="$CIPHER_PASS" \
+              -e PGBACKREST_REPO1_PATH="$2" -e PGBACKREST_STANZA=pult $MNT -v "$3":/var/lib/postgresql/data \
+              -v "$PWD/ops/pitr/postgresql.conf":/etc/postgresql/postgresql.conf:ro \
+              -e POSTGRES_PASSWORD="$PGPW" -e POSTGRES_DB=business_pult pult-pitr:ci postgres -c config_file=/etc/postgresql/postgresql.conf >/dev/null
+            for k in $(seq 1 60); do docker exec "$1" pg_isready -U postgres >/dev/null 2>&1 && break || sleep 2; done
+            lready "$1"
+            docker exec -u postgres -e PGBACKREST_REPO1_PATH="$2" "$1" pgbackrest --stanza=pult stanza-create
+            docker exec -u postgres -e PGBACKREST_REPO1_PATH="$2" "$1" pgbackrest --stanza=pult --type=full backup
+          }
+          # confirm baseline offsite: force a switch, poll pgbackrest check ok. $1=name $2=repo-path
+          baseline_offsite() {
+            docker exec -u postgres "$1" psql -U postgres -d business_pult -c "CREATE TABLE IF NOT EXISTS m(id serial primary key, w text, tag text); SELECT pg_switch_wal()" >/dev/null
+            for k in $(seq 1 20); do docker exec -u postgres -e PGBACKREST_REPO1_PATH="$2" "$1" pgbackrest --stanza=pult check >/dev/null 2>&1 && return 0; sleep 3; done
+            echo "FAIL: baseline offsite not confirmed for $1"; exit 1
+          }
+          PASS=0
+
+          echo "==================== 0. PROBE: where does the backlog physically live? ===================="
+          start_src probe /pult-probe pitr_ext_probe
+          baseline_offsite probe /pult-probe
+          P_off0="$(off_max probe /pult-probe)"; P_spool0="$(docker exec probe sh -c 'du -sb /var/spool/pgbackrest 2>/dev/null | cut -f1' || echo 0)"; P_wal0="$(docker exec probe sh -c 'du -sb /var/lib/postgresql/data/pg_wal 2>/dev/null | cut -f1' || echo 0)"; P_fc0="$(fcount probe)"
+          docker pause minio
+          PROBE_SEGS=""
+          for i in 1 2 3; do
+            docker exec -u postgres probe psql -U postgres -d business_pult -c "INSERT INTO m(w,tag) VALUES ('probe$i','P')" >/dev/null
+            s="$(cur_seg probe)"; docker exec -u postgres probe psql -U postgres -d business_pult -c "SELECT pg_switch_wal()" >/dev/null
+            PROBE_SEGS="$PROBE_SEGS $s"
+          done
+          P_fc1="$(fcount probe)"; P_spool1="$(docker exec probe sh -c 'du -sb /var/spool/pgbackrest 2>/dev/null | cut -f1' || echo 0)"; P_wal1="$(docker exec probe sh -c 'du -sb /var/lib/postgresql/data/pg_wal 2>/dev/null | cut -f1' || echo 0)"
+          echo "PROBE segments:$PROBE_SEGS"
+          echo "PROBE spool bytes: $P_spool0 -> $P_spool1 ; pg_wal bytes: $P_wal0 -> $P_wal1 ; failed_count $P_fc0->$P_fc1 ; offsite_max before=$P_off0"
+          echo "PROBE spool file types (names only, no content):"; docker exec probe sh -c 'find /var/spool/pgbackrest -type f 2>/dev/null | sed "s#.*/##" | sed "s/[0-9A-F]\{8,\}/<segid>/g" | sort -u | head -20' || true
+          # physical backlog assertion: each probe segment retained in pg_wal, none offsite yet, failed_count flat
+          for s in $PROBE_SEGS; do wal_has probe "$s" || { echo "PROBE FAIL: $s not in pg_wal"; docker unpause minio||true; exit 1; }; done
+          [ "$P_fc1" = "$P_fc0" ] || { echo "PROBE FAIL: failed_count moved under async ($P_fc0->$P_fc1)"; docker unpause minio||true; exit 1; }
+          docker unpause minio
+          lready probe
+          docker exec -u postgres probe psql -U postgres -d business_pult -c "SELECT pg_switch_wal()" >/dev/null 2>&1 || true
+          for s in $PROBE_SEGS; do d=0; for k in $(seq 1 40); do seg_in_s3 "$s" pult-probe && { d=1; break; }; sleep 3; done; [ "$d" = 1 ] || { echo "PROBE FAIL: $s never drained"; exit 1; }; done
+          echo "PROBE OK: backlog physically retained in pg_wal (spool holds transient status only); drains after S3 returns"
+          docker rm -f probe >/dev/null 2>&1 || true; docker volume rm pitr_ext_probe >/dev/null 2>&1 || true
+          PASS=$((PASS+1))
+
+          echo "==================== 2. LONG async S3 outage (N=8 segments, measured) ===================="
+          start_src longsrc /pult-long pitr_ext_long
+          baseline_offsite longsrc /pult-long
+          L_off0="$(off_max longsrc /pult-long)"; L_fc0="$(fcount longsrc)"
+          L_spool0="$(docker exec longsrc sh -c 'du -sb /var/spool/pgbackrest 2>/dev/null | cut -f1' || echo 0)"; L_wal0="$(docker exec longsrc sh -c 'du -sb /var/lib/postgresql/data/pg_wal 2>/dev/null | cut -f1' || echo 0)"
+          OUT_START="$SECONDS"
+          docker pause minio
+          # confirm true isolation (repo-ls fails)
+          iso=0; for k in $(seq 1 12); do docker exec -u postgres -e PGBACKREST_REPO1_PATH=/pult-long longsrc pgbackrest --stanza=pult --io-timeout=5 repo-ls >/dev/null 2>&1 || { iso=1; break; }; sleep 1; done
+          [ "$iso" = 1 ] || { echo "LONG FAIL: source still reachable during pause"; docker unpause minio||true; exit 1; }
+          N=8; SEGS=""
+          for i in $(seq 1 $N); do
+            docker exec -u postgres longsrc psql -U postgres -d business_pult -c "INSERT INTO m(w,tag) VALUES ('long$i','L')" >/dev/null
+            s="$(cur_seg longsrc)"; [ -n "$s" ] || { echo "LONG FAIL: empty seg"; docker unpause minio||true; exit 1; }
+            docker exec -u postgres longsrc psql -U postgres -d business_pult -c "SELECT pg_switch_wal()" >/dev/null
+            case " $SEGS " in *" $s "*) : ;; *) SEGS="$SEGS $s";; esac
+          done
+          CNT=$(echo $SEGS | wc -w)
+          [ "$CNT" -ge "$N" ] || { echo "LONG FAIL: expected >=$N unique segs, got $CNT ($SEGS)"; docker unpause minio||true; exit 1; }
+          L_fc1="$(fcount longsrc)"; L_spool1="$(docker exec longsrc sh -c 'du -sb /var/spool/pgbackrest 2>/dev/null | cut -f1' || echo 0)"; L_wal1="$(docker exec longsrc sh -c 'du -sb /var/lib/postgresql/data/pg_wal 2>/dev/null | cut -f1' || echo 0)"
+          # foreground accepted locally: failed_count flat
+          [ "$L_fc1" = "$L_fc0" ] || { echo "LONG FAIL: failed_count moved ($L_fc0->$L_fc1)"; docker unpause minio||true; exit 1; }
+          # every exact seg retained locally in pg_wal, none offsite yet
+          for s in $SEGS; do wal_has longsrc "$s" || { echo "LONG FAIL: $s not retained in pg_wal"; docker unpause minio||true; exit 1; }; done
+          for s in $SEGS; do if seg_in_s3 "$s" pult-long; then echo "LONG FAIL: $s offsite during outage"; docker unpause minio||true; exit 1; fi; done
+          # offsite max frozen
+          L_offd="$(off_max longsrc /pult-long)"
+          # status unsafe
+          LSTAT="$(statusline longsrc /pult-long)"; echo "$LSTAT" | sed 's/^/LONG-status(outage): /'
+          echo "$LSTAT" | grep -q '^pitr_check_status=ok$' && { echo "LONG FAIL: check ok during outage"; docker unpause minio||true; exit 1; }
+          echo "$LSTAT" | grep -q '^pitr_continuity=intact$' && { echo "LONG FAIL: continuity intact during outage"; docker unpause minio||true; exit 1; }
+          OUT_DUR=$((SECONDS-OUT_START))
+          echo "LONG metrics: N=$CNT segs pg_wal $L_wal0->$L_wal1 (delta $((L_wal1-L_wal0))B) spool $L_spool0->$L_spool1 offsite_max before=$L_off0 during=$L_offd max_tested_backlog_bytes=$((L_wal1-L_wal0)) outage_window_s~=$OUT_DUR"
+          # restore S3, drain each exact segment, measure drain rate
+          docker unpause minio
+          lready longsrc
+          docker exec -u postgres longsrc psql -U postgres -d business_pult -c "SELECT pg_switch_wal()" >/dev/null 2>&1 || true
+          DRAIN_START="$SECONDS"
+          for s in $SEGS; do d=0; for k in $(seq 1 60); do seg_in_s3 "$s" pult-long && { d=1; break; }; sleep 3; done; [ "$d" = 1 ] || { echo "LONG FAIL: $s never drained after S3 return"; exit 1; }; done
+          DRAIN_DUR=$((SECONDS-DRAIN_START)); [ "$DRAIN_DUR" -lt 1 ] && DRAIN_DUR=1
+          for k in $(seq 1 20); do docker exec -u postgres -e PGBACKREST_REPO1_PATH=/pult-long longsrc pgbackrest --stanza=pult check >/dev/null 2>&1 && { chk=1; break; }; sleep 3; done
+          [ "${chk:-0}" = 1 ] || { echo "LONG FAIL: check not ok after drain"; exit 1; }
+          LSTAT2="$(statusline longsrc /pult-long)"; echo "$LSTAT2" | sed 's/^/LONG-status(healthy): /'
+          echo "$LSTAT2" | grep -q '^pitr_continuity=intact$' || { echo "LONG FAIL: continuity not intact after drain"; exit 1; }
+          DR=$(( CNT / DRAIN_DUR )); echo "LONG drain rate ~= $CNT segs / ${DRAIN_DUR}s = ${DR} seg/s (SYNTHETIC — NOT production RPO/RTO/capacity)"
+          echo "NEG ok: LONG async S3 outage ($CNT segs accepted local, absent offsite, drained after return)"
+          docker rm -f longsrc >/dev/null 2>&1 || true; docker volume rm pitr_ext_long >/dev/null 2>&1 || true
+          PASS=$((PASS+1))
+
+          echo "==================== 3. CONCURRENT writers + multi-LSN restore ===================="
+          start_src concsrc /pult-conc pitr_ext_conc
+          baseline_offsite concsrc /pult-conc
+          # 3 concurrent writers each inserting unique tagged rows in the background
+          for wtr in 1 2 3; do
+            docker exec -u postgres concsrc sh -c "for i in \$(seq 1 40); do psql -U postgres -d business_pult -c \"INSERT INTO m(w,tag) VALUES ('w${wtr}_\$i','flow')\" >/dev/null 2>&1; done" &
+          done
+          CSEGS=""
+          rec_point() { docker exec -u postgres concsrc psql -U postgres -d business_pult -c "INSERT INTO m(w,tag) VALUES ('$1','$1')" >/dev/null; docker exec -u postgres concsrc psql -U postgres -d business_pult -tAc 'SELECT pg_current_wal_lsn()'; docker exec -u postgres concsrc psql -U postgres -d business_pult -c "SELECT pg_switch_wal()" >/dev/null; }
+          LSN1="$(rec_point M1)"; sleep 1
+          docker pause minio; sleep 1
+          LSN2="$(rec_point M2)"; sleep 1
+          docker unpause minio; sleep 1
+          LSN3="$(rec_point M3)"
+          wait || true
+          echo "CONC LSNs: M1=$LSN1 M2=$LSN2 M3=$LSN3 (authoritative order = numeric LSN + marker rows)"
+          # LSN ordering LSN1<LSN2<LSN3 (string compare valid for same-length hex/hex pairs -> normalize)
+          norm() { printf '%s' "$1" | awk -F/ '{printf "%08s%08s", $1, $2}'; }
+          [ "$(norm "$LSN1")" \< "$(norm "$LSN2")" ] && [ "$(norm "$LSN2")" \< "$(norm "$LSN3")" ] || { echo "CONC FAIL: LSN not strictly increasing"; exit 1; }
+          # let archiver drain everything to offsite
+          docker exec -u postgres concsrc psql -U postgres -d business_pult -c "SELECT pg_switch_wal()" >/dev/null 2>&1 || true
+          for k in $(seq 1 30); do docker exec -u postgres -e PGBACKREST_REPO1_PATH=/pult-conc concsrc pgbackrest --stanza=pult check >/dev/null 2>&1 && { cok=1; break; }; sleep 3; done
+          [ "${cok:-0}" = 1 ] || { echo "CONC FAIL: archive not healthy after load"; exit 1; }
+          # expected row counts
+          R_all="$(docker exec -u postgres concsrc psql -U postgres -d business_pult -tAc "SELECT count(*) FROM m WHERE tag='flow'")"
+          echo "CONC flow rows committed = $R_all"
+          docker rm -f concsrc >/dev/null 2>&1 || true   # keep volume? no; repo is offsite
+          # restore target A -> LSN2 ; target B -> LSN3 (two NEW empty PGDATA)
+          restore_to() { # $1=name $2=vol $3=lsn
+            docker run -d --name "$1" --network pitrnet-ext -e PGBACKREST_REPO1_S3_KEY="$S3_KEY" -e PGBACKREST_REPO1_S3_KEY_SECRET="$S3_SECRET" -e PGBACKREST_REPO1_CIPHER_PASS="$CIPHER_PASS" -e PGBACKREST_REPO1_PATH=/pult-conc $MNT -v "$2":/var/lib/postgresql/data --entrypoint sh pult-pitr:ci -c 'sleep 400' >/dev/null
+            docker exec "$1" chown postgres:postgres /var/lib/postgresql/data
+            docker exec -u postgres -e PGBACKREST_REPO1_PATH=/pult-conc -e PITR_SYNTHETIC_MARKER=synthetic-3b1 -e PGDATA=/var/lib/postgresql/data -e PITR_STANZA=pult -e PITR_TARGET_LSN="$3" "$1" restore.sh
+            docker exec -u postgres "$1" sh -c 'pg_ctl -D /var/lib/postgresql/data -w -t 120 start'
+            lready "$1"
+          }
+          restore_to ctgtA pitr_ext_ctgtA "$LSN2"
+          restore_to ctgtB pitr_ext_ctgtB "$LSN3"
+          A_m1="$(docker exec -u postgres ctgtA psql -U postgres -d business_pult -tAc "SELECT count(*) FROM m WHERE tag='M1'")"
+          A_m2="$(docker exec -u postgres ctgtA psql -U postgres -d business_pult -tAc "SELECT count(*) FROM m WHERE tag='M2'")"
+          A_m3="$(docker exec -u postgres ctgtA psql -U postgres -d business_pult -tAc "SELECT count(*) FROM m WHERE tag='M3'")"
+          echo "CONC target-A(LSN2): M1=$A_m1 M2=$A_m2 M3=$A_m3 (expect M1=1 M2=1 M3=0)"
+          [ "$A_m1" = 1 ] && [ "$A_m2" = 1 ] && [ "$A_m3" = 0 ] || { echo "CONC FAIL: target-A markers wrong"; exit 1; }
+          docker exec -u postgres ctgtA psql -U postgres -d business_pult -c "INSERT INTO m(w,tag) VALUES ('freshA','fresh')" >/dev/null || { echo "CONC FAIL: target-A no fresh write"; exit 1; }
+          B_m3="$(docker exec -u postgres ctgtB psql -U postgres -d business_pult -tAc "SELECT count(*) FROM m WHERE tag='M3'")"
+          echo "CONC target-B(LSN3): M3=$B_m3 (expect 1)"
+          [ "$B_m3" = 1 ] || { echo "CONC FAIL: target-B missing M3"; exit 1; }
+          docker exec -u postgres ctgtB psql -U postgres -d business_pult -c "INSERT INTO m(w,tag) VALUES ('freshB','fresh')" >/dev/null || { echo "CONC FAIL: target-B no fresh write"; exit 1; }
+          echo "NEG ok: CONCURRENT + multi-LSN restore (A@LSN2 has M1,M2 not M3; B@LSN3 has M3)"
+          docker rm -f ctgtA ctgtB >/dev/null 2>&1 || true; docker volume rm pitr_ext_conc pitr_ext_ctgtA pitr_ext_ctgtB >/dev/null 2>&1 || true
+          PASS=$((PASS+1))
+
+          echo "==================== 4. RESTART / recreation matrix ===================="
+          # A. PG restart, empty backlog
+          start_src rsrc /pult-rst pitr_ext_rst
+          baseline_offsite rsrc /pult-rst
+          docker restart rsrc >/dev/null; lready rsrc
+          docker exec -u postgres rsrc psql -U postgres -d business_pult -c "INSERT INTO m(w,tag) VALUES ('afterrestart','R')" >/dev/null
+          docker exec -u postgres rsrc psql -U postgres -d business_pult -c "SELECT pg_switch_wal()" >/dev/null
+          for k in $(seq 1 20); do docker exec -u postgres -e PGBACKREST_REPO1_PATH=/pult-rst rsrc pgbackrest --stanza=pult check >/dev/null 2>&1 && { ra=1; break; }; sleep 3; done
+          [ "${ra:-0}" = 1 ] || { echo "RESTART-A FAIL: archive not ok after PG restart"; exit 1; }
+          echo "NEG ok: RESTART-A (PG restart, empty backlog, archiving healthy)"
+          # B. PG restart WITH backlog during S3 outage (preserve exact segs)
+          docker pause minio
+          iso=0; for k in $(seq 1 12); do docker exec -u postgres -e PGBACKREST_REPO1_PATH=/pult-rst rsrc pgbackrest --stanza=pult --io-timeout=5 repo-ls >/dev/null 2>&1 || { iso=1; break; }; sleep 1; done
+          [ "$iso" = 1 ] || { echo "RESTART-B FAIL: not isolated"; docker unpause minio||true; exit 1; }
+          RB_SEGS=""
+          for i in 1 2 3; do docker exec -u postgres rsrc psql -U postgres -d business_pult -c "INSERT INTO m(w,tag) VALUES ('rb$i','RB')" >/dev/null; s="$(cur_seg rsrc)"; docker exec -u postgres rsrc psql -U postgres -d business_pult -c "SELECT pg_switch_wal()" >/dev/null; RB_SEGS="$RB_SEGS $s"; done
+          for s in $RB_SEGS; do wal_has rsrc "$s" || { echo "RESTART-B FAIL: $s not local pre-restart"; docker unpause minio||true; exit 1; }; if seg_in_s3 "$s" pult-rst; then echo "RESTART-B FAIL: $s offsite during outage"; docker unpause minio||true; exit 1; fi; done
+          docker restart rsrc >/dev/null; lready rsrc
+          for s in $RB_SEGS; do wal_has rsrc "$s" || { echo "RESTART-B FAIL: $s LOST across restart"; docker unpause minio||true; exit 1; }; done
+          docker unpause minio
+          docker exec -u postgres rsrc psql -U postgres -d business_pult -c "SELECT pg_switch_wal()" >/dev/null 2>&1 || true
+          for s in $RB_SEGS; do d=0; for k in $(seq 1 60); do seg_in_s3 "$s" pult-rst && { d=1; break; }; sleep 3; done; [ "$d" = 1 ] || { echo "RESTART-B FAIL: $s never drained post-restart"; exit 1; }; done
+          echo "NEG ok: RESTART-B (PG restart with backlog: exact segs survived, drained after S3 return)"
+          docker rm -f rsrc >/dev/null 2>&1 || true; docker volume rm pitr_ext_rst >/dev/null 2>&1 || true
+          # C. source CONTAINER recreation with preserved volume (backlog survives)
+          start_src csrc /pult-crt pitr_ext_crt
+          baseline_offsite csrc /pult-crt
+          docker pause minio
+          iso=0; for k in $(seq 1 12); do docker exec -u postgres -e PGBACKREST_REPO1_PATH=/pult-crt csrc pgbackrest --stanza=pult --io-timeout=5 repo-ls >/dev/null 2>&1 || { iso=1; break; }; sleep 1; done
+          [ "$iso" = 1 ] || { echo "RECREATE FAIL: not isolated"; docker unpause minio||true; exit 1; }
+          docker exec -u postgres csrc psql -U postgres -d business_pult -c "INSERT INTO m(w,tag) VALUES ('crt1','C')" >/dev/null; CS="$(cur_seg csrc)"; docker exec -u postgres csrc psql -U postgres -d business_pult -c "SELECT pg_switch_wal()" >/dev/null
+          wal_has csrc "$CS" || { echo "RECREATE FAIL: seg not local"; docker unpause minio||true; exit 1; }
+          docker rm -f csrc >/dev/null   # remove container only; volume pitr_ext_crt kept
+          docker run -d --name csrc --network pitrnet-ext -e PGBACKREST_REPO1_S3_KEY="$S3_KEY" -e PGBACKREST_REPO1_S3_KEY_SECRET="$S3_SECRET" -e PGBACKREST_REPO1_CIPHER_PASS="$CIPHER_PASS" -e PGBACKREST_REPO1_PATH=/pult-crt -e PGBACKREST_STANZA=pult $MNT -v pitr_ext_crt:/var/lib/postgresql/data -v "$PWD/ops/pitr/postgresql.conf":/etc/postgresql/postgresql.conf:ro -e POSTGRES_PASSWORD="$PGPW" -e POSTGRES_DB=business_pult pult-pitr:ci postgres -c config_file=/etc/postgresql/postgresql.conf >/dev/null
+          for k in $(seq 1 60); do docker exec csrc pg_isready -U postgres >/dev/null 2>&1 && break || sleep 2; done; lready csrc
+          wal_has csrc "$CS" || { echo "RECREATE FAIL: $CS lost across container recreation"; docker unpause minio||true; exit 1; }
+          docker unpause minio
+          docker exec -u postgres csrc psql -U postgres -d business_pult -c "SELECT pg_switch_wal()" >/dev/null 2>&1 || true
+          d=0; for k in $(seq 1 60); do seg_in_s3 "$CS" pult-crt && { d=1; break; }; sleep 3; done; [ "$d" = 1 ] || { echo "RECREATE FAIL: $CS never drained"; exit 1; }
+          echo "NEG ok: RECREATE (container recreated on preserved volume: backlog survived + drained)"
+          docker rm -f csrc >/dev/null 2>&1 || true; docker volume rm pitr_ext_crt >/dev/null 2>&1 || true
+          # E. restore retry: first attempt into a target then REUSE (must fail-closed), success only in NEW empty
+          start_src esrc /pult-ret pitr_ext_ret
+          baseline_offsite esrc /pult-ret
+          RLSN="$(docker exec -u postgres esrc psql -U postgres -d business_pult -tAc 'SELECT pg_current_wal_lsn()')"
+          docker exec -u postgres esrc psql -U postgres -d business_pult -c "SELECT pg_switch_wal()" >/dev/null
+          for k in $(seq 1 20); do docker exec -u postgres -e PGBACKREST_REPO1_PATH=/pult-ret esrc pgbackrest --stanza=pult check >/dev/null 2>&1 && break; sleep 3; done
+          docker rm -f esrc >/dev/null 2>&1 || true
+          # first restore into target
+          docker run -d --name rtgt --network pitrnet-ext -e PGBACKREST_REPO1_S3_KEY="$S3_KEY" -e PGBACKREST_REPO1_S3_KEY_SECRET="$S3_SECRET" -e PGBACKREST_REPO1_CIPHER_PASS="$CIPHER_PASS" -e PGBACKREST_REPO1_PATH=/pult-ret $MNT -v pitr_ext_rtgt:/var/lib/postgresql/data --entrypoint sh pult-pitr:ci -c 'sleep 400' >/dev/null
+          docker exec rtgt chown postgres:postgres /var/lib/postgresql/data
+          docker exec -u postgres -e PGBACKREST_REPO1_PATH=/pult-ret -e PITR_SYNTHETIC_MARKER=synthetic-3b1 -e PGDATA=/var/lib/postgresql/data -e PITR_STANZA=pult -e PITR_TARGET_LSN="$RLSN" rtgt restore.sh
+          # retry into the SAME now-non-empty target must fail-closed (restore.sh refuses PG_VERSION)
+          if docker exec -u postgres -e PGBACKREST_REPO1_PATH=/pult-ret -e PITR_SYNTHETIC_MARKER=synthetic-3b1 -e PGDATA=/var/lib/postgresql/data -e PITR_STANZA=pult -e PITR_TARGET_LSN="$RLSN" rtgt restore.sh >/dev/null 2>&1; then
+            echo "RETRY FAIL: second restore into non-empty target was NOT refused"; exit 1
+          fi
+          # success only in a NEW empty PGDATA
+          docker run -d --name rtgt2 --network pitrnet-ext -e PGBACKREST_REPO1_S3_KEY="$S3_KEY" -e PGBACKREST_REPO1_S3_KEY_SECRET="$S3_SECRET" -e PGBACKREST_REPO1_CIPHER_PASS="$CIPHER_PASS" -e PGBACKREST_REPO1_PATH=/pult-ret $MNT -v pitr_ext_rtgt2:/var/lib/postgresql/data --entrypoint sh pult-pitr:ci -c 'sleep 400' >/dev/null
+          docker exec rtgt2 chown postgres:postgres /var/lib/postgresql/data
+          docker exec -u postgres -e PGBACKREST_REPO1_PATH=/pult-ret -e PITR_SYNTHETIC_MARKER=synthetic-3b1 -e PGDATA=/var/lib/postgresql/data -e PITR_STANZA=pult -e PITR_TARGET_LSN="$RLSN" rtgt2 restore.sh
+          docker exec -u postgres rtgt2 sh -c 'pg_ctl -D /var/lib/postgresql/data -w -t 120 start'; lready rtgt2
+          echo "NEG ok: RETRY (2nd restore into non-empty target refused; success only in new empty PGDATA)"
+          docker rm -f rtgt rtgt2 >/dev/null 2>&1 || true; docker volume rm pitr_ext_ret pitr_ext_rtgt pitr_ext_rtgt2 >/dev/null 2>&1 || true
+          PASS=$((PASS+1))
+
+          echo "==================== 6. CORRUPTION on scratch repo copy (truncation / zero / missing-middle) ===================="
+          start_src corsrc /pult-cor pitr_ext_cor
+          baseline_offsite corsrc /pult-cor
+          # generate >=5 archived segments
+          COR_SEGS=""
+          for i in $(seq 1 6); do docker exec -u postgres corsrc psql -U postgres -d business_pult -c "INSERT INTO m(w,tag) VALUES ('cor$i','K')" >/dev/null; s="$(cur_seg corsrc)"; docker exec -u postgres corsrc psql -U postgres -d business_pult -c "SELECT pg_switch_wal()" >/dev/null; COR_SEGS="$COR_SEGS $s"; done
+          docker exec -u postgres corsrc psql -U postgres -d business_pult -c "SELECT pg_switch_wal()" >/dev/null 2>&1 || true
+          for k in $(seq 1 30); do docker exec -u postgres -e PGBACKREST_REPO1_PATH=/pult-cor corsrc pgbackrest --stanza=pult check >/dev/null 2>&1 && break; sleep 3; done
+          # need a target LSN AFTER a middle segment; use current
+          CORLSN="$(docker exec -u postgres corsrc psql -U postgres -d business_pult -tAc 'SELECT pg_current_wal_lsn()')"
+          docker exec -u postgres corsrc psql -U postgres -d business_pult -c "SELECT pg_switch_wal()" >/dev/null
+          for k in $(seq 1 20); do docker exec -u postgres -e PGBACKREST_REPO1_PATH=/pult-cor corsrc pgbackrest --stanza=pult check >/dev/null 2>&1 && break; sleep 3; done
+          docker rm -f corsrc >/dev/null 2>&1 || true
+          # helper: copy intact repo to scratch prefix, mutate one middle object, expect recovery to FAIL to reach target
+          MIDSEG="$(echo $COR_SEGS | awk '{print $3}')"   # a middle segment (3rd of 6)
+          scratch_copy() { MC "mc --insecure rm --recursive --force m/$BUCKET/$1 >/dev/null 2>&1 || true; mc --insecure cp --recursive m/$BUCKET/pult-cor/ m/$BUCKET/$1/ >/dev/null"; }
+          obj_key() { MC "mc --insecure --json ls --recursive m/$BUCKET/$1/archive/pult/16-1/" | grep "$2" | sed -n 's/.*\"key\":\"//;s/\".*//p' | head -1; }
+          expect_restore_fail() { # $1=scratch-prefix(with /) $2=vol $3=label
+            n="cor_$3"; docker run -d --name "$n" --network pitrnet-ext -e PGBACKREST_REPO1_S3_KEY="$S3_KEY" -e PGBACKREST_REPO1_S3_KEY_SECRET="$S3_SECRET" -e PGBACKREST_REPO1_CIPHER_PASS="$CIPHER_PASS" -e PGBACKREST_REPO1_PATH="$1" $MNT -v "$2":/var/lib/postgresql/data --entrypoint sh pult-pitr:ci -c 'sleep 300' >/dev/null
+            docker exec "$n" chown postgres:postgres /var/lib/postgresql/data
+            ok=1
+            if docker exec -u postgres -e PGBACKREST_REPO1_PATH="$1" -e PITR_SYNTHETIC_MARKER=synthetic-3b1 -e PGDATA=/var/lib/postgresql/data -e PITR_STANZA=pult -e PITR_TARGET_LSN="$CORLSN" "$n" restore.sh >/dev/null 2>&1; then
+              docker exec -u postgres "$n" sh -c 'pg_ctl -D /var/lib/postgresql/data -w -t 60 start' >/dev/null 2>&1 || ok=0
+              if [ "$ok" = 1 ]; then rec="$(docker exec -u postgres "$n" psql -U postgres -d business_pult -tAc 'SELECT pg_is_in_recovery()' 2>/dev/null || echo err)"; [ "$rec" = f ] && ok=0 || true; fi
+            fi
+            # ok=1 => restore/recovery did NOT reach a promoted consistent target => fail-closed correct
+            if [ "$ok" = 1 ]; then echo "NEG ok: CORRUPT $3 (fail-closed, target not promoted)"; else echo "CORRUPT $3 WRONG: reached/promoted target"; docker rm -f "$n">/dev/null 2>&1||true; docker volume rm "$2">/dev/null 2>&1||true; exit 1; fi
+            docker rm -f "$n" >/dev/null 2>&1 || true; docker volume rm "$2" >/dev/null 2>&1 || true
+          }
+          # (a) truncation of a middle WAL object
+          scratch_copy pult-cor-trunc
+          K="$(obj_key pult-cor-trunc "$MIDSEG")"; [ -n "$K" ] || { echo "CORRUPT trunc: object for $MIDSEG not found"; exit 1; }
+          printf 'x' | MC "mc --insecure pipe m/$BUCKET/pult-cor-trunc/archive/pult/16-1/$K"
+          expect_restore_fail /pult-cor-trunc pitr_ext_cor_trunc trunc
+          # (b) zero-length middle WAL object
+          scratch_copy pult-cor-zero
+          K="$(obj_key pult-cor-zero "$MIDSEG")"
+          printf '' | MC "mc --insecure pipe m/$BUCKET/pult-cor-zero/archive/pult/16-1/$K"
+          expect_restore_fail /pult-cor-zero pitr_ext_cor_zero zero
+          # (c) missing middle WAL object
+          scratch_copy pult-cor-miss
+          K="$(obj_key pult-cor-miss "$MIDSEG")"
+          MC "mc --insecure rm m/$BUCKET/pult-cor-miss/archive/pult/16-1/$K"
+          expect_restore_fail /pult-cor-miss pitr_ext_cor_miss miss
+          echo "NEG ok: CORRUPTION matrix (truncation/zero-length/missing-middle all fail-closed on scratch repo; canonical pult-cor untouched)"
+          docker volume rm pitr_ext_cor >/dev/null 2>&1 || true
+          PASS=$((PASS+1))
+
+          echo "==================== SUMMARY ===================="
+          echo "PITR extended matrix: sections passed=$PASS/5 (probe, long-outage, concurrent+multi-LSN, restart/recreate/retry, corruption)"
+          test "$PASS" = 5
+
+      - name: Teardown
+        if: always()
+        run: |
+          docker unpause minio 2>/dev/null || true
+          docker rm -f minio probe longsrc concsrc ctgtA ctgtB rsrc csrc esrc rtgt rtgt2 corsrc $(docker ps -aq --filter 'name=cor_') 2>/dev/null || true
+          docker volume rm $(docker volume ls -q | grep -E '^pitr_ext_') 2>/dev/null || true
+          docker network rm pitrnet-ext 2>/dev/null || true
