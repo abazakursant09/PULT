@@ -262,3 +262,26 @@ Launch/deploy ЗАПРЕЩЁН, пока НЕ доказано ВСЁ (3C1 НЕ 
 - [ ] нет красных security residuals без решения
 
 Текущий статус: **NOT READY.**
+
+## §15 Canary tooling (SECURITY-2D-3E1B-3C2A) — validates candidates only
+
+3C2A adds DORMANT tooling under `ops/canary/`. It does NOT touch Selectel, create any account/bucket/
+user/key, use real credentials, or activate anything. It validates candidate IAM policies OFFLINE and
+proves their allow/deny on a TEMPORARY MinIO with synthetic job-local users. **MinIO ≠ Selectel** — a green
+MinIO run is a compatibility signal, not a Selectel proof; no Selectel network or resource is exercised.
+
+Roles and closure (candidates, proven minimal only by the future live canary 3C2C):
+
+- The pgBackRest OFFICIAL sample S3 policy includes `s3:ListBucket + s3:GetObject + s3:PutObject +
+  s3:DeleteObject`. That sample is a working set, **not** proof of the minimal closure.
+- The **active pitr-writer candidate starts WITHOUT `DeleteObject`** (List + Get + Put + multipart only).
+  `expire` (deletion of old backups) belongs to the separate **retention-admin** role, not the writer.
+- Live **3C2C determines the actual closure**. If it proves the ordinary pgBackRest flow requires Delete,
+  the permission is **NOT auto-expanded / not auto-widened** — the exact denied operation is recorded and a
+  minimal correction is added only after Inal approval (deny-driven).
+- **Object Lock protects locked versions** against deletion, but it does NOT justify broad IAM permissions —
+  immutability comes from Object Lock, not from granting/denying Delete.
+- logical-writer = Put + Head only (no Get/Delete); restore-reader = List + Get only (no Put/Delete);
+  application principal = zero access (explicit Deny of all S3 on the backup bucket).
+
+This section marks **no** external launch-gate item as done. The launch gate above remains **NOT READY**.

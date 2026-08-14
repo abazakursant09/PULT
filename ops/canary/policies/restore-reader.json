@@ -1,0 +1,30 @@
+{
+  "_canary": {
+    "role": "restore-reader",
+    "active": true,
+    "tier": "read-only",
+    "note": "Restore reader: prefix-scoped ListBucket + GetObject/Head only, on pitr/ + logical/ + canary read prefixes. NO PutObject, NO multipart writes, NO DeleteObject, NO retention/legal-hold, NO policy/lifecycle. Credentials + age private identity are provided only during a restore; not permanently on the VDS."
+  },
+  "policy": {
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Sid": "ReaderListPrefix",
+        "Effect": "Allow",
+        "Action": ["s3:ListBucket"],
+        "Resource": "arn:aws:s3:::<BACKUP_BUCKET>",
+        "Condition": {"StringLike": {"s3:prefix": ["pitr/*", "logical/*", "canary/<RUN_ID>/*"]}}
+      },
+      {
+        "Sid": "ReaderGet",
+        "Effect": "Allow",
+        "Action": ["s3:GetObject"],
+        "Resource": [
+          "arn:aws:s3:::<BACKUP_BUCKET>/pitr/*",
+          "arn:aws:s3:::<BACKUP_BUCKET>/logical/*",
+          "arn:aws:s3:::<BACKUP_BUCKET>/canary/<RUN_ID>/*"
+        ]
+      }
+    ]
+  }
+}

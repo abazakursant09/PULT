@@ -1,0 +1,26 @@
+{
+  "_canary": {
+    "role": "retention-admin",
+    "active": true,
+    "marker": "NOT_FOR_ROUTINE_BACKUP",
+    "provisional_actions": ["s3:DeleteObjectVersion", "s3:BypassGovernanceRetention", "s3:PutLifecycleConfiguration", "s3:PutObjectLegalHold"],
+    "note": "Retention/Object-Lock administrator. Separate principal, off the application VDS, NOT used by the ordinary backup/restore/app flow. Active candidate = read versioning/Object-Lock config + PutObjectRetention on the canary prefix only. The provisional_actions (DeleteObjectVersion / BypassGovernanceRetention / lifecycle / legal-hold) are PROVISIONAL — they are NOT in the active Allow statements, are NOT applied by ordinary CI, and require Inal approval + live 3C2C before use. Compliance mode and legal hold are never activated here."
+  },
+  "policy": {
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Sid": "RetentionReadConfig",
+        "Effect": "Allow",
+        "Action": ["s3:GetBucketVersioning", "s3:GetBucketObjectLockConfiguration", "s3:GetObjectRetention", "s3:GetObjectLegalHold"],
+        "Resource": ["arn:aws:s3:::<BACKUP_BUCKET>", "arn:aws:s3:::<BACKUP_BUCKET>/*"]
+      },
+      {
+        "Sid": "RetentionPutOnCanaryOnly",
+        "Effect": "Allow",
+        "Action": ["s3:PutObjectRetention"],
+        "Resource": ["arn:aws:s3:::<BACKUP_BUCKET>/canary/<RUN_ID>/*"]
+      }
+    ]
+  }
+}

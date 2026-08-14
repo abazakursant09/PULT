@@ -1,0 +1,29 @@
+{
+  "_canary": {
+    "role": "logical-writer",
+    "active": true,
+    "tier": "append-oriented",
+    "note": "3A rclone logical-backup writer. Candidate minimum = PutObject + multipart + prefix-scoped ListBucket for stat. NO GetObject content, NO DeleteObject, NO retention/lifecycle/Object-Lock admin. Head/stat closure is a Selectel-verify item (3C2C); if rclone stat needs GetObject on Selectel it is a compatibility limitation, not proven here."
+  },
+  "policy": {
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Sid": "LogicalWriterListPrefix",
+        "Effect": "Allow",
+        "Action": ["s3:ListBucket"],
+        "Resource": "arn:aws:s3:::<BACKUP_BUCKET>",
+        "Condition": {"StringLike": {"s3:prefix": ["logical/*", "canary/<RUN_ID>/logical/*"]}}
+      },
+      {
+        "Sid": "LogicalWriterPut",
+        "Effect": "Allow",
+        "Action": ["s3:PutObject", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"],
+        "Resource": [
+          "arn:aws:s3:::<BACKUP_BUCKET>/logical/*",
+          "arn:aws:s3:::<BACKUP_BUCKET>/canary/<RUN_ID>/logical/*"
+        ]
+      }
+    ]
+  }
+}
