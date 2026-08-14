@@ -49,9 +49,26 @@ LIVE_REGION_ENDPOINTS = {
 }
 LIVE_GATE_ENV = "PULT_SELECTEL_CANARY_LIVE"
 LIVE_GATE_VALUE = "YES_I_UNDERSTAND"
-SELECTEL_EXECUTION_DEFERRED = "SELECTEL_TRANSPORT_NOT_WIRED_UNTIL_3C2C2"
+# 3C2C2-A wires the real S3 transport (SigV4 + hardened HTTPS) but its EXECUTION against Selectel is still
+# gated: the live CLI never drives it to a live Selectel endpoint — that is enabled only by the separate
+# Inal-approved 3C2C2-B execution step. So the CLI still defers.
+SELECTEL_EXECUTION_DEFERRED = "SELECTEL_EXECUTION_GATED_UNTIL_3C2C2B"
 # Runtime-change review marker — must be bumped together with the SHA-256 freeze on every canary.py change.
-CANARY_RUNTIME_REVIEW = "3C2C1-live-canary-dormant"
+CANARY_RUNTIME_REVIEW = "3C2C2A-selectel-transport-dormant"
+# live network safety knobs (used by the real transport in 3C2C2-B; enforced/asserted now)
+LIVE_CONNECT_TIMEOUT = 10.0
+LIVE_READ_TIMEOUT = 30.0
+LIVE_READ_RETRIES = 2  # idempotent reads only; mutations are NEVER auto-retried
+_READ_ONLY_S3_OPS = frozenset({
+    "GetBucketVersioning", "GetObjectLockConfiguration", "GetBucketObjectLockConfiguration",
+    "ListBucket", "ListBucketVersions", "ListMultipartUploads", "HeadObject", "GetObject",
+    "GetObjectRetention", "GetObjectLegalHold",
+})
+_MUTATING_S3_OPS = frozenset({
+    "CreateBucket", "PutBucketVersioning", "PutBucketObjectLockConfiguration", "PutObject",
+    "CreateMultipartUpload", "UploadPart", "CompleteMultipartUpload", "AbortMultipartUpload",
+    "PutObjectRetention", "DeleteObject", "DeleteObjectVersion",
+})
 
 
 def _fail(msg: str) -> None:
@@ -334,12 +351,121 @@ def live_validate(args, env) -> dict:
 
 
 # ------------------------- transport seam (real Selectel deferred to 3C2C2) -----------------------
+def _sigv4_signing_key(secret_key: str, date_stamp: str, region: str, service: str) -> bytes:
+    """AWS Signature Version 4 signing key (stdlib hmac/sha256 only; no third-party dependency)."""
+    import hashlib
+    import hmac
+
+    def _hmac(key, msg):
+        return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
+
+    k_date = _hmac(("AWS4" + secret_key).encode("utf-8"), date_stamp)
+    k_region = _hmac(k_date, region)
+    k_service = _hmac(k_region, service)
+    return _hmac(k_service, "aws4_request")
+
+
+def _sigv4_authorization(access_key, signing_key, credential_scope, signed_headers, string_to_sign):
+    import hashlib
+    import hmac
+    signature = hmac.new(signing_key, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
+    return (f"AWS4-HMAC-SHA256 Credential={access_key}/{credential_scope}, "
+            f"SignedHeaders={signed_headers}, Signature={signature}")
+
+
 class SelectelTransport:
-    """Placeholder for the REAL Selectel S3 transport. NOT wired in 3C2C1 — any use is refused so the
-    live CLI cannot touch Selectel until 3C2C2 wires signing/HTTPS against the allowlisted endpoint."""
+    """DORMANT alias retained for the gate — see SelectelS3Transport. The live CLI never constructs the
+    real transport in 3C2C2-A; execution is gated until 3C2C2-B."""
 
     def __init__(self, manifest):
         raise LiveGateError(SELECTEL_EXECUTION_DEFERRED)
+
+
+class SelectelS3Transport:
+    """Real Selectel S3 data-plane transport: SigV4-signed HTTPS via httpx. Implemented in 3C2C2-A but its
+    EXECUTION against a live endpoint is gated to 3C2C2-B (the live CLI does not drive it). Hardened:
+    HTTPS-only allowlisted endpoint, TLS verification always on, no redirects, no env-proxy / metadata /
+    default-credential chain, bounded timeouts, retries for idempotent reads ONLY (mutations never
+    auto-retried), and never logs Authorization / secret / signed URL / payload."""
+
+    def __init__(self, manifest, creds, http_client=None, service="s3"):
+        endpoint = manifest["endpoint"]
+        if endpoint not in LIVE_REGION_ENDPOINTS.values():
+            raise LiveGateError("endpoint not in the Selectel HTTPS allowlist")
+        if not endpoint.startswith("https://"):
+            raise LiveGateError("endpoint must be HTTPS")
+        # credentials come only from the validated env/fd input (never argv); stored privately, never logged
+        self._access = creds["access_key"]
+        self.__secret = creds["secret_key"]
+        self._manifest = manifest
+        self._endpoint = endpoint
+        self._region = manifest["region"]
+        self._service = service
+        self._host = endpoint.split("://", 1)[1]
+        self._client = http_client  # injected for tests (fake) or MinIO; real client built lazily otherwise
+
+    def _build_client(self):
+        # Real hardened client — built ONLY when actually needed (3C2C2-B). Lazy import keeps offline paths
+        # dependency-free; trust_env=False disables proxy + credential env; redirects disabled.
+        import httpx
+        return httpx.Client(verify=True, follow_redirects=False, trust_env=False,
+                            timeout=httpx.Timeout(LIVE_READ_TIMEOUT, connect=LIVE_CONNECT_TIMEOUT))
+
+    def _sign(self, method, op, canonical_uri, query, payload_hash, amz_date, date_stamp):
+        headers = {"host": self._host, "x-amz-content-sha256": payload_hash, "x-amz-date": amz_date}
+        signed_headers = ";".join(sorted(headers))
+        canonical_headers = "".join(f"{k}:{headers[k]}\n" for k in sorted(headers))
+        canonical_request = "\n".join([method, canonical_uri, query, canonical_headers,
+                                       signed_headers, payload_hash])
+        import hashlib
+        scope = f"{date_stamp}/{self._region}/{self._service}/aws4_request"
+        sts = "\n".join(["AWS4-HMAC-SHA256", amz_date, scope,
+                         hashlib.sha256(canonical_request.encode("utf-8")).hexdigest()])
+        key = _sigv4_signing_key(self.__secret, date_stamp, self._region, self._service)
+        auth = _sigv4_authorization(self._access, key, scope, signed_headers, sts)
+        return dict(headers, Authorization=auth)
+
+    def is_mutating(self, op):
+        if op in _READ_ONLY_S3_OPS:
+            return False
+        if op in _MUTATING_S3_OPS:
+            return True
+        raise LiveGateError(f"unclassified S3 op {op!r} -> treated as mutating, refuse")
+
+    def attempt(self, op, canonical_uri, method="GET", query="", payload=b"", amz_date=None, date_stamp=None):
+        """Perform ONE signed request. Mutations are never auto-retried; reads retry up to LIVE_READ_RETRIES.
+
+        Returns a normalized, secret-free result. Any ambiguity -> UNKNOWN (no guessing, no retry of writes)."""
+        import hashlib
+        mutating = self.is_mutating(op)
+        if amz_date is None or date_stamp is None:
+            raise LiveGateError("amz_date/date_stamp must be supplied by the caller (no wall-clock in module)")
+        payload_hash = hashlib.sha256(payload).hexdigest()
+        if self._client is None:
+            self._client = self._build_client()
+        attempts = 1 if mutating else (1 + LIVE_READ_RETRIES)
+        last = None
+        for _ in range(attempts):
+            headers = self._sign(method, op, canonical_uri, query, payload_hash, amz_date, date_stamp)
+            url = f"{self._endpoint}{canonical_uri}" + (f"?{query}" if query else "")
+            resp = self._client.request(method, url, headers=headers, content=payload)
+            code = getattr(resp, "status_code", None)
+            reqid = getattr(resp, "headers", {}).get("x-amz-request-id", "") if hasattr(resp, "headers") else ""
+            last = {"operation": op, "http_code": code, "request_id": reqid,
+                    "allow": None, "mutating": mutating}
+            if code is None:
+                return {**last, "allow": "unknown", "error": "no status (ambiguous) -> STOP"}
+            if code in (200, 204, 206):
+                return {**last, "allow": "allow"}
+            if code in (403, 401):
+                return {**last, "allow": "deny", "error_code": code}
+            if not mutating and code in (429, 500, 502, 503, 504):
+                continue  # idempotent read: bounded retry only
+            return {**last, "allow": "unknown", "error_code": code}
+        return {**last, "allow": "unknown", "error": "read retries exhausted"}
+
+    def __repr__(self):  # never leak the secret via repr/exceptions
+        return f"<SelectelS3Transport endpoint={self._endpoint} region={self._region}>"
 
 
 # role -> operations it may attempt; expected result checked by the orchestration (mirrors candidate policies)
