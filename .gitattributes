@@ -1,1 +1,5 @@
 backend/tests/characterization/**/snapshot.json text eol=lf
+# SECURITY-2D-3E1B-3C2A: the canary runtime is frozen by a raw-byte SHA-256 (see
+# backend/tests/test_canary_tooling_guard.py). Pin its line endings to LF so the digest is identical on
+# every checkout (incl. Windows core.autocrlf=true), not platform-dependent. Content/blob is unchanged.
+ops/canary/canary.py text eol=lf
