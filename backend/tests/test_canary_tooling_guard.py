@@ -8,6 +8,7 @@ canary_offline workflow — NOT comments. Every listed mutation must flip a guar
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -26,6 +27,23 @@ POLICIES = CANARY / "policies"
 WORKFLOW = REPO / ".github" / "workflows" / "canary_offline.yml"
 POLICY_DOC = REPO / "docs" / "pitr-operations-policy.md"
 NEG_MATRIX = CANARY / "negative-matrix.md"
+
+# SHA-256 of the EXACT bytes of ops/canary/canary.py. This freezes the whole canary runtime: ANY change
+# (safe or unsafe) flips the freeze test RED. Independent reviews confirmed the pinned runtime is safe
+# (live -> exit 3 before network/credentials; single-shot writes; loopback-only endpoint; exact cleanup;
+# no retries; AST detector reports 0 violations). Because a semantic analyzer can never prove the safety
+# of arbitrary future Python, the byte-freeze is the strong invariant; the AST detector below stays as
+# defense-in-depth for known retry patterns.
+#
+# Updating this digest is allowed ONLY when ALL of the following hold together:
+#   - a dedicated task explicitly changes the canary runtime;
+#   - the full canary.py diff has been reviewed;
+#   - live fail-closed re-proven; network confinement re-proven; IAM/cleanup/retry guards re-proven;
+#   - the MinIO compatibility matrix is green;
+#   - an independent safety review passed;
+#   - Inal separately approved the runtime change.
+# The digest is a hard-coded literal — never computed at run time, never env-overridable, never auto-updated.
+_CANARY_RUNTIME_SHA256 = "a10a463eeb59b1177a5736b97c8f5c553229f57c7be7efd3c3dee8cc571e1976"
 
 # Each mutation below, applied to a disposable copy, must make at least one test in this file fail.
 MUTATION_MATRIX = [
@@ -619,3 +637,38 @@ def test_no_write_retry_decorator_or_helper_in_runtime():
     """No generic retry decorator/wrapper that could silently re-issue writes."""
     code = _code()
     assert "@retry" not in code and "tenacity" not in code and "backoff" not in code
+
+
+# ---------------- SHA-256 runtime freeze (strong invariant) ----------------
+def test_canary_runtime_frozen_by_sha256():
+    """Freeze the whole canary runtime by byte-level SHA-256. Any change to ops/canary/canary.py — safe or
+    not — flips this RED and requires a dedicated runtime-change PR + independent review before re-pinning."""
+    digest = hashlib.sha256(CANARY_PY.read_bytes()).hexdigest()
+    assert digest == _CANARY_RUNTIME_SHA256, (
+        "canary runtime changed; perform dedicated runtime security review and update the pinned digest "
+        f"only after approval (got {digest})"
+    )
+
+
+def test_sha256_pin_is_strict_and_unbypassable():
+    """The freeze test itself must be a hard, strict, byte-level check with no bypass/auto-update."""
+    # pinned digest is a lowercase 64-hex literal
+    assert re.fullmatch(r"[0-9a-f]{64}", _CANARY_RUNTIME_SHA256)
+    src = Path(__file__).read_text(encoding="utf-8")
+    fn = next(n for n in ast.walk(ast.parse(src))
+              if isinstance(n, ast.FunctionDef) and n.name == "test_canary_runtime_frozen_by_sha256")
+    body = ast.get_source_segment(src, fn)
+    # hashes the real canary.py bytes with sha256, no text normalisation
+    assert "hashlib.sha256" in body
+    assert "CANARY_PY.read_bytes()" in body
+    for bad in (".read_text", ".replace(", ".strip(", ".splitlines(", "normalize", "os.environ",
+                "getenv", "UPDATE_GOLDEN", "hexdigest()  #"):
+        assert bad not in body, f"freeze test must not use {bad!r}"
+    # mismatch is an assertion (hard failure), not a warning; digest compared, not recomputed-as-expected
+    assert "assert digest == _CANARY_RUNTIME_SHA256" in body
+    assert "warnings" not in body and "warn(" not in body
+    # the expected value is a module-level literal, never assigned from a computation
+    pin = next(n for n in ast.walk(ast.parse(src))
+               if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "_CANARY_RUNTIME_SHA256"
+                                                     for t in n.targets))
+    assert isinstance(pin.value, ast.Constant) and isinstance(pin.value.value, str)
