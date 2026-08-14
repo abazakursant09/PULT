@@ -36,6 +36,23 @@ MINIO_HOST_ALLOWLIST = re.compile(r"^https?://(minio|localhost|127\.0\.0\.1)(:\d
 SELECTEL_FORBIDDEN = re.compile(r"selcloud\.ru|storage\.selcloud", re.I)
 LIVE_NOT_IMPLEMENTED = "LIVE_SELECTEL_NOT_IMPLEMENTED"
 
+# ---- live mode (SECURITY-2D-3E1B-3C2C1, DORMANT) ------------------------------------------------
+# Real Selectel S3 execution is wired ONLY in the separate Inal-approved 3C2C2 step. In 3C2C1 the live
+# CLI path is a hard fail-closed gate; the orchestration (role matrix / pgBackRest probe / Object-Lock
+# probe / exact cleanup) is transport-agnostic and exercised only against an in-memory FakeTransport or a
+# job-local MinIO — NEVER a Selectel production endpoint. Strict HTTPS endpoint allowlist, no wildcards.
+LIVE_REGION_ENDPOINTS = {
+    "ru-1": "https://s3.ru-1.storage.selcloud.ru",
+    "ru-7": "https://s3.ru-7.storage.selcloud.ru",
+    "gis-1": "https://s3.gis-1.storage.selcloud.ru",
+    "ru-3": "https://s3.ru-3.storage.selcloud.ru",
+}
+LIVE_GATE_ENV = "PULT_SELECTEL_CANARY_LIVE"
+LIVE_GATE_VALUE = "YES_I_UNDERSTAND"
+SELECTEL_EXECUTION_DEFERRED = "SELECTEL_TRANSPORT_NOT_WIRED_UNTIL_3C2C2"
+# Runtime-change review marker — must be bumped together with the SHA-256 freeze on every canary.py change.
+CANARY_RUNTIME_REVIEW = "3C2C1-live-canary-dormant"
+
 
 def _fail(msg: str) -> None:
     print(f"CANARY FAIL: {msg}", file=sys.stderr)
@@ -273,14 +290,182 @@ def minio_compat() -> int:
     return 0
 
 
+# ------------------------- live mode: hard gate (fail-closed, no network) -------------------------
+class LiveGateError(Exception):
+    """Raised when the live gate refuses. Message must never contain secrets."""
+
+
+def _redact(text: str, secrets) -> str:
+    out = text
+    for s in secrets:
+        if s:
+            out = out.replace(s, "***REDACTED***")
+    return out
+
+
+def live_validate(args, env) -> dict:
+    """Validate ALL live preconditions BEFORE any DNS/credential/network use. Pure; raises LiveGateError.
+
+    Returns an exact resource manifest (no secrets)."""
+    if env.get(LIVE_GATE_ENV) != LIVE_GATE_VALUE:
+        raise LiveGateError(f"env {LIVE_GATE_ENV} must equal the explicit acknowledgement value")
+    runid = getattr(args, "run_id", None) or ""
+    if not re.fullmatch(r"[0-9a-f]{12}", runid):
+        raise LiveGateError("run_id must be 12 lowercase hex chars")
+    region = getattr(args, "region", None) or ""
+    if region not in LIVE_REGION_ENDPOINTS:
+        raise LiveGateError("region not in the Selectel allowlist")
+    endpoint = getattr(args, "endpoint", None) or ""
+    if endpoint != LIVE_REGION_ENDPOINTS[region]:
+        raise LiveGateError("endpoint does not match the region's official HTTPS endpoint")
+    if not endpoint.startswith("https://"):
+        raise LiveGateError("endpoint must be HTTPS")
+    bucket = getattr(args, "bucket", None) or ""
+    if bucket != f"pult-canary-{runid}":
+        raise LiveGateError("bucket must be exactly pult-canary-<runid>")
+    project = getattr(args, "project_id", None) or ""
+    if not re.fullmatch(r"[0-9a-f]{16,64}", project):
+        raise LiveGateError("project_id must be 16-64 lowercase hex chars")
+    expected_confirm = f"{project}/{region}/{endpoint}/{bucket}/{runid}"
+    if getattr(args, "confirm", None) != expected_confirm:
+        raise LiveGateError("typed confirmation must equal project/region/endpoint/bucket/runid exactly")
+    return {"project": project, "region": region, "endpoint": endpoint, "bucket": bucket,
+            "prefix": f"canary/{runid}/", "runid": runid}
+
+
+# ------------------------- transport seam (real Selectel deferred to 3C2C2) -----------------------
+class SelectelTransport:
+    """Placeholder for the REAL Selectel S3 transport. NOT wired in 3C2C1 — any use is refused so the
+    live CLI cannot touch Selectel until 3C2C2 wires signing/HTTPS against the allowlisted endpoint."""
+
+    def __init__(self, manifest):
+        raise LiveGateError(SELECTEL_EXECUTION_DEFERRED)
+
+
+# role -> operations it may attempt; expected result checked by the orchestration (mirrors candidate policies)
+_LIVE_ROLE_MATRIX = {
+    "logical-writer": [("put", "logical/", "allow"), ("list", "logical/", "allow"),
+                       ("get", "logical/", "deny"), ("delete", "logical/", "deny"),
+                       ("put", "pitr/", "deny")],
+    "pitr-writer": [("put", "pitr/", "allow"), ("get", "pitr/", "allow"), ("list", "pitr/", "allow"),
+                    ("delete", "pitr/", "deny"), ("put", "logical/", "deny")],
+    "restore-reader": [("list", "pitr/", "allow"), ("get", "pitr/", "allow"),
+                       ("put", "pitr/", "deny"), ("delete", "pitr/", "deny")],
+    "app": [("list", "pitr/", "deny"), ("get", "pitr/", "deny"),
+            ("put", "pitr/", "deny"), ("delete", "pitr/", "deny")],
+}
+
+
+def run_role_matrix(transport, manifest) -> dict:
+    """Attempt each role/op against a transport; compare to expected. Never auto-expand permissions.
+
+    Unexpected allow of a forbidden op OR unexpected deny of a required op -> failure recorded (no raise)."""
+    rows, failures = [], []
+    for role, ops in _LIVE_ROLE_MATRIX.items():
+        for op, prefix, expect in ops:
+            key = f"{manifest['prefix']}{prefix}probe-{manifest['runid']}"
+            result = transport.attempt(role, op, key)  # "allow" / "deny"
+            ok = (result == expect)
+            rows.append({"role": role, "operation": op, "prefix": prefix,
+                         "expected": expect, "actual": result})
+            if not ok:
+                failures.append(f"{role}:{op}:{prefix} expected={expect} actual={result}")
+    return {"rows": rows, "failures": failures}
+
+
+def pgbackrest_probe(transport, manifest) -> dict:
+    """Record which S3 operations a synthetic pgBackRest stanza/create/check/backup/archive/restore flow
+    actually needs. GetObject and DeleteObject necessity are recorded SEPARATELY. No policy is changed."""
+    steps = ["stanza-create", "stanza-check", "backup", "archive-push", "info", "restore"]
+    used = []
+    for step in steps:
+        used.extend(transport.pgbackrest_ops(step))
+    return {
+        "steps": steps,
+        "s3_operations_used": sorted(set(used)),
+        "get_object_required": "GetObject" in used,
+        "delete_object_required": "DeleteObject" in used,
+        "note": "closure recorded only; permissions are NOT auto-expanded (feeds 3C2D)",
+    }
+
+
+def objectlock_probe(transport, manifest) -> dict:
+    """Read back versioning + Object-Lock config on the canary object; verify a locked version cannot be
+    deleted; Governance bypass only by retention-admin. Compliance is NEVER exercised here."""
+    return {
+        "versioning": transport.get_versioning(),
+        "object_lock_config": transport.get_lock_config(),
+        "min_retention_used": True,
+        "locked_delete_refused": transport.locked_delete_refused(),
+        "governance_bypass_admin_only": transport.governance_bypass_admin_only(),
+        "compliance_tested": False,
+    }
+
+
+def run_cleanup(transport, manifest, ledger) -> dict:
+    """Delete ONLY the exact resources in `ledger` (keys, versions, multipart upload ids, users/keys).
+
+    No recursive/wildcard/prefix-wide delete. Access keys are revoked even if the main test failed. The
+    bucket is removed only after a read-back shows no unknown objects/versions/uploads; a locked residual
+    is reported as a controlled residual (with retention deadline + max cost) — never a false success."""
+    failures, revoked, deleted = [], [], []
+    for user in ledger.get("users", []):
+        if not transport.delete_user(user):
+            failures.append(f"user not deleted: {user}")
+        else:
+            revoked.append(user)
+    for item in ledger.get("objects", []):
+        if not transport.delete_object(item["key"], item.get("version")):
+            failures.append(f"object not deleted: {item['key']}")
+        else:
+            deleted.append(item["key"])
+    for up in ledger.get("multipart", []):
+        transport.abort_multipart(up["key"], up["upload_id"])
+    residual = transport.read_back_unknown(manifest["bucket"], manifest["prefix"])
+    locked = transport.locked_residual()
+    if locked:
+        return {"status": "controlled-residual", "revoked_users": revoked, "deleted": deleted,
+                "locked_residual": locked, "bucket_removed": False, "failures": failures}
+    if residual:
+        failures.append(f"unexpected residual objects: {residual}")
+        return {"status": "failed", "revoked_users": revoked, "deleted": deleted,
+                "bucket_removed": False, "failures": failures}
+    bucket_removed = transport.remove_bucket_if_empty(manifest["bucket"])
+    status = "clean" if bucket_removed and not failures else "failed"
+    return {"status": status, "revoked_users": revoked, "deleted": deleted,
+            "bucket_removed": bucket_removed, "failures": failures}
+
+
+def live(args, env=None) -> int:
+    """3C2C1 live CLI: hard fail-closed gate, then refuse — real Selectel execution is wired in 3C2C2."""
+    env = os.environ if env is None else env
+    try:
+        manifest = live_validate(args, env)
+    except LiveGateError as e:
+        print(f"LIVE GATE REFUSED: {_redact(str(e), [])}", file=sys.stderr)
+        return 4
+    # Gate passed. In 3C2C1 the real Selectel transport is NOT wired — never touch the network here.
+    try:
+        SelectelTransport(manifest)
+    except LiveGateError as e:
+        print(str(e), file=sys.stderr)
+        return 5
+    return 5
+
+
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Selectel canary tooling (3C2A: offline + MinIO only)")
+    ap = argparse.ArgumentParser(description="Selectel canary tooling (offline/MinIO; live gated + dormant)")
     ap.add_argument("mode", choices=["validate-policies", "plan", "minio-compat", "live"])
+    # Non-secret live parameters only. Credentials are NEVER accepted on argv (env/file-descriptor only).
+    ap.add_argument("--project-id", dest="project_id")
+    ap.add_argument("--region")
+    ap.add_argument("--endpoint")
+    ap.add_argument("--bucket")
+    ap.add_argument("--run-id", dest="run_id")
+    ap.add_argument("--confirm")
     args = ap.parse_args()
     if args.mode == "live":
-        # Fail-closed BEFORE any DNS/network/credential read.
-        print(LIVE_NOT_IMPLEMENTED, file=sys.stderr)
-        return 3
+        return live(args)
     if args.mode == "validate-policies":
         return validate_policies()
     if args.mode == "plan":

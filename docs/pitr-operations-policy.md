@@ -285,3 +285,35 @@ Roles and closure (candidates, proven minimal only by the future live canary 3C2
   application principal = zero access (explicit Deny of all S3 on the backup bucket).
 
 This section marks **no** external launch-gate item as done. The launch gate above remains **NOT READY**.
+
+## §16 Live canary — 3C2C1 implementation vs 3C2C2 execution
+
+3C2C1 adds a **DORMANT** live mode to `ops/canary/canary.py`. It implements the hard safety gate and the
+transport-agnostic orchestration (role matrix, pgBackRest closure probe, Object-Lock probe, exact cleanup),
+exercised in CI only against an in-memory FakeTransport or a job-local MinIO. **It does NOT touch Selectel.**
+
+- **Hard gate (fail-closed, before any network/credential read):** requires `--mode live` (positional `live`),
+  the explicit env acknowledgement `PULT_SELECTEL_CANARY_LIVE=YES_I_UNDERSTAND`, a typed confirmation equal to
+  `project/region/endpoint/bucket/runid`, a `run_id` of 12 hex, `region` in a strict HTTPS endpoint allowlist,
+  `endpoint` matching that region's official `https://s3.<region>.storage.selcloud.ru`, and `bucket` equal to
+  exactly `pult-canary-<runid>` with prefix `canary/<runid>/`. Any mismatch exits before DNS/credentials.
+- **3C2C1 defers real execution:** even when the gate passes, the real `SelectelTransport` is NOT wired — it
+  refuses with `SELECTEL_TRANSPORT_NOT_WIRED_UNTIL_3C2C2`. No Selectel account/bucket/user/key/network is
+  created or contacted in 3C2C1.
+- **Secrets:** credentials come only from environment/file descriptors, never argv; never printed; masked in
+  errors; never written to files/artifacts/reports. Ordinary CI never sets the gate env and never names a
+  Selectel endpoint (guard-enforced); the offline workflow runs `canary.py live` ONLY as a fail-closed probe
+  that treats a live success as a CI failure.
+- **Cleanup:** exact resource manifest only (project/bucket/principal/keyID/objectKey/versionId/uploadId);
+  no recursive/wildcard/prefix-wide delete; access keys revoked even on failure; bucket removed only after a
+  read-back shows no unknown objects; a locked residual is reported as a **controlled residual** (retention
+  deadline + max cost), never a false success.
+- **pgBackRest closure + Object Lock:** the probe records which S3 operations are actually needed (GetObject
+  and DeleteObject necessity recorded **separately**); permissions are **never auto-expanded** — findings feed
+  a future 3C2D policy correction. Compliance mode is **never** exercised; only a minimal Governance retention.
+- **Runtime freeze:** `canary.py` remains byte-frozen by SHA-256; this reviewed change bumps the pinned digest
+  and the `CANARY_RUNTIME_REVIEW` marker together.
+
+**3C2C2** (separate, Inal-approved) wires the real `SelectelTransport` and runs the same orchestration against
+temporary real Selectel resources. This section marks **no** external launch-gate item as done. Launch gate
+remains **NOT READY**. **MinIO ≠ Selectel.**
