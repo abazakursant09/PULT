@@ -43,7 +43,9 @@ NEG_MATRIX = CANARY / "negative-matrix.md"
 #   - an independent safety review passed;
 #   - Inal separately approved the runtime change.
 # The digest is a hard-coded literal — never computed at run time, never env-overridable, never auto-updated.
-_CANARY_RUNTIME_SHA256 = "a10a463eeb59b1177a5736b97c8f5c553229f57c7be7efd3c3dee8cc571e1976"
+_CANARY_RUNTIME_SHA256 = "4239405f3d59310bab7998c6ca24911861357084859c890d0fbb1d622df19f8f"
+# Review marker — bumped with the digest on every reviewed canary.py runtime change (3C2C1 adds live mode).
+_CANARY_RUNTIME_REVIEW = "3C2C1-live-canary-dormant"
 
 # Each mutation below, applied to a disposable copy, must make at least one test in this file fail.
 MUTATION_MATRIX = [
@@ -91,23 +93,36 @@ def test_modes_are_exactly_the_allowed_set():
     assert choices == {"validate-policies", "plan", "minio-compat", "live"}, choices
 
 
-def test_live_fails_closed_before_any_network_or_credential():
+def test_live_gate_is_double_and_fail_closed_structurally():
     code = _code()
-    # the live branch must appear and return nonzero + the sentinel before dispatching to minio-compat
-    live_idx = code.index('args.mode == "live"')
-    minio_idx = code.index('args.mode == "minio-compat"')
-    assert live_idx < minio_idx, "live gate must be evaluated before minio dispatch"
-    live_branch = code[live_idx:minio_idx]
-    assert 'LIVE_NOT_IMPLEMENTED = "LIVE_SELECTEL_NOT_IMPLEMENTED"' in code
-    assert "LIVE_NOT_IMPLEMENTED" in live_branch
-    assert "return 3" in live_branch
-    # no network/credential/env read inside the live branch
-    for bad in ("subprocess", "environ", "requests", "socket", "mc "):
-        assert bad not in live_branch, f"live branch must not touch {bad!r}"
+    # live() must exist, require the explicit env acknowledgement AND a typed confirmation, and validate
+    # region/endpoint/bucket/run_id/project BEFORE any transport is constructed.
+    assert "def live_validate(args, env)" in code and "def live(args, env=None)" in code
+    assert 'LIVE_GATE_ENV = "PULT_SELECTEL_CANARY_LIVE"' in code
+    assert 'LIVE_GATE_VALUE = "YES_I_UNDERSTAND"' in code
+    assert "env.get(LIVE_GATE_ENV) != LIVE_GATE_VALUE" in code
+    assert 'raise LiveGateError' in code
+    assert 'bucket != f"pult-canary-{runid}"' in code
+    assert "typed confirmation" in code
+    # real Selectel transport must be refused in 3C2C1
+    assert "SELECTEL_TRANSPORT_NOT_WIRED_UNTIL_3C2C2" in code
+    # no direct network primitive in the live path (transport is deferred; MinIO uses mc only in minio-compat)
+    live_seg = code[code.index("def live(args"):]
+    for bad in ("requests.", "urllib", "http.client", "socket.socket"):
+        assert bad not in live_seg, f"live path must not use {bad!r}"
 
 
-def test_no_selectel_endpoint_in_executable_code():
-    assert not re.search(r"selcloud\.ru|storage\.selcloud", _code(), re.I)
+def test_selcloud_only_in_endpoint_allowlist():
+    code = _code()
+    # selcloud.ru may appear ONLY inside the LIVE_REGION_ENDPOINTS allowlist (no other use, no wildcard).
+    allowlist = code[code.index("LIVE_REGION_ENDPOINTS = {"):code.index("LIVE_GATE_ENV =")]
+    total = len(re.findall(r"selcloud\.ru", code))
+    in_allow = len(re.findall(r"selcloud\.ru", allowlist))
+    assert total == in_allow and total >= 1, "selcloud.ru must appear only in LIVE_REGION_ENDPOINTS"
+    assert "*.selcloud" not in code and "*.storage" not in code, "no wildcard endpoint"
+    # endpoints are explicit https hosts, region-keyed
+    for host in re.findall(r'"(https://[^"]+)"', allowlist):
+        assert host.startswith("https://s3.") and host.endswith(".storage.selcloud.ru")
 
 
 def test_no_default_credentials_and_missing_creds_fail_closed():
@@ -119,12 +134,13 @@ def test_no_default_credentials_and_missing_creds_fail_closed():
 
 def test_no_credentials_on_argv():
     code = _code()
-    for bad in ("--secret", "--access-key", "--key", "--password", "add_argument"):
-        if bad == "add_argument":
-            # only the positional mode arg is allowed
-            assert code.count("add_argument(") == 1, "only the positional mode argument is allowed"
-        else:
-            assert bad not in code, f"credential CLI arg {bad!r} forbidden"
+    # credentials are NEVER an argv argument; only non-secret live parameters are allowed as flags.
+    for bad in ("--secret", "--access-key", "--secret-key", "--key", "--password", "--token", "--access"):
+        assert bad not in code, f"credential CLI arg {bad!r} forbidden"
+    # every argparse flag must be one of the allowlisted non-secret parameters
+    allowed_flags = {"--project-id", "--region", "--endpoint", "--bucket", "--run-id", "--confirm"}
+    flags = set(re.findall(r'add_argument\("(--[a-z-]+)"', code))
+    assert flags <= allowed_flags, f"unexpected argv flags: {flags - allowed_flags}"
 
 
 def test_no_environment_dump():
@@ -672,3 +688,230 @@ def test_sha256_pin_is_strict_and_unbypassable():
                if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "_CANARY_RUNTIME_SHA256"
                                                      for t in n.targets))
     assert isinstance(pin.value, ast.Constant) and isinstance(pin.value.value, str)
+
+
+def test_runtime_review_marker_matches():
+    """The runtime carries a review marker bumped together with the digest on every reviewed change."""
+    assert f'CANARY_RUNTIME_REVIEW = "{_CANARY_RUNTIME_REVIEW}"' in _code()
+
+
+# ================= SECURITY-2D-3E1B-3C2C1 live-mode (DORMANT) guards + behaviour =================
+import importlib.util as _ilu  # noqa: E402
+
+
+def _load_canary():
+    spec = _ilu.spec_from_file_location("canary_runtime", str(CANARY_PY))
+    mod = _ilu.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class _Args:
+    def __init__(self, **kw):
+        self.project_id = self.region = self.endpoint = self.bucket = self.run_id = self.confirm = None
+        for k, v in kw.items():
+            setattr(self, k, v)
+
+
+def _valid_args():
+    rid = "0123456789ab"
+    proj = "0123456789abcdef"
+    ep = "https://s3.ru-7.storage.selcloud.ru"
+    bkt = f"pult-canary-{rid}"
+    return _Args(project_id=proj, region="ru-7", endpoint=ep, bucket=bkt, run_id=rid,
+                 confirm=f"{proj}/ru-7/{ep}/{bkt}/{rid}")
+
+
+class _NoNetwork:
+    """Context manager: any socket connection attempt raises -> proves the code path did no networking."""
+    def __enter__(self):
+        import socket
+        self._orig = socket.socket.connect
+        def _boom(self_, *a, **k):
+            raise AssertionError("network connection attempted in a no-network path")
+        socket.socket.connect = _boom
+        return self
+    def __exit__(self, *a):
+        import socket
+        socket.socket.connect = self._orig
+
+
+def test_live_gate_refuses_without_env_and_before_network():
+    c = _load_canary()
+    with _NoNetwork():
+        assert c.live(_valid_args(), env={}) == 4  # missing gate env -> refuse, no network
+
+
+def test_live_gate_matrix_fail_closed():
+    c = _load_canary()
+    good = _valid_args()
+    ok_env = {c.LIVE_GATE_ENV: c.LIVE_GATE_VALUE}
+    # each single tampering must raise LiveGateError (no network), i.e. live() returns 4
+    bad = {
+        "wrong region": _Args(project_id=good.project_id, region="us-east-1", endpoint=good.endpoint,
+                              bucket=good.bucket, run_id=good.run_id, confirm=good.confirm),
+        "endpoint mismatch": _Args(project_id=good.project_id, region="ru-7",
+                              endpoint="https://s3.ru-1.storage.selcloud.ru", bucket=good.bucket,
+                              run_id=good.run_id, confirm=good.confirm),
+        "http endpoint": _Args(project_id=good.project_id, region="ru-7",
+                              endpoint="http://s3.ru-7.storage.selcloud.ru", bucket=good.bucket,
+                              run_id=good.run_id, confirm=good.confirm),
+        "bad bucket": _Args(project_id=good.project_id, region="ru-7", endpoint=good.endpoint,
+                              bucket="prod-backup", run_id=good.run_id, confirm=good.confirm),
+        "bad runid": _Args(project_id=good.project_id, region="ru-7", endpoint=good.endpoint,
+                              bucket=good.bucket, run_id="ZZZ", confirm=good.confirm),
+        "bad project": _Args(project_id="nope", region="ru-7", endpoint=good.endpoint,
+                              bucket=good.bucket, run_id=good.run_id, confirm=good.confirm),
+        "confirm mismatch": _Args(project_id=good.project_id, region="ru-7", endpoint=good.endpoint,
+                              bucket=good.bucket, run_id=good.run_id, confirm="wrong"),
+    }
+    with _NoNetwork():
+        for name, a in bad.items():
+            assert c.live(a, env=ok_env) == 4, f"{name} must be refused"
+            try:
+                c.live_validate(a, ok_env)
+                raise AssertionError(f"{name} should have raised")
+            except c.LiveGateError:
+                pass
+
+
+def test_live_full_gate_defers_selectel_execution():
+    c = _load_canary()
+    ok_env = {c.LIVE_GATE_ENV: c.LIVE_GATE_VALUE}
+    with _NoNetwork():
+        # gate passes, but real Selectel transport is not wired in 3C2C1 -> deferral exit, still no network
+        assert c.live(_valid_args(), env=ok_env) == 5
+        try:
+            c.SelectelTransport({"bucket": "x"})
+            raise AssertionError("SelectelTransport must refuse in 3C2C1")
+        except c.LiveGateError as e:
+            assert "3C2C2" in str(e)
+
+
+# ---- FakeTransport: in-memory, drives the orchestration offline (never touches the network) ----
+class FakeTransport:
+    def __init__(self, allow):
+        self.allow = allow            # set of (role, op, prefix-root)
+        self.users = list(allow and [] or [])
+        self._locked_residual = None
+        self._unknown = []
+    def attempt(self, role, op, key):
+        root = key.split("canary/")[-1].split("/")[1] + "/" if "canary/" in key else key
+        # derive prefix root robustly
+        parts = key.split("/")
+        root = parts[-2] + "/" if len(parts) >= 2 else key
+        return "allow" if (role, op, root) in self.allow else "deny"
+    def pgbackrest_ops(self, step):
+        return {"stanza-create": ["ListBucket"], "stanza-check": ["ListBucket", "GetObject"],
+                "backup": ["PutObject"], "archive-push": ["PutObject"], "info": ["ListBucket", "GetObject"],
+                "restore": ["GetObject"]}.get(step, [])
+    def get_versioning(self): return "Enabled"
+    def get_lock_config(self): return {"mode": "GOVERNANCE", "days": 1}
+    def locked_delete_refused(self): return True
+    def governance_bypass_admin_only(self): return True
+    def delete_user(self, u): return True
+    def delete_object(self, key, version=None): return True
+    def abort_multipart(self, key, uid): return True
+    def read_back_unknown(self, bucket, prefix): return self._unknown
+    def locked_residual(self): return self._locked_residual
+    def remove_bucket_if_empty(self, bucket): return True
+
+
+def _fake_allow_from_matrix(c):
+    allow = set()
+    for role, ops in c._LIVE_ROLE_MATRIX.items():
+        for op, prefix, expect in ops:
+            if expect == "allow":
+                allow.add((role, op, prefix))
+    return allow
+
+
+def test_run_role_matrix_expected_allow_deny():
+    c = _load_canary()
+    t = FakeTransport(_fake_allow_from_matrix(c))
+    res = c.run_role_matrix(t, {"prefix": "canary/0123456789ab/", "runid": "0123456789ab"})
+    assert res["failures"] == [], res["failures"]
+
+
+def test_run_role_matrix_unexpected_allow_fails():
+    c = _load_canary()
+    allow = _fake_allow_from_matrix(c)
+    allow.add(("app", "put", "pitr/"))  # app must be denied everything -> unexpected allow
+    res = c.run_role_matrix(FakeTransport(allow), {"prefix": "canary/0123456789ab/", "runid": "0123456789ab"})
+    assert any("app:put" in f for f in res["failures"])
+
+
+def test_pgbackrest_probe_records_get_delete_separately():
+    c = _load_canary()
+    probe = c.pgbackrest_probe(FakeTransport(set()), {"prefix": "canary/x/", "runid": "x"})
+    assert probe["get_object_required"] is True
+    assert probe["delete_object_required"] is False  # candidate writer starts without Delete
+    assert "auto-expanded" in probe["note"]
+
+
+def test_objectlock_probe_never_tests_compliance():
+    c = _load_canary()
+    r = c.objectlock_probe(FakeTransport(set()), {})
+    assert r["compliance_tested"] is False
+    assert r["locked_delete_refused"] is True
+
+
+def test_cleanup_exact_only_and_revokes_keys():
+    c = _load_canary()
+    t = FakeTransport(set())
+    ledger = {"users": ["cu_writer_x"], "objects": [{"key": "canary/x/o", "version": "v1"}],
+              "multipart": [{"key": "canary/x/m", "upload_id": "u1"}]}
+    r = c.run_cleanup(t, {"bucket": "pult-canary-x", "prefix": "canary/x/"}, ledger)
+    assert r["status"] == "clean" and r["bucket_removed"] is True and r["failures"] == []
+    assert "cu_writer_x" in r["revoked_users"]
+
+
+def test_cleanup_locked_residual_is_controlled_not_success():
+    c = _load_canary()
+    t = FakeTransport(set())
+    t._locked_residual = {"key": "canary/x/locked", "retention_until": "later", "max_cost": "small"}
+    r = c.run_cleanup(t, {"bucket": "pult-canary-x", "prefix": "canary/x/"},
+                      {"users": ["k"], "objects": [], "multipart": []})
+    assert r["status"] == "controlled-residual" and r["bucket_removed"] is False
+    assert "k" in r["revoked_users"]  # keys revoked even with a locked residual
+
+
+def test_redact_masks_secrets():
+    c = _load_canary()
+    assert "SECRET123" not in c._redact("token=SECRET123 rest", ["SECRET123"])
+
+
+def test_cleanup_has_no_recursive_or_wildcard_delete():
+    code = _code()
+    seg = code[code.index("def run_cleanup("):code.index("def live(args")]
+    for bad in ("--recursive", "recursive=True", "prefix_delete", "prune", "delete_all", "rmtree"):
+        assert bad not in seg, f"cleanup must not use {bad!r}"
+
+
+# ---------------- live-mode mutation matrix (guard teeth) ----------------
+_LIVE_MUTATIONS = [
+    "drop the env gate check", "drop the typed-confirmation check", "allow a wildcard bucket",
+    "allow a non-allowlisted endpoint", "wire SelectelTransport in 3C2C1", "add a --secret argv flag",
+    "log a secret / drop _redact", "recursive/prefix-wide cleanup", "auto-expand IAM on unexpected deny",
+    "run live in ordinary CI", "add production endpoint outside allowlist", "network call in live path",
+    "change runtime without bumping SHA-freeze + review marker",
+]
+
+
+def test_live_mutation_matrix_declared():
+    assert len(_LIVE_MUTATIONS) >= 13
+
+
+def test_ordinary_ci_never_runs_live():
+    """No workflow may set the live gate env or name a Selectel endpoint; any `canary.py live` invocation
+    must be a fail-closed probe (asserted to exit non-zero), never an actual live run."""
+    for wf in (REPO / ".github" / "workflows").glob("*.yml"):
+        raw = wf.read_text(encoding="utf-8")
+        assert "PULT_SELECTEL_CANARY_LIVE" not in raw, f"{wf.name} must not set the live gate env"
+        assert not re.search(r"selcloud\.ru", raw, re.I), f"{wf.name} must not name a Selectel endpoint"
+        if "canary.py live" in raw:
+            # only allowed as a fail-closed probe: guarded by an `if ... then ... exit 1` that treats
+            # a live SUCCESS as a CI failure.
+            assert "SHOULD HAVE FAILED" in raw, f"{wf.name} runs live without a fail-closed assertion"
+    raw = WORKFLOW.read_text(encoding="utf-8")
+    assert "canary.py live" in raw and "SHOULD HAVE FAILED" in raw
