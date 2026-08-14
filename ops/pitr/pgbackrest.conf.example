@@ -6,6 +6,13 @@
 #   PGBACKREST_REPO1_CIPHER_PASS     — repository cipher passphrase
 # In production these come from secret files exported into the postgres process env by a
 # non-logging wrapper (documented in docs/pitr-policy.md); the synthetic CI sets them job-local.
+# SECURITY-2D-3E1B-3C1 (comment-only): allowed Selectel endpoint hostnames (public, NOT secrets) —
+#   s3.ru-1.storage.selcloud.ru (SPb) / s3.ru-7.storage.selcloud.ru (Moscow) / ru-3 / ru-6.
+#   The exact region+endpoint is chosen in 3C2, NOT here. These examples do NOT mean a bucket exists.
+#   Real access/secret keys and the real production bucket name are FORBIDDEN here (see
+#   docs/pitr-operations-policy.md). Writer permissions are PROVISIONAL until the 3C2 canary proves the
+#   pgBackRest IAM closure; pgBackRest expire (Delete) is performed by the retention role (Role C), NOT
+#   this writer. Runtime placeholder values below stay .invalid/REPLACE — do not fill them in 3C1.
 [global]
 repo1-type=s3
 repo1-s3-endpoint=s3.example-ru-region.selectel.invalid   # production MUST be a real https S3 endpoint
