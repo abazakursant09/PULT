@@ -7,6 +7,7 @@ canary_offline workflow — NOT comments. Every listed mutation must flip a guar
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 from pathlib import Path
@@ -34,10 +35,14 @@ MUTATION_MATRIX = [
     "use Resource '*'", "logical-writer allow GetObject", "logical-writer allow DeleteObject",
     "pitr-writer allow DeleteObject", "pitr-writer allow admin action", "reader allow PutObject",
     "reader allow DeleteObject", "app allow anything", "recursive delete", "bucket delete w/o allowlist",
-    "unbounded retry", "retry non-idempotent Put", "use --insecure", "use an http:// public endpoint",
+    "unbounded retry", "use --insecure", "use an http:// public endpoint",
     "remove host/prefix allowlist", "remove exact cleanup", "ignore unexpected allow",
     "auto-expand permission", "hardcode a production bucket", "use production DB", "upload-artifact",
     "remove cleanup always", "remove MinIO != Selectel disclaimer", "flip launch gate to READY",
+    # write-retry family (AST guard) — each must be RED; the read-only range loop is a GREEN negative control
+    "wrap remote Put in for _ in range(N)", "wrap Put in while attempts<N",
+    "move Put into a helper called from range loop", "dynamic command list inside a retry loop",
+    "NEGATIVE CONTROL: range loop with read-only ls/stat stays GREEN",
 ]
 
 
@@ -281,4 +286,133 @@ def test_workflow_minio_endpoint_is_private():
 
 
 def test_mutation_matrix_is_declared():
-    assert len(MUTATION_MATRIX) >= 30
+    assert len(MUTATION_MATRIX) >= 34
+
+
+# ---------------- AST guard: no retry of mutating S3 operations ----------------
+# A retry loop repeats the SAME operation (for _ in range(N) / while ...). Repeating a mutating S3
+# operation (cp local->remote, mb, rm, rb, multipart, admin user/policy, retention/legal-hold) is
+# unsafe (double-write / duplicate resource / masked partial failure). Iterating a COLLECTION
+# (for key in created_objs) performs one op per distinct resource and is allowed (that is the cleanup
+# path). Read-only ops (ls/stat/info) may be retried (readiness polling). Unknown / dynamic command
+# lists are treated as mutating (fail-closed).
+
+# first-token (and admin subcommand) command sets that are provably read-only / loop-safe
+_MC_READONLY_FIRST = {"ls", "stat", "du", "tree", "find", "info", "version", "alias"}
+_MC_ADMIN_READONLY = {"info"}
+
+
+def _mc_call_is_mutating(call: ast.Call) -> bool:
+    """True if this `_mc([...])` call mutates an external resource (fail-closed on anything unprovable)."""
+    if not (isinstance(call.func, ast.Name) and call.func.id == "_mc"):
+        return False
+    if not call.args:
+        return True
+    first = call.args[0]
+    if not isinstance(first, ast.List) or not first.elts:
+        return True  # dynamic / non-literal command list -> cannot prove read-only
+    lead = [e.value for e in first.elts if isinstance(e, ast.Constant) and isinstance(e.value, str)]
+    if not lead:
+        return True
+    cmd = lead[0]
+    if cmd == "admin":
+        return not (len(lead) >= 2 and lead[1] in _MC_ADMIN_READONLY)
+    return cmd not in _MC_READONLY_FIRST
+
+
+def _is_mc_mutating_anywhere(node: ast.AST) -> bool:
+    return any(isinstance(c, ast.Call) and _mc_call_is_mutating(c) for c in ast.walk(node))
+
+
+def _mutating_func_names(tree: ast.AST) -> set[str]:
+    """Fixpoint set of module-level functions that (transitively) perform a mutating `_mc` op."""
+    funcs = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+    mutating = {name for name, fn in funcs.items() if _is_mc_mutating_anywhere(fn)}
+    changed = True
+    while changed:
+        changed = False
+        for name, fn in funcs.items():
+            if name in mutating:
+                continue
+            for c in ast.walk(fn):
+                if isinstance(c, ast.Call) and isinstance(c.func, ast.Name) and c.func.id in mutating:
+                    mutating.add(name)
+                    changed = True
+                    break
+    return mutating
+
+
+def _retry_loop_nodes(fn: ast.FunctionDef) -> list[ast.AST]:
+    """Loops that REPEAT the same body: while-loops, for-in-range, and range-driven comprehensions."""
+    out = []
+    for n in ast.walk(fn):
+        if isinstance(n, ast.While):
+            out.append(n)
+        elif isinstance(n, ast.For) and isinstance(n.iter, ast.Call) \
+                and isinstance(n.iter.func, ast.Name) and n.iter.func.id == "range":
+            out.append(n)
+        elif isinstance(n, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+            for g in n.generators:
+                if isinstance(g.iter, ast.Call) and isinstance(g.iter.func, ast.Name) and g.iter.func.id == "range":
+                    out.append(n)
+                    break
+    return out
+
+
+def _retry_violations(fn: ast.FunctionDef, mutating_names: set[str]) -> list[str]:
+    v = []
+    for loop in _retry_loop_nodes(fn):
+        for c in ast.walk(loop):
+            if not isinstance(c, ast.Call):
+                continue
+            if _mc_call_is_mutating(c):
+                v.append(f"line {getattr(c, 'lineno', '?')}: mutating _mc inside retry loop")
+            elif isinstance(c.func, ast.Name) and c.func.id in mutating_names:
+                v.append(f"line {getattr(c, 'lineno', '?')}: retry loop calls mutating helper {c.func.id!r}")
+    return v
+
+
+def _scan_source_for_retry_writes(src: str, func_name: str = "minio_compat") -> list[str]:
+    tree = ast.parse(src)
+    mutating = _mutating_func_names(tree)
+    fns = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == func_name]
+    assert fns, f"function {func_name} not found"
+    out = []
+    for fn in fns:
+        out += _retry_violations(fn, mutating)
+    return out
+
+
+def test_no_mutating_mc_inside_retry_loop():
+    """Real canary.py: minio_compat must never repeat a mutating S3 op in a retry loop."""
+    violations = _scan_source_for_retry_writes(_code(), "minio_compat")
+    assert violations == [], "mutating S3 op inside a retry loop: " + "; ".join(violations)
+
+
+def test_retry_detector_has_teeth():
+    """The AST detector must flag write-retries (incl. helper bypass / dynamic cmd) and pass read-only retries."""
+    def scan(body):
+        src = "def _mc(a):\n    return (0, '', '')\n" + body
+        return _scan_source_for_retry_writes(src, "minio_compat")
+
+    put = 'f"u/{b}/{o}"'
+    # A: for _ in range(N) around a remote Put -> RED
+    assert scan(f'def minio_compat():\n    for _ in range(5):\n        _mc(["cp", "x", {put}])\n')
+    # B: while attempts < N around Put -> RED
+    assert scan(f'def minio_compat():\n    n = 0\n    while n < 5:\n        _mc(["cp", "x", {put}]); n += 1\n')
+    # helper bypass: Put in a helper called from a range loop -> RED
+    assert scan(f'def _put():\n    _mc(["cp", "x", {put}])\ndef minio_compat():\n    for _ in range(5):\n        _put()\n')
+    # dynamic command list inside a retry loop -> RED (fail-closed)
+    assert scan('def minio_compat():\n    cmd = ["cp", "x", "y"]\n    for _ in range(5):\n        _mc(cmd)\n')
+    # admin mutation retried -> RED
+    assert scan('def minio_compat():\n    for _ in range(3):\n        _mc(["admin", "user", "add", "u", "s"])\n')
+    # NEGATIVE CONTROL: read-only ls/stat retried (readiness polling) -> GREEN
+    assert scan('def minio_compat():\n    for _ in range(30):\n        _mc(["ls", "u/b/"])\n        _mc(["stat", "u/b/x"])\n') == []
+    # collection iteration performing one write per element (cleanup) -> GREEN
+    assert scan('def minio_compat():\n    for k in ["a", "b"]:\n        _mc(["rm", f"u/{k}"])\n') == []
+
+
+def test_no_write_retry_decorator_or_helper_in_runtime():
+    """No generic retry decorator/wrapper that could silently re-issue writes."""
+    code = _code()
+    assert "@retry" not in code and "tenacity" not in code and "backoff" not in code
