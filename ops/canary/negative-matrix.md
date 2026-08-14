@@ -10,12 +10,18 @@ policy is NOT auto-widened** — the exact denied operation is recorded and a mi
 after Inal approval (deny-driven, never automatic). Cleanup deletes only the exact synthetic key / version-id /
 multipart-upload-id created by the current random run-id — never recursive/wildcard/bucket-prune.
 
+**Compatibility limitation (Head vs Get).** MinIO maps `HeadObject`/`mc stat` to `s3:GetObject`, so a
+deliberately Get-less writer cannot `stat` on MinIO. The logical writer therefore verifies its upload via a
+prefix-scoped **List** (`rclone lsjson`, which 3A actually uses), not HeadObject. Whether the Selectel writer
+needs `GetObject` for a size/Head check is a `future-selectel` (3C2C) item — not proven here.
+
 ## Positive + negative (offline + MinIO)
 
 | role | operation | resource prefix | expected | accepted error | timeout | retry | evidence | cleanup | tier |
 |---|---|---|---|---|---|---|---|---|---|
 | logical-writer | PutObject | `logical/` | allow | — | 60s | reads only | mc rc=0 | rm exact key | minio |
-| logical-writer | stat/Head | `logical/` | allow | — | 60s | reads only | mc rc=0 | none | minio |
+| logical-writer | ListBucket(prefix) | `logical/` | allow | — | 60s | reads only | mc rc=0 | none | minio |
+| logical-writer | HeadObject/stat | `logical/` | LIMITATION | — | 60s | reads only | not asserted | none | compat-limitation |
 | logical-writer | GetObject | `logical/` | deny | AccessDenied | 60s | none | mc AccessDenied | none | minio |
 | logical-writer | DeleteObject | `logical/` | deny | AccessDenied | 60s | none | mc AccessDenied | none | minio |
 | logical-writer | PutObject | `pitr/` (wrong) | deny | AccessDenied | 60s | none | mc AccessDenied | none | minio |

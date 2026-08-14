@@ -155,7 +155,11 @@ def plan() -> int:
 
 # role -> list of (operation, prefix, expected)  used by plan + minio-compat
 _MATRIX = {
-    "logical-writer": [("put", "logical/", "allow"), ("stat", "logical/", "allow"),
+    # NOTE: logical-writer verifies its upload via LIST (rclone `lsjson`), which the prefix-scoped
+    # ListBucket grant covers. HeadObject/`mc stat` is NOT tested here: MinIO maps HeadObject to
+    # s3:GetObject, so a deliberately Get-less writer cannot stat on MinIO — a Head-vs-Get compatibility
+    # limitation (see negative-matrix.md), resolved only by the live Selectel canary (3C2C), not proven here.
+    "logical-writer": [("put", "logical/", "allow"), ("ls", "logical/", "allow"),
                        ("get", "logical/", "deny"), ("rm", "logical/", "deny"),
                        ("put", "pitr/", "deny")],
     "pitr-writer": [("put", "pitr/", "allow"), ("get", "pitr/", "allow"), ("ls", "pitr/", "allow"),
