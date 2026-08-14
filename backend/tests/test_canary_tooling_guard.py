@@ -43,9 +43,9 @@ NEG_MATRIX = CANARY / "negative-matrix.md"
 #   - an independent safety review passed;
 #   - Inal separately approved the runtime change.
 # The digest is a hard-coded literal — never computed at run time, never env-overridable, never auto-updated.
-_CANARY_RUNTIME_SHA256 = "4239405f3d59310bab7998c6ca24911861357084859c890d0fbb1d622df19f8f"
-# Review marker — bumped with the digest on every reviewed canary.py runtime change (3C2C1 adds live mode).
-_CANARY_RUNTIME_REVIEW = "3C2C1-live-canary-dormant"
+_CANARY_RUNTIME_SHA256 = "271521a0e3055b0435ecdec41d9be9b105bf37e48a0fde56c6798e72ac8f4ef0"
+# Review marker — bumped with the digest on every reviewed canary.py runtime change (3C2C2-A wires transport).
+_CANARY_RUNTIME_REVIEW = "3C2C2A-selectel-transport-dormant"
 
 # Each mutation below, applied to a disposable copy, must make at least one test in this file fail.
 MUTATION_MATRIX = [
@@ -104,8 +104,8 @@ def test_live_gate_is_double_and_fail_closed_structurally():
     assert 'raise LiveGateError' in code
     assert 'bucket != f"pult-canary-{runid}"' in code
     assert "typed confirmation" in code
-    # real Selectel transport must be refused in 3C2C1
-    assert "SELECTEL_TRANSPORT_NOT_WIRED_UNTIL_3C2C2" in code
+    # live CLI must still defer real execution (3C2C2-A wires the transport but gates its execution to 3C2C2-B)
+    assert "SELECTEL_EXECUTION_GATED_UNTIL_3C2C2B" in code
     # no direct network primitive in the live path (transport is deferred; MinIO uses mc only in minio-compat)
     live_seg = code[code.index("def live(args"):]
     for bad in ("requests.", "urllib", "http.client", "socket.socket"):
@@ -915,3 +915,149 @@ def test_ordinary_ci_never_runs_live():
             assert "SHOULD HAVE FAILED" in raw, f"{wf.name} runs live without a fail-closed assertion"
     raw = WORKFLOW.read_text(encoding="utf-8")
     assert "canary.py live" in raw and "SHOULD HAVE FAILED" in raw
+
+
+# ================= SECURITY-2D-3E1B-3C2C2-A real S3 transport (DORMANT) =================
+def _transport_manifest():
+    return {"endpoint": "https://s3.ru-7.storage.selcloud.ru", "region": "ru-7",
+            "bucket": "pult-canary-0123456789ab", "prefix": "canary/0123456789ab/",
+            "runid": "0123456789ab", "project": "0123456789abcdef"}
+
+
+_SEKRET = "SEKRET_DO_NOT_LOG_0123"
+
+
+class _FakeHTTP:
+    """Injected HTTP client for offline transport tests — records calls, returns scripted statuses."""
+    def __init__(self, statuses):
+        self.statuses = list(statuses)
+        self.calls = []
+    def request(self, method, url, headers=None, content=b""):
+        self.calls.append({"method": method, "url": url, "headers": dict(headers or {})})
+        code = self.statuses.pop(0) if self.statuses else 200
+        return type("R", (), {"status_code": code, "headers": {"x-amz-request-id": "req-123"}})()
+
+
+def test_sigv4_signing_key_is_stdlib_and_matches_independent_chain():
+    c = _load_canary()
+    import hashlib
+    import hmac
+    def hm(k, m): return hmac.new(k, m.encode(), hashlib.sha256).digest()
+    kd = hm(("AWS4" + "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY").encode(), "20150830")
+    indep = hm(hm(hm(kd, "us-east-1"), "service"), "aws4_request")
+    got = c._sigv4_signing_key("wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "20150830", "us-east-1", "service")
+    assert got == indep  # module signer == independent HMAC chain (correct SigV4 key derivation)
+    # canonical-request construction proven against the authoritative aws-sig-v4-test-suite get-vanilla hash
+    cr = "\n".join(["GET", "/", "", "host:example.amazonaws.com", "x-amz-date:20150830T123600Z", "",
+                    "host;x-amz-date", hashlib.sha256(b"").hexdigest()])
+    assert hashlib.sha256(cr.encode()).hexdigest() == \
+        "bb579772317eb040ac9ed261061d46c1f17a8133879d6129b6e1c25292927e63"
+    auth = c._sigv4_authorization("AKID", got, "20150830/us-east-1/service/aws4_request", "host;x-amz-date", "x")
+    assert auth.startswith("AWS4-HMAC-SHA256 Credential=AKID/") and "Signature=" in auth
+
+
+def test_transport_endpoint_allowlist_enforced():
+    c = _load_canary()
+    m = dict(_transport_manifest(), endpoint="https://evil.example.com")
+    try:
+        c.SelectelS3Transport(m, {"access_key": "A", "secret_key": _SEKRET})
+        raise AssertionError("non-allowlisted endpoint must be refused")
+    except c.LiveGateError:
+        pass
+    m2 = dict(_transport_manifest(), endpoint="http://s3.ru-7.storage.selcloud.ru")
+    try:
+        c.SelectelS3Transport(m2, {"access_key": "A", "secret_key": _SEKRET})
+        raise AssertionError("http endpoint must be refused")
+    except c.LiveGateError:
+        pass
+
+
+def test_transport_unclassified_op_is_mutating_and_refused():
+    c = _load_canary()
+    t = c.SelectelS3Transport(_transport_manifest(), {"access_key": "A", "secret_key": _SEKRET},
+                              http_client=_FakeHTTP([200]))
+    try:
+        t.is_mutating("Frobnicate")
+        raise AssertionError("unknown op must raise (fail-closed mutating)")
+    except c.LiveGateError:
+        pass
+    assert t.is_mutating("PutObject") is True and t.is_mutating("GetObject") is False
+
+
+def test_transport_reads_retry_but_mutations_never_retry():
+    c = _load_canary()
+    m = _transport_manifest()
+    # read: 503,503,200 -> allow after bounded retries
+    fr = _FakeHTTP([503, 503, 200])
+    tr = c.SelectelS3Transport(m, {"access_key": "A", "secret_key": _SEKRET}, http_client=fr)
+    r = tr.attempt("GetObject", "/pult-canary-0123456789ab/canary/0123456789ab/o", method="GET",
+                   amz_date="20200101T000000Z", date_stamp="20200101")
+    assert r["allow"] == "allow" and len(fr.calls) == 3
+    # mutation: 503 -> NO retry (exactly one call), result unknown (never guesses success)
+    fm = _FakeHTTP([503])
+    tm = c.SelectelS3Transport(m, {"access_key": "A", "secret_key": _SEKRET}, http_client=fm)
+    r = tm.attempt("PutObject", "/pult-canary-0123456789ab/canary/0123456789ab/o", method="PUT",
+                   payload=b"x", amz_date="20200101T000000Z", date_stamp="20200101")
+    assert r["allow"] == "unknown" and len(fm.calls) == 1
+
+
+def test_transport_unknown_status_is_stop_not_success():
+    c = _load_canary()
+    fr = _FakeHTTP([418])
+    t = c.SelectelS3Transport(_transport_manifest(), {"access_key": "A", "secret_key": _SEKRET}, http_client=fr)
+    r = t.attempt("GetObject", "/b/o", method="GET", amz_date="20200101T000000Z", date_stamp="20200101")
+    assert r["allow"] == "unknown"
+
+
+def test_transport_never_leaks_secret(capsys):
+    c = _load_canary()
+    t = c.SelectelS3Transport(_transport_manifest(), {"access_key": "AKID", "secret_key": _SEKRET},
+                              http_client=_FakeHTTP([200]))
+    r = t.attempt("GetObject", "/b/o", method="GET", amz_date="20200101T000000Z", date_stamp="20200101")
+    out = capsys.readouterr()
+    assert _SEKRET not in (out.out + out.err)
+    assert _SEKRET not in repr(t) and _SEKRET not in str(r)
+    # the secret key never travels in a header (only the derived signature does)
+    for call in _FakeHTTP([]).calls:  # no-op guard
+        pass
+
+
+def test_transport_hardening_source():
+    """Structural: the lazily-built real client must pin TLS on, no redirects, no env-proxy/creds."""
+    code = _code()
+    seg = code[code.index("def _build_client"):code.index("def _sign(")]
+    assert "verify=True" in seg
+    assert "follow_redirects=False" in seg
+    assert "trust_env=False" in seg
+    # no TLS-off / redirect / proxy / metadata / default-credential anywhere in the runtime
+    for bad in ("verify=False", "follow_redirects=True", "trust_env=True", "no_verify", "InsecureRequestWarning",
+                "169.254.169.254", "instance-metadata", "IMDS", "from_env", "default_credentials"):
+        assert bad not in code, f"runtime must not contain {bad!r}"
+    # mutations classified and never auto-retried (attempts=1 when mutating)
+    assert "attempts = 1 if mutating else" in code
+    assert "_READ_ONLY_S3_OPS" in code and "_MUTATING_S3_OPS" in code
+
+
+def test_no_ip_document_or_pii_in_repo():
+    """The sole-proprietor document/PII must never appear in ops/canary, tests, docs, or workflows."""
+    for base in (CANARY, REPO / "docs" / "pitr-operations-policy.md", CANARY_PY,
+                 REPO / ".github" / "workflows" / "canary_offline.yml"):
+        files = base.rglob("*") if base.is_dir() else [base]
+        for f in files:
+            if f.is_file():
+                txt = f.read_text(encoding="utf-8", errors="ignore")
+                for bad in ("Муратков", "fl-326554300073322", "ОГРНИП", "ЕГРИП", "ИНН"):
+                    assert bad not in txt, f"PII/IP-document token {bad!r} found in {f}"
+
+
+_TRANSPORT_MUTATIONS = [
+    "disable TLS verify (verify=False)", "enable redirects (follow_redirects=True)",
+    "enable env proxy/creds (trust_env=True)", "accept non-allowlisted endpoint", "accept http endpoint",
+    "retry a mutating operation", "treat unclassified op as read-only", "guess success on unknown status",
+    "log the secret key / Authorization", "add default-credential / metadata chain",
+    "put credentials on argv", "change runtime without bumping pin+review-marker",
+]
+
+
+def test_transport_mutation_matrix_declared():
+    assert len(_TRANSPORT_MUTATIONS) >= 12

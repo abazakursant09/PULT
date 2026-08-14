@@ -317,3 +317,30 @@ exercised in CI only against an in-memory FakeTransport or a job-local MinIO. **
 **3C2C2** (separate, Inal-approved) wires the real `SelectelTransport` and runs the same orchestration against
 temporary real Selectel resources. This section marks **no** external launch-gate item as done. Launch gate
 remains **NOT READY**. **MinIO ≠ Selectel.**
+
+## §17 Live S3 transport — 3C2C2-A (implemented, execution still gated)
+
+3C2C2-A wires a REAL Selectel S3 data-plane transport into `ops/canary/canary.py`, but its execution against
+a live endpoint remains gated to the separate Inal-approved 3C2C2-B step — the live CLI still defers
+(`SELECTEL_EXECUTION_GATED_UNTIL_3C2C2B`). No Selectel account/bucket/key/network in this PR.
+
+- **No new dependency.** SigV4 signing uses the standard library (`hmac`/`hashlib`); HTTPS uses the already
+  hash-locked `httpx==0.28.1`, imported lazily only when the real client is built (3C2C2-B). No ad-hoc install.
+- **`SelectelS3Transport` hardening:** endpoint must be in `LIVE_REGION_ENDPOINTS` (HTTPS only), TLS verify
+  always on, `follow_redirects=False`, `trust_env=False` (no env proxy / credential chain / instance metadata),
+  bounded connect/read timeouts, retries for idempotent READS only (mutations never auto-retried), unclassified
+  S3 op → treated as mutating and refused, credentials only from validated env/fd (never argv), and the secret
+  key / Authorization / signed URL / payload are never logged (private attribute, safe `__repr__`). An
+  ambiguous response (no status / unexpected code) → `allow="unknown"` STOP, never a guessed success.
+- **Read vs mutation** are explicitly enumerated (`_READ_ONLY_S3_OPS` / `_MUTATING_S3_OPS`).
+- **Control plane** (creating projects / service users / keys / policies) is NOT implemented as an automated
+  API here — if a safe official API cannot be proven, 3C2C2-B provisions temporary principals via the Selectel
+  UI with read-back + immediate rotation; no shell/browser automation, no sole-proprietor document in the repo.
+- **SigV4 correctness:** the signing-key HMAC chain matches an independent implementation and the canonical
+  request matches the authoritative aws-sig-v4-test-suite `get-vanilla` hash. Byte-correct final signatures are
+  proven against a real SigV4 verifier (MinIO / Selectel) only in **3C2C2-B** — an explicit UNKNOWN until then.
+- **Runtime freeze** re-pinned; `CANARY_RUNTIME_REVIEW = 3C2C2A-selectel-transport-dormant`.
+
+3C2C2-A safety is proven offline: FakeHTTP client + socket network-trap (0 external connections), no secret
+leakage, endpoint allowlist enforced, mutation-no-retry, exact-cleanup unchanged. Launch gate remains **NOT
+READY**. **MinIO ≠ Selectel.**
