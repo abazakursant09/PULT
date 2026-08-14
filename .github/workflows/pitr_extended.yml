@@ -227,13 +227,16 @@ jobs:
           # writer body: register ready, bounded-wait the release flag, do exactly 40 tagged inserts,
           # register done. Single-quoted on the runner so $WID/$i expand INSIDE the container ($$ = SQL
           # dollar-quoting → no nested single quotes). set -e → any psql failure exits the writer nonzero.
+          # NOTE: SQL dollar-quotes are written \$\$ so the CONTAINER shell (double-quoted psql arg)
+          # yields literal $$ for PostgreSQL instead of expanding $$ to the shell PID. $WID/$i stay
+          # unescaped so they expand inside the container (WID from -e, i from the loop).
           WSCRIPT='set -e
-          psql -U postgres -d business_pult -c "INSERT INTO cbar(k,v) VALUES (concat($$ready_$$,$WID::text),1)"
+          psql -U postgres -d business_pult -c "INSERT INTO cbar(k,v) VALUES (concat(\$\$ready_\$\$,$WID::text),1)"
           ok=0
-          for t in $(seq 1 120); do r=$(psql -U postgres -d business_pult -tAc "SELECT count(*) FROM cbar WHERE k=$$release$$"); [ "$r" = 1 ] && { ok=1; break; }; sleep 0.5; done
+          for t in $(seq 1 120); do r=$(psql -U postgres -d business_pult -tAc "SELECT count(*) FROM cbar WHERE k=\$\$release\$\$"); [ "$r" = 1 ] && { ok=1; break; }; sleep 0.5; done
           [ "$ok" = 1 ] || { echo "writer $WID release timeout" >&2; exit 3; }
-          i=1; while [ $i -le 40 ]; do psql -U postgres -d business_pult -c "INSERT INTO m(w,tag) VALUES (concat($$w$$,$WID::text,$$_$$,$i::text),$$flow$$)"; i=$((i+1)); done
-          psql -U postgres -d business_pult -c "INSERT INTO cbar(k,v) VALUES (concat($$done_$$,$WID::text),1)"'
+          i=1; while [ $i -le 40 ]; do psql -U postgres -d business_pult -c "INSERT INTO m(w,tag) VALUES (concat(\$\$w\$\$,$WID::text,\$\$_\$\$,$i::text),\$\$flow\$\$)"; i=$((i+1)); done
+          psql -U postgres -d business_pult -c "INSERT INTO cbar(k,v) VALUES (concat(\$\$done_\$\$,$WID::text),1)"'
           docker exec -u postgres -e WID=1 concsrc sh -c "$WSCRIPT" & PID1=$!
           docker exec -u postgres -e WID=2 concsrc sh -c "$WSCRIPT" & PID2=$!
           docker exec -u postgres -e WID=3 concsrc sh -c "$WSCRIPT" & PID3=$!
