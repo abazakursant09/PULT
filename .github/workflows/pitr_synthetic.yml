@@ -23,6 +23,12 @@ on:
 permissions:
   contents: read
 
+# SECURITY-2D-3E1B-3B2: serialize runs so parallel jobs cannot collide on the shared `pitrnet`
+# network / `pitr_*` volumes (B1 behavior otherwise unchanged; positive PITR + A–L 12/12 intact).
+concurrency:
+  group: pitr-synthetic-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   pitr-synthetic:
     runs-on: ubuntu-latest
