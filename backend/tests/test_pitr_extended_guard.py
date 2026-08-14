@@ -111,7 +111,12 @@ def test_long_outage_measured():
     assert "failed_count moved" in m, "must assert foreground accept (failed_count flat) under async"
     # physical local-retention proof must be the ACTUAL guarded check, not just its message
     assert 'wal_has longsrc "$s" ||' in m, "each exact seg must be physically proven retained in pg_wal"
-    assert "offsite during outage" in m, "must prove each exact seg absent offsite during outage"
+    # pin the EXACT absence-check construct (loop over each $s from $SEGS, seg_in_s3 with the correct
+    # repo prefix pult-long, exact segment $s, fail branch) — not just the FAIL message. A wrong repo
+    # prefix (e.g. pult-longX) would make the check a no-op while keeping the message, so require the
+    # real query.
+    assert 'for s in $SEGS; do if seg_in_s3 "$s" pult-long; then echo "LONG FAIL: $s offsite during outage"' in m, \
+        "outage-absence check must query the correct repo prefix (exact construct, not just the message)"
     assert "continuity intact during outage" in m, "status must be unsafe during outage"
     # exact-segment remote drain must be the ACTUAL bounded loop + guarded assertion
     assert 'for k in $(seq 1 60); do seg_in_s3 "$s" pult-long' in m, "drain must poll each exact seg in a bounded loop"
