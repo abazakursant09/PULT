@@ -1,0 +1,29 @@
+{
+  "_canary": {
+    "role": "pitr-writer",
+    "active": true,
+    "tier": "get-yes-delete-no",
+    "note": "pgBackRest PITR writer candidate. The pgBackRest OFFICIAL sample policy includes DeleteObject, but that is a working-set example, NOT proof of the minimal closure. This candidate deliberately STARTS WITHOUT DeleteObject: backup/archive/check are tested first without Delete; expire belongs to the retention-admin role; if live 3C2C proves the ordinary pgBackRest flow needs Delete, the permission is NOT auto-added — a separate minimal correction is made after Inal approval. Object Lock remains the last-resort protection against deletion of locked versions."
+  },
+  "policy": {
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Sid": "PitrWriterListPrefix",
+        "Effect": "Allow",
+        "Action": ["s3:ListBucket"],
+        "Resource": "arn:aws:s3:::<BACKUP_BUCKET>",
+        "Condition": {"StringLike": {"s3:prefix": ["pitr/*", "canary/<RUN_ID>/pitr/*"]}}
+      },
+      {
+        "Sid": "PitrWriterReadWriteNoDelete",
+        "Effect": "Allow",
+        "Action": ["s3:GetObject", "s3:PutObject", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"],
+        "Resource": [
+          "arn:aws:s3:::<BACKUP_BUCKET>/pitr/*",
+          "arn:aws:s3:::<BACKUP_BUCKET>/canary/<RUN_ID>/pitr/*"
+        ]
+      }
+    ]
+  }
+}

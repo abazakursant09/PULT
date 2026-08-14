@@ -1,0 +1,19 @@
+{
+  "_canary": {
+    "role": "app",
+    "active": true,
+    "tier": "deny-all",
+    "note": "Application principal has ZERO access to the backup bucket. This is an explicit Deny of every S3 action on the bucket and its objects. (s3:* is allowed here ONLY because the Effect is Deny — an all-actions Deny is the intended zero-access contract; s3:* is never permitted in an Allow.)"
+  },
+  "policy": {
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Sid": "AppDenyAllBackup",
+        "Effect": "Deny",
+        "Action": ["s3:*"],
+        "Resource": ["arn:aws:s3:::<BACKUP_BUCKET>", "arn:aws:s3:::<BACKUP_BUCKET>/*"]
+      }
+    ]
+  }
+}

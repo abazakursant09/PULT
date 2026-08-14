@@ -1,0 +1,100 @@
+name: Canary Offline
+
+# SECURITY-2D-3E1B-3C2A — DORMANT Selectel canary tooling.
+# Job `offline`: structural JSON policy validation + guard, 0 network, 0 credentials.
+# Job `minio-compat`: proves candidate policies' allow/deny on a TEMPORARY MinIO over HTTP on
+# 127.0.0.1 with SYNTHETIC job-local users/keys. NEVER Selectel, no insecure-TLS flag, no repo secrets,
+# no artifacts, exact-only cleanup. MinIO != Selectel: a green run is a compat signal, not a proof.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ops/canary/**
+      - docs/pitr-operations-policy.md
+      - backend/tests/test_canary_tooling_guard.py
+      - .github/workflows/canary_offline.yml
+  push:
+    branches: [master]
+    paths:
+      - ops/canary/**
+      - .github/workflows/canary_offline.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: canary-offline-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MINIO_IMAGE: "minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e"
+
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.13"
+      - name: Offline guard + policy validation (no network, no credentials)
+        run: |
+          set -euo pipefail
+          pip install --require-hashes -r backend/requirements-ci.lock
+          python -m pytest backend/tests/test_canary_tooling_guard.py -q
+          python ops/canary/canary.py validate-policies
+          python ops/canary/canary.py plan
+          # live mode must fail-closed before any network/credential read
+          if python ops/canary/canary.py live; then echo "LIVE SHOULD HAVE FAILED"; exit 1; fi
+          echo "offline OK"
+
+  minio-compat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CANARY_MINIO_ENDPOINT: "http://127.0.0.1:9000"
+      CANARY_MINIO_ADMIN: canaryadmin
+      CANARY_MINIO_ADMIN_SECRET: canaryadminsecret123
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.13"
+      - name: Extract pinned mc client from MinIO image (no new supply-chain artifact)
+        run: |
+          set -euo pipefail
+          docker create --name mcextract "$MINIO_IMAGE"
+          docker cp mcextract:/usr/bin/mc "$RUNNER_TEMP/mc"
+          docker rm mcextract
+          chmod +x "$RUNNER_TEMP/mc"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: Start temporary MinIO (HTTP on 127.0.0.1, synthetic root creds)
+        run: |
+          set -euo pipefail
+          docker run -d --name minio -p 127.0.0.1:9000:9000 \
+            -e MINIO_ROOT_USER="$CANARY_MINIO_ADMIN" \
+            -e MINIO_ROOT_PASSWORD="$CANARY_MINIO_ADMIN_SECRET" \
+            "$MINIO_IMAGE" server /data
+          for i in $(seq 1 30); do
+            if mc alias set adm "$CANARY_MINIO_ENDPOINT" "$CANARY_MINIO_ADMIN" "$CANARY_MINIO_ADMIN_SECRET" --api S3v4 >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+      - name: MinIO compatibility matrix (synthetic; exact cleanup)
+        run: |
+          set -euo pipefail
+          python ops/canary/canary.py minio-compat
+      - name: Teardown (exact synthetic resources only)
+        if: always()
+        run: |
+          docker rm -f minio >/dev/null 2>&1 || true
+          rm -f "$RUNNER_TEMP/mc" || true
+          echo "teardown done (no system/volume prune)"

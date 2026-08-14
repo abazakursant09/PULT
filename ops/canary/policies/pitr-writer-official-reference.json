@@ -1,0 +1,27 @@
+{
+  "_canary": {
+    "role": "pitr-writer-reference",
+    "active": false,
+    "marker": "REFERENCE_NOT_ACTIVE_CANDIDATE",
+    "source": "pgBackRest official sample S3 policy (List + Get + Put + Delete on repo path)",
+    "note": "REFERENCE ONLY — NOT an applied candidate. Records the pgBackRest official working-set policy (which INCLUDES DeleteObject) for comparison against the deny-driven minimal closure proved by live 3C2C. The canary tooling MUST NOT select this as an active candidate; active=false and the guard enforces it."
+  },
+  "policy": {
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Sid": "RefList",
+        "Effect": "Allow",
+        "Action": ["s3:ListBucket"],
+        "Resource": "arn:aws:s3:::<BACKUP_BUCKET>",
+        "Condition": {"StringLike": {"s3:prefix": ["pitr/*"]}}
+      },
+      {
+        "Sid": "RefReadWriteDelete",
+        "Effect": "Allow",
+        "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+        "Resource": ["arn:aws:s3:::<BACKUP_BUCKET>/pitr/*"]
+      }
+    ]
+  }
+}
