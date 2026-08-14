@@ -219,18 +219,40 @@ jobs:
           echo "==================== 3. CONCURRENT writers + multi-LSN restore ===================="
           start_src concsrc /pult-conc pitr_ext_conc
           baseline_offsite concsrc /pult-conc
-          # 3 concurrent writers each inserting unique tagged rows in the background
-          for wtr in 1 2 3; do
-            docker exec -u postgres concsrc sh -c "for i in \$(seq 1 40); do psql -U postgres -d business_pult -c \"INSERT INTO m(w,tag) VALUES ('w${wtr}_\$i','flow')\" >/dev/null 2>&1; done" &
-          done
-          CSEGS=""
+          # ENFORCED concurrent writers: a DB barrier proves all three are ALIVE simultaneously before
+          # any load, each runs as its OWN tracked background PID, each PID is waited and its exit
+          # status checked (no `wait || true`, no swallowed failure), and exact 40/40/40 row counts are
+          # asserted — a dead/failed writer FAILS the job (concurrency is ENFORCED, not merely evidenced).
+          docker exec -u postgres concsrc psql -U postgres -d business_pult -c "CREATE TABLE cbar(k text primary key, v int)"
+          # writer body: register ready, bounded-wait the release flag, do exactly 40 tagged inserts,
+          # register done. Single-quoted on the runner so $WID/$i expand INSIDE the container ($$ = SQL
+          # dollar-quoting → no nested single quotes). set -e → any psql failure exits the writer nonzero.
+          WSCRIPT='set -e
+          psql -U postgres -d business_pult -c "INSERT INTO cbar(k,v) VALUES (concat($$ready_$$,$WID::text),1)"
+          ok=0
+          for t in $(seq 1 120); do r=$(psql -U postgres -d business_pult -tAc "SELECT count(*) FROM cbar WHERE k=$$release$$"); [ "$r" = 1 ] && { ok=1; break; }; sleep 0.5; done
+          [ "$ok" = 1 ] || { echo "writer $WID release timeout" >&2; exit 3; }
+          i=1; while [ $i -le 40 ]; do psql -U postgres -d business_pult -c "INSERT INTO m(w,tag) VALUES (concat($$w$$,$WID::text,$$_$$,$i::text),$$flow$$)"; i=$((i+1)); done
+          psql -U postgres -d business_pult -c "INSERT INTO cbar(k,v) VALUES (concat($$done_$$,$WID::text),1)"'
+          docker exec -u postgres -e WID=1 concsrc sh -c "$WSCRIPT" & PID1=$!
+          docker exec -u postgres -e WID=2 concsrc sh -c "$WSCRIPT" & PID2=$!
+          docker exec -u postgres -e WID=3 concsrc sh -c "$WSCRIPT" & PID3=$!
+          # barrier: bounded-wait until all THREE registered ready (proves simultaneous liveness)
+          ready=0; for t in $(seq 1 60); do rc=$(docker exec -u postgres concsrc psql -U postgres -d business_pult -tAc "SELECT count(*) FROM cbar WHERE k ~ '^ready_'" 2>/dev/null || echo 0); [ "$rc" = 3 ] && { ready=1; break; }; sleep 1; done
+          [ "$ready" = 1 ] || { echo "CONC FAIL: ready_count != 3 (barrier: not all 3 writers alive) rc=$rc"; kill "$PID1" "$PID2" "$PID3" 2>/dev/null || true; exit 1; }
+          echo "CONC barrier: ready_count=3 (all 3 writers alive+registered before release)"
           rec_point() { docker exec -u postgres concsrc psql -U postgres -d business_pult -c "INSERT INTO m(w,tag) VALUES ('$1','$1')" >/dev/null; docker exec -u postgres concsrc psql -U postgres -d business_pult -tAc 'SELECT pg_current_wal_lsn()'; docker exec -u postgres concsrc psql -U postgres -d business_pult -c "SELECT pg_switch_wal()" >/dev/null; }
-          LSN1="$(rec_point M1)"; sleep 1
+          LSN1="$(rec_point M1)"
+          # RELEASE only after all three are ready → the 40-insert load runs concurrently with the outage.
+          docker exec -u postgres concsrc psql -U postgres -d business_pult -c "INSERT INTO cbar(k,v) VALUES ('release',1)"
           docker pause minio; sleep 1
           LSN2="$(rec_point M2)"; sleep 1
           docker unpause minio; sleep 1
           LSN3="$(rec_point M3)"
-          wait || true
+          # wait EACH writer PID and capture its exit status (|| avoids set -e aborting before capture)
+          s1=0; wait "$PID1" || s1=$?; s2=0; wait "$PID2" || s2=$?; s3=0; wait "$PID3" || s3=$?
+          echo "CONC writer exit status: w1=$s1 w2=$s2 w3=$s3"
+          [ "$s1" = 0 ] && [ "$s2" = 0 ] && [ "$s3" = 0 ] || { echo "CONC FAIL: a writer exited nonzero (w1=$s1 w2=$s2 w3=$s3)"; exit 1; }
           echo "CONC LSNs: M1=$LSN1 M2=$LSN2 M3=$LSN3 (authoritative order = numeric LSN + marker rows)"
           # LSN ordering LSN1<LSN2<LSN3 (string compare valid for same-length hex/hex pairs -> normalize)
           norm() { printf '%s' "$1" | awk -F/ '{printf "%08s%08s", $1, $2}'; }
@@ -239,9 +261,15 @@ jobs:
           docker exec -u postgres concsrc psql -U postgres -d business_pult -c "SELECT pg_switch_wal()" >/dev/null 2>&1 || true
           for k in $(seq 1 30); do docker exec -u postgres -e PGBACKREST_REPO1_PATH=/pult-conc concsrc pgbackrest --stanza=pult check >/dev/null 2>&1 && { cok=1; break; }; sleep 3; done
           [ "${cok:-0}" = 1 ] || { echo "CONC FAIL: archive not healthy after load"; exit 1; }
-          # expected row counts
-          R_all="$(docker exec -u postgres concsrc psql -U postgres -d business_pult -tAc "SELECT count(*) FROM m WHERE tag='flow'")"
-          echo "CONC flow rows committed = $R_all"
+          # EXACT per-writer row assertions: each writer committed exactly 40, total 120, 3 distinct
+          w1="$(docker exec -u postgres concsrc psql -U postgres -d business_pult -tAc "SELECT count(*) FROM m WHERE tag='flow' AND split_part(w,'_',1)='w1'")"
+          w2="$(docker exec -u postgres concsrc psql -U postgres -d business_pult -tAc "SELECT count(*) FROM m WHERE tag='flow' AND split_part(w,'_',1)='w2'")"
+          w3="$(docker exec -u postgres concsrc psql -U postgres -d business_pult -tAc "SELECT count(*) FROM m WHERE tag='flow' AND split_part(w,'_',1)='w3'")"
+          tot="$(docker exec -u postgres concsrc psql -U postgres -d business_pult -tAc "SELECT count(*) FROM m WHERE tag='flow'")"
+          dis="$(docker exec -u postgres concsrc psql -U postgres -d business_pult -tAc "SELECT count(DISTINCT split_part(w,'_',1)) FROM m WHERE tag='flow'")"
+          donec="$(docker exec -u postgres concsrc psql -U postgres -d business_pult -tAc "SELECT count(*) FROM cbar WHERE k ~ '^done_'")"
+          echo "CONC writers rows: w1=$w1 w2=$w2 w3=$w3 total=$tot distinct=$dis done=$donec"
+          [ "$w1" = 40 ] && [ "$w2" = 40 ] && [ "$w3" = 40 ] && [ "$tot" = 120 ] && [ "$dis" = 3 ] && [ "$donec" = 3 ] || { echo "CONC FAIL: concurrent writers not all 40/40/40 (total=$tot distinct=$dis done=$donec)"; exit 1; }
           docker rm -f concsrc >/dev/null 2>&1 || true   # keep volume? no; repo is offsite
           # restore target A -> LSN2 ; target B -> LSN3 (two NEW empty PGDATA)
           restore_to() { # $1=name $2=vol $3=lsn

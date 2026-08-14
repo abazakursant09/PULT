@@ -120,10 +120,32 @@ def test_long_outage_measured():
     assert "max_tested_backlog_bytes" in m
 
 
+def test_concurrent_writers_enforced():
+    """The three concurrent writers must be ENFORCED, not merely evidenced: own PIDs, each waited
+    with exit-status checked, a DB barrier proving simultaneous liveness, and exact 40/40/40 counts."""
+    m = _code(_matrix(_r(EXT)))  # executable lines only (comments must not satisfy the guard)
+    # three separate background writer PIDs
+    assert "PID1=$!" in m and "PID2=$!" in m and "PID3=$!" in m, "each writer must be its own tracked background PID"
+    # each PID explicitly waited, and its exit status checked (never swallowed)
+    assert 'wait "$PID1"' in m and 'wait "$PID2"' in m and 'wait "$PID3"' in m, "must wait each writer PID"
+    assert "wait || true" not in m, "writer failures must not be swallowed with `wait || true`"
+    assert "a writer exited nonzero" in m, "any nonzero writer exit must FAIL the job"
+    assert re.search(r'\[ "\$s1" = 0 \] && \[ "\$s2" = 0 \] && \[ "\$s3" = 0 \]', m), "all three exit statuses must be checked"
+    # DB barrier proving all three alive simultaneously before load
+    assert "CREATE TABLE cbar" in m, "must use a synthetic DB barrier table"
+    assert "ready_count != 3" in m and re.search(r'\[ "\$rc" = 3 \]', m), "barrier must require ready_count==3"
+    assert "for t in $(seq 1 60)" in m, "barrier readiness poll must be bounded (deadline)"
+    assert "INSERT INTO cbar(k,v) VALUES ('release',1)" in m, "release only after all three are ready"
+    # release must come AFTER the ready barrier (not before)
+    assert m.index("ready_count != 3") < m.index("VALUES ('release',1)"), "release must follow the ready barrier"
+    # exact per-writer + total + distinct assertions (no weak threshold)
+    assert re.search(r'\[ "\$w1" = 40 \]', m) and re.search(r'\[ "\$w2" = 40 \]', m) and re.search(r'\[ "\$w3" = 40 \]', m), "each writer must commit exactly 40"
+    assert re.search(r'\[ "\$tot" = 120 \]', m) and re.search(r'\[ "\$dis" = 3 \]', m), "total=120 and distinct writers=3"
+    assert "R_all >=" not in m and "R_all>=" not in m, "no weak row threshold"
+
+
 def test_concurrent_multi_lsn_restore():
     m = _matrix(_r(EXT))
-    # >=3 writers
-    assert m.count("for i in \\$(seq 1 40)") >= 1 and "for wtr in 1 2 3" in m, ">=3 concurrent writers"
     # 3 DISTINCT ordered LSN checkpoints — each from its own rec_point call (not aliased)
     assert "rec_point M1" in m and "rec_point M2" in m and "rec_point M3" in m, "three distinct LSN checkpoints"
     assert 'LSN3="$(rec_point M3)"' in m, "LSN3 must be its own checkpoint, not aliased to another LSN"
