@@ -54,11 +54,12 @@ LIVE_GATE_VALUE = "YES_I_UNDERSTAND"
 # Inal-approved 3C2C2-B execution step. So the CLI still defers.
 SELECTEL_EXECUTION_DEFERRED = "SELECTEL_EXECUTION_GATED_UNTIL_3C2C2B"
 # Runtime-change review marker — must be bumped together with the SHA-256 freeze on every canary.py change.
-CANARY_RUNTIME_REVIEW = "3C2C2B-live-execution-gated"
+CANARY_RUNTIME_REVIEW = "3C2C2B-prelive-correction"
 # live network safety knobs (used by the real transport in 3C2C2-B; enforced/asserted now)
 LIVE_CONNECT_TIMEOUT = 10.0
 LIVE_READ_TIMEOUT = 30.0
 LIVE_READ_RETRIES = 2  # idempotent reads only; mutations are NEVER auto-retried
+EXECUTE_MAX_DEADLINE_WINDOW_SEC = 1800  # deadline must be in (now, now+30min]
 _READ_ONLY_S3_OPS = frozenset({
     "GetBucketVersioning", "GetObjectLockConfiguration", "GetBucketObjectLockConfiguration",
     "ListBucket", "ListBucketVersions", "ListMultipartUploads", "HeadObject", "GetObject",
@@ -67,7 +68,7 @@ _READ_ONLY_S3_OPS = frozenset({
 _MUTATING_S3_OPS = frozenset({
     "CreateBucket", "PutBucketVersioning", "PutBucketObjectLockConfiguration", "PutObject",
     "CreateMultipartUpload", "UploadPart", "CompleteMultipartUpload", "AbortMultipartUpload",
-    "PutObjectRetention", "DeleteObject", "DeleteObjectVersion",
+    "PutObjectRetention", "DeleteObject", "DeleteObjectVersion", "DeleteBucket",
 })
 
 
@@ -450,8 +451,10 @@ class SelectelS3Transport:
             url = f"{self._endpoint}{canonical_uri}" + (f"?{query}" if query else "")
             resp = self._client.request(method, url, headers=headers, content=payload)
             code = getattr(resp, "status_code", None)
-            reqid = getattr(resp, "headers", {}).get("x-amz-request-id", "") if hasattr(resp, "headers") else ""
-            last = {"operation": op, "http_code": code, "request_id": reqid,
+            rh = getattr(resp, "headers", {}) or {}
+            reqid = rh.get("x-amz-request-id", "")
+            vid = rh.get("x-amz-version-id", "")
+            last = {"operation": op, "http_code": code, "request_id": reqid, "version_id": vid,
                     "allow": None, "mutating": mutating}
             if code is None:
                 return {**last, "allow": "unknown", "error": "no status (ambiguous) -> STOP"}
@@ -515,51 +518,46 @@ def pgbackrest_probe(transport, manifest) -> dict:
     }
 
 
-def objectlock_probe(transport, manifest) -> dict:
-    """Read back versioning + Object-Lock config on the canary object; verify a locked version cannot be
-    deleted; Governance bypass only by retention-admin. Compliance is NEVER exercised here."""
-    return {
-        "versioning": transport.get_versioning(),
-        "object_lock_config": transport.get_lock_config(),
-        "min_retention_used": True,
-        "locked_delete_refused": transport.locked_delete_refused(),
-        "governance_bypass_admin_only": transport.governance_bypass_admin_only(),
-        "compliance_tested": False,
-    }
+# NOTE: pgbackrest_probe() above is an OFFLINE DESIGN helper only (FakeTransport). Gate F does NOT prove a
+# live pgBackRest closure — that needs a real pgBackRest binary run and is a separate, later step. The live
+# orchestration below deliberately does NOT call it.
 
 
-def run_cleanup(transport, manifest, ledger) -> dict:
-    """Delete ONLY the exact resources in `ledger` (keys, versions, multipart upload ids, users/keys).
+def _amz_ds(dt):
+    return dt.strftime("%Y%m%dT%H%M%SZ"), dt.strftime("%Y%m%d")
 
-    No recursive/wildcard/prefix-wide delete. Access keys are revoked even if the main test failed. The
-    bucket is removed only after a read-back shows no unknown objects/versions/uploads; a locked residual
-    is reported as a controlled residual (with retention deadline + max cost) — never a false success."""
-    failures, revoked, deleted = [], [], []
-    for user in ledger.get("users", []):
-        if not transport.delete_user(user):
-            failures.append(f"user not deleted: {user}")
-        else:
-            revoked.append(user)
-    for item in ledger.get("objects", []):
-        if not transport.delete_object(item["key"], item.get("version")):
-            failures.append(f"object not deleted: {item['key']}")
-        else:
-            deleted.append(item["key"])
+
+def run_cleanup(admin_transport, manifest, ledger, clock) -> dict:
+    """EXACT data-plane cleanup via the transport's attempt() interface ONLY (no phantom methods).
+
+    Deletes only the exact object versions / multipart uploads WE created, then deletes the bucket. Bucket
+    deletion is the fail-closed read-back: S3 refuses to delete a non-empty bucket, so a non-2xx DeleteBucket
+    means something unknown remains -> CONTROLLED_RESIDUAL. A Governance-locked object cannot be deleted before
+    its retain-until -> CONTROLLED_RESIDUAL (deadline recorded), never a false clean. Mutations are single-shot;
+    an ambiguous result is treated as residual, not success. IAM keys/users/policies are control-plane and are
+    NOT touched here — they are recorded for MANUAL revocation."""
+    amz, ds = _amz_ds(clock())
+    bucket = manifest["bucket"]
+    deleted, residual, failures = [], [], []
     for up in ledger.get("multipart", []):
-        transport.abort_multipart(up["key"], up["upload_id"])
-    residual = transport.read_back_unknown(manifest["bucket"], manifest["prefix"])
-    locked = transport.locked_residual()
-    if locked:
-        return {"status": "controlled-residual", "revoked_users": revoked, "deleted": deleted,
-                "locked_residual": locked, "bucket_removed": False, "failures": failures}
-    if residual:
-        failures.append(f"unexpected residual objects: {residual}")
-        return {"status": "failed", "revoked_users": revoked, "deleted": deleted,
-                "bucket_removed": False, "failures": failures}
-    bucket_removed = transport.remove_bucket_if_empty(manifest["bucket"])
-    status = "clean" if bucket_removed and not failures else "failed"
-    return {"status": status, "revoked_users": revoked, "deleted": deleted,
-            "bucket_removed": bucket_removed, "failures": failures}
+        admin_transport.attempt("AbortMultipartUpload", f"/{bucket}/{up['key']}", method="DELETE",
+                                query=f"uploadId={up['upload_id']}", amz_date=amz, date_stamp=ds)
+    for o in ledger.get("objects", []):
+        q = f"versionId={o['version']}" if o.get("version") else ""
+        r = admin_transport.attempt("DeleteObjectVersion", f"/{bucket}/{o['key']}", method="DELETE",
+                                    query=q, amz_date=amz, date_stamp=ds)
+        if r.get("allow") == "allow":
+            deleted.append(o["key"])
+        else:
+            residual.append({"key": o["key"], "reason": r.get("allow"), "locked": bool(o.get("locked"))})
+    rb = admin_transport.attempt("DeleteBucket", f"/{bucket}", method="DELETE", amz_date=amz, date_stamp=ds)
+    bucket_removed = rb.get("allow") == "allow"
+    locked = [x for x in residual if x["locked"]]
+    if locked or residual or not bucket_removed:
+        status = "controlled-residual" if (locked and not [x for x in residual if not x["locked"]]) else "failed"
+        return {"status": status, "deleted": deleted, "residual": residual, "bucket_removed": bucket_removed,
+                "locked_residual": locked, "retention_deadline": manifest.get("retain_until"), "failures": failures}
+    return {"status": "clean", "deleted": deleted, "residual": [], "bucket_removed": True, "failures": failures}
 
 
 # ------------------------- execute-live gate (Gate F) — fail-closed BEFORE any network/credential read ----
@@ -570,9 +568,21 @@ _CANARY_ROLES = ("logical-writer", "pitr-writer", "restore-reader", "retention-a
 _DEADLINE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 
 
-def execute_validate(args, manifest) -> dict:
+def _parse_deadline(s):
+    import datetime
+    return datetime.datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ")
+
+
+def _utcnow():
+    import datetime
+    return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+
+
+def execute_validate(args, manifest, clock) -> dict:
     """Strict Gate-F execute gate. Raises LiveGateError BEFORE any DNS/socket/credential read unless every
-    one-time condition holds. Ordinary `live` without --execute-live never reaches this."""
+    one-time condition holds. `clock` (injected, returns a UTC datetime) proves the deadline is in the future
+    and within the max window. Ordinary `live` without --execute-live never reaches this."""
+    import datetime
     if not getattr(args, "execute_live", False):
         raise LiveGateError("execute-live requires the explicit --execute-live flag")
     if manifest["region"] != EXECUTE_LIVE_REGION:
@@ -586,10 +596,14 @@ def execute_validate(args, manifest) -> dict:
         raise LiveGateError("--max-object-bytes must be an int in (0, 10 MiB]")
     if not _DEADLINE_RE.match(getattr(args, "deadline", "") or ""):
         raise LiveGateError("--deadline must be a UTC timestamp YYYY-MM-DDTHH:MM:SSZ")
+    deadline = _parse_deadline(args.deadline)
+    now = clock()
+    if not (now < deadline <= now + datetime.timedelta(seconds=EXECUTE_MAX_DEADLINE_WINDOW_SEC)):
+        raise LiveGateError("--deadline must be in the future and within the max window (30 min)")
     if not manifest["bucket"].startswith("pult-canary-"):
         raise LiveGateError("bucket must be a pult-canary-<runid> disposable bucket")
     return {"region": EXECUTE_LIVE_REGION, "max_object_bytes": mob, "deadline": args.deadline,
-            "ack": args.ack, "max_buckets": 1}
+            "deadline_dt": deadline, "ack": args.ack, "max_buckets": 1}
 
 
 def read_masked_credentials(roles=_CANARY_ROLES, reader=None) -> dict:
@@ -610,46 +624,82 @@ _OP_TO_S3 = {"put": ("PutObject", "PUT"), "get": ("GetObject", "GET"),
              "list": ("ListBucket", "GET"), "delete": ("DeleteObject", "DELETE")}
 
 
-def run_live_execution(manifest, execmani, creds_by_role, transport_factory=None, clock=None) -> dict:
-    """Gate-F orchestration against REAL per-role transports (factory/clock injected for offline tests).
+def _live_uri(manifest, op, prefix):
+    full = f"{manifest['prefix']}{prefix}"
+    key = f"{full}probe-{manifest['runid']}"
+    if op == "list":
+        return f"/{manifest['bucket']}", f"prefix={full}", key
+    return f"/{manifest['bucket']}/{key}", "", key
 
-    Runs the role allow/deny matrix, then EXACT data-plane cleanup in a finally. Control-plane revocation
-    (keys/users/policies) is MANUAL and only RECORDED for Inal. Any cleanup failure / unknown residual ->
-    non-zero + CONTROLLED_RESIDUAL, never hidden."""
+
+def run_live_execution(manifest, execmani, creds_by_role, transport_factory=None, clock=None) -> dict:
+    """Gate-F orchestration over the attempt()-ONLY transport interface (factory/clock injected offline).
+
+    (1) role allow/deny matrix; (2) Object-Lock Governance probe (create 1 synthetic object, PutObjectRetention
+    with retain-until = deadline, prove a writer's DeleteObjectVersion is DENIED while locked); then EXACT
+    data-plane cleanup in a finally. Deadline is enforced per operation (clock() < deadline_dt) — after it the
+    remaining test operations STOP but cleanup still runs. Control-plane revocation is MANUAL/recorded.
+    pgBackRest live closure is NOT attempted here (separate step). CONTROLLED_RESIDUAL/FAILED never hidden."""
     if transport_factory is None:
         transport_factory = SelectelS3Transport
     if clock is None:
         raise LiveGateError("run_live_execution requires an injected clock (no wall-clock in module)")
+    deadline_dt = execmani.get("deadline_dt") or _parse_deadline(execmani["deadline"])
     transports = {r: transport_factory(manifest, creds_by_role[r], service="s3") for r in _CANARY_ROLES}
     ledger = {"objects": [], "multipart": [], "users": list(_CANARY_ROLES), "policies": list(_CANARY_ROLES)}
-    rows, failures = [], []
+    rows, failures, objectlock = [], [], {}
+    deadline_reached = False
     try:
         for role, ops in _LIVE_ROLE_MATRIX.items():
             t = transports[role if role != "app" else "app-deny"]
             for op, prefix, expect in ops:
+                if clock() >= deadline_dt:
+                    deadline_reached = True
+                    break
                 s3op, method = _OP_TO_S3[op]
-                full_prefix = f"{manifest['prefix']}{prefix}"
-                key = f"{full_prefix}probe-{manifest['runid']}"
-                if op == "list":
-                    uri, query = f"/{manifest['bucket']}", f"prefix={full_prefix}"
-                else:
-                    uri, query = f"/{manifest['bucket']}/{key}", ""
-                amz, ds = clock()
+                uri, query, key = _live_uri(manifest, op, prefix)
+                amz, ds = _amz_ds(clock())
                 res = t.attempt(s3op, uri, method=method, query=query, amz_date=amz, date_stamp=ds)
                 allow = res.get("allow")
                 ok = (expect == "allow" and allow == "allow") or (expect == "deny" and allow == "deny")
                 rows.append({"role": role, "op": op, "prefix": prefix, "expected": expect, "actual": allow,
                              "code": res.get("http_code"), "request_id": res.get("request_id")})
                 if op == "put" and expect == "allow" and allow == "allow":
-                    ledger["objects"].append({"key": key})
+                    ledger["objects"].append({"key": key, "version": res.get("version_id", "")})
                 if not ok:
                     failures.append(f"{role}:{op}:{prefix} expected={expect} actual={allow}")
+            if deadline_reached:
+                break
+        # Object-Lock Governance probe (only if deadline not yet reached)
+        if not deadline_reached:
+            admin = transports["retention-admin"]
+            writer = transports["pitr-writer"]
+            lk = f"{manifest['prefix']}pitr/lock-{manifest['runid']}"
+            amz, ds = _amz_ds(clock())
+            pr = admin.attempt("PutObject", f"/{manifest['bucket']}/{lk}", method="PUT", payload=b"x",
+                               amz_date=amz, date_stamp=ds)
+            lock_version = pr.get("version_id", "")
+            if pr.get("allow") == "allow":
+                ledger["objects"].append({"key": lk, "version": lock_version, "locked": True})
+                admin.attempt("PutObjectRetention", f"/{manifest['bucket']}/{lk}", method="PUT",
+                              query=f"retention&versionId={lock_version}", payload=b"", amz_date=amz, date_stamp=ds)
+                dv = writer.attempt("DeleteObjectVersion", f"/{manifest['bucket']}/{lk}", method="DELETE",
+                                    query=f"versionId={lock_version}", amz_date=amz, date_stamp=ds)
+                objectlock = {"created": True, "locked_delete_by_writer": dv.get("allow"),
+                              "locked_delete_refused": dv.get("allow") == "deny", "mode": "GOVERNANCE",
+                              "compliance_tested": False}
+                if dv.get("allow") != "deny":
+                    failures.append("object-lock: writer DeleteObjectVersion NOT refused on locked version")
+            else:
+                objectlock = {"created": False, "put_result": pr.get("allow")}
     finally:
-        cleanup = run_cleanup(transports["retention-admin"], manifest, ledger)
-    result = {"rows": rows, "matrix_failures": failures, "cleanup": cleanup,
+        cleanup = run_cleanup(transports["retention-admin"], manifest, ledger, clock)
+    result = {"rows": rows, "matrix_failures": failures, "object_lock": objectlock, "cleanup": cleanup,
+              "deadline_reached": deadline_reached, "pgbackrest_closure": "NOT-ATTEMPTED-live (separate step)",
               "manual_revoke_required": {"keys": ledger["users"], "policies": ledger["policies"]}}
     if failures or cleanup["status"] != "clean":
-        result["status"] = "CONTROLLED_RESIDUAL" if cleanup["status"] == "controlled-residual" else "FAILED"
+        result["status"] = "CONTROLLED_RESIDUAL" if cleanup["status"] == "controlled-residual" and not failures \
+            else "FAILED"
     else:
         result["status"] = "ok"
     return result
@@ -669,16 +719,13 @@ def live(args, env=None) -> int:
         print(SELECTEL_EXECUTION_DEFERRED, file=sys.stderr)
         return 5
     try:
-        execmani = execute_validate(args, manifest)  # fail-closed BEFORE credential read / DNS / socket
+        execmani = execute_validate(args, manifest, _utcnow)  # fail-closed BEFORE creds/DNS/socket
     except LiveGateError as e:
         print(f"EXECUTE GATE REFUSED: {_redact(str(e), [])}", file=sys.stderr)
         return 4
     # Only here — after the full one-time gate — are credentials read and the network touched (Gate F only).
-    import datetime
     creds = read_masked_credentials()
-    result = run_live_execution(manifest, execmani, creds,
-                                clock=lambda: (datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ"),
-                                               datetime.datetime.utcnow().strftime("%Y%m%d")))
+    result = run_live_execution(manifest, execmani, creds, clock=_utcnow)
     print(f"execute-live status={result['status']}", file=sys.stderr)
     return 0 if result["status"] == "ok" else 6
 
