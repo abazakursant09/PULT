@@ -54,7 +54,7 @@ LIVE_GATE_VALUE = "YES_I_UNDERSTAND"
 # Inal-approved 3C2C2-B execution step. So the CLI still defers.
 SELECTEL_EXECUTION_DEFERRED = "SELECTEL_EXECUTION_GATED_UNTIL_3C2C2B"
 # Runtime-change review marker — must be bumped together with the SHA-256 freeze on every canary.py change.
-CANARY_RUNTIME_REVIEW = "3C2C2A-selectel-transport-dormant"
+CANARY_RUNTIME_REVIEW = "3C2C2B-live-execution-gated"
 # live network safety knobs (used by the real transport in 3C2C2-B; enforced/asserted now)
 LIVE_CONNECT_TIMEOUT = 10.0
 LIVE_READ_TIMEOUT = 30.0
@@ -562,21 +562,125 @@ def run_cleanup(transport, manifest, ledger) -> dict:
             "bucket_removed": bucket_removed, "failures": failures}
 
 
+# ------------------------- execute-live gate (Gate F) — fail-closed BEFORE any network/credential read ----
+EXECUTE_LIVE_REGION = "ru-3"                      # canary is pinned to ru-3 (SPb)
+EXECUTE_MAX_OBJECT_BYTES = 10 * 1024 * 1024       # 10 MiB hard cap
+EXECUTE_LIVE_ACK_PREFIX = "PULT-CANARY-EXECUTE-"  # --ack must equal EXECUTE_LIVE_ACK_PREFIX + run_id
+_CANARY_ROLES = ("logical-writer", "pitr-writer", "restore-reader", "retention-admin", "app-deny")
+_DEADLINE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+
+
+def execute_validate(args, manifest) -> dict:
+    """Strict Gate-F execute gate. Raises LiveGateError BEFORE any DNS/socket/credential read unless every
+    one-time condition holds. Ordinary `live` without --execute-live never reaches this."""
+    if not getattr(args, "execute_live", False):
+        raise LiveGateError("execute-live requires the explicit --execute-live flag")
+    if manifest["region"] != EXECUTE_LIVE_REGION:
+        raise LiveGateError("execute-live is pinned to region ru-3")
+    if manifest["endpoint"] != LIVE_REGION_ENDPOINTS[EXECUTE_LIVE_REGION]:
+        raise LiveGateError("endpoint must be the official ru-3 S3 endpoint")
+    if getattr(args, "ack", None) != EXECUTE_LIVE_ACK_PREFIX + manifest["runid"]:
+        raise LiveGateError("--ack must equal PULT-CANARY-EXECUTE-<runid> exactly")
+    mob = getattr(args, "max_object_bytes", None)
+    if not isinstance(mob, int) or not (0 < mob <= EXECUTE_MAX_OBJECT_BYTES):
+        raise LiveGateError("--max-object-bytes must be an int in (0, 10 MiB]")
+    if not _DEADLINE_RE.match(getattr(args, "deadline", "") or ""):
+        raise LiveGateError("--deadline must be a UTC timestamp YYYY-MM-DDTHH:MM:SSZ")
+    if not manifest["bucket"].startswith("pult-canary-"):
+        raise LiveGateError("bucket must be a pult-canary-<runid> disposable bucket")
+    return {"region": EXECUTE_LIVE_REGION, "max_object_bytes": mob, "deadline": args.deadline,
+            "ack": args.ack, "max_buckets": 1}
+
+
+def read_masked_credentials(roles=_CANARY_ROLES, reader=None) -> dict:
+    """Read one access/secret pair per role WITHOUT echo, into process memory ONLY. Never argv, never a file,
+    never shell history, never Git, never logged. `reader` is injectable for tests (default getpass.getpass)."""
+    if reader is None:
+        import getpass
+        reader = getpass.getpass
+    creds = {}
+    for role in roles:
+        access = reader(f"{role} access-key id (hidden): ")
+        secret = reader(f"{role} secret key (hidden): ")
+        creds[role] = {"access_key": access, "secret_key": secret}
+    return creds
+
+
+_OP_TO_S3 = {"put": ("PutObject", "PUT"), "get": ("GetObject", "GET"),
+             "list": ("ListBucket", "GET"), "delete": ("DeleteObject", "DELETE")}
+
+
+def run_live_execution(manifest, execmani, creds_by_role, transport_factory=None, clock=None) -> dict:
+    """Gate-F orchestration against REAL per-role transports (factory/clock injected for offline tests).
+
+    Runs the role allow/deny matrix, then EXACT data-plane cleanup in a finally. Control-plane revocation
+    (keys/users/policies) is MANUAL and only RECORDED for Inal. Any cleanup failure / unknown residual ->
+    non-zero + CONTROLLED_RESIDUAL, never hidden."""
+    if transport_factory is None:
+        transport_factory = SelectelS3Transport
+    if clock is None:
+        raise LiveGateError("run_live_execution requires an injected clock (no wall-clock in module)")
+    transports = {r: transport_factory(manifest, creds_by_role[r], service="s3") for r in _CANARY_ROLES}
+    ledger = {"objects": [], "multipart": [], "users": list(_CANARY_ROLES), "policies": list(_CANARY_ROLES)}
+    rows, failures = [], []
+    try:
+        for role, ops in _LIVE_ROLE_MATRIX.items():
+            t = transports[role if role != "app" else "app-deny"]
+            for op, prefix, expect in ops:
+                s3op, method = _OP_TO_S3[op]
+                full_prefix = f"{manifest['prefix']}{prefix}"
+                key = f"{full_prefix}probe-{manifest['runid']}"
+                if op == "list":
+                    uri, query = f"/{manifest['bucket']}", f"prefix={full_prefix}"
+                else:
+                    uri, query = f"/{manifest['bucket']}/{key}", ""
+                amz, ds = clock()
+                res = t.attempt(s3op, uri, method=method, query=query, amz_date=amz, date_stamp=ds)
+                allow = res.get("allow")
+                ok = (expect == "allow" and allow == "allow") or (expect == "deny" and allow == "deny")
+                rows.append({"role": role, "op": op, "prefix": prefix, "expected": expect, "actual": allow,
+                             "code": res.get("http_code"), "request_id": res.get("request_id")})
+                if op == "put" and expect == "allow" and allow == "allow":
+                    ledger["objects"].append({"key": key})
+                if not ok:
+                    failures.append(f"{role}:{op}:{prefix} expected={expect} actual={allow}")
+    finally:
+        cleanup = run_cleanup(transports["retention-admin"], manifest, ledger)
+    result = {"rows": rows, "matrix_failures": failures, "cleanup": cleanup,
+              "manual_revoke_required": {"keys": ledger["users"], "policies": ledger["policies"]}}
+    if failures or cleanup["status"] != "clean":
+        result["status"] = "CONTROLLED_RESIDUAL" if cleanup["status"] == "controlled-residual" else "FAILED"
+    else:
+        result["status"] = "ok"
+    return result
+
+
 def live(args, env=None) -> int:
-    """3C2C1 live CLI: hard fail-closed gate, then refuse — real Selectel execution is wired in 3C2C2."""
+    """Live CLI. Ordinary `live` (no --execute-live) fails closed BEFORE any network. Only --execute-live with
+    the full one-time confirmation reaches real execution (Gate F, isolated machine)."""
     env = os.environ if env is None else env
     try:
         manifest = live_validate(args, env)
     except LiveGateError as e:
         print(f"LIVE GATE REFUSED: {_redact(str(e), [])}", file=sys.stderr)
         return 4
-    # Gate passed. In 3C2C1 the real Selectel transport is NOT wired — never touch the network here.
-    try:
-        SelectelTransport(manifest)
-    except LiveGateError as e:
-        print(str(e), file=sys.stderr)
+    if not getattr(args, "execute_live", False):
+        # ordinary live still stops here — real execution needs the explicit --execute-live gate below
+        print(SELECTEL_EXECUTION_DEFERRED, file=sys.stderr)
         return 5
-    return 5
+    try:
+        execmani = execute_validate(args, manifest)  # fail-closed BEFORE credential read / DNS / socket
+    except LiveGateError as e:
+        print(f"EXECUTE GATE REFUSED: {_redact(str(e), [])}", file=sys.stderr)
+        return 4
+    # Only here — after the full one-time gate — are credentials read and the network touched (Gate F only).
+    import datetime
+    creds = read_masked_credentials()
+    result = run_live_execution(manifest, execmani, creds,
+                                clock=lambda: (datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ"),
+                                               datetime.datetime.utcnow().strftime("%Y%m%d")))
+    print(f"execute-live status={result['status']}", file=sys.stderr)
+    return 0 if result["status"] == "ok" else 6
 
 
 def main() -> int:
@@ -589,6 +693,11 @@ def main() -> int:
     ap.add_argument("--bucket")
     ap.add_argument("--run-id", dest="run_id")
     ap.add_argument("--confirm")
+    # execute-live (Gate F) — non-secret confirmation params only; credentials are read masked, never argv
+    ap.add_argument("--execute-live", dest="execute_live", action="store_true")
+    ap.add_argument("--ack")
+    ap.add_argument("--max-object-bytes", dest="max_object_bytes", type=int)
+    ap.add_argument("--deadline")
     args = ap.parse_args()
     if args.mode == "live":
         return live(args)
