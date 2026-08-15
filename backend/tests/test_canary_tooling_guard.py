@@ -43,7 +43,7 @@ NEG_MATRIX = CANARY / "negative-matrix.md"
 #   - an independent safety review passed;
 #   - Inal separately approved the runtime change.
 # The digest is a hard-coded literal — never computed at run time, never env-overridable, never auto-updated.
-_CANARY_RUNTIME_SHA256 = "c1573b57f3fffb423ca1c469ad25bfa617f19488928a119020411bb54b69bdc1"
+_CANARY_RUNTIME_SHA256 = "ba314f7f118fece59c968c820968e9cd07739d4b00e5af75ffe6ab65bce34148"
 # Review marker — bumped with the digest on every reviewed canary.py runtime change (3C2C2-B wires execution gate).
 _CANARY_RUNTIME_REVIEW = "3C2C2B-prelive-correction"
 
@@ -1200,9 +1200,9 @@ class _FakeLiveTransport:
         hay = uri + "?" + query
         root = "logical/" if "logical/" in hay else ("pitr/" if "pitr/" in hay else "")
         if s3op == "PutObject":
-            allow = ("lock-" in uri) or ("unlocked-" in uri) or (("put", root) in self._allow)
-            return {"allow": "allow" if allow else "deny", "http_code": 200, "request_id": "r",
-                    "version_id": "v-" + uri.rsplit("/", 1)[-1], "body": b""}
+            allow = ("put", root) in self._allow  # REAL policy semantics: role must be granted put on this prefix
+            return {"allow": "allow" if allow else "deny", "http_code": 200 if allow else 403, "request_id": "r",
+                    "version_id": ("v-" + uri.rsplit("/", 1)[-1]) if allow else "", "body": b""}
         if s3op == "PutObjectRetention":
             self._last_retention = payload  # echo it back on GetObjectRetention (proves round-trip)
             return {"allow": "allow", "http_code": 200, "request_id": "r", "version_id": "", "body": b""}
@@ -1267,6 +1267,7 @@ def test_run_live_execution_uses_only_attempt_interface():
     # locked object -> honest CONTROLLED_RESIDUAL
     assert res["matrix_failures"] == [], res["matrix_failures"]
     ol = res["object_lock"]
+    assert ol["unlocked_put_ok"] is True and ol["locked_put_ok"] is True  # created by pitr-writer
     assert ol["iam_delete_ok_on_unlocked"] is True
     assert ol["retention_set"] is True and ol["readback_ok"] is True
     assert ol["locked_delete_refused"] is True and ol["proof"] is True
@@ -1434,3 +1435,31 @@ def test_gate_f_live_policy_template_is_exact_and_scoped():
     # app principal is a Deny of all S3
     app = [s for s in doc["policy"]["Statement"] if s.get("Sid", "").startswith("appDeny")]
     assert app and app[0]["Effect"] == "Deny" and "s3:*" in app[0]["Action"]
+
+
+# ================= code<->policy parity: control objects created by pitr-writer, not retention-admin =========
+def test_gate_f_retention_admin_has_no_putobject():
+    import json as _json
+    doc = _json.loads(GATE_F_POLICY.read_text(encoding="utf-8"))
+    ra = _gate_f_allow(doc, "retentionAdmin")
+    assert "s3:PutObject" not in ra, "retention-admin must NOT have PutObject (least privilege)"
+    pw = _gate_f_allow(doc, "pitrWriter")
+    assert "s3:PutObject" in pw, "pitr-writer must have PutObject (it creates the control objects)"
+
+
+def test_object_lock_controls_created_by_pitr_writer_not_admin():
+    """The Object-Lock probe must PUT its control objects via pitr-writer (policy allows it), and let
+    retention-admin only manage retention/delete — else on real Selectel the creates would 403."""
+    code = _code()
+    seg = code[code.index("Object-Lock Governance proof"):code.index("if not objectlock.get(\"proof\")")]
+    # both control creates go through the writer transport
+    assert 'up = writer.attempt("PutObject"' in seg
+    assert 'pr = writer.attempt("PutObject"' in seg
+    # retention-admin never PutObject here
+    assert 'admin.attempt("PutObject"' not in seg
+    # retention/read-back/delete go through admin
+    assert 'admin.attempt("PutObjectRetention"' in seg
+    assert 'admin.attempt("GetObjectRetention"' in seg
+    assert 'admin.attempt("DeleteObjectVersion"' in seg
+    # proof requires the full chain incl. pitr puts + admin unlocked-delete
+    assert "unlocked_put_ok and iam_delete_ok and locked_put_ok and retention_set" in code

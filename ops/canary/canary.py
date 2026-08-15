@@ -714,29 +714,36 @@ def run_live_execution(manifest, execmani, creds_by_role, transport_factory=None
                     failures.append(f"{role}:{op}:{prefix} expected={expect} actual={allow}")
             if deadline_reached:
                 break
-        # Object-Lock Governance proof (only if deadline not yet reached). Uses retention-admin throughout so a
-        # final DeleteObjectVersion DENY is attributable to Object Lock, NOT to IAM — because we FIRST prove the
-        # same retention-admin can delete an UNLOCKED version (IAM allows delete). GOVERNANCE only; no Bypass.
+        # Object-Lock Governance proof (only if deadline not yet reached). CONTROL OBJECTS ARE CREATED BY
+        # pitr-writer (its policy grants PutObject on canary/<runid>/pitr/*); retention-admin (no PutObject —
+        # least privilege) only manages retention + delete. A final DeleteObjectVersion DENY is attributable to
+        # Object Lock, NOT to IAM — because the SAME retention-admin is first proven able to delete an UNLOCKED
+        # version. GOVERNANCE mode only; no Bypass.
         if not deadline_reached and clock() < deadline_dt:
             admin = transports["retention-admin"]
+            writer = transports["pitr-writer"]
             b = manifest["bucket"]
             retain_until = execmani.get("deadline")  # ≤ now+30min window, already validated
-            # (1) unlocked control: retention-admin must be able to delete a version -> proves IAM allows delete
+            # (1) unlocked control: pitr-writer creates it; retention-admin must be able to delete its version
             uk = f"{manifest['prefix']}pitr/unlocked-{manifest['runid']}"
             amz, ds = _amz_ds(clock())
-            up = admin.attempt("PutObject", f"/{b}/{uk}", method="PUT", payload=b"u", amz_date=amz, date_stamp=ds)
+            up = writer.attempt("PutObject", f"/{b}/{uk}", method="PUT", payload=b"u", amz_date=amz, date_stamp=ds)
             u_ver = up.get("version_id", "")
-            ud = admin.attempt("DeleteObjectVersion", f"/{b}/{uk}", method="DELETE",
-                               query=f"versionId={u_ver}", amz_date=amz, date_stamp=ds)
-            iam_delete_ok = ud.get("allow") == "allow"
-            # (2) locked control: PutObject -> PutObjectRetention(GOVERNANCE, retain-until, signed XML+MD5) -> read-back
+            unlocked_put_ok = up.get("allow") == "allow" and bool(u_ver)
+            iam_delete_ok = False
+            if unlocked_put_ok:
+                ud = admin.attempt("DeleteObjectVersion", f"/{b}/{uk}", method="DELETE",
+                                   query=f"versionId={u_ver}", amz_date=amz, date_stamp=ds)
+                iam_delete_ok = ud.get("allow") == "allow"  # proven deletable (so a later lock-deny != IAM)
+            # (2) locked control: pitr-writer creates it -> retention-admin PutObjectRetention(GOVERNANCE) -> read-back
             lk = f"{manifest['prefix']}pitr/lock-{manifest['runid']}"
             amz, ds = _amz_ds(clock())
-            pr = admin.attempt("PutObject", f"/{b}/{lk}", method="PUT", payload=b"x", amz_date=amz, date_stamp=ds)
+            pr = writer.attempt("PutObject", f"/{b}/{lk}", method="PUT", payload=b"x", amz_date=amz, date_stamp=ds)
             lv = pr.get("version_id", "")
+            locked_put_ok = pr.get("allow") == "allow" and bool(lv)
             retention_set = readback_ok = locked_delete_refused = False
             readback = {}
-            if pr.get("allow") == "allow" and lv:
+            if locked_put_ok:
                 ledger["objects"].append({"key": lk, "version": lv, "locked": True, "retain_until": retain_until})
                 xml = _retention_xml("GOVERNANCE", retain_until)
                 eh = {"content-md5": _content_md5(xml), "content-type": "application/xml"}
@@ -758,11 +765,17 @@ def run_live_execution(manifest, execmani, creds_by_role, transport_factory=None
                         dv = admin.attempt("DeleteObjectVersion", f"/{b}/{lk}", method="DELETE",
                                            query=f"versionId={lv}", amz_date=amz, date_stamp=ds)
                         locked_delete_refused = dv.get("allow") == "deny"
-            objectlock = {"created": pr.get("allow") == "allow", "iam_delete_ok_on_unlocked": iam_delete_ok,
-                          "retention_set": retention_set, "readback_ok": readback_ok, "readback": readback,
+            elif pr.get("allow") == "unknown":
+                # ambiguous locked Put — the object may exist; record it once so cleanup does not lose it
+                ledger["objects"].append({"key": lk, "version": lv, "locked": True, "retain_until": retain_until,
+                                          "ambiguous": True})
+            objectlock = {"unlocked_put_ok": unlocked_put_ok, "iam_delete_ok_on_unlocked": iam_delete_ok,
+                          "locked_put_ok": locked_put_ok, "retention_set": retention_set,
+                          "readback_ok": readback_ok, "readback": readback,
                           "locked_delete_refused": locked_delete_refused, "mode": "GOVERNANCE",
                           "compliance_tested": False,
-                          "proof": bool(iam_delete_ok and retention_set and readback_ok and locked_delete_refused)}
+                          "proof": bool(unlocked_put_ok and iam_delete_ok and locked_put_ok and retention_set
+                                        and readback_ok and locked_delete_refused)}
             if not objectlock.get("proof"):
                 failures.append("object-lock: proof incomplete (need IAM-delete-on-unlocked + retention set + "
                                 "read-back + locked-delete DENY by the same retention-admin)")

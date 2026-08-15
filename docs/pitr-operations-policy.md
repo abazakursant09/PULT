@@ -415,9 +415,10 @@ Launch gate remains **NOT READY**. **MinIO ≠ Selectel.**
 
 A second review found the Object-Lock "proof" was false-positive. Fixed:
 
-- **Real Object-Lock proof** (`run_live_execution`, retention-admin throughout): (1) create an UNLOCKED control
-  object and prove retention-admin **can** DeleteObjectVersion it → IAM allows delete; (2) create a locked
-  control object, `PutObjectRetention` with a **valid signed XML body** (`Mode=GOVERNANCE`, `RetainUntilDate`,
+- **Real Object-Lock proof** (`run_live_execution`): **pitr-writer creates both control objects** (its
+  policy grants PutObject on `canary/<runid>/pitr/*`; retention-admin has NO PutObject — least privilege). (1)
+  pitr-writer PUTs an UNLOCKED control; retention-admin **can** DeleteObjectVersion it → IAM allows delete; (2)
+  pitr-writer PUTs a locked control; retention-admin `PutObjectRetention` with a **valid signed XML body** (`Mode=GOVERNANCE`, `RetainUntilDate`,
   content-md5 + content-type SIGNED) → expect 2xx; (3) `GetObjectRetention` read-back, parse XML fail-closed and
   assert `Mode==GOVERNANCE` + `RetainUntilDate`==sent + versionId==same; (4) THEN the same retention-admin
   attempts DeleteObjectVersion → expect **AccessDenied**. Only `iam_delete_ok ∧ retention_set ∧ readback_ok ∧
