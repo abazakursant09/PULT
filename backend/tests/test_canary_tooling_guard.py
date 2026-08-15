@@ -43,9 +43,9 @@ NEG_MATRIX = CANARY / "negative-matrix.md"
 #   - an independent safety review passed;
 #   - Inal separately approved the runtime change.
 # The digest is a hard-coded literal — never computed at run time, never env-overridable, never auto-updated.
-_CANARY_RUNTIME_SHA256 = "6903fff85da2ffdf2a9ba67dc4ec371b68073e72e1ca84a86709eb024daa91e8"
+_CANARY_RUNTIME_SHA256 = "ba314f7f118fece59c968c820968e9cd07739d4b00e5af75ffe6ab65bce34148"
 # Review marker — bumped with the digest on every reviewed canary.py runtime change (3C2C2-B wires execution gate).
-_CANARY_RUNTIME_REVIEW = "3C2C2B-live-execution-gated"
+_CANARY_RUNTIME_REVIEW = "3C2C2B-prelive-correction"
 
 # Each mutation below, applied to a disposable copy, must make at least one test in this file fail.
 MUTATION_MATRIX = [
@@ -252,9 +252,10 @@ def test_unexpected_allow_or_deny_is_fatal():
 def test_no_insecure_or_public_http():
     code = _code()
     assert "--insecure" not in code and "--no-check-certificate" not in code
-    # any http:// literal in code must be the private allowlist regex, not a public host
+    # any http:// literal in code must be a private host — OR the S3 XML namespace URI (not an endpoint)
     for lit in re.findall(r'http://[^\s"\')]+', code):
-        assert re.search(r"(minio|localhost|127\.0\.0\.1)", lit), f"public http endpoint {lit!r}"
+        assert re.search(r"(minio|localhost|127\.0\.0\.1)", lit) or lit.startswith("http://s3.amazonaws.com/doc/"), \
+            f"public http endpoint {lit!r}"
 
 
 def test_no_production_bucket_or_db():
@@ -850,31 +851,73 @@ def test_pgbackrest_probe_records_get_delete_separately():
     assert "auto-expanded" in probe["note"]
 
 
-def test_objectlock_probe_never_tests_compliance():
+class _CleanupFake:
+    """attempt()-ONLY transport (matches the real SelectelS3Transport surface) for cleanup tests."""
+    def __init__(self, deny_substr=frozenset(), bucket_allow=True):
+        self.deny = deny_substr
+        self.bucket_allow = bucket_allow
+        self.calls = []
+
+    def attempt(self, op, uri, method="GET", query="", payload=b"", amz_date=None, date_stamp=None,
+                extra_headers=None):
+        self.calls.append((op, uri, query))
+        if op == "DeleteBucket":
+            return {"allow": "allow" if self.bucket_allow else "deny", "http_code": 204 if self.bucket_allow else 409}
+        allow = not any(s in (uri + "?" + query) for s in self.deny)
+        return {"allow": "allow" if allow else "deny", "http_code": 204 if allow else 403}
+
+
+def _fixed_clock():
+    import datetime
+    return lambda: datetime.datetime(2026, 8, 15, 12, 0, 0)
+
+
+def test_no_live_compliance_or_bypass():
+    """Live Object-Lock is Governance-only: the live orchestration never issues a BypassGovernanceRetention
+    or Compliance operation (the token may appear only in the policy validator that FORBIDS it)."""
+    code = _code()
+    live_seg = code[code.index("def run_cleanup"):code.index("def main(")]
+    assert "BypassGovernanceRetention" not in live_seg
+    assert "COMPLIANCE" not in live_seg.upper().replace("COMPLIANCE_TESTED", "")
+    assert '"GOVERNANCE"' in live_seg
+
+
+def test_cleanup_uses_attempt_only_and_is_exact():
     c = _load_canary()
-    r = c.objectlock_probe(FakeTransport(set()), {})
-    assert r["compliance_tested"] is False
-    assert r["locked_delete_refused"] is True
+    t = _CleanupFake()
+    ledger = {"objects": [{"key": "canary/x/o", "version": "v1"}],
+              "multipart": [{"key": "canary/x/m", "upload_id": "u1"}], "users": ["k"], "policies": ["p"]}
+    r = c.run_cleanup(t, {"bucket": "pult-canary-x", "prefix": "canary/x/"}, ledger, _fixed_clock())
+    assert r["status"] == "clean" and r["residual"] == []
+    ops = [op for op, _, _ in t.calls]
+    assert "AbortMultipartUpload" in ops and "DeleteObjectVersion" in ops
+    assert "DeleteBucket" not in ops  # Variant 1: bucket deletion is MANUAL, never automatic
+    # exact only: DeleteObjectVersion carries an explicit versionId, no recursive/prefix flags
+    assert any("versionId=v1" in q for op, _, q in t.calls if op == "DeleteObjectVersion")
+    assert r["manual_cleanup"]["bucket"] == "pult-canary-x"  # bucket/keys/policies recorded for manual F6
 
 
-def test_cleanup_exact_only_and_revokes_keys():
+def test_cleanup_locked_object_is_controlled_residual_not_success():
     c = _load_canary()
-    t = FakeTransport(set())
-    ledger = {"users": ["cu_writer_x"], "objects": [{"key": "canary/x/o", "version": "v1"}],
-              "multipart": [{"key": "canary/x/m", "upload_id": "u1"}]}
-    r = c.run_cleanup(t, {"bucket": "pult-canary-x", "prefix": "canary/x/"}, ledger)
-    assert r["status"] == "clean" and r["bucket_removed"] is True and r["failures"] == []
-    assert "cu_writer_x" in r["revoked_users"]
+    t = _CleanupFake(deny_substr={"lock-"})  # DeleteObjectVersion on the locked object would be denied anyway
+    ledger = {"objects": [{"key": "canary/x/lock-x", "version": "vL", "locked": True,
+                           "retain_until": "2026-08-15T12:15:00Z"}],
+              "multipart": [], "users": ["k"], "policies": ["p"]}
+    r = c.run_cleanup(t, {"bucket": "pult-canary-x", "prefix": "canary/x/"}, ledger, _fixed_clock())
+    assert r["status"] == "controlled-residual"
+    assert r["locked_residual"] and r["locked_residual"][0]["retain_until"] == "2026-08-15T12:15:00Z"
+    # the locked object is NEVER attempted for deletion before expiry
+    assert not any("lock-x" in u for op, u, _ in t.calls if op == "DeleteObjectVersion")
 
 
-def test_cleanup_locked_residual_is_controlled_not_success():
+def test_cleanup_unknown_residual_is_failed_not_success():
     c = _load_canary()
-    t = FakeTransport(set())
-    t._locked_residual = {"key": "canary/x/locked", "retention_until": "later", "max_cost": "small"}
-    r = c.run_cleanup(t, {"bucket": "pult-canary-x", "prefix": "canary/x/"},
-                      {"users": ["k"], "objects": [], "multipart": []})
-    assert r["status"] == "controlled-residual" and r["bucket_removed"] is False
-    assert "k" in r["revoked_users"]  # keys revoked even with a locked residual
+    # a created NON-locked object we could NOT delete -> unknown residual -> FAILED, never clean
+    t = _CleanupFake(deny_substr={"o-stuck"})
+    ledger = {"objects": [{"key": "canary/x/o-stuck", "version": "v9"}], "multipart": [],
+              "users": ["k"], "policies": ["p"]}
+    r = c.run_cleanup(t, {"bucket": "pult-canary-x", "prefix": "canary/x/"}, ledger, _fixed_clock())
+    assert r["status"] == "failed"
 
 
 def test_redact_masks_secrets():
@@ -1084,19 +1127,29 @@ def test_ordinary_live_still_defers_without_execute_flag():
         assert c.live(a, env={c.LIVE_GATE_ENV: c.LIVE_GATE_VALUE}) == 5  # deferral, no network
 
 
+def _clock_at(y=2026, mo=8, d=15, h=12, mi=0, s=0):
+    import datetime
+    return lambda: datetime.datetime(y, mo, d, h, mi, s)
+
+
 def test_execute_gate_fails_closed_before_network():
     c = _load_canary()
     E = {c.LIVE_GATE_ENV: c.LIVE_GATE_VALUE}
+    clk = _clock_at()  # "now" = 2026-08-15T12:00:00; good deadline is 12:00 (+? use future in _exec_args)
+    good_deadline = "2026-08-15T12:10:00Z"
     wrong_conf = "0123456789abcdef/ru-7/https://s3.ru-7.storage.selcloud.ru/pult-canary-0123456789ab/0123456789ab"
     bad = {
-        "no execute flag": _exec_args(execute_live=False),
-        "wrong region": _exec_args(region="ru-7", endpoint="https://s3.ru-7.storage.selcloud.ru", confirm=wrong_conf),
-        "bad ack": _exec_args(ack="nope"),
-        "no ack": _exec_args(ack=None),
-        "oversize": _exec_args(max_object_bytes=10 * 1024 * 1024 + 1),
-        "zero size": _exec_args(max_object_bytes=0),
+        "no execute flag": _exec_args(execute_live=False, deadline=good_deadline),
+        "wrong region": _exec_args(region="ru-7", endpoint="https://s3.ru-7.storage.selcloud.ru",
+                                   confirm=wrong_conf, deadline=good_deadline),
+        "bad ack": _exec_args(ack="nope", deadline=good_deadline),
+        "no ack": _exec_args(ack=None, deadline=good_deadline),
+        "oversize": _exec_args(max_object_bytes=10 * 1024 * 1024 + 1, deadline=good_deadline),
+        "zero size": _exec_args(max_object_bytes=0, deadline=good_deadline),
         "bad deadline": _exec_args(deadline="soon"),
         "no deadline": _exec_args(deadline=None),
+        "past deadline": _exec_args(deadline="2020-01-01T00:00:00Z"),
+        "too-far deadline": _exec_args(deadline="2026-08-15T13:00:00Z"),  # >30 min window
     }
     with _NoNetwork():
         for name, a in bad.items():
@@ -1104,14 +1157,13 @@ def test_execute_gate_fails_closed_before_network():
             assert rc in (4, 5), f"{name}: expected fail-closed (4/5), got {rc}"
             if name != "no execute flag":
                 try:
-                    c.execute_validate(a, c.live_validate(a, E))
+                    c.execute_validate(a, c.live_validate(a, E), clk)
                     raise AssertionError(f"{name} should have raised")
                 except c.LiveGateError:
                     pass
-    good = _exec_args()
-    m = c.live_validate(good, E)
-    em = c.execute_validate(good, m)
-    assert em["region"] == "ru-3" and em["max_buckets"] == 1
+    good = _exec_args(deadline=good_deadline)
+    em = c.execute_validate(good, c.live_validate(good, E), clk)
+    assert em["region"] == "ru-3" and em["max_buckets"] == 1 and em["deadline_dt"] is not None
 
 
 def test_masked_credentials_memory_only(capsys):
@@ -1128,63 +1180,56 @@ def test_masked_credentials_memory_only(capsys):
     out = capsys.readouterr()
     assert "SECRETVALUE_zzz" not in (out.out + out.err)
     code = _code()
-    seg = code[code.index("def read_masked_credentials"):code.index("def run_live_execution")]
+    seg = code[code.index("def read_masked_credentials"):code.index("_OP_TO_S3")]
     assert "getpass" in seg and "input(" not in seg and "open(" not in seg
 
 
 class _FakeLiveTransport:
-    """Injected per-role transport for offline run_live_execution tests. Never touches the network."""
+    """attempt()-ONLY per-role transport (SAME surface as the real SelectelS3Transport) for offline
+    run_live_execution tests. No phantom cleanup methods -> proves run_live_execution/run_cleanup never call
+    anything the real transport lacks. Never touches the network."""
 
     _S3_TO_OP = {"PutObject": "put", "GetObject": "get", "ListBucket": "list", "DeleteObject": "delete"}
 
     def __init__(self, manifest, creds, service="s3", allow_ops=frozenset()):
-        self._allow = allow_ops  # set of (op, prefix-root) that are ALLOW for this role
-        self.locked = None
+        self._allow = allow_ops  # set of (op, prefix-root) that are ALLOW for this role's matrix
         self.__secret = creds["secret_key"]
 
-    def attempt(self, s3op, uri, method="GET", query="", payload=b"", amz_date=None, date_stamp=None):
-        op = self._S3_TO_OP[s3op]
+    def attempt(self, s3op, uri, method="GET", query="", payload=b"", amz_date=None, date_stamp=None,
+                extra_headers=None):
         hay = uri + "?" + query
         root = "logical/" if "logical/" in hay else ("pitr/" if "pitr/" in hay else "")
+        if s3op == "PutObject":
+            allow = ("put", root) in self._allow  # REAL policy semantics: role must be granted put on this prefix
+            return {"allow": "allow" if allow else "deny", "http_code": 200 if allow else 403, "request_id": "r",
+                    "version_id": ("v-" + uri.rsplit("/", 1)[-1]) if allow else "", "body": b""}
+        if s3op == "PutObjectRetention":
+            self._last_retention = payload  # echo it back on GetObjectRetention (proves round-trip)
+            return {"allow": "allow", "http_code": 200, "request_id": "r", "version_id": "", "body": b""}
+        if s3op == "GetObjectRetention":
+            return {"allow": "allow", "http_code": 200, "request_id": "r", "version_id": "",
+                    "body": getattr(self, "_last_retention", b"")}
+        if s3op == "DeleteObjectVersion":
+            allow = "deny" if "lock-" in uri else "allow"  # locked object refused; unlocked/others deletable
+            return {"allow": allow, "http_code": 403 if allow == "deny" else 204, "request_id": "r",
+                    "version_id": "", "body": b""}
+        if s3op == "AbortMultipartUpload":
+            return {"allow": "allow", "http_code": 204, "request_id": "r", "version_id": "", "body": b""}
+        op = self._S3_TO_OP.get(s3op, "?")
         allow = "allow" if (op, root) in self._allow else "deny"
-        return {"operation": s3op, "http_code": 200 if allow == "allow" else 403,
-                "request_id": "r1", "allow": allow}
-
-    def delete_user(self, u):
-        return True
-
-    def delete_object(self, key, version=None):
-        return True
-
-    def abort_multipart(self, key, uid):
-        return True
-
-    def read_back_unknown(self, bucket, prefix):
-        return []
-
-    def locked_residual(self):
-        return self.locked
-
-    def remove_bucket_if_empty(self, bucket):
-        return True
+        return {"allow": allow, "http_code": 200 if allow == "allow" else 403, "request_id": "r",
+                "version_id": "", "body": b""}
 
 
-def test_run_live_execution_requires_injected_clock():
-    c = _load_canary()
-    m = c.live_validate(_exec_args(), {c.LIVE_GATE_ENV: c.LIVE_GATE_VALUE})
-    creds = {r: {"access_key": "A", "secret_key": "S"} for r in c._CANARY_ROLES}
-    try:
-        c.run_live_execution(m, {}, creds, transport_factory=_FakeLiveTransport, clock=None)
-        raise AssertionError("must require injected clock")
-    except c.LiveGateError:
-        pass
+def _execmani(deadline_h=12, deadline_mi=10):
+    import datetime
+    return {"deadline": "2026-08-15T12:10:00Z",
+            "deadline_dt": datetime.datetime(2026, 8, 15, deadline_h, deadline_mi, 0),
+            "max_object_bytes": 1048576, "max_buckets": 1}
 
 
-def test_run_live_execution_offline_matrix_and_cleanup():
-    c = _load_canary()
-    m = c.live_validate(_exec_args(), {c.LIVE_GATE_ENV: c.LIVE_GATE_VALUE})
-    creds = {r: {"access_key": "A", "secret_key": "Sx"} for r in c._CANARY_ROLES}
-    allow = {
+def _matrix_allow(c):
+    return {
         "logical-writer": {("put", "logical/"), ("list", "logical/")},
         "pitr-writer": {("put", "pitr/"), ("get", "pitr/"), ("list", "pitr/")},
         "restore-reader": {("list", "pitr/"), ("get", "pitr/")},
@@ -1192,36 +1237,74 @@ def test_run_live_execution_offline_matrix_and_cleanup():
         "app-deny": set(),
     }
 
+
+def test_run_live_execution_requires_injected_clock():
+    c = _load_canary()
+    m = c.live_validate(_exec_args(), {c.LIVE_GATE_ENV: c.LIVE_GATE_VALUE})
+    creds = {r: {"access_key": "A", "secret_key": "S"} for r in c._CANARY_ROLES}
+    try:
+        c.run_live_execution(m, _execmani(), creds, transport_factory=_FakeLiveTransport, clock=None)
+        raise AssertionError("must require injected clock")
+    except c.LiveGateError:
+        pass
+
+
+def test_run_live_execution_uses_only_attempt_interface():
+    """Contract: run_live_execution + run_cleanup must call ONLY attempt() on the transport (real interface),
+    never delete_user/delete_object/remove_bucket_if_empty etc — else AttributeError on the real transport."""
+    c = _load_canary()
+    m = c.live_validate(_exec_args(), {c.LIVE_GATE_ENV: c.LIVE_GATE_VALUE})
+    creds = {r: {"access_key": "A", "secret_key": "Sx"} for r in c._CANARY_ROLES}
+    allow = _matrix_allow(c)
+
     def factory(manifest, cr, service="s3"):
         return _FakeLiveTransport(manifest, cr, service, allow_ops=factory.map.pop(0))
 
     factory.map = [allow[r] for r in c._CANARY_ROLES]
     with _NoNetwork():
-        res = c.run_live_execution(m, {}, creds, transport_factory=factory,
-                                   clock=lambda: ("20260101T000000Z", "20260101"))
-    assert res["status"] == "ok", res["matrix_failures"]
-    assert res["cleanup"]["status"] == "clean"
+        res = c.run_live_execution(m, _execmani(), creds, transport_factory=factory, clock=_clock_at())
+    # matrix clean; REAL object-lock proof (IAM-delete-on-unlocked + retention set + read-back + locked DENY);
+    # locked object -> honest CONTROLLED_RESIDUAL
+    assert res["matrix_failures"] == [], res["matrix_failures"]
+    ol = res["object_lock"]
+    assert ol["unlocked_put_ok"] is True and ol["locked_put_ok"] is True  # created by pitr-writer
+    assert ol["iam_delete_ok_on_unlocked"] is True
+    assert ol["retention_set"] is True and ol["readback_ok"] is True
+    assert ol["locked_delete_refused"] is True and ol["proof"] is True
+    assert ol["compliance_tested"] is False
+    assert res["status"] == "CONTROLLED_RESIDUAL"
+    assert res["cleanup"]["status"] == "controlled-residual"
+    assert res["pgbackrest_closure"].startswith("NOT-ATTEMPTED")
     assert res["manual_revoke_required"]["keys"] == list(c._CANARY_ROLES)
 
 
-def test_run_live_execution_controlled_residual_on_locked():
+def test_run_live_execution_matrix_failure_is_FAILED():
     c = _load_canary()
     m = c.live_validate(_exec_args(), {c.LIVE_GATE_ENV: c.LIVE_GATE_VALUE})
     creds = {r: {"access_key": "A", "secret_key": "Sx"} for r in c._CANARY_ROLES}
+    allow = _matrix_allow(c)
+    allow["app-deny"] = {("put", "pitr/")}  # app must be denied all -> unexpected allow -> FAILED
 
     def factory(manifest, cr, service="s3"):
-        t = _FakeLiveTransport(manifest, cr, service, allow_ops=set())
-        if factory.n == 3:
-            t.locked = {"key": "canary/x/lock", "retention_until": "later", "max_cost": "small"}
-        factory.n += 1
-        return t
+        return _FakeLiveTransport(manifest, cr, service, allow_ops=factory.map.pop(0))
 
-    factory.n = 0
+    factory.map = [allow[r] for r in c._CANARY_ROLES]
     with _NoNetwork():
-        res = c.run_live_execution(m, {}, creds, transport_factory=factory,
-                                   clock=lambda: ("20260101T000000Z", "20260101"))
-    assert res["status"] == "CONTROLLED_RESIDUAL"
-    assert res["cleanup"]["status"] == "controlled-residual"
+        res = c.run_live_execution(m, _execmani(), creds, transport_factory=factory, clock=_clock_at())
+    assert res["status"] == "FAILED" and any("app:put" in f for f in res["matrix_failures"])
+
+
+def test_run_live_execution_deadline_expiry_stops_ops_but_cleans_up():
+    c = _load_canary()
+    m = c.live_validate(_exec_args(), {c.LIVE_GATE_ENV: c.LIVE_GATE_VALUE})
+    creds = {r: {"access_key": "A", "secret_key": "Sx"} for r in c._CANARY_ROLES}
+    # clock is already PAST the deadline -> no matrix op runs, but cleanup finally still executes
+    with _NoNetwork():
+        res = c.run_live_execution(m, _execmani(), creds, transport_factory=_FakeLiveTransport,
+                                   clock=_clock_at(h=12, mi=30))
+    assert res["deadline_reached"] is True
+    assert res["rows"] == []
+    assert "cleanup" in res
 
 
 def test_execute_gate_constants_and_order():
@@ -1238,8 +1321,145 @@ _EXEC_MUTATIONS = [
     "allow object > 10 MiB", "drop the deadline check", "read credentials before execute_validate",
     "credentials via argv", "masked reader writes to disk / uses input()", "clock not injected",
     "cleanup not in finally", "controlled-residual reported as success", "change runtime without pin/marker bump",
+    "accept a past deadline", "accept a too-far deadline", "cleanup calls a non-attempt phantom method",
+    "skip the deadline per-op check", "skip the Object-Lock probe", "claim pgBackRest closure was proven live",
+    "use Compliance / BypassGovernanceRetention live", "switch addressing to vHosted (host mismatch)",
 ]
 
 
 def test_exec_mutation_matrix_declared():
-    assert len(_EXEC_MUTATIONS) >= 12
+    assert len(_EXEC_MUTATIONS) >= 20
+
+
+# ================= 3C2C2-B PRE-LIVE CORRECTION guards (addressing / deadline / launcher) =================
+def test_addressing_is_path_style_consistent():
+    """Transport is Path-Style: host = region endpoint host, URL = endpoint + /bucket/key (NOT vhost).
+    SigV4 host header must match. (Gate C checklist must therefore use Path-Style, not vHosted.)"""
+    code = _code()
+    assert 'self._host = endpoint.split("://", 1)[1]' in code
+    assert 'url = f"{self._endpoint}{canonical_uri}"' in code
+    # canonical_uri for objects is /bucket/key (path-style) — the live orchestration builds it that way
+    assert 'f"/{manifest' in code and "bucket']}/{key}" in code
+
+
+def test_sigv4_path_style_delete_version_deterministic():
+    """SigV4 over a path-style DeleteObjectVersion (with versionId query) is deterministic and matches an
+    independent recompute (byte-correct-vs-live still UNKNOWN until Gate F)."""
+    c = _load_canary()
+    import hashlib
+    import hmac
+    m = {"endpoint": "https://s3.ru-3.storage.selcloud.ru", "region": "ru-3", "bucket": "b",
+         "prefix": "canary/x/", "runid": "x", "project": "p"}
+    t = c.SelectelS3Transport(m, {"access_key": "AKID", "secret_key": "sk"}, http_client=object())
+    hdrs = t._sign("DELETE", "DeleteObjectVersion", "/b/canary/x/pitr/lock-x", "versionId=v1",
+                   hashlib.sha256(b"").hexdigest(), "20260815T120000Z", "20260815")
+    # independent reconstruction
+    host = "s3.ru-3.storage.selcloud.ru"
+    H = {"host": host, "x-amz-content-sha256": hashlib.sha256(b"").hexdigest(), "x-amz-date": "20260815T120000Z"}
+    sh = ";".join(sorted(H))
+    ch = "".join(f"{k}:{H[k]}\n" for k in sorted(H))
+    creq = "\n".join(["DELETE", "/b/canary/x/pitr/lock-x", "versionId=v1", ch, sh, H["x-amz-content-sha256"]])
+    scope = "20260815/ru-3/s3/aws4_request"
+    sts = "\n".join(["AWS4-HMAC-SHA256", "20260815T120000Z", scope, hashlib.sha256(creq.encode()).hexdigest()])
+    key = c._sigv4_signing_key("sk", "20260815", "ru-3", "s3")
+    sig = hmac.new(key, sts.encode(), hashlib.sha256).hexdigest()
+    assert hdrs["Authorization"].endswith("Signature=" + sig)
+
+
+def test_windows_launcher_documented_without_secret_leak():
+    """docs must show a Windows/PowerShell launch that never puts secrets in argv/env — only the non-secret
+    acknowledgement via $env:, secrets via masked getpass prompts."""
+    doc = POLICY_DOC.read_text(encoding="utf-8")
+    assert "PowerShell" in doc or "$env:PULT_SELECTEL_CANARY_LIVE" in doc
+    # no access/secret key on the documented command line
+    assert "--secret" not in doc and "--access-key" not in doc
+    # the only env exported is the non-secret acknowledgement
+    for line in doc.splitlines():
+        if "$env:" in line:
+            assert "PULT_SELECTEL_CANARY_LIVE" in line, f"only the non-secret ack may be exported: {line}"
+
+
+def test_execute_validate_deadline_window_enforced():
+    c = _load_canary()
+    code = _code()
+    assert "EXECUTE_MAX_DEADLINE_WINDOW_SEC" in code
+    assert "now < deadline <= now + datetime.timedelta" in code
+    # per-op deadline check inside the matrix loop
+    assert "if clock() >= deadline_dt:" in code and "deadline_reached = True" in code
+
+
+# ================= Gate-F live bucket-policy template guard =================
+GATE_F_POLICY = CANARY / "gate-f-live-bucket-policy.json"
+
+
+def _gate_f_allow(pol, sid_role):
+    for s in pol["policy"]["Statement"]:
+        if s.get("Sid", "").startswith(sid_role) and s["Effect"] == "Allow":
+            a = s.get("Action", [])
+            return set([a] if isinstance(a, str) else a)
+    return set()
+
+
+def test_gate_f_live_policy_template_is_exact_and_scoped():
+    import json as _json
+    doc = _json.loads(GATE_F_POLICY.read_text(encoding="utf-8"))
+    assert doc["_canary"]["marker"] == "NOT_FOR_ROUTINE_BACKUP"
+    blob = _json.dumps(doc["policy"])
+    # placeholders only — no real bucket / real UID / secrets
+    assert "<BUCKET>" in blob and "<RUNID>" in blob
+    assert "pult-canary-" not in blob or "<BUCKET>" in blob  # bucket name is a placeholder, not concrete
+    for m in re.findall(r"arn:aws:s3:::([^/\"]+)", blob):
+        assert m == "<BUCKET>", f"non-placeholder bucket {m!r}"
+    # every ALLOW object resource is scoped to canary/<RUNID>/... (the app Deny may use the bucket-wide /*)
+    for s in doc["policy"]["Statement"]:
+        if s["Effect"] != "Allow":
+            continue
+        res = s.get("Resource", [])
+        for r in ([res] if isinstance(res, str) else res):
+            obj = re.match(r"arn:aws:s3:::<BUCKET>/(.+)", r)
+            if obj:
+                assert obj.group(1).startswith("canary/<RUNID>/"), f"unscoped allow resource: {r}"
+    # role closures
+    lw = _gate_f_allow(doc, "logicalWriter")
+    assert "s3:PutObject" in lw and "s3:GetObject" not in lw and "s3:DeleteObject" not in lw
+    pw = _gate_f_allow(doc, "pitrWriter")
+    assert "s3:PutObject" in pw and "s3:GetObject" in pw and "s3:DeleteObject" not in pw
+    rr = _gate_f_allow(doc, "restoreReader")
+    assert rr and "s3:PutObject" not in rr and "s3:DeleteObject" not in rr
+    ra = _gate_f_allow(doc, "retentionAdmin")
+    assert {"s3:PutObjectRetention", "s3:DeleteObject", "s3:DeleteObjectVersion"} <= ra
+    # retention-admin cleanup rights but NO bypass / NO Compliance / NO bucket delete / NO lifecycle
+    assert "s3:BypassGovernanceRetention" not in blob
+    assert "s3:DeleteBucket" not in blob
+    assert "s3:PutLifecycleConfiguration" not in blob and "s3:PutBucketObjectLockConfiguration" not in ra
+    # app principal is a Deny of all S3
+    app = [s for s in doc["policy"]["Statement"] if s.get("Sid", "").startswith("appDeny")]
+    assert app and app[0]["Effect"] == "Deny" and "s3:*" in app[0]["Action"]
+
+
+# ================= code<->policy parity: control objects created by pitr-writer, not retention-admin =========
+def test_gate_f_retention_admin_has_no_putobject():
+    import json as _json
+    doc = _json.loads(GATE_F_POLICY.read_text(encoding="utf-8"))
+    ra = _gate_f_allow(doc, "retentionAdmin")
+    assert "s3:PutObject" not in ra, "retention-admin must NOT have PutObject (least privilege)"
+    pw = _gate_f_allow(doc, "pitrWriter")
+    assert "s3:PutObject" in pw, "pitr-writer must have PutObject (it creates the control objects)"
+
+
+def test_object_lock_controls_created_by_pitr_writer_not_admin():
+    """The Object-Lock probe must PUT its control objects via pitr-writer (policy allows it), and let
+    retention-admin only manage retention/delete — else on real Selectel the creates would 403."""
+    code = _code()
+    seg = code[code.index("Object-Lock Governance proof"):code.index("if not objectlock.get(\"proof\")")]
+    # both control creates go through the writer transport
+    assert 'up = writer.attempt("PutObject"' in seg
+    assert 'pr = writer.attempt("PutObject"' in seg
+    # retention-admin never PutObject here
+    assert 'admin.attempt("PutObject"' not in seg
+    # retention/read-back/delete go through admin
+    assert 'admin.attempt("PutObjectRetention"' in seg
+    assert 'admin.attempt("GetObjectRetention"' in seg
+    assert 'admin.attempt("DeleteObjectVersion"' in seg
+    # proof requires the full chain incl. pitr puts + admin unlocked-delete
+    assert "unlocked_put_ok and iam_delete_ok and locked_put_ok and retention_set" in code

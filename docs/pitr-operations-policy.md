@@ -368,3 +368,72 @@ network is touched in this PR**, and CI never runs it.
 
 Gate-F actual run (real keys on an isolated machine, disposable ru-3 canary) remains a separate Inal step.
 Launch gate **NOT READY**. **MinIO ≠ Selectel.**
+
+## §19 Pre-live correction (3C2C2-B) — honest live path
+
+An independent pre-live review found real defects in the first live wiring; this correction fixes them. No
+Selectel resource is created; proven offline (attempt()-only FakeTransport + socket network-trap).
+
+- **Cleanup uses only `attempt()`** (the real transport's sole method). `run_cleanup(admin_transport, manifest,
+  ledger, clock)` issues exact `AbortMultipartUpload` / `DeleteObjectVersion` (with explicit versionId) / final
+  `DeleteBucket`. Bucket deletion is the fail-closed read-back: S3 refuses to delete a non-empty bucket, so a
+  non-2xx `DeleteBucket` ⇒ unknown residual ⇒ `CONTROLLED_RESIDUAL`. No phantom `delete_user`/`remove_bucket`
+  methods (the earlier code would have raised AttributeError in `finally`). IAM keys/users/policies are
+  **control-plane = MANUAL**, only RECORDED in `manual_revoke_required`; the canary never revokes them.
+- **Object Lock IS reached live**: `run_live_execution` creates exactly one synthetic object, applies
+  `PutObjectRetention` **Governance** with retain-until = deadline (≤15 min), and proves a writer's
+  `DeleteObjectVersion` is **DENIED** while locked. **Compliance and BypassGovernanceRetention are never used.**
+  Because the locked object cannot be deleted before expiry, the honest live outcome is **CONTROLLED_RESIDUAL**
+  until expiry — a follow-up exact cleanup deletes it after retain-until. Never reported as a false clean.
+- **pgBackRest live closure is NOT attempted here** (`pgbackrest_closure = "NOT-ATTEMPTED-live"`). It needs a real
+  pgBackRest binary run and is a separate later step. The offline `pgbackrest_probe` is a design helper only.
+- **Deadline** is enforced with an injected clock: `execute_validate` requires `now < deadline ≤ now + 30 min`
+  (past / too-far / malformed → exit 4 pre-network); `run_live_execution` checks `clock() < deadline_dt` before
+  every operation and STOPs remaining ops after expiry, but cleanup still runs in `finally`.
+- **Addressing = Path-Style** (host = `s3.ru-3.storage.selcloud.ru`, URL = endpoint + `/bucket/key`), matching
+  the SigV4 host header and pgBackRest `uri-style=path`. **Gate C must therefore use Path-Style, not vHosted —
+  a checklist change requiring Inal's confirmation.**
+- **Runtime freeze** re-pinned; marker `3C2C2B-prelive-correction`.
+
+### Windows launcher (Gate F, isolated machine — PowerShell)
+Secrets are NEVER in argv/env/file/history — only the non-secret acknowledgement is exported; the 10 key values
+are entered at masked `getpass` prompts into process memory:
+```
+# PowerShell, isolated machine, clean session (history off):
+$env:PULT_SELECTEL_CANARY_LIVE = 'YES_I_UNDERSTAND'
+python ops\canary\canary.py live --execute-live `
+  --project-id <PROJECT_ID> --region ru-3 `
+  --endpoint https://s3.ru-3.storage.selcloud.ru `
+  --bucket pult-canary-<runid> --run-id <runid> `
+  --confirm "<PROJECT_ID>/ru-3/https://s3.ru-3.storage.selcloud.ru/pult-canary-<runid>/<runid>" `
+  --ack PULT-CANARY-EXECUTE-<runid> --max-object-bytes 1048576 --deadline <UTC now+15min>
+Remove-Item Env:\PULT_SELECTEL_CANARY_LIVE   # clear the ack env afterwards
+```
+Launch gate remains **NOT READY**. **MinIO ≠ Selectel.**
+
+## §20 Pre-live correction-2 — real Object-Lock proof + cleanup contract
+
+A second review found the Object-Lock "proof" was false-positive. Fixed:
+
+- **Real Object-Lock proof** (`run_live_execution`): **pitr-writer creates both control objects** (its
+  policy grants PutObject on `canary/<runid>/pitr/*`; retention-admin has NO PutObject — least privilege). (1)
+  pitr-writer PUTs an UNLOCKED control; retention-admin **can** DeleteObjectVersion it → IAM allows delete; (2)
+  pitr-writer PUTs a locked control; retention-admin `PutObjectRetention` with a **valid signed XML body** (`Mode=GOVERNANCE`, `RetainUntilDate`,
+  content-md5 + content-type SIGNED) → expect 2xx; (3) `GetObjectRetention` read-back, parse XML fail-closed and
+  assert `Mode==GOVERNANCE` + `RetainUntilDate`==sent + versionId==same; (4) THEN the same retention-admin
+  attempts DeleteObjectVersion → expect **AccessDenied**. Only `iam_delete_ok ∧ retention_set ∧ readback_ok ∧
+  locked_delete_refused` counts as proof. The pitr-writer's DeleteObjectVersion deny stays in the IAM role
+  matrix — it is **not** used as Object-Lock proof (it is IAM-denied regardless). No Compliance, no Bypass.
+- **Cleanup contract = Variant 1 (manual post-expiry)**: `run_cleanup` deletes ONLY the exact unlocked object
+  versions and multipart uploads it created, via `attempt()` only. It does **NOT** call DeleteBucket (removed —
+  retention-admin has no `s3:DeleteBucket`) and never attempts to delete the locked object before expiry. The run
+  ends **CONTROLLED_RESIDUAL** with a secret-free ledger (bucket/key/versionId/retainUntil). Bucket + keys/users/
+  policies + project + the post-expiry locked-object delete are **MANUAL (Gate F6)**, only recorded.
+- **Exact Gate-F live bucket policy** is versioned at `ops/canary/gate-f-live-bucket-policy.json` (placeholders
+  `<BUCKET>`/`<RUNID>`/`<UID-*>`), marker `NOT_FOR_ROUTINE_BACKUP`, retention-admin scoped to `canary/<RUNID>/*`
+  with `PutObjectRetention`+`DeleteObject`+`DeleteObjectVersion` but **no BypassGovernanceRetention, no
+  DeleteBucket, no Compliance, no lifecycle**; app = Deny s3:*. Guard-checked.
+- **Path-Style stays PROPOSED** — Gate C change to Path-Style still needs Inal's explicit approval.
+- **Runtime freeze** re-pinned; marker `3C2C2B-prelive-correction`.
+
+Launch gate remains **NOT READY**. **MinIO ≠ Selectel.**
