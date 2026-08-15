@@ -410,3 +410,29 @@ python ops\canary\canary.py live --execute-live `
 Remove-Item Env:\PULT_SELECTEL_CANARY_LIVE   # clear the ack env afterwards
 ```
 Launch gate remains **NOT READY**. **MinIO ≠ Selectel.**
+
+## §20 Pre-live correction-2 — real Object-Lock proof + cleanup contract
+
+A second review found the Object-Lock "proof" was false-positive. Fixed:
+
+- **Real Object-Lock proof** (`run_live_execution`, retention-admin throughout): (1) create an UNLOCKED control
+  object and prove retention-admin **can** DeleteObjectVersion it → IAM allows delete; (2) create a locked
+  control object, `PutObjectRetention` with a **valid signed XML body** (`Mode=GOVERNANCE`, `RetainUntilDate`,
+  content-md5 + content-type SIGNED) → expect 2xx; (3) `GetObjectRetention` read-back, parse XML fail-closed and
+  assert `Mode==GOVERNANCE` + `RetainUntilDate`==sent + versionId==same; (4) THEN the same retention-admin
+  attempts DeleteObjectVersion → expect **AccessDenied**. Only `iam_delete_ok ∧ retention_set ∧ readback_ok ∧
+  locked_delete_refused` counts as proof. The pitr-writer's DeleteObjectVersion deny stays in the IAM role
+  matrix — it is **not** used as Object-Lock proof (it is IAM-denied regardless). No Compliance, no Bypass.
+- **Cleanup contract = Variant 1 (manual post-expiry)**: `run_cleanup` deletes ONLY the exact unlocked object
+  versions and multipart uploads it created, via `attempt()` only. It does **NOT** call DeleteBucket (removed —
+  retention-admin has no `s3:DeleteBucket`) and never attempts to delete the locked object before expiry. The run
+  ends **CONTROLLED_RESIDUAL** with a secret-free ledger (bucket/key/versionId/retainUntil). Bucket + keys/users/
+  policies + project + the post-expiry locked-object delete are **MANUAL (Gate F6)**, only recorded.
+- **Exact Gate-F live bucket policy** is versioned at `ops/canary/gate-f-live-bucket-policy.json` (placeholders
+  `<BUCKET>`/`<RUNID>`/`<UID-*>`), marker `NOT_FOR_ROUTINE_BACKUP`, retention-admin scoped to `canary/<RUNID>/*`
+  with `PutObjectRetention`+`DeleteObject`+`DeleteObjectVersion` but **no BypassGovernanceRetention, no
+  DeleteBucket, no Compliance, no lifecycle**; app = Deny s3:*. Guard-checked.
+- **Path-Style stays PROPOSED** — Gate C change to Path-Style still needs Inal's explicit approval.
+- **Runtime freeze** re-pinned; marker `3C2C2B-prelive-correction`.
+
+Launch gate remains **NOT READY**. **MinIO ≠ Selectel.**

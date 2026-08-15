@@ -412,8 +412,10 @@ class SelectelS3Transport:
         return httpx.Client(verify=True, follow_redirects=False, trust_env=False,
                             timeout=httpx.Timeout(LIVE_READ_TIMEOUT, connect=LIVE_CONNECT_TIMEOUT))
 
-    def _sign(self, method, op, canonical_uri, query, payload_hash, amz_date, date_stamp):
+    def _sign(self, method, op, canonical_uri, query, payload_hash, amz_date, date_stamp, extra_headers=None):
         headers = {"host": self._host, "x-amz-content-sha256": payload_hash, "x-amz-date": amz_date}
+        for k, v in (extra_headers or {}).items():
+            headers[k.lower()] = v  # e.g. content-md5, content-type — signed so the write is bound to its body
         signed_headers = ";".join(sorted(headers))
         canonical_headers = "".join(f"{k}:{headers[k]}\n" for k in sorted(headers))
         canonical_request = "\n".join([method, canonical_uri, query, canonical_headers,
@@ -433,10 +435,11 @@ class SelectelS3Transport:
             return True
         raise LiveGateError(f"unclassified S3 op {op!r} -> treated as mutating, refuse")
 
-    def attempt(self, op, canonical_uri, method="GET", query="", payload=b"", amz_date=None, date_stamp=None):
+    def attempt(self, op, canonical_uri, method="GET", query="", payload=b"", amz_date=None, date_stamp=None,
+                extra_headers=None):
         """Perform ONE signed request. Mutations are never auto-retried; reads retry up to LIVE_READ_RETRIES.
-
-        Returns a normalized, secret-free result. Any ambiguity -> UNKNOWN (no guessing, no retry of writes)."""
+        `extra_headers` (e.g. content-md5, content-type) are SIGNED. Returns a normalized, secret-free result
+        incl. the response body for read-backs. Any ambiguity -> UNKNOWN (no guessing, no retry of writes)."""
         import hashlib
         mutating = self.is_mutating(op)
         if amz_date is None or date_stamp is None:
@@ -447,15 +450,16 @@ class SelectelS3Transport:
         attempts = 1 if mutating else (1 + LIVE_READ_RETRIES)
         last = None
         for _ in range(attempts):
-            headers = self._sign(method, op, canonical_uri, query, payload_hash, amz_date, date_stamp)
+            headers = self._sign(method, op, canonical_uri, query, payload_hash, amz_date, date_stamp, extra_headers)
             url = f"{self._endpoint}{canonical_uri}" + (f"?{query}" if query else "")
             resp = self._client.request(method, url, headers=headers, content=payload)
             code = getattr(resp, "status_code", None)
             rh = getattr(resp, "headers", {}) or {}
             reqid = rh.get("x-amz-request-id", "")
             vid = rh.get("x-amz-version-id", "")
+            body = getattr(resp, "content", b"") or b""
             last = {"operation": op, "http_code": code, "request_id": reqid, "version_id": vid,
-                    "allow": None, "mutating": mutating}
+                    "body": body, "allow": None, "mutating": mutating}
             if code is None:
                 return {**last, "allow": "unknown", "error": "no status (ambiguous) -> STOP"}
             if code in (200, 204, 206):
@@ -530,12 +534,12 @@ def _amz_ds(dt):
 def run_cleanup(admin_transport, manifest, ledger, clock) -> dict:
     """EXACT data-plane cleanup via the transport's attempt() interface ONLY (no phantom methods).
 
-    Deletes only the exact object versions / multipart uploads WE created, then deletes the bucket. Bucket
-    deletion is the fail-closed read-back: S3 refuses to delete a non-empty bucket, so a non-2xx DeleteBucket
-    means something unknown remains -> CONTROLLED_RESIDUAL. A Governance-locked object cannot be deleted before
-    its retain-until -> CONTROLLED_RESIDUAL (deadline recorded), never a false clean. Mutations are single-shot;
-    an ambiguous result is treated as residual, not success. IAM keys/users/policies are control-plane and are
-    NOT touched here — they are recorded for MANUAL revocation."""
+    Contract = Variant 1 (manual post-expiry): the canary deletes ONLY the exact unlocked object versions and
+    multipart uploads it created. It does NOT delete the bucket automatically (retention-admin is not granted
+    DeleteBucket) and does NOT touch control-plane keys/users/policies/project — those are MANUAL (Gate F6),
+    recorded here. A Governance-locked object cannot be deleted before retain-until -> the run ends
+    CONTROLLED_RESIDUAL with a secret-free ledger (bucket/key/versionId/retainUntil) for the manual post-expiry
+    cleanup. Any UNKNOWN or non-locked residual -> FAILED. Mutations are single-shot; never a false clean."""
     amz, ds = _amz_ds(clock())
     bucket = manifest["bucket"]
     deleted, residual, failures = [], [], []
@@ -543,21 +547,30 @@ def run_cleanup(admin_transport, manifest, ledger, clock) -> dict:
         admin_transport.attempt("AbortMultipartUpload", f"/{bucket}/{up['key']}", method="DELETE",
                                 query=f"uploadId={up['upload_id']}", amz_date=amz, date_stamp=ds)
     for o in ledger.get("objects", []):
+        if o.get("locked"):
+            residual.append({"key": o["key"], "version": o.get("version"), "locked": True,
+                             "retain_until": o.get("retain_until")})
+            continue  # locked object cannot be deleted before expiry — never attempted here
         q = f"versionId={o['version']}" if o.get("version") else ""
         r = admin_transport.attempt("DeleteObjectVersion", f"/{bucket}/{o['key']}", method="DELETE",
                                     query=q, amz_date=amz, date_stamp=ds)
         if r.get("allow") == "allow":
             deleted.append(o["key"])
         else:
-            residual.append({"key": o["key"], "reason": r.get("allow"), "locked": bool(o.get("locked"))})
-    rb = admin_transport.attempt("DeleteBucket", f"/{bucket}", method="DELETE", amz_date=amz, date_stamp=ds)
-    bucket_removed = rb.get("allow") == "allow"
-    locked = [x for x in residual if x["locked"]]
-    if locked or residual or not bucket_removed:
-        status = "controlled-residual" if (locked and not [x for x in residual if not x["locked"]]) else "failed"
-        return {"status": status, "deleted": deleted, "residual": residual, "bucket_removed": bucket_removed,
-                "locked_residual": locked, "retention_deadline": manifest.get("retain_until"), "failures": failures}
-    return {"status": "clean", "deleted": deleted, "residual": [], "bucket_removed": True, "failures": failures}
+            residual.append({"key": o["key"], "version": o.get("version"), "reason": r.get("allow"),
+                             "locked": False})  # could not delete a non-locked object -> unknown residual
+    locked = [x for x in residual if x.get("locked")]
+    nonlocked = [x for x in residual if not x.get("locked")]
+    manual = {"keys": list(ledger.get("users", [])), "policies": list(ledger.get("policies", [])),
+              "bucket": bucket, "project": manifest.get("project"),
+              "note": "control-plane + bucket deletion are MANUAL (Gate F6); post-expiry object delete is MANUAL"}
+    if nonlocked:
+        return {"status": "failed", "deleted": deleted, "residual": residual, "locked_residual": locked,
+                "manual_cleanup": manual, "failures": failures + ["unknown/non-locked residual remains"]}
+    if locked:
+        return {"status": "controlled-residual", "deleted": deleted, "locked_residual": locked,
+                "manual_cleanup": manual, "failures": failures}
+    return {"status": "clean", "deleted": deleted, "residual": [], "manual_cleanup": manual, "failures": failures}
 
 
 # ------------------------- execute-live gate (Gate F) — fail-closed BEFORE any network/credential read ----
@@ -576,6 +589,37 @@ def _parse_deadline(s):
 def _utcnow():
     import datetime
     return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+
+
+def _retention_xml(mode, retain_until):
+    return (f'<Retention xmlns="http://s3.amazonaws.com/doc/2006-03-01/">'
+            f'<Mode>{mode}</Mode><RetainUntilDate>{retain_until}</RetainUntilDate></Retention>').encode("utf-8")
+
+
+def _content_md5(b):
+    import base64
+    import hashlib
+    return base64.b64encode(hashlib.md5(b).digest()).decode("ascii")
+
+
+def _parse_retention_xml(body):
+    """Fail-closed parse of a GetObjectRetention response. Returns {mode, retain_until} or raises."""
+    import xml.etree.ElementTree as ET
+    try:
+        root = ET.fromstring(body)
+    except Exception:
+        raise LiveGateError("malformed retention XML")
+
+    def _t(tag):
+        for el in root.iter():
+            if el.tag.rsplit("}", 1)[-1] == tag:
+                return (el.text or "").strip()
+        return None
+
+    mode, until = _t("Mode"), _t("RetainUntilDate")
+    if not mode or not until:
+        raise LiveGateError("retention XML missing Mode/RetainUntilDate")
+    return {"mode": mode, "retain_until": until}
 
 
 def execute_validate(args, manifest, clock) -> dict:
@@ -670,28 +714,58 @@ def run_live_execution(manifest, execmani, creds_by_role, transport_factory=None
                     failures.append(f"{role}:{op}:{prefix} expected={expect} actual={allow}")
             if deadline_reached:
                 break
-        # Object-Lock Governance probe (only if deadline not yet reached)
-        if not deadline_reached:
+        # Object-Lock Governance proof (only if deadline not yet reached). Uses retention-admin throughout so a
+        # final DeleteObjectVersion DENY is attributable to Object Lock, NOT to IAM — because we FIRST prove the
+        # same retention-admin can delete an UNLOCKED version (IAM allows delete). GOVERNANCE only; no Bypass.
+        if not deadline_reached and clock() < deadline_dt:
             admin = transports["retention-admin"]
-            writer = transports["pitr-writer"]
+            b = manifest["bucket"]
+            retain_until = execmani.get("deadline")  # ≤ now+30min window, already validated
+            # (1) unlocked control: retention-admin must be able to delete a version -> proves IAM allows delete
+            uk = f"{manifest['prefix']}pitr/unlocked-{manifest['runid']}"
+            amz, ds = _amz_ds(clock())
+            up = admin.attempt("PutObject", f"/{b}/{uk}", method="PUT", payload=b"u", amz_date=amz, date_stamp=ds)
+            u_ver = up.get("version_id", "")
+            ud = admin.attempt("DeleteObjectVersion", f"/{b}/{uk}", method="DELETE",
+                               query=f"versionId={u_ver}", amz_date=amz, date_stamp=ds)
+            iam_delete_ok = ud.get("allow") == "allow"
+            # (2) locked control: PutObject -> PutObjectRetention(GOVERNANCE, retain-until, signed XML+MD5) -> read-back
             lk = f"{manifest['prefix']}pitr/lock-{manifest['runid']}"
             amz, ds = _amz_ds(clock())
-            pr = admin.attempt("PutObject", f"/{manifest['bucket']}/{lk}", method="PUT", payload=b"x",
-                               amz_date=amz, date_stamp=ds)
-            lock_version = pr.get("version_id", "")
-            if pr.get("allow") == "allow":
-                ledger["objects"].append({"key": lk, "version": lock_version, "locked": True})
-                admin.attempt("PutObjectRetention", f"/{manifest['bucket']}/{lk}", method="PUT",
-                              query=f"retention&versionId={lock_version}", payload=b"", amz_date=amz, date_stamp=ds)
-                dv = writer.attempt("DeleteObjectVersion", f"/{manifest['bucket']}/{lk}", method="DELETE",
-                                    query=f"versionId={lock_version}", amz_date=amz, date_stamp=ds)
-                objectlock = {"created": True, "locked_delete_by_writer": dv.get("allow"),
-                              "locked_delete_refused": dv.get("allow") == "deny", "mode": "GOVERNANCE",
-                              "compliance_tested": False}
-                if dv.get("allow") != "deny":
-                    failures.append("object-lock: writer DeleteObjectVersion NOT refused on locked version")
-            else:
-                objectlock = {"created": False, "put_result": pr.get("allow")}
+            pr = admin.attempt("PutObject", f"/{b}/{lk}", method="PUT", payload=b"x", amz_date=amz, date_stamp=ds)
+            lv = pr.get("version_id", "")
+            retention_set = readback_ok = locked_delete_refused = False
+            readback = {}
+            if pr.get("allow") == "allow" and lv:
+                ledger["objects"].append({"key": lk, "version": lv, "locked": True, "retain_until": retain_until})
+                xml = _retention_xml("GOVERNANCE", retain_until)
+                eh = {"content-md5": _content_md5(xml), "content-type": "application/xml"}
+                rr = admin.attempt("PutObjectRetention", f"/{b}/{lk}", method="PUT",
+                                   query=f"retention&versionId={lv}", payload=xml, extra_headers=eh,
+                                   amz_date=amz, date_stamp=ds)
+                retention_set = rr.get("allow") == "allow"
+                if retention_set:
+                    gr = admin.attempt("GetObjectRetention", f"/{b}/{lk}", method="GET",
+                                       query=f"retention&versionId={lv}", amz_date=amz, date_stamp=ds)
+                    if gr.get("allow") == "allow":
+                        try:
+                            readback = _parse_retention_xml(gr.get("body", b""))
+                            readback_ok = (readback.get("mode") == "GOVERNANCE"
+                                           and readback.get("retain_until") == retain_until)
+                        except LiveGateError:
+                            readback_ok = False
+                    if readback_ok:
+                        dv = admin.attempt("DeleteObjectVersion", f"/{b}/{lk}", method="DELETE",
+                                           query=f"versionId={lv}", amz_date=amz, date_stamp=ds)
+                        locked_delete_refused = dv.get("allow") == "deny"
+            objectlock = {"created": pr.get("allow") == "allow", "iam_delete_ok_on_unlocked": iam_delete_ok,
+                          "retention_set": retention_set, "readback_ok": readback_ok, "readback": readback,
+                          "locked_delete_refused": locked_delete_refused, "mode": "GOVERNANCE",
+                          "compliance_tested": False,
+                          "proof": bool(iam_delete_ok and retention_set and readback_ok and locked_delete_refused)}
+            if not objectlock.get("proof"):
+                failures.append("object-lock: proof incomplete (need IAM-delete-on-unlocked + retention set + "
+                                "read-back + locked-delete DENY by the same retention-admin)")
     finally:
         cleanup = run_cleanup(transports["retention-admin"], manifest, ledger, clock)
     result = {"rows": rows, "matrix_failures": failures, "object_lock": objectlock, "cleanup": cleanup,

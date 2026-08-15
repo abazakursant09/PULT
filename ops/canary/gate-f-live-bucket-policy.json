@@ -1,0 +1,37 @@
+{
+  "_canary": {
+    "role": "gate-f-live-bucket-policy",
+    "active": true,
+    "marker": "NOT_FOR_ROUTINE_BACKUP",
+    "note": "EXACT Gate-F live bucket policy TEMPLATE (Path-Style). Placeholders <BUCKET>=pult-canary-<runid>, <RUNID>, <UID-*>=service-user ids are filled by Inal at F4. retention-admin carries provisional cleanup permissions (DeleteObject/DeleteObjectVersion + PutObjectRetention + Object-Lock/versioning reads) scoped to the exact canary prefix ONLY — NOT for routine backup, NO BypassGovernanceRetention, NO Compliance, NO DeleteBucket (bucket deletion is MANUAL Gate F6). app principal is explicit Deny of all S3."
+  },
+  "policy": {
+    "Version": "2012-10-17",
+    "Statement": [
+      {"Sid": "logicalWriter", "Effect": "Allow", "Principal": {"AWS": ["<UID-logical-writer>"]},
+       "Action": ["s3:PutObject", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"],
+       "Resource": ["arn:aws:s3:::<BUCKET>/canary/<RUNID>/logical/*"]},
+      {"Sid": "logicalWriterList", "Effect": "Allow", "Principal": {"AWS": ["<UID-logical-writer>"]},
+       "Action": ["s3:ListBucket"], "Resource": "arn:aws:s3:::<BUCKET>",
+       "Condition": {"StringLike": {"s3:prefix": ["canary/<RUNID>/logical/*"]}}},
+      {"Sid": "pitrWriter", "Effect": "Allow", "Principal": {"AWS": ["<UID-pitr-writer>"]},
+       "Action": ["s3:GetObject", "s3:PutObject", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"],
+       "Resource": ["arn:aws:s3:::<BUCKET>/canary/<RUNID>/pitr/*"]},
+      {"Sid": "pitrWriterList", "Effect": "Allow", "Principal": {"AWS": ["<UID-pitr-writer>"]},
+       "Action": ["s3:ListBucket"], "Resource": "arn:aws:s3:::<BUCKET>",
+       "Condition": {"StringLike": {"s3:prefix": ["canary/<RUNID>/pitr/*"]}}},
+      {"Sid": "restoreReader", "Effect": "Allow", "Principal": {"AWS": ["<UID-restore-reader>"]},
+       "Action": ["s3:GetObject"], "Resource": ["arn:aws:s3:::<BUCKET>/canary/<RUNID>/*"]},
+      {"Sid": "restoreReaderList", "Effect": "Allow", "Principal": {"AWS": ["<UID-restore-reader>"]},
+       "Action": ["s3:ListBucket"], "Resource": "arn:aws:s3:::<BUCKET>",
+       "Condition": {"StringLike": {"s3:prefix": ["canary/<RUNID>/*"]}}},
+      {"Sid": "retentionAdmin", "Effect": "Allow", "Principal": {"AWS": ["<UID-retention-admin>"]},
+       "Action": ["s3:GetBucketVersioning", "s3:GetBucketObjectLockConfiguration", "s3:GetObjectRetention",
+                  "s3:GetObjectLegalHold", "s3:PutObjectRetention", "s3:GetObject", "s3:ListBucket",
+                  "s3:DeleteObject", "s3:DeleteObjectVersion", "s3:AbortMultipartUpload"],
+       "Resource": ["arn:aws:s3:::<BUCKET>", "arn:aws:s3:::<BUCKET>/canary/<RUNID>/*"]},
+      {"Sid": "appDeny", "Effect": "Deny", "Principal": {"AWS": ["<UID-app-deny>"]},
+       "Action": ["s3:*"], "Resource": ["arn:aws:s3:::<BUCKET>", "arn:aws:s3:::<BUCKET>/*"]}
+    ]
+  }
+}
