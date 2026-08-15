@@ -43,9 +43,9 @@ NEG_MATRIX = CANARY / "negative-matrix.md"
 #   - an independent safety review passed;
 #   - Inal separately approved the runtime change.
 # The digest is a hard-coded literal — never computed at run time, never env-overridable, never auto-updated.
-_CANARY_RUNTIME_SHA256 = "271521a0e3055b0435ecdec41d9be9b105bf37e48a0fde56c6798e72ac8f4ef0"
-# Review marker — bumped with the digest on every reviewed canary.py runtime change (3C2C2-A wires transport).
-_CANARY_RUNTIME_REVIEW = "3C2C2A-selectel-transport-dormant"
+_CANARY_RUNTIME_SHA256 = "6903fff85da2ffdf2a9ba67dc4ec371b68073e72e1ca84a86709eb024daa91e8"
+# Review marker — bumped with the digest on every reviewed canary.py runtime change (3C2C2-B wires execution gate).
+_CANARY_RUNTIME_REVIEW = "3C2C2B-live-execution-gated"
 
 # Each mutation below, applied to a disposable copy, must make at least one test in this file fail.
 MUTATION_MATRIX = [
@@ -138,7 +138,8 @@ def test_no_credentials_on_argv():
     for bad in ("--secret", "--access-key", "--secret-key", "--key", "--password", "--token", "--access"):
         assert bad not in code, f"credential CLI arg {bad!r} forbidden"
     # every argparse flag must be one of the allowlisted non-secret parameters
-    allowed_flags = {"--project-id", "--region", "--endpoint", "--bucket", "--run-id", "--confirm"}
+    allowed_flags = {"--project-id", "--region", "--endpoint", "--bucket", "--run-id", "--confirm",
+                     "--execute-live", "--ack", "--max-object-bytes", "--deadline"}
     flags = set(re.findall(r'add_argument\("(--[a-z-]+)"', code))
     assert flags <= allowed_flags, f"unexpected argv flags: {flags - allowed_flags}"
 
@@ -1061,3 +1062,184 @@ _TRANSPORT_MUTATIONS = [
 
 def test_transport_mutation_matrix_declared():
     assert len(_TRANSPORT_MUTATIONS) >= 12
+
+
+# ================= SECURITY-2D-3E1B-3C2C2-B execute-live gate (Gate F, offline) =================
+def _exec_args(**over):
+    rid = "0123456789ab"
+    proj = "0123456789abcdef"
+    ep = "https://s3.ru-3.storage.selcloud.ru"
+    bkt = f"pult-canary-{rid}"
+    base = dict(project_id=proj, region="ru-3", endpoint=ep, bucket=bkt, run_id=rid,
+                confirm=f"{proj}/ru-3/{ep}/{bkt}/{rid}", execute_live=True,
+                ack=f"PULT-CANARY-EXECUTE-{rid}", max_object_bytes=1048576, deadline="2026-08-15T12:00:00Z")
+    base.update(over)
+    return _Args(**base)
+
+
+def test_ordinary_live_still_defers_without_execute_flag():
+    c = _load_canary()
+    a = _exec_args(execute_live=False)
+    with _NoNetwork():
+        assert c.live(a, env={c.LIVE_GATE_ENV: c.LIVE_GATE_VALUE}) == 5  # deferral, no network
+
+
+def test_execute_gate_fails_closed_before_network():
+    c = _load_canary()
+    E = {c.LIVE_GATE_ENV: c.LIVE_GATE_VALUE}
+    wrong_conf = "0123456789abcdef/ru-7/https://s3.ru-7.storage.selcloud.ru/pult-canary-0123456789ab/0123456789ab"
+    bad = {
+        "no execute flag": _exec_args(execute_live=False),
+        "wrong region": _exec_args(region="ru-7", endpoint="https://s3.ru-7.storage.selcloud.ru", confirm=wrong_conf),
+        "bad ack": _exec_args(ack="nope"),
+        "no ack": _exec_args(ack=None),
+        "oversize": _exec_args(max_object_bytes=10 * 1024 * 1024 + 1),
+        "zero size": _exec_args(max_object_bytes=0),
+        "bad deadline": _exec_args(deadline="soon"),
+        "no deadline": _exec_args(deadline=None),
+    }
+    with _NoNetwork():
+        for name, a in bad.items():
+            rc = c.live(a, env=E)
+            assert rc in (4, 5), f"{name}: expected fail-closed (4/5), got {rc}"
+            if name != "no execute flag":
+                try:
+                    c.execute_validate(a, c.live_validate(a, E))
+                    raise AssertionError(f"{name} should have raised")
+                except c.LiveGateError:
+                    pass
+    good = _exec_args()
+    m = c.live_validate(good, E)
+    em = c.execute_validate(good, m)
+    assert em["region"] == "ru-3" and em["max_buckets"] == 1
+
+
+def test_masked_credentials_memory_only(capsys):
+    c = _load_canary()
+    seen = []
+
+    def fake_reader(prompt):
+        seen.append(prompt)
+        return "SECRETVALUE_zzz"
+
+    creds = c.read_masked_credentials(reader=fake_reader)
+    assert set(creds) == set(c._CANARY_ROLES)
+    assert len(seen) == 2 * len(c._CANARY_ROLES)
+    out = capsys.readouterr()
+    assert "SECRETVALUE_zzz" not in (out.out + out.err)
+    code = _code()
+    seg = code[code.index("def read_masked_credentials"):code.index("def run_live_execution")]
+    assert "getpass" in seg and "input(" not in seg and "open(" not in seg
+
+
+class _FakeLiveTransport:
+    """Injected per-role transport for offline run_live_execution tests. Never touches the network."""
+
+    _S3_TO_OP = {"PutObject": "put", "GetObject": "get", "ListBucket": "list", "DeleteObject": "delete"}
+
+    def __init__(self, manifest, creds, service="s3", allow_ops=frozenset()):
+        self._allow = allow_ops  # set of (op, prefix-root) that are ALLOW for this role
+        self.locked = None
+        self.__secret = creds["secret_key"]
+
+    def attempt(self, s3op, uri, method="GET", query="", payload=b"", amz_date=None, date_stamp=None):
+        op = self._S3_TO_OP[s3op]
+        hay = uri + "?" + query
+        root = "logical/" if "logical/" in hay else ("pitr/" if "pitr/" in hay else "")
+        allow = "allow" if (op, root) in self._allow else "deny"
+        return {"operation": s3op, "http_code": 200 if allow == "allow" else 403,
+                "request_id": "r1", "allow": allow}
+
+    def delete_user(self, u):
+        return True
+
+    def delete_object(self, key, version=None):
+        return True
+
+    def abort_multipart(self, key, uid):
+        return True
+
+    def read_back_unknown(self, bucket, prefix):
+        return []
+
+    def locked_residual(self):
+        return self.locked
+
+    def remove_bucket_if_empty(self, bucket):
+        return True
+
+
+def test_run_live_execution_requires_injected_clock():
+    c = _load_canary()
+    m = c.live_validate(_exec_args(), {c.LIVE_GATE_ENV: c.LIVE_GATE_VALUE})
+    creds = {r: {"access_key": "A", "secret_key": "S"} for r in c._CANARY_ROLES}
+    try:
+        c.run_live_execution(m, {}, creds, transport_factory=_FakeLiveTransport, clock=None)
+        raise AssertionError("must require injected clock")
+    except c.LiveGateError:
+        pass
+
+
+def test_run_live_execution_offline_matrix_and_cleanup():
+    c = _load_canary()
+    m = c.live_validate(_exec_args(), {c.LIVE_GATE_ENV: c.LIVE_GATE_VALUE})
+    creds = {r: {"access_key": "A", "secret_key": "Sx"} for r in c._CANARY_ROLES}
+    allow = {
+        "logical-writer": {("put", "logical/"), ("list", "logical/")},
+        "pitr-writer": {("put", "pitr/"), ("get", "pitr/"), ("list", "pitr/")},
+        "restore-reader": {("list", "pitr/"), ("get", "pitr/")},
+        "retention-admin": set(),
+        "app-deny": set(),
+    }
+
+    def factory(manifest, cr, service="s3"):
+        return _FakeLiveTransport(manifest, cr, service, allow_ops=factory.map.pop(0))
+
+    factory.map = [allow[r] for r in c._CANARY_ROLES]
+    with _NoNetwork():
+        res = c.run_live_execution(m, {}, creds, transport_factory=factory,
+                                   clock=lambda: ("20260101T000000Z", "20260101"))
+    assert res["status"] == "ok", res["matrix_failures"]
+    assert res["cleanup"]["status"] == "clean"
+    assert res["manual_revoke_required"]["keys"] == list(c._CANARY_ROLES)
+
+
+def test_run_live_execution_controlled_residual_on_locked():
+    c = _load_canary()
+    m = c.live_validate(_exec_args(), {c.LIVE_GATE_ENV: c.LIVE_GATE_VALUE})
+    creds = {r: {"access_key": "A", "secret_key": "Sx"} for r in c._CANARY_ROLES}
+
+    def factory(manifest, cr, service="s3"):
+        t = _FakeLiveTransport(manifest, cr, service, allow_ops=set())
+        if factory.n == 3:
+            t.locked = {"key": "canary/x/lock", "retention_until": "later", "max_cost": "small"}
+        factory.n += 1
+        return t
+
+    factory.n = 0
+    with _NoNetwork():
+        res = c.run_live_execution(m, {}, creds, transport_factory=factory,
+                                   clock=lambda: ("20260101T000000Z", "20260101"))
+    assert res["status"] == "CONTROLLED_RESIDUAL"
+    assert res["cleanup"]["status"] == "controlled-residual"
+
+
+def test_execute_gate_constants_and_order():
+    code = _code()
+    assert 'EXECUTE_LIVE_REGION = "ru-3"' in code
+    assert "EXECUTE_MAX_OBJECT_BYTES = 10 * 1024 * 1024" in code
+    assert 'EXECUTE_LIVE_ACK_PREFIX = "PULT-CANARY-EXECUTE-"' in code
+    live_src = code[code.index("def live(args"):]
+    assert live_src.index("execute_validate(") < live_src.index("read_masked_credentials()")
+
+
+_EXEC_MUTATIONS = [
+    "drop --execute-live requirement", "drop the --ack check", "allow region != ru-3",
+    "allow object > 10 MiB", "drop the deadline check", "read credentials before execute_validate",
+    "credentials via argv", "masked reader writes to disk / uses input()", "clock not injected",
+    "cleanup not in finally", "controlled-residual reported as success", "change runtime without pin/marker bump",
+]
+
+
+def test_exec_mutation_matrix_declared():
+    assert len(_EXEC_MUTATIONS) >= 12

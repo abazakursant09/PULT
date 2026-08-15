@@ -344,3 +344,27 @@ a live endpoint remains gated to the separate Inal-approved 3C2C2-B step — the
 3C2C2-A safety is proven offline: FakeHTTP client + socket network-trap (0 external connections), no secret
 leakage, endpoint allowlist enforced, mutation-no-retry, exact-cleanup unchanged. Launch gate remains **NOT
 READY**. **MinIO ≠ Selectel.**
+
+## §18 Live execution gate — 3C2C2-B (wired, offline-proven; Gate F not run)
+
+3C2C2-B wires the real live execution path into `ops/canary/canary.py` behind a strict one-time execute
+gate. It is proven only offline (FakeTransport + socket network-trap); **no Selectel account/bucket/key/
+network is touched in this PR**, and CI never runs it.
+
+- **Ordinary `live` still defers**: without `--execute-live` it prints `SELECTEL_EXECUTION_GATED_UNTIL_3C2C2B`
+  and exits (no network). Execution requires the explicit `--execute-live` gate below.
+- **Execute gate (fail-closed BEFORE any DNS/socket/credential read):** `--execute-live` AND the env
+  acknowledgement AND a typed confirmation AND `--ack == PULT-CANARY-EXECUTE-<runid>` AND region pinned to
+  **ru-3** AND endpoint == official ru-3 S3 AND `--max-object-bytes` in (0, 10 MiB] AND `--deadline` a UTC
+  timestamp AND bucket == `pult-canary-<runid>`. Any mismatch → exit 4 before credentials/network.
+- **Credentials** are read ONLY after the gate passes, via `read_masked_credentials` (getpass, no echo, memory
+  only; never argv / file / shell history / Git / logs). Order is enforced: `execute_validate` before any
+  credential read.
+- **Orchestration** (`run_live_execution`, injected transport factory + clock) runs the role allow/deny matrix
+  against per-role transports, then EXACT data-plane cleanup in a `finally`. Control-plane revocation
+  (keys/users/policies) is MANUAL and only RECORDED for Inal (`manual_revoke_required`). Any matrix failure or
+  cleanup residual → `CONTROLLED_RESIDUAL`/`FAILED`, never a hidden success.
+- **Runtime freeze** re-pinned; marker `CANARY_RUNTIME_REVIEW = 3C2C2B-live-execution-gated`.
+
+Gate-F actual run (real keys on an isolated machine, disposable ru-3 canary) remains a separate Inal step.
+Launch gate **NOT READY**. **MinIO ≠ Selectel.**
