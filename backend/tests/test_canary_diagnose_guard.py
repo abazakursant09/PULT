@@ -21,9 +21,9 @@ CANARY = REPO / "ops" / "canary"
 CANARY_PY = CANARY / "canary.py"
 DIAG_PY = CANARY / "diagnose.py"
 
-# canary.py must remain byte-identical to the reviewed master runtime — this diagnostic never touches it.
-_CANARY_RUNTIME_SHA256 = "ba314f7f118fece59c968c820968e9cd07739d4b00e5af75ffe6ab65bce34148"
-_CANARY_RUNTIME_REVIEW = "3C2C2B-prelive-correction"
+# canary.py must remain byte-identical to the pinned runtime (3C2D SigV4 fix) — this diagnostic never edits it.
+_CANARY_RUNTIME_SHA256 = "573304ab321bb1477d361e29d699e36178b4310a77df7a930201f551921067f9"
+_CANARY_RUNTIME_REVIEW = "3C2D-sigv4-query-canonicalization"
 
 # S3 operations that MUST NEVER appear in the diagnostic (as an op literal or an attempt target).
 _FORBIDDEN_OPS = frozenset({
@@ -141,10 +141,11 @@ def _reader(secret="SEKRET_zzz_DO_NOT_LEAK"):
 class FakeState:
     def __init__(self, versioning="Enabled", object_lock=True, present=(), retention=None,
                  deny=(), force_unknown=None, versions=None, request_id="req-123-DONOTLEAK",
-                 error=None, raise_on=None):
+                 error=None, raise_on=None, listed=None, list_truncated=False, list_extra_keys=(),
+                 list_body=None):
         self.versioning = versioning
         self.object_lock = object_lock             # True / False / None(=404 not-found)
-        self.present = set(present)                # keys that exist
+        self.present = set(present)                # keys that exist (drive Head + default ListBucket contents)
         self.retention = retention                 # None or {"mode","until","malformed"}
         self.deny = set(deny)                      # ops forced to 403 deny (empty body)
         self.force_unknown = force_unknown or {}   # {op or ("HeadObject",key): http_code}
@@ -152,6 +153,12 @@ class FakeState:
         self.request_id = request_id
         self.error = error or {}                   # {op: (http_code, body_bytes)} — custom error response
         self.raise_on = raise_on or {}             # {op: Exception instance} — transport raises (net/TLS/...)
+        # ListBucket controls: `listed` overrides which keys the listing returns (default = present); extra
+        # (unexpected) key names to prove they are ignored; truncation flag; or a fully custom XML body.
+        self.listed = set(listed) if listed is not None else None
+        self.list_truncated = list_truncated
+        self.list_extra_keys = tuple(list_extra_keys)
+        self.list_body = list_body
 
 
 class FakeReadTransport:
@@ -195,7 +202,15 @@ class FakeReadTransport:
                     else b"<ObjectLockConfiguration></ObjectLockConfiguration>")
             return self._r("allow", 200, body)
         if op == "ListBucket":
-            return self._r("allow", 200, b"<ListBucketResult></ListBucketResult>")
+            if st.list_body is not None:
+                return self._r("allow", 200, st.list_body)
+            keys = st.listed if st.listed is not None else st.present
+            contents = "".join(f"<Contents><Key>{k}</Key></Contents>"
+                               for k in sorted(keys) + list(st.list_extra_keys))
+            trunc = "true" if st.list_truncated else "false"
+            body = (f"<ListBucketResult>{contents}<IsTruncated>{trunc}</IsTruncated>"
+                    f"</ListBucketResult>").encode()
+            return self._r("allow", 200, body)
         if op == "HeadObject":
             key = self._key(uri)
             fk = ("HeadObject", key)
@@ -312,19 +327,19 @@ def test_happy_all_present_pass():
 
 def test_each_key_existence_states():
     d = _load_diag()
-    # logical present, pitr missing, unlocked forced-unknown, locked present
-    st = FakeState(present=[d.KEY_LOGICAL_PROBE, d.KEY_LOCKED],
-                   force_unknown={("HeadObject", d.KEY_UNLOCKED): 500},
-                   retention={"mode": "GOVERNANCE", "until": "2026-08-16T00:15:00Z"})
-    report = d.run_diagnostic(
-        d.diag_validate(_diag_args(), _ok_env(d), _clock()),
-        {"retention-admin": {"access_key": "A", "secret_key": "S"}},
-        _load_canary(), transport_factory=_factory(st, record=[]), clock=_clock())
-    assert report["logical_probe_exists"] == "yes"
-    assert report["pitr_probe_exists"] == "no"
-    assert report["unlocked_control_exists"] == "unknown"
-    assert report["locked_control_exists"] == "yes"
-    assert report["diagnostic_status"] == "PARTIAL"
+    # ListBucket (not truncated) is authoritative: listed -> yes, absent -> no (Head agrees here).
+    ok = _diag_run_report(d, FakeState(present=[d.KEY_PITR_PROBE, d.KEY_LOCKED],
+                                       retention={"mode": "GOVERNANCE", "until": "2026-08-16T00:15:00Z"}))
+    assert ok["logical_probe_exists"] == "no"
+    assert ok["pitr_probe_exists"] == "yes"
+    assert ok["unlocked_control_exists"] == "no"
+    assert ok["locked_control_exists"] == "yes"
+    # Truncated listing: a key seen in the page -> yes; a key NOT seen -> unknown (never a false 'no').
+    tr = _diag_run_report(d, FakeState(listed=[d.KEY_LOGICAL_PROBE], list_truncated=True))
+    assert tr["logical_probe_exists"] == "yes"
+    assert tr["pitr_probe_exists"] == "unknown"
+    assert tr["unlocked_control_exists"] == "unknown"
+    assert tr["diagnostic_status"] in ("PARTIAL", "FAILED")
 
 
 def test_retention_variants():
@@ -403,9 +418,10 @@ def test_restore_reader_conflict_is_fail_closed():
     man = d.diag_validate(_diag_args(with_restore_reader=True), _ok_env(d), _clock())
     creds = {"retention-admin": {"access_key": "A", "secret_key": "S"},
              "restore-reader": {"access_key": "B", "secret_key": "S2"}}
-    admin_state = FakeState(present=[d.KEY_PITR_PROBE, d.KEY_LOCKED],
-                            retention={"mode": "GOVERNANCE", "until": "2026-08-16T00:15:00Z"})
-    reader_state = FakeState(present=[d.KEY_LOCKED])  # disagrees on pitr-probe existence
+    # ListBucket UNAVAILABLE (denied) for both, so HeadObject is the only source; admin Head says pitr present,
+    # restore-reader Head says pitr absent -> two successful Heads disagree -> fail-closed unknown.
+    admin_state = FakeState(present=[d.KEY_PITR_PROBE, d.KEY_LOCKED], deny={"ListBucket"})
+    reader_state = FakeState(present=[d.KEY_LOCKED], deny={"ListBucket"})
     report = d.run_diagnostic(man, creds, ca,
                               transport_factory=_factory(admin_state, reader_state, record=[]), clock=_clock())
     assert report["pitr_probe_exists"] == "unknown"  # conflict -> fail-closed unknown
@@ -519,9 +535,10 @@ def test_all_unknown_reads_status_failed():
     ca = _load_canary()
     man = d.diag_validate(_diag_args(), _ok_env(d), _clock())
     admin = {"retention-admin": {"access_key": "A", "secret_key": "S"}}
-    # every bucket-level + head read forced unknown -> everything unknown -> FAILED
+    # every bucket-level + list + head read forced unknown -> everything unknown -> FAILED
     st = FakeState(versioning=None, object_lock=None,
                    force_unknown={"GetBucketVersioning": 500, "GetBucketObjectLockConfiguration": 500,
+                                  "ListBucket": 500,
                                   ("HeadObject", d.KEY_LOGICAL_PROBE): 500,
                                   ("HeadObject", d.KEY_PITR_PROBE): 500,
                                   ("HeadObject", d.KEY_UNLOCKED): 500,
@@ -759,3 +776,88 @@ def test_missing_objects_are_not_errors():
     assert report["logical_probe_read_status"] == "ok"
     assert report["lock_retention_read_status"] == d._NOT_READ
     assert report["diagnostic_error_summary"] == "none"
+
+
+# ================= 3C2D ListBucket existence fallback (Head-denied on real Selectel) =================
+_ACCESS_DENIED = (b"<Error><Code>AccessDenied</Code><Message>SECRET_M</Message>"
+                  b"<RequestId>RID_LEAK</RequestId></Error>")
+
+
+def test_head_denied_list_success_trusts_list():
+    d = _load_diag()
+    # HeadObject AccessDenied on every key (real Selectel behaviour), but ListBucket succeeds and lists pitr.
+    st = FakeState(listed=[d.KEY_PITR_PROBE], error={"HeadObject": (403, _ACCESS_DENIED)})
+    report = _diag_run_report(d, st)
+    assert report["pitr_probe_exists"] == "yes"          # trusted from List despite denied Head
+    assert report["logical_probe_exists"] == "no"
+    assert report["unlocked_control_exists"] == "no"
+    assert report["locked_control_exists"] == "no"
+    # a denied Head does NOT turn the trusted List result into unknown / an error
+    assert report["pitr_probe_read_status"] == "ok"
+    assert report["logical_probe_read_status"] == "ok"
+
+
+def test_list_denied_and_head_denied_is_unknown():
+    d = _load_diag()
+    st = FakeState(deny={"ListBucket"}, error={"HeadObject": (403, _ACCESS_DENIED)})
+    report = _diag_run_report(d, st)
+    for f in ("logical_probe_exists", "pitr_probe_exists", "unlocked_control_exists", "locked_control_exists"):
+        assert report[f] == "unknown", f
+    for f in ("logical_probe_read_status", "pitr_probe_read_status"):
+        assert report[f] == "access-denied", f
+
+
+def test_list_vs_successful_head_conflict_is_unknown():
+    d = _load_diag()
+    # List says pitr ABSENT (listed=[]) but a successful Head says PRESENT -> conflict -> unknown
+    st = FakeState(listed=[], present=[d.KEY_PITR_PROBE])
+    report = _diag_run_report(d, st)
+    assert report["pitr_probe_exists"] == "unknown"
+    assert report["pitr_probe_read_status"] == "unknown"
+
+
+def test_truncated_listing_never_false_no():
+    d = _load_diag()
+    st = FakeState(listed=[d.KEY_LOCKED], list_truncated=True)
+    report = _diag_run_report(d, st)
+    assert report["locked_control_exists"] == "yes"      # present in the page
+    assert report["logical_probe_exists"] == "unknown"   # not seen + truncated -> not a false 'no'
+    assert report["pitr_probe_exists"] == "unknown"
+
+
+def test_list_ignores_unexpected_keys_and_never_prints_them(capsys):
+    d = _load_diag()
+    body = (b"<ListBucketResult>"
+            b"<Contents><Key>canary/eced74af45e3/pitr/probe-eced74af45e3</Key></Contents>"
+            b"<Contents><Key>SECRET_OTHER_KEY_LEAK</Key></Contents>"
+            b"<Contents><Key>../../etc/passwd</Key></Contents>"
+            b"<IsTruncated>false</IsTruncated></ListBucketResult>")
+    status, keys, trunc = d._list_keys({"allow": "allow", "http_code": 200, "body": body})
+    assert status == "ok" and trunc is False
+    assert keys == {d.KEY_PITR_PROBE}  # ONLY the frozen exact key retained; unexpected keys dropped
+    # full run: the unexpected key names must never reach stdout/stderr
+    with _NoNetwork():
+        _run(d, FakeState(list_body=body))
+    out = capsys.readouterr()
+    for leak in ("SECRET_OTHER_KEY_LEAK", "etc/passwd", "RID_LEAK"):
+        assert leak not in (out.out + out.err)
+
+
+def test_list_keys_malformed_and_unavailable():
+    d = _load_diag()
+    assert d._list_keys({"allow": "allow", "http_code": 200, "body": b"<ListBucketResult><Contents"}) == \
+        ("malformed", set(), False)
+    assert d._list_keys({"allow": "deny", "http_code": 403, "body": b""}) == ("unavailable", set(), False)
+    assert d._list_keys("not-a-dict") == ("unavailable", set(), False)
+
+
+def test_retention_only_when_lock_resolved_present():
+    d = _load_diag()
+    rec = []
+    # lock present via List -> retention IS read
+    _diag_run_report(d, FakeState(present=[d.KEY_LOCKED],
+                                  retention={"mode": "GOVERNANCE", "until": "2026-08-16T00:15:00Z"}))
+    # lock absent via List -> retention NOT read (no GetObjectRetention issued)
+    with _NoNetwork():
+        _, rec = _run(d, FakeState(listed=[]))
+    assert not [r for r in rec if r["op"] == "GetObjectRetention"]

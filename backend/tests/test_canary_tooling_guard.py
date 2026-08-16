@@ -43,9 +43,9 @@ NEG_MATRIX = CANARY / "negative-matrix.md"
 #   - an independent safety review passed;
 #   - Inal separately approved the runtime change.
 # The digest is a hard-coded literal — never computed at run time, never env-overridable, never auto-updated.
-_CANARY_RUNTIME_SHA256 = "ba314f7f118fece59c968c820968e9cd07739d4b00e5af75ffe6ab65bce34148"
-# Review marker — bumped with the digest on every reviewed canary.py runtime change (3C2C2-B wires execution gate).
-_CANARY_RUNTIME_REVIEW = "3C2C2B-prelive-correction"
+_CANARY_RUNTIME_SHA256 = "573304ab321bb1477d361e29d699e36178b4310a77df7a930201f551921067f9"
+# Review marker — bumped with the digest on every reviewed canary.py runtime change (3C2D SigV4 canonical query).
+_CANARY_RUNTIME_REVIEW = "3C2D-sigv4-query-canonicalization"
 
 # Each mutation below, applied to a disposable copy, must make at least one test in this file fail.
 MUTATION_MATRIX = [
@@ -1380,7 +1380,6 @@ def test_windows_launcher_documented_without_secret_leak():
 
 
 def test_execute_validate_deadline_window_enforced():
-    c = _load_canary()
     code = _code()
     assert "EXECUTE_MAX_DEADLINE_WINDOW_SEC" in code
     assert "now < deadline <= now + datetime.timedelta" in code
@@ -1463,3 +1462,78 @@ def test_object_lock_controls_created_by_pitr_writer_not_admin():
     assert 'admin.attempt("DeleteObjectVersion"' in seg
     # proof requires the full chain incl. pitr puts + admin unlocked-delete
     assert "unlocked_put_ok and iam_delete_ok and locked_put_ok and retention_set" in code
+
+
+# ================= SECURITY-2D-3E1B-3C2D SigV4 canonical-query goldens =================
+# Root cause (pre-3C2D): SelectelS3Transport signed and sent the caller's RAW query string, so the AWS SigV4
+# canonical query the client signed did not match what the server recomputes (empty-value params lacked '=',
+# '/' in values was not %2F, params were unsorted) -> SignatureDoesNotMatch on every query-bearing request,
+# while HeadObject (empty query) reached a real policy decision. These goldens pin the AWS-correct form and
+# prove the wire query equals the signed canonical query. They FAIL on the pre-3C2D runtime (_canonical_query
+# did not exist / raw query was used).
+def test_canonical_query_goldens():
+    c = _load_canary()
+    assert c._canonical_query("") == ""
+    assert c._canonical_query("versioning") == "versioning="
+    assert c._canonical_query("object-lock") == "object-lock="
+    assert c._canonical_query("prefix=canary/eced74af45e3/") == "prefix=canary%2Feced74af45e3%2F"
+    assert c._canonical_query("retention&versionId=syntheticV") == "retention=&versionId=syntheticV"
+
+
+def test_canonical_query_order_independent_and_repeated():
+    c = _load_canary()
+    assert c._canonical_query("versionId=x&retention") == c._canonical_query("retention&versionId=x")
+    assert c._canonical_query("retention&versionId=x") == "retention=&versionId=x"
+    # repeated keys are kept and sorted by (encoded name, encoded value) — so input order does not matter
+    assert c._canonical_query("a=2&a=1") == "a=1&a=2"
+    assert c._canonical_query("a=1&a=2") == "a=1&a=2"
+
+
+def test_canonical_query_encoding_rules():
+    c = _load_canary()
+    assert c._canonical_query("k=a b") == "k=a%20b"      # space -> %20, never '+'
+    assert c._canonical_query("k=a+b") == "k=a%2Bb"      # literal '+' -> %2B
+    assert c._canonical_query("k=a/b") == "k=a%2Fb"      # '/' in a value -> %2F
+    assert c._canonical_query("k=100%") == "k=100%25"    # '%' -> %25 (no double-encode)
+    assert c._canonical_query("k=é") == "k=%C3%A9"  # UTF-8 bytes percent-encoded
+    assert c._canonical_query("k=") == "k="              # blank value preserved
+    assert c._canonical_query("k=a=b") == "k=a%3Db"      # '=' inside value encoded (split on first '=')
+    assert c._canonical_query("k=?#&x=1") == "k=%3F%23&x=1"  # reserved chars encoded; '&' is the delimiter
+
+
+def test_attempt_outgoing_query_equals_canonical_signed():
+    c = _load_canary()
+    m = _transport_manifest()
+    for raw in ("versioning", "object-lock", "prefix=canary/eced74af45e3/", "retention&versionId=v1"):
+        fr = _FakeHTTP([200])
+        t = c.SelectelS3Transport(m, {"access_key": "A", "secret_key": _SEKRET}, http_client=fr)
+        op = "ListBucket" if raw.startswith("prefix") else (
+            "GetObjectRetention" if raw.startswith("retention") else
+            "GetBucketVersioning" if raw == "versioning" else "GetBucketObjectLockConfiguration")
+        t.attempt(op, "/pult-canary-0123456789ab", method="GET", query=raw,
+                  amz_date="20200101T000000Z", date_stamp="20200101")
+        url = fr.calls[0]["url"]
+        cq = c._canonical_query(raw)
+        # the wire query is exactly the canonical query fed to the signer (no divergence)
+        assert url.endswith("?" + cq), (raw, url, cq)
+
+
+def test_pre_3c2d_raw_query_no_longer_used():
+    """Regression marker: the pre-3C2D bug was signing the RAW query; the normalized form now differs from it
+    for exactly the shapes the canary uses, so a revert to the raw string is a behavioural RED."""
+    c = _load_canary()
+    assert c._canonical_query("versioning") != "versioning"
+    assert c._canonical_query("prefix=canary/eced74af45e3/") != "prefix=canary/eced74af45e3/"
+    # the transport builds its wire url from the canonical form, never the raw one
+    code = _code()
+    seg = code[code.index("def attempt("):code.index("def __repr__")]
+    assert "cquery = _canonical_query(query)" in seg
+    assert 'url = f"{self._endpoint}{canonical_uri}" + (f"?{cquery}" if cquery else "")' in seg
+    assert "self._sign(method, op, canonical_uri, cquery" in seg
+
+
+def test_canonical_query_helpers_are_pure_no_network():
+    c = _load_canary()
+    with _NoNetwork():
+        assert c._query_encode("a/b c") == "a%2Fb%20c"
+        assert c._canonical_query("b=2&a=1") == "a=1&b=2"
