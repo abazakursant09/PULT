@@ -63,11 +63,34 @@ DIAG_READ_ONLY_OPS = frozenset({
 
 _DEADLINE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 
+# secret-free error categories — the ONLY strings a *_read_status or diagnostic_error_summary may take.
+# Derived exclusively from: transport `allow`, numeric HTTP status class, an allowlisted XML <Code>, or a
+# fixed local exception-type category. NEVER from a raw body/URI/header/request-id/version-id/message.
+DIAG_ERROR_CATEGORIES = (
+    "ok", "not-found", "invalid-access-key", "signature-mismatch", "access-denied",
+    "authentication-failed", "timeout", "tls-error", "network-error", "service-error",
+    "malformed-response", "unknown",
+)
+# allowlisted S3 error <Code> -> category. Nothing else from the body is ever read or emitted.
+_XML_CODE_CATEGORY = {
+    "InvalidAccessKeyId": "invalid-access-key",
+    "SignatureDoesNotMatch": "signature-mismatch",
+    "AuthorizationHeaderMalformed": "signature-mismatch",
+    "AccessDenied": "access-denied",
+    "InvalidToken": "authentication-failed",
+    "ExpiredToken": "authentication-failed",
+}
+_NOT_READ = "not-read"  # benign sentinel: an op intentionally not attempted (never an error, never counted)
+
 # the exact, fixed set of fields printed — no other output is ever emitted
 _OUTPUT_FIELDS = (
     "versioning", "object_lock",
     "logical_probe_exists", "pitr_probe_exists", "unlocked_control_exists", "locked_control_exists",
-    "lock_retention_mode", "lock_retain_until_utc", "diagnostic_status",
+    "lock_retention_mode", "lock_retain_until_utc",
+    "versioning_read_status", "object_lock_read_status", "list_prefix_read_status",
+    "logical_probe_read_status", "pitr_probe_read_status", "unlocked_control_read_status",
+    "locked_control_read_status", "lock_retention_read_status",
+    "diagnostic_error_summary", "diagnostic_status",
 )
 
 
@@ -150,6 +173,69 @@ def _xml_text(body: bytes, tag: str):
     return None
 
 
+def _xml_error_code_category(body: bytes):
+    """Read ONLY the <Code> tag and map via the allowlist. Never returns Message/Resource/RequestId/HostId/
+    StringToSign/CanonicalRequest or any raw text. Malformed XML -> 'malformed-response'; a <Code> not in the
+    allowlist (or no <Code>) -> None so the caller falls back to the numeric status class."""
+    if not body:
+        return None
+    import xml.etree.ElementTree as ET
+    try:
+        root = ET.fromstring(body)
+    except Exception:
+        return "malformed-response"
+    code = None
+    for el in root.iter():
+        if el.tag.rsplit("}", 1)[-1] == "Code":
+            code = (el.text or "").strip()
+            break
+    if not code:
+        return None
+    return _XML_CODE_CATEGORY.get(code)  # None if the Code value is not allowlisted
+
+
+def _classify_result(result) -> str:
+    """Map a transport result dict to a secret-free category from ONLY: allow, numeric HTTP status class, and
+    an allowlisted XML <Code>. Never reads body text beyond the <Code> tag; never emits an identifier."""
+    if not isinstance(result, dict):
+        return "unknown"
+    if result.get("allow") == "allow":
+        return "ok"
+    code = result.get("http_code")
+    if code == 404:
+        return "not-found"
+    xml_cat = _xml_error_code_category(result.get("body", b""))
+    if xml_cat:  # allowlisted code OR 'malformed-response'
+        return xml_cat
+    if code == 401:
+        return "authentication-failed"
+    if code == 403:
+        return "access-denied"
+    if isinstance(code, int) and 500 <= code <= 599:
+        return "service-error"
+    return "unknown"
+
+
+def _exc_category(exc) -> str:
+    """Classify a caught transport exception by TYPE NAME ONLY (its MRO), never its message/args, so no URL,
+    credential, or identifier can leak. Unknown shapes fail safe to 'unknown'."""
+    joined = " ".join(c.__name__.lower() for c in type(exc).__mro__)
+    if "timeout" in joined:
+        return "timeout"
+    if "ssl" in joined or "certificate" in joined or "tls" in joined:
+        return "tls-error"
+    if any(k in joined for k in ("connect", "network", "socket", "proxy", "resolution", "nameresolution")):
+        return "network-error"
+    return "unknown"
+
+
+def _summary_from(read_status: dict) -> str:
+    errs = sorted({c for c in read_status.values() if c not in ("ok", _NOT_READ)})
+    if not errs:
+        return "none"
+    return errs[0] if len(errs) == 1 else "mixed"
+
+
 def _exists_from(result) -> str:
     if not isinstance(result, dict):
         return "unknown"
@@ -224,53 +310,87 @@ def run_diagnostic(manifest, creds, canary, transport_factory=None, clock=None) 
     bucket = manifest["bucket"]
 
     def call(transport, op, uri, query="", method="GET"):
+        """Perform ONE allowlisted read-only op and attach a secret-free category. Any transport exception
+        (timeout/TLS/network/...) is caught and mapped to a fixed category — never re-raised, never logged."""
         if op not in DIAG_READ_ONLY_OPS:  # defence in depth — only literal read ops ever reach here
             raise DiagGateError("operation not in the read-only diagnostic allowlist")
         amz, ds = canary._amz_ds(clock())
-        return transport.attempt(op, uri, method=method, query=query, amz_date=amz, date_stamp=ds)
+        try:
+            res = transport.attempt(op, uri, method=method, query=query, amz_date=amz, date_stamp=ds)
+        except DiagGateError:
+            raise
+        except BaseException as exc:  # noqa: BLE001 — classify by type only; message never read
+            return {"allow": "unknown", "http_code": None, "body": b"", "category": _exc_category(exc)}
+        res = dict(res)
+        res["category"] = _classify_result(res)
+        return res
+
+    # HeadObject on a missing key is a SUCCESSFUL read whose answer is "absent" -> not an error for read_status
+    def _head_status(cat):
+        return "ok" if cat in ("ok", "not-found") else cat
 
     report = {k: "unknown" for k in _OUTPUT_FIELDS}
+    rstat = {}
 
     # (1) bucket-level configuration reads
-    report["versioning"] = _versioning_from(call(admin, "GetBucketVersioning", f"/{bucket}", query="versioning"))
-    report["object_lock"] = _object_lock_from(
-        call(admin, "GetBucketObjectLockConfiguration", f"/{bucket}", query="object-lock"))
+    v = call(admin, "GetBucketVersioning", f"/{bucket}", query="versioning")
+    report["versioning"] = _versioning_from(v)
+    rstat["versioning_read_status"] = v["category"]
+    ol = call(admin, "GetBucketObjectLockConfiguration", f"/{bucket}", query="object-lock")
+    report["object_lock"] = _object_lock_from(ol)
+    rstat["object_lock_read_status"] = ol["category"]
 
     # (2) prefix-scoped enumeration (exact prefix only — proves scope, never lists another prefix)
-    call(admin, "ListBucket", f"/{bucket}", query=f"prefix={manifest['prefix']}")
+    lst = call(admin, "ListBucket", f"/{bucket}", query=f"prefix={manifest['prefix']}")
+    rstat["list_prefix_read_status"] = lst["category"]
 
     # (3) existence of each of the four exact keys via HeadObject (retention-admin)
     heads = {}
     exists = {}
+    head_cat = {}
     for key in _EXACT_KEYS:
         heads[key] = call(admin, "HeadObject", f"/{bucket}/{key}", method="HEAD")
         exists[key] = _exists_from(heads[key])
+        head_cat[key] = heads[key]["category"]
 
     # optional independent cross-check on the two pitr keys via restore-reader; conflict -> fail-closed
     if reader is not None:
         for key in (KEY_PITR_PROBE, KEY_LOCKED):
-            xc = _exists_from(call(reader, "HeadObject", f"/{bucket}/{key}", method="HEAD"))
-            if xc != exists[key]:
+            rr = call(reader, "HeadObject", f"/{bucket}/{key}", method="HEAD")
+            if _exists_from(rr) != exists[key]:
                 exists[key] = "unknown"
+            if _head_status(rr["category"]) != "ok":
+                head_cat[key] = rr["category"]  # surface a reader-side read error
 
     report["logical_probe_exists"] = exists[KEY_LOGICAL_PROBE]
     report["pitr_probe_exists"] = exists[KEY_PITR_PROBE]
     report["unlocked_control_exists"] = exists[KEY_UNLOCKED]
     report["locked_control_exists"] = exists[KEY_LOCKED]
+    rstat["logical_probe_read_status"] = _head_status(head_cat[KEY_LOGICAL_PROBE])
+    rstat["pitr_probe_read_status"] = _head_status(head_cat[KEY_PITR_PROBE])
+    rstat["unlocked_control_read_status"] = _head_status(head_cat[KEY_UNLOCKED])
+    rstat["locked_control_read_status"] = _head_status(head_cat[KEY_LOCKED])
 
     # (4) retention only on the lock key, only when it exists
     if exists[KEY_LOCKED] == "yes":
         # a version id, if any, is used ONLY in memory to target the exact version; it is never printed
         version_id = heads[KEY_LOCKED].get("version_id", "") if isinstance(heads[KEY_LOCKED], dict) else ""
         query = ("retention&versionId=" + version_id) if version_id else "retention"
-        mode, until = _retention_from(
-            call(admin, "GetObjectRetention", f"/{bucket}/{KEY_LOCKED}", query=query), canary)
+        rr = call(admin, "GetObjectRetention", f"/{bucket}/{KEY_LOCKED}", query=query)
+        mode, until = _retention_from(rr, canary)
         report["lock_retention_mode"] = mode
         report["lock_retain_until_utc"] = until
+        rstat["lock_retention_read_status"] = rr["category"]
     elif exists[KEY_LOCKED] == "no":
         report["lock_retention_mode"] = "none"
         report["lock_retain_until_utc"] = "none"
+        rstat["lock_retention_read_status"] = _NOT_READ
+    else:
+        rstat["lock_retention_read_status"] = _NOT_READ
 
+    for field, cat in rstat.items():
+        report[field] = cat
+    report["diagnostic_error_summary"] = _summary_from(rstat)
     report["diagnostic_status"] = _status_from(report)
     return report
 
