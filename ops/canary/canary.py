@@ -54,7 +54,7 @@ LIVE_GATE_VALUE = "YES_I_UNDERSTAND"
 # Inal-approved 3C2C2-B execution step. So the CLI still defers.
 SELECTEL_EXECUTION_DEFERRED = "SELECTEL_EXECUTION_GATED_UNTIL_3C2C2B"
 # Runtime-change review marker — must be bumped together with the SHA-256 freeze on every canary.py change.
-CANARY_RUNTIME_REVIEW = "3C2C2B-prelive-correction"
+CANARY_RUNTIME_REVIEW = "3C2D-sigv4-query-canonicalization"
 # live network safety knobs (used by the real transport in 3C2C2-B; enforced/asserted now)
 LIVE_CONNECT_TIMEOUT = 10.0
 LIVE_READ_TIMEOUT = 30.0
@@ -374,6 +374,43 @@ def _sigv4_authorization(access_key, signing_key, credential_scope, signed_heade
             f"SignedHeaders={signed_headers}, Signature={signature}")
 
 
+# AWS SigV4 canonical-query-string encoding (per the AWS "Create a canonical request" spec): every parameter
+# name and value is URI-encoded with RFC 3986 unreserved chars left as-is and EVERYTHING else percent-encoded
+# (space -> %20 not '+', '/' -> %2F in the query, no double-encoding); parameters are sorted by encoded name
+# then encoded value; a parameter with no value is emitted as "name=". The SAME normalized string is signed
+# AND sent on the wire, so the client-signed canonical query is byte-identical to what the server recomputes.
+_QUERY_UNRESERVED = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~")
+
+
+def _query_encode(s: str) -> str:
+    out = []
+    for byte in s.encode("utf-8"):
+        ch = chr(byte)
+        out.append(ch if ch in _QUERY_UNRESERVED else f"%{byte:02X}")
+    return "".join(out)
+
+
+def _canonical_query(raw: str) -> str:
+    """Normalize a caller's raw query (e.g. 'versioning', 'prefix=canary/x/', 'retention&versionId=v') into the
+    exact AWS SigV4 canonical query string. Empty -> ''. Split on '&', split each token on the FIRST '=' (a
+    value may itself contain '='), percent-encode name and value, sort by (encoded name, encoded value), keep
+    repeated names, and always emit 'name=' (empty value included)."""
+    if not raw:
+        return ""
+    pairs = []
+    for tok in raw.split("&"):
+        if tok == "":
+            continue
+        if "=" in tok:
+            name, value = tok.split("=", 1)
+        else:
+            name, value = tok, ""
+        pairs.append((_query_encode(name), _query_encode(value)))
+    pairs.sort()
+    return "&".join(f"{n}={v}" for n, v in pairs)
+
+
 class SelectelTransport:
     """DORMANT alias retained for the gate — see SelectelS3Transport. The live CLI never constructs the
     real transport in 3C2C2-A; execution is gated until 3C2C2-B."""
@@ -447,11 +484,14 @@ class SelectelS3Transport:
         payload_hash = hashlib.sha256(payload).hexdigest()
         if self._client is None:
             self._client = self._build_client()
+        # ONE normalizer feeds BOTH the signature and the wire query, so they are byte-identical (SigV4 fix).
+        cquery = _canonical_query(query)
         attempts = 1 if mutating else (1 + LIVE_READ_RETRIES)
         last = None
         for _ in range(attempts):
-            headers = self._sign(method, op, canonical_uri, query, payload_hash, amz_date, date_stamp, extra_headers)
-            url = f"{self._endpoint}{canonical_uri}" + (f"?{query}" if query else "")
+            headers = self._sign(method, op, canonical_uri, cquery, payload_hash, amz_date, date_stamp,
+                                 extra_headers)
+            url = f"{self._endpoint}{canonical_uri}" + (f"?{cquery}" if cquery else "")
             resp = self._client.request(method, url, headers=headers, content=payload)
             code = getattr(resp, "status_code", None)
             rh = getattr(resp, "headers", {}) or {}

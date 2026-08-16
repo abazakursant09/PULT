@@ -436,6 +436,28 @@ A second review found the Object-Lock "proof" was false-positive. Fixed:
 - **Path-Style stays PROPOSED** — Gate C change to Path-Style still needs Inal's explicit approval.
 - **Runtime freeze** re-pinned; marker `3C2C2B-prelive-correction`.
 
+## SECURITY-2D-3E1B-3C2D — SigV4 canonical-query fix + read-only List fallback
+
+The classified read-only diagnose run showed `signature-mismatch` on every query-bearing request
+(`versioning`, `object-lock`, `prefix=…`, `retention&versionId=…`) while `HeadObject` (empty query) reached a
+real policy decision (`access-denied`). Root cause: `SelectelS3Transport` signed and sent the caller's **raw**
+query string, so the client-signed AWS SigV4 canonical query did not match what the server recomputes —
+empty-value subresources lacked the `=` (`versioning` vs `versioning=`), `/` in a value was not `%2F`, and
+parameters were unsorted. The keys were fine (empty-query HeadObject reached IAM).
+
+- **Fix (runtime)**: one normalizer `_canonical_query` (RFC 3986 encoding, space→`%20` never `+`, `/`→`%2F`,
+  no double-encode, sort by encoded name then value, empty value → `name=`) now builds **both** the SigV4
+  canonical query and the on-the-wire query, so they are byte-identical. Canonical URI (Path-Style), headers,
+  payload hash, credential scope, mutations-never-retried and read-retries are unchanged.
+- **Runtime freeze bumped**: canary.py sha256 `573304ab321bb1477d361e29d699e36178b4310a77df7a930201f551921067f9`,
+  marker `3C2D-sigv4-query-canonicalization`; guard re-pinned; independent review required.
+- **List fallback (diagnose)**: because `HeadObject` maps to `s3:GetObject` and is AccessDenied for
+  retention-admin, `ListBucket` (exact prefix) is now the **primary** existence signal after the SigV4 fix —
+  a listed exact key → exists, an absent one → not present; a denied Head no longer forces `unknown`. Only the
+  four frozen exact `<Key>` values are ever retained (unexpected key names never kept/printed); a truncated
+  listing without bounded pagination, or a List-vs-successful-Head conflict, is fail-closed to `unknown` (never
+  a false `no`). No new S3 op type; policy is **not** expanded; owner still has no access.
+
 ## SECURITY-2D-3E1B-3C2C2-B-DIAG — read-only post-run diagnostic (DORMANT)
 
 The single Gate-F live run ended `status=FAILED` / exit 6 and its in-memory detail (role matrix, Object-Lock

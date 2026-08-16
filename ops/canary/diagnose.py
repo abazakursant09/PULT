@@ -236,6 +236,29 @@ def _summary_from(read_status: dict) -> str:
     return errs[0] if len(errs) == 1 else "mixed"
 
 
+def _list_keys(result):
+    """Parse a ListBucket response into (status, keys, truncated). status in {ok, unavailable, malformed}.
+    Reads ONLY <Key> and <IsTruncated>; retains ONLY keys that are one of the four frozen exact keys (an
+    unexpected key name is never kept, never printed); never returns raw XML/body."""
+    if not isinstance(result, dict) or result.get("allow") != "allow":
+        return "unavailable", set(), False
+    import xml.etree.ElementTree as ET
+    try:
+        root = ET.fromstring(result.get("body", b"") or b"")
+    except Exception:
+        return "malformed", set(), False
+    keys, truncated = set(), False
+    for el in root.iter():
+        tag = el.tag.rsplit("}", 1)[-1]
+        if tag == "Key":
+            k = (el.text or "").strip()
+            if k in _EXACT_KEYS:  # ONLY the four frozen keys are ever retained
+                keys.add(k)
+        elif tag == "IsTruncated":
+            truncated = (el.text or "").strip().lower() == "true"
+    return "ok", keys, truncated
+
+
 def _exists_from(result) -> str:
     if not isinstance(result, dict):
         return "unknown"
@@ -340,36 +363,59 @@ def run_diagnostic(manifest, creds, canary, transport_factory=None, clock=None) 
     report["object_lock"] = _object_lock_from(ol)
     rstat["object_lock_read_status"] = ol["category"]
 
-    # (2) prefix-scoped enumeration (exact prefix only — proves scope, never lists another prefix)
+    # (2) prefix-scoped enumeration (exact prefix only — proves scope, never lists another prefix).
+    # After the 3C2D SigV4 fix ListBucket is the PRIMARY existence signal (retention-admin's policy grants it);
+    # HeadObject may be AccessDenied on real Selectel (Head maps to GetObject), so a denied Head must NOT turn
+    # a trusted List result into unknown. Only the four frozen keys are ever retained from the listing.
     lst = call(admin, "ListBucket", f"/{bucket}", query=f"prefix={manifest['prefix']}")
     rstat["list_prefix_read_status"] = lst["category"]
+    list_status, listed_keys, list_truncated = _list_keys(lst)
 
-    # (3) existence of each of the four exact keys via HeadObject (retention-admin)
+    # (3) HeadObject on each of the four exact keys (secondary signal / cross-check)
     heads = {}
-    exists = {}
+    head_exists = {}
     head_cat = {}
     for key in _EXACT_KEYS:
         heads[key] = call(admin, "HeadObject", f"/{bucket}/{key}", method="HEAD")
-        exists[key] = _exists_from(heads[key])
+        head_exists[key] = _exists_from(heads[key])
         head_cat[key] = heads[key]["category"]
 
-    # optional independent cross-check on the two pitr keys via restore-reader; conflict -> fail-closed
+    # optional independent cross-check on the two pitr keys via restore-reader
     if reader is not None:
         for key in (KEY_PITR_PROBE, KEY_LOCKED):
             rr = call(reader, "HeadObject", f"/{bucket}/{key}", method="HEAD")
-            if _exists_from(rr) != exists[key]:
-                exists[key] = "unknown"
+            rx = _exists_from(rr)
+            if head_exists[key] == "unknown":
+                head_exists[key] = rx
+            elif rx not in ("unknown", head_exists[key]):
+                head_exists[key] = "unknown"  # two successful Heads disagree -> fail-closed
             if _head_status(rr["category"]) != "ok":
-                head_cat[key] = rr["category"]  # surface a reader-side read error
+                head_cat[key] = rr["category"]
 
-    report["logical_probe_exists"] = exists[KEY_LOGICAL_PROBE]
-    report["pitr_probe_exists"] = exists[KEY_PITR_PROBE]
-    report["unlocked_control_exists"] = exists[KEY_UNLOCKED]
-    report["locked_control_exists"] = exists[KEY_LOCKED]
-    rstat["logical_probe_read_status"] = _head_status(head_cat[KEY_LOGICAL_PROBE])
-    rstat["pitr_probe_read_status"] = _head_status(head_cat[KEY_PITR_PROBE])
-    rstat["unlocked_control_read_status"] = _head_status(head_cat[KEY_UNLOCKED])
-    rstat["locked_control_read_status"] = _head_status(head_cat[KEY_LOCKED])
+    def _resolve(key):
+        """Return (exists, read_status). ListBucket (when it succeeded and is not truncated) is authoritative;
+        a denied/unknown Head does not override it. Conflict between a trusted List and a successful Head, or a
+        truncated listing that did not include the key, is fail-closed to unknown (never a false 'no')."""
+        he = head_exists[key]
+        if list_status == "ok" and not list_truncated:
+            le = "yes" if key in listed_keys else "no"
+            if he in ("yes", "no") and he != le:
+                return "unknown", "unknown"          # List vs successful Head conflict
+            return le, "ok"                          # trusted List; denied Head is not fatal
+        if list_status == "ok" and list_truncated:
+            if key in listed_keys:
+                return "yes", "ok"
+            return "unknown", "unknown"              # truncated + not seen -> no bounded pagination -> unknown
+        return he, _head_status(head_cat[key])       # List unavailable/malformed -> Head only
+
+    exists = {}
+    for key, ex_field, st_field in (
+            (KEY_LOGICAL_PROBE, "logical_probe_exists", "logical_probe_read_status"),
+            (KEY_PITR_PROBE, "pitr_probe_exists", "pitr_probe_read_status"),
+            (KEY_UNLOCKED, "unlocked_control_exists", "unlocked_control_read_status"),
+            (KEY_LOCKED, "locked_control_exists", "locked_control_read_status")):
+        exists[key], rstat[st_field] = _resolve(key)
+        report[ex_field] = exists[key]
 
     # (4) retention only on the lock key, only when it exists
     if exists[KEY_LOCKED] == "yes":
