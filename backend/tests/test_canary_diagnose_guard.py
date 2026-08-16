@@ -1,0 +1,578 @@
+"""SECURITY-2D-3E1B-3C2C2-B-DIAG — offline guard for the DORMANT read-only canary diagnostic.
+
+Proves ops/canary/diagnose.py is a fail-closed, read-only, secret-free inspector of the ALREADY-completed
+canary run: full gate before any getpass/transport/network; exactly five read-only S3 ops against the exact
+bucket/prefix/keys; no writes/deletes/retention-mutation reachable; output is a fixed allowlist that never
+carries a secret, version id, request id, UID/PROJECT_ID, body, URI, or stack trace. No network, no
+credentials, no Docker; the frozen canary.py runtime must stay byte-identical (SHA-256 pinned).
+"""
+
+from __future__ import annotations
+
+import ast
+import builtins
+import hashlib
+import importlib.util as _ilu
+import re
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[2]
+CANARY = REPO / "ops" / "canary"
+CANARY_PY = CANARY / "canary.py"
+DIAG_PY = CANARY / "diagnose.py"
+
+# canary.py must remain byte-identical to the reviewed master runtime — this diagnostic never touches it.
+_CANARY_RUNTIME_SHA256 = "ba314f7f118fece59c968c820968e9cd07739d4b00e5af75ffe6ab65bce34148"
+_CANARY_RUNTIME_REVIEW = "3C2C2B-prelive-correction"
+
+# S3 operations that MUST NEVER appear in the diagnostic (as an op literal or an attempt target).
+_FORBIDDEN_OPS = frozenset({
+    "PutObject", "DeleteObject", "DeleteObjectVersion", "PutObjectRetention", "AbortMultipartUpload",
+    "DeleteBucket", "CreateBucket", "PutBucketVersioning", "PutBucketObjectLockConfiguration",
+    "CreateMultipartUpload", "UploadPart", "CompleteMultipartUpload", "PutObjectLegalHold",
+    "BypassGovernanceRetention",
+})
+
+# Every listed mutation, applied to a disposable copy, must flip at least one assertion in this file RED.
+DIAG_MUTATION_MATRIX = [
+    "drop the env-ack check", "drop the typed-confirm check", "drop the --ack check",
+    "accept a wrong bucket", "accept a wrong run-id", "accept a wrong endpoint",
+    "accept a past deadline", "accept a too-far deadline", "read credentials before the gate",
+    "add a credential CLI argument", "issue a PutObject / write", "issue a DeleteObject / delete",
+    "issue a PutObjectRetention mutation", "widen ListBucket beyond the exact prefix",
+    "HeadObject a non-allowlisted key", "GetObjectRetention on a non-lock key",
+    "print a version id / request id / secret", "print an unlisted output field",
+    "re-run the canary", "change canary.py without bumping the pin",
+]
+
+
+def _diag_code() -> str:
+    return DIAG_PY.read_text(encoding="utf-8")
+
+
+def _load(path: Path, name: str):
+    spec = _ilu.spec_from_file_location(name, str(path))
+    mod = _ilu.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _load_canary():
+    return _load(CANARY_PY, "canary_runtime_diagtest")
+
+
+def _load_diag():
+    return _load(DIAG_PY, "diagnose_runtime_test")
+
+
+# ---------------- args / clock / no-network helpers ----------------
+class _Args:
+    def __init__(self, **kw):
+        for k in ("mode", "run_id", "region", "endpoint", "bucket", "ack", "confirm", "deadline"):
+            setattr(self, k, None)
+        self.execute_diagnose = False
+        self.with_restore_reader = False
+        for k, v in kw.items():
+            setattr(self, k, v)
+
+
+GOOD_DEADLINE = "2026-08-16T00:20:00Z"
+RUN_ID = "eced74af45e3"
+BUCKET = "pult-canary-eced74af45e3"
+ENDPOINT = "https://s3.ru-3.storage.selcloud.ru"
+PREFIX = "canary/eced74af45e3/"
+CONFIRM = f"diagnose/{BUCKET}/ru-3/{ENDPOINT}/{RUN_ID}"
+ACK = "PULT-CANARY-DIAGNOSE-eced74af45e3"
+
+
+def _diag_args(**over):
+    base = dict(mode="diagnose", run_id=RUN_ID, region="ru-3", endpoint=ENDPOINT, bucket=BUCKET,
+                ack=ACK, confirm=CONFIRM, deadline=GOOD_DEADLINE, execute_diagnose=True,
+                with_restore_reader=False)
+    base.update(over)
+    return _Args(**base)
+
+
+def _clock(y=2026, mo=8, d=16, h=0, mi=0, s=0):
+    import datetime
+    return lambda: datetime.datetime(y, mo, d, h, mi, s)
+
+
+def _ok_env(d):
+    return {d.DIAG_ENV: d.DIAG_ENV_VALUE}
+
+
+class _NoNetwork:
+    def __enter__(self):
+        import socket
+        self._orig = socket.socket.connect
+
+        def _boom(self_, *a, **k):
+            raise AssertionError("network connection attempted in a no-network path")
+
+        socket.socket.connect = _boom
+        return self
+
+    def __exit__(self, *a):
+        import socket
+        socket.socket.connect = self._orig
+
+
+def _boom_reader(prompt):
+    raise AssertionError("getpass reader called before it should be")
+
+
+def _reader(secret="SEKRET_zzz_DO_NOT_LEAK"):
+    seen = []
+
+    def r(prompt):
+        seen.append(prompt)
+        return secret
+
+    r.seen = seen
+    return r
+
+
+# ---------------- FakeState + FakeReadTransport (attempt()-only, never a socket) ----------------
+class FakeState:
+    def __init__(self, versioning="Enabled", object_lock=True, present=(), retention=None,
+                 deny=(), force_unknown=None, versions=None, request_id="req-123-DONOTLEAK"):
+        self.versioning = versioning
+        self.object_lock = object_lock             # True / False / None(=404 not-found)
+        self.present = set(present)                # keys that exist
+        self.retention = retention                 # None or {"mode","until","malformed"}
+        self.deny = set(deny)                      # ops forced to 403 deny
+        self.force_unknown = force_unknown or {}   # {op or ("HeadObject",key): http_code}
+        self.versions = versions or {}             # key -> version id (memory-only echo)
+        self.request_id = request_id
+
+
+class FakeReadTransport:
+    def __init__(self, bucket, creds, state, record):
+        self.bucket = bucket
+        self.__secret = creds["secret_key"]        # kept private; must never leak
+        self.state = state
+        self.record = record
+
+    def _r(self, allow, code, body=b"", version_id=""):
+        return {"allow": allow, "http_code": code, "version_id": version_id, "body": body,
+                "request_id": self.state.request_id}
+
+    def _key(self, uri):
+        head = f"/{self.bucket}/"
+        return uri[len(head):] if uri.startswith(head) else uri
+
+    def attempt(self, op, uri, method="GET", query="", payload=b"", amz_date=None, date_stamp=None,
+                extra_headers=None):
+        self.record.append({"op": op, "uri": uri, "query": query, "method": method})
+        st = self.state
+        if op in st.force_unknown:
+            return self._r("unknown", st.force_unknown[op])
+        if op in st.deny:
+            return self._r("deny", 403)
+        if op == "GetBucketVersioning":
+            body = (f"<VersioningConfiguration><Status>{st.versioning}</Status></VersioningConfiguration>"
+                    .encode() if st.versioning else b"<VersioningConfiguration></VersioningConfiguration>")
+            return self._r("allow", 200, body)
+        if op == "GetBucketObjectLockConfiguration":
+            if st.object_lock is None:
+                return self._r("unknown", 404)
+            body = (b"<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled>"
+                    b"</ObjectLockConfiguration>" if st.object_lock
+                    else b"<ObjectLockConfiguration></ObjectLockConfiguration>")
+            return self._r("allow", 200, body)
+        if op == "ListBucket":
+            return self._r("allow", 200, b"<ListBucketResult></ListBucketResult>")
+        if op == "HeadObject":
+            key = self._key(uri)
+            fk = ("HeadObject", key)
+            if fk in st.force_unknown:
+                return self._r("unknown", st.force_unknown[fk])
+            if key in st.present:
+                return self._r("allow", 200, version_id=st.versions.get(key, ""))
+            return self._r("unknown", 404)
+        if op == "GetObjectRetention":
+            if st.retention is None:
+                return self._r("deny", 403)
+            if st.retention.get("malformed"):
+                return self._r("allow", 200, b"<Retention><Mode>GOV")
+            mode = st.retention.get("mode", "GOVERNANCE")
+            until = st.retention.get("until", "2026-08-16T00:15:00Z")
+            body = (f'<Retention xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Mode>{mode}</Mode>'
+                    f"<RetainUntilDate>{until}</RetainUntilDate></Retention>").encode()
+            return self._r("allow", 200, body)
+        raise AssertionError(f"non-allowlisted op reached the transport: {op}")
+
+
+def _factory(*states, record):
+    seq = list(states)
+
+    def factory(manifest, creds, service="s3"):
+        return FakeReadTransport(manifest["bucket"], creds, seq.pop(0), record)
+
+    return factory
+
+
+def _run(d, state, over=None, reader=None, record=None, extra_states=()):
+    record = [] if record is None else record
+    args = _diag_args(**(over or {}))
+    canary = _load_canary()
+    fac = _factory(state, *extra_states, record=record)
+    rc = d.diagnose(args, env=_ok_env(d), canary=canary, transport_factory=fac,
+                    clock=_clock(), reader=reader or _reader())
+    return rc, record
+
+
+# ================= gate: fail-closed BEFORE any getpass / transport / network =================
+def test_gate_off_is_prenetwork_no_getpass_no_transport():
+    d = _load_diag()
+    canary = _load_canary()
+
+    def bad_factory(*a, **k):
+        raise AssertionError("transport constructed on a refused gate")
+
+    with _NoNetwork():
+        rc = d.diagnose(_diag_args(), env={}, canary=canary, transport_factory=bad_factory,
+                        clock=_clock(), reader=_boom_reader)
+    assert rc == 4
+
+
+def test_wrong_params_fail_closed_prenetwork():
+    d = _load_diag()
+    canary = _load_canary()
+    bad = {
+        "wrong ack": _diag_args(ack="nope"),
+        "wrong deadline fmt": _diag_args(deadline="soon"),
+        "past deadline": _diag_args(deadline="2020-01-01T00:00:00Z"),
+        "too-far deadline": _diag_args(deadline="2026-08-16T01:00:00Z"),
+        "wrong endpoint": _diag_args(endpoint="https://s3.ru-1.storage.selcloud.ru"),
+        "wrong bucket": _diag_args(bucket="prod-backup"),
+        "wrong run-id": _diag_args(run_id="0123456789ab"),
+        "wrong region": _diag_args(region="ru-1"),
+        "confirm mismatch": _diag_args(confirm="wrong"),
+    }
+
+    def bad_factory(*a, **k):
+        raise AssertionError("transport constructed on a refused gate")
+
+    with _NoNetwork():
+        for name, a in bad.items():
+            rc = d.diagnose(a, env=_ok_env(d), canary=canary, transport_factory=bad_factory,
+                            clock=_clock(), reader=_boom_reader)
+            assert rc == 4, f"{name} must be refused pre-network (got {rc})"
+            try:
+                d.diag_validate(a, _ok_env(d), _clock())
+                raise AssertionError(f"{name} should have raised")
+            except d.DiagGateError:
+                pass
+
+
+def test_validation_runs_before_credentials():
+    d = _load_diag()
+    canary = _load_canary()
+    # ordinary invocation (no --execute-diagnose): gate validated, then deferral BEFORE any getpass
+    with _NoNetwork():
+        rc = d.diagnose(_diag_args(execute_diagnose=False), env=_ok_env(d), canary=canary,
+                        transport_factory=lambda *a, **k: (_ for _ in ()).throw(AssertionError("no transport")),
+                        clock=_clock(), reader=_boom_reader)
+    assert rc == 5
+
+
+def test_main_bare_invocation_is_fail_closed(monkeypatch):
+    d = _load_diag()
+    monkeypatch.delenv(d.DIAG_ENV, raising=False)
+    with _NoNetwork():
+        assert d.main(["diagnose"]) == 4  # no env-ack -> refuse before creds/network
+
+
+# ================= happy read-only path =================
+def test_happy_all_present_pass():
+    d = _load_diag()
+    st = FakeState(versioning="Enabled", object_lock=True,
+                   present=[d.KEY_LOGICAL_PROBE, d.KEY_PITR_PROBE, d.KEY_UNLOCKED, d.KEY_LOCKED],
+                   retention={"mode": "GOVERNANCE", "until": "2026-08-16T00:15:00Z"},
+                   versions={d.KEY_LOCKED: "vid-SECRETish"})
+    with _NoNetwork():
+        rc, rec = _run(d, st)
+    assert rc == 0
+
+
+def test_each_key_existence_states():
+    d = _load_diag()
+    # logical present, pitr missing, unlocked forced-unknown, locked present
+    st = FakeState(present=[d.KEY_LOGICAL_PROBE, d.KEY_LOCKED],
+                   force_unknown={("HeadObject", d.KEY_UNLOCKED): 500},
+                   retention={"mode": "GOVERNANCE", "until": "2026-08-16T00:15:00Z"})
+    report = d.run_diagnostic(
+        d.diag_validate(_diag_args(), _ok_env(d), _clock()),
+        {"retention-admin": {"access_key": "A", "secret_key": "S"}},
+        _load_canary(), transport_factory=_factory(st, record=[]), clock=_clock())
+    assert report["logical_probe_exists"] == "yes"
+    assert report["pitr_probe_exists"] == "no"
+    assert report["unlocked_control_exists"] == "unknown"
+    assert report["locked_control_exists"] == "yes"
+    assert report["diagnostic_status"] == "PARTIAL"
+
+
+def test_retention_variants():
+    d = _load_diag()
+    ca = _load_canary()
+    man = d.diag_validate(_diag_args(), _ok_env(d), _clock())
+    admin = {"retention-admin": {"access_key": "A", "secret_key": "S"}}
+
+    def run(state):
+        return d.run_diagnostic(man, admin, ca, transport_factory=_factory(state, record=[]), clock=_clock())
+
+    gov = run(FakeState(present=[d.KEY_LOCKED], retention={"mode": "GOVERNANCE", "until": "2026-08-16T00:15:00Z"}))
+    assert gov["lock_retention_mode"] == "GOVERNANCE" and gov["lock_retain_until_utc"] == "2026-08-16T00:15:00Z"
+    denied = run(FakeState(present=[d.KEY_LOCKED], retention=None))
+    assert denied["lock_retention_mode"] == "unknown" and denied["lock_retain_until_utc"] == "unknown"
+    malformed = run(FakeState(present=[d.KEY_LOCKED], retention={"malformed": True}))
+    assert malformed["lock_retention_mode"] == "unknown"
+    missing = run(FakeState(present=[]))
+    assert missing["lock_retention_mode"] == "none" and missing["lock_retain_until_utc"] == "none"
+
+
+# ================= exact-scope enforcement (ops actually issued) =================
+def test_listbucket_uses_only_the_exact_prefix():
+    d = _load_diag()
+    with _NoNetwork():
+        _, rec = _run(d, FakeState(present=[d.KEY_LOCKED],
+                                   retention={"mode": "GOVERNANCE", "until": "2026-08-16T00:15:00Z"}))
+    lists = [r for r in rec if r["op"] == "ListBucket"]
+    assert lists, "ListBucket must be issued"
+    for r in lists:
+        assert r["uri"] == f"/{BUCKET}" and r["query"] == f"prefix={PREFIX}", r
+
+
+def test_headobject_only_the_four_exact_keys():
+    d = _load_diag()
+    with _NoNetwork():
+        _, rec = _run(d, FakeState(present=[d.KEY_PITR_PROBE, d.KEY_LOCKED],
+                                   retention={"mode": "GOVERNANCE", "until": "2026-08-16T00:15:00Z"}))
+    exact = {f"/{BUCKET}/{k}" for k in (d.KEY_LOGICAL_PROBE, d.KEY_PITR_PROBE, d.KEY_UNLOCKED, d.KEY_LOCKED)}
+    heads = {r["uri"] for r in rec if r["op"] == "HeadObject"}
+    assert heads <= exact, f"HeadObject hit a non-exact key: {heads - exact}"
+
+
+def test_getobjectretention_only_on_lock_key_and_only_when_present():
+    d = _load_diag()
+    with _NoNetwork():
+        _, rec_present = _run(d, FakeState(present=[d.KEY_LOCKED],
+                                           retention={"mode": "GOVERNANCE", "until": "2026-08-16T00:15:00Z"}))
+        _, rec_absent = _run(d, FakeState(present=[]))
+    gets = [r for r in rec_present if r["op"] == "GetObjectRetention"]
+    assert gets and all(r["uri"] == f"/{BUCKET}/{d.KEY_LOCKED}" for r in gets)
+    assert not [r for r in rec_absent if r["op"] == "GetObjectRetention"], "no retention read when lock absent"
+
+
+def test_only_read_ops_ever_issued():
+    d = _load_diag()
+    with _NoNetwork():
+        _, rec = _run(d, FakeState(present=[d.KEY_LOGICAL_PROBE, d.KEY_PITR_PROBE, d.KEY_UNLOCKED, d.KEY_LOCKED],
+                                   retention={"mode": "GOVERNANCE", "until": "2026-08-16T00:15:00Z"}))
+    issued = {r["op"] for r in rec}
+    assert issued <= d.DIAG_READ_ONLY_OPS, f"non-read op issued: {issued - d.DIAG_READ_ONLY_OPS}"
+    assert not (issued & _FORBIDDEN_OPS)
+
+
+def test_readonly_allowlist_is_exactly_five_and_disjoint_from_mutations():
+    d = _load_diag()
+    assert d.DIAG_READ_ONLY_OPS == {
+        "GetBucketVersioning", "GetBucketObjectLockConfiguration", "ListBucket", "HeadObject",
+        "GetObjectRetention"}
+    assert not (d.DIAG_READ_ONLY_OPS & _FORBIDDEN_OPS)
+
+
+def test_restore_reader_conflict_is_fail_closed():
+    d = _load_diag()
+    ca = _load_canary()
+    man = d.diag_validate(_diag_args(with_restore_reader=True), _ok_env(d), _clock())
+    creds = {"retention-admin": {"access_key": "A", "secret_key": "S"},
+             "restore-reader": {"access_key": "B", "secret_key": "S2"}}
+    admin_state = FakeState(present=[d.KEY_PITR_PROBE, d.KEY_LOCKED],
+                            retention={"mode": "GOVERNANCE", "until": "2026-08-16T00:15:00Z"})
+    reader_state = FakeState(present=[d.KEY_LOCKED])  # disagrees on pitr-probe existence
+    report = d.run_diagnostic(man, creds, ca,
+                              transport_factory=_factory(admin_state, reader_state, record=[]), clock=_clock())
+    assert report["pitr_probe_exists"] == "unknown"  # conflict -> fail-closed unknown
+
+
+# ================= AST: no mutating call, every op literal in the allowlist =================
+def test_ast_no_mutating_op_and_every_issued_op_is_allowlisted():
+    d = _load_diag()
+    src = _diag_code()
+    tree = ast.parse(src)
+    consts = {n.value for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str)}
+    leaked = consts & _FORBIDDEN_OPS
+    assert not leaked, f"mutating op literal present: {leaked}"
+    # every op passed to the internal read helper call("...") is a literal in the frozen allowlist
+    call_ops = []
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "call":
+            assert len(n.args) >= 2 and isinstance(n.args[1], ast.Constant), "op must be a literal"
+            call_ops.append(n.args[1].value)
+    assert call_ops, "no read ops issued via call()"
+    assert set(call_ops) <= d.DIAG_READ_ONLY_OPS, f"op outside allowlist: {set(call_ops) - d.DIAG_READ_ONLY_OPS}"
+    # exactly one attempt() site, guarded by the allowlist membership check
+    assert src.count(".attempt(") == 1, "attempt() must be called from exactly one guarded site"
+    assert "if op not in DIAG_READ_ONLY_OPS" in src
+
+
+def test_no_write_or_retry_helpers():
+    src = _diag_code()
+    for bad in ("@retry", "tenacity", "backoff", "while True", "--recursive", "rmtree", "shutil"):
+        assert bad not in src, f"diagnostic must not contain {bad!r}"
+
+
+# ================= credentials only via getpass; no argv/env/file =================
+def test_credentials_only_masked_getpass():
+    src = _diag_code()
+    seg = src[src.index("def read_masked_credentials"):src.index("def _xml_text")]
+    assert "getpass" in seg and "input(" not in seg and "open(" not in seg
+    # no credential CLI flags in the parser
+    flags = set(re.findall(r'add_argument\("(--[a-z-]+)"', src))
+    allowed = {"--run-id", "--region", "--endpoint", "--bucket", "--ack", "--confirm", "--deadline",
+               "--execute-diagnose", "--with-restore-reader"}
+    assert flags <= allowed, f"unexpected argv flags: {flags - allowed}"
+    for bad in ("--secret", "--access-key", "--secret-key", "--key", "--password", "--token", "--access"):
+        assert bad not in src, f"credential CLI arg {bad!r} forbidden"
+
+
+def test_masked_reader_is_memory_only(capsys):
+    d = _load_diag()
+    r = _reader("SEKRET_zzz_DO_NOT_LEAK")
+    creds = d.read_masked_credentials(with_restore_reader=True, reader=r)
+    assert set(creds) == {"retention-admin", "restore-reader"}
+    assert len(r.seen) == 4  # 2 roles x (access + secret)
+    out = capsys.readouterr()
+    assert "SEKRET_zzz_DO_NOT_LEAK" not in (out.out + out.err)
+
+
+def test_no_environ_dump():
+    src = _diag_code()
+    assert "print(os.environ" not in src and "os.environ)" not in src.replace("os.environ.get", "")
+
+
+# ================= output allowlist; no secret/id in any path =================
+def test_output_is_exactly_the_field_allowlist(capsys):
+    d = _load_diag()
+    st = FakeState(present=[d.KEY_LOGICAL_PROBE, d.KEY_PITR_PROBE, d.KEY_UNLOCKED, d.KEY_LOCKED],
+                   retention={"mode": "GOVERNANCE", "until": "2026-08-16T00:15:00Z"})
+    with _NoNetwork():
+        _run(d, st)
+    out = capsys.readouterr().out.strip().splitlines()
+    keys = [ln.split(":", 1)[0] for ln in out if ln.strip()]
+    assert keys == list(d._OUTPUT_FIELDS), keys
+
+
+def test_no_secret_version_or_request_id_in_output_happy(capsys):
+    d = _load_diag()
+    st = FakeState(present=[d.KEY_LOCKED], versions={d.KEY_LOCKED: "vid-LEAK-9999"},
+                   retention={"mode": "GOVERNANCE", "until": "2026-08-16T00:15:00Z"},
+                   request_id="req-123-DONOTLEAK")
+    with _NoNetwork():
+        _run(d, st, reader=_reader("SEKRET_zzz_DO_NOT_LEAK"))
+    blob = capsys.readouterr()
+    combined = blob.out + blob.err
+    for leak in ("SEKRET_zzz_DO_NOT_LEAK", "vid-LEAK-9999", "req-123-DONOTLEAK"):
+        assert leak not in combined, f"leaked {leak!r}"
+
+
+def test_error_path_never_leaks(capsys):
+    d = _load_diag()
+    canary = _load_canary()
+
+    class _Boom:
+        def __init__(self, *a, **k):
+            pass
+
+        def attempt(self, *a, **k):
+            raise RuntimeError("https://s3.ru-3.storage.selcloud.ru/b?x secret=SEKRET_LEAK "
+                               "reqid=req-123 versionId=vid-LEAK")
+
+    with _NoNetwork():
+        rc = d.diagnose(_diag_args(), env=_ok_env(d), canary=canary,
+                        transport_factory=lambda *a, **k: _Boom(), clock=_clock(), reader=_reader())
+    combined = capsys.readouterr()
+    text = combined.out + combined.err
+    assert rc == 6
+    assert "DIAG ERROR: read-or-transport-error" in combined.err
+    assert "diagnostic_status: FAILED" in combined.out
+    for leak in ("SEKRET_LEAK", "req-123", "vid-LEAK", "https://s3.ru-3"):
+        assert leak not in text, f"error path leaked {leak!r}"
+
+
+def test_all_unknown_reads_status_failed():
+    d = _load_diag()
+    ca = _load_canary()
+    man = d.diag_validate(_diag_args(), _ok_env(d), _clock())
+    admin = {"retention-admin": {"access_key": "A", "secret_key": "S"}}
+    # every bucket-level + head read forced unknown -> everything unknown -> FAILED
+    st = FakeState(versioning=None, object_lock=None,
+                   force_unknown={"GetBucketVersioning": 500, "GetBucketObjectLockConfiguration": 500,
+                                  ("HeadObject", d.KEY_LOGICAL_PROBE): 500,
+                                  ("HeadObject", d.KEY_PITR_PROBE): 500,
+                                  ("HeadObject", d.KEY_UNLOCKED): 500,
+                                  ("HeadObject", d.KEY_LOCKED): 500})
+    report = d.run_diagnostic(man, admin, ca, transport_factory=_factory(st, record=[]), clock=_clock())
+    assert report["diagnostic_status"] == "FAILED"
+
+
+def test_status_logic_unit():
+    d = _load_diag()
+    base = {k: "unknown" for k in d._OUTPUT_FIELDS}
+    allknown = dict(base, versioning="enabled", object_lock="enabled", logical_probe_exists="no",
+                    pitr_probe_exists="no", unlocked_control_exists="no", locked_control_exists="no")
+    assert d._status_from(allknown) == "PASS"
+    partial = dict(allknown, pitr_probe_exists="unknown")
+    assert d._status_from(partial) == "PARTIAL"
+
+
+# ================= no files written =================
+def test_no_files_written_during_diagnose():
+    d = _load_diag()
+    canary = _load_canary()  # preload so diagnose() does not import canary via open() during the trap
+    st = FakeState(present=[d.KEY_LOCKED],
+                   retention={"mode": "GOVERNANCE", "until": "2026-08-16T00:15:00Z"})
+    rec = []
+    fac = _factory(st, record=rec)
+    orig_open = builtins.open
+    opened = []
+
+    def trap(*a, **k):
+        opened.append(a[0] if a else None)
+        return orig_open(*a, **k)
+
+    builtins.open = trap
+    try:
+        with _NoNetwork():
+            d.diagnose(_diag_args(), env=_ok_env(d), canary=canary, transport_factory=fac,
+                       clock=_clock(), reader=_reader())
+    finally:
+        builtins.open = orig_open
+    # any file opened during the run must NOT be for writing
+    assert opened == [], f"diagnose opened files: {opened}"
+
+
+# ================= frozen canary.py runtime is untouched =================
+def test_canary_runtime_byte_frozen_and_marker():
+    digest = hashlib.sha256(CANARY_PY.read_bytes()).hexdigest()
+    assert digest == _CANARY_RUNTIME_SHA256, f"canary.py changed (got {digest}) — this task must not touch it"
+    assert f'CANARY_RUNTIME_REVIEW = "{_CANARY_RUNTIME_REVIEW}"' in CANARY_PY.read_text(encoding="utf-8")
+
+
+def test_existing_canary_guard_still_pins_same_runtime():
+    guard = (REPO / "backend" / "tests" / "test_canary_tooling_guard.py").read_text(encoding="utf-8")
+    assert f'_CANARY_RUNTIME_SHA256 = "{_CANARY_RUNTIME_SHA256}"' in guard
+    assert f'_CANARY_RUNTIME_REVIEW = "{_CANARY_RUNTIME_REVIEW}"' in guard
+
+
+def test_diagnose_never_imports_httpx_at_module_load():
+    src = _diag_code()
+    # httpx must not be imported at module top-level (only the reused transport imports it lazily on a request)
+    assert "import httpx" not in src
+
+
+def test_mutation_matrix_declared():
+    assert len(DIAG_MUTATION_MATRIX) >= 15

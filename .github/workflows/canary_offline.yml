@@ -12,6 +12,7 @@ on:
       - ops/canary/**
       - docs/pitr-operations-policy.md
       - backend/tests/test_canary_tooling_guard.py
+      - backend/tests/test_canary_diagnose_guard.py
       - .github/workflows/canary_offline.yml
   push:
     branches: [master]
@@ -46,11 +47,13 @@ jobs:
         run: |
           set -euo pipefail
           pip install --require-hashes -r backend/requirements-ci.lock
-          python -m pytest backend/tests/test_canary_tooling_guard.py -q
+          python -m pytest backend/tests/test_canary_tooling_guard.py backend/tests/test_canary_diagnose_guard.py -q
           python ops/canary/canary.py validate-policies
           python ops/canary/canary.py plan
           # live mode must fail-closed before any network/credential read
           if python ops/canary/canary.py live; then echo "LIVE SHOULD HAVE FAILED"; exit 1; fi
+          # read-only diagnostic must ALSO fail-closed (no env-ack) before any network/credential read
+          if python ops/canary/diagnose.py diagnose; then echo "DIAGNOSE SHOULD HAVE FAILED"; exit 1; fi
           echo "offline OK"
 
   minio-compat:

@@ -436,4 +436,31 @@ A second review found the Object-Lock "proof" was false-positive. Fixed:
 - **Path-Style stays PROPOSED** — Gate C change to Path-Style still needs Inal's explicit approval.
 - **Runtime freeze** re-pinned; marker `3C2C2B-prelive-correction`.
 
+## SECURITY-2D-3E1B-3C2C2-B-DIAG — read-only post-run diagnostic (DORMANT)
+
+The single Gate-F live run ended `status=FAILED` / exit 6 and its in-memory detail (role matrix, Object-Lock
+booleans, cleanup ledger) is gone — nothing was ever written to a file or log, so the exact FAILED cause is
+**not recoverable**. `ops/canary/diagnose.py` is a separate, dormant, **read-only** inspector of the CURRENT
+bucket state; it never re-runs the canary, never widens IAM/policy, and touches `canary.py` not at all.
+
+- **Exactly five read-only S3 ops**: `GetBucketVersioning`, `GetBucketObjectLockConfiguration`, `ListBucket`
+  (exact prefix `canary/<runid>/` only), `HeadObject` (the four exact synthetic keys only), and
+  `GetObjectRetention` (the lock key only). No write, delete, retention-mutation, Bypass, or Compliance op is
+  reachable — an AST guard proves it and the transport is driven single-shot for reads only.
+- **Hard-pinned scope**: bucket/run-id/prefix/region/endpoint are constants; no argv or env can widen it.
+- **Credentials** come only from masked getpass — retention-admin required (it holds ListBucket/GetObject/
+  GetObjectRetention + bucket-config reads), restore-reader optional for an independent existence cross-check.
+  The bucket owner intentionally has no object access, so its UI "Access denied" proves nothing; policy is
+  **not** expanded for the diagnostic. Credentials never reach argv/env/file/log; `PROJECT_ID`/UID are neither
+  needed nor accepted.
+- **Gate**: separate env acknowledgement `PULT_SELECTEL_CANARY_DIAGNOSE`, a typed confirm, a `--ack`, and a
+  deadline in `(now, now+30min]` — all validated **before** any getpass/transport/DNS/socket; ordinary
+  invocation fails closed pre-network; execution needs `--execute-diagnose`.
+- **Output** is a fixed secret-free allowlist (versioning, object_lock, the four `*_exists`, lock retention
+  mode + retain-until UTC, and `diagnostic_status` PASS/PARTIAL/FAILED). It never prints a secret, version id,
+  request id, UID/PROJECT_ID, HTTP body, URI, raw transport result, or a request-bearing stack trace.
+- **Honest limits**: results describe only current state. They do not reconstruct the past role matrix; an
+  empty bucket does not explain the failure; a lock object without retention indicates an incomplete
+  Object-Lock path; residual probe/unlocked objects indicate a cleanup residual. No stronger claim is made.
+
 Launch gate remains **NOT READY**. **MinIO ≠ Selectel.**
