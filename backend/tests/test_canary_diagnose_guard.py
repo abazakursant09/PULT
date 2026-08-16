@@ -43,6 +43,10 @@ DIAG_MUTATION_MATRIX = [
     "HeadObject a non-allowlisted key", "GetObjectRetention on a non-lock key",
     "print a version id / request id / secret", "print an unlisted output field",
     "re-run the canary", "change canary.py without bumping the pin",
+    # error-classification correction (3C2C2-B-DIAG-CORRECTION)
+    "emit a non-allowlisted error category", "read Message/RequestId/StringToSign from the error body",
+    "print the raw exception text on a per-op failure", "classify an exception by its message not its type",
+    "turn an access-denied read into success",
 ]
 
 
@@ -136,15 +140,18 @@ def _reader(secret="SEKRET_zzz_DO_NOT_LEAK"):
 # ---------------- FakeState + FakeReadTransport (attempt()-only, never a socket) ----------------
 class FakeState:
     def __init__(self, versioning="Enabled", object_lock=True, present=(), retention=None,
-                 deny=(), force_unknown=None, versions=None, request_id="req-123-DONOTLEAK"):
+                 deny=(), force_unknown=None, versions=None, request_id="req-123-DONOTLEAK",
+                 error=None, raise_on=None):
         self.versioning = versioning
         self.object_lock = object_lock             # True / False / None(=404 not-found)
         self.present = set(present)                # keys that exist
         self.retention = retention                 # None or {"mode","until","malformed"}
-        self.deny = set(deny)                      # ops forced to 403 deny
+        self.deny = set(deny)                      # ops forced to 403 deny (empty body)
         self.force_unknown = force_unknown or {}   # {op or ("HeadObject",key): http_code}
         self.versions = versions or {}             # key -> version id (memory-only echo)
         self.request_id = request_id
+        self.error = error or {}                   # {op: (http_code, body_bytes)} — custom error response
+        self.raise_on = raise_on or {}             # {op: Exception instance} — transport raises (net/TLS/...)
 
 
 class FakeReadTransport:
@@ -166,6 +173,12 @@ class FakeReadTransport:
                 extra_headers=None):
         self.record.append({"op": op, "uri": uri, "query": query, "method": method})
         st = self.state
+        if op in st.raise_on:
+            raise st.raise_on[op]
+        if op in st.error:
+            code, body = st.error[op]
+            allow = "deny" if code in (401, 403) else "unknown"
+            return self._r(allow, code, body)
         if op in st.force_unknown:
             return self._r("unknown", st.force_unknown[op])
         if op in st.deny:
@@ -480,20 +493,18 @@ def test_no_secret_version_or_request_id_in_output_happy(capsys):
 
 
 def test_error_path_never_leaks(capsys):
+    """Top-level backstop: an UNEXPECTED error (transport construction fails) -> fixed category + all-unknown
+    FAILED report, never the raw exception text."""
     d = _load_diag()
     canary = _load_canary()
 
-    class _Boom:
-        def __init__(self, *a, **k):
-            pass
-
-        def attempt(self, *a, **k):
-            raise RuntimeError("https://s3.ru-3.storage.selcloud.ru/b?x secret=SEKRET_LEAK "
-                               "reqid=req-123 versionId=vid-LEAK")
+    def boom_factory(*a, **k):
+        raise RuntimeError("https://s3.ru-3.storage.selcloud.ru/b?x secret=SEKRET_LEAK "
+                           "reqid=req-123 versionId=vid-LEAK")
 
     with _NoNetwork():
         rc = d.diagnose(_diag_args(), env=_ok_env(d), canary=canary,
-                        transport_factory=lambda *a, **k: _Boom(), clock=_clock(), reader=_reader())
+                        transport_factory=boom_factory, clock=_clock(), reader=_reader())
     combined = capsys.readouterr()
     text = combined.out + combined.err
     assert rc == 6
@@ -576,3 +587,175 @@ def test_diagnose_never_imports_httpx_at_module_load():
 
 def test_mutation_matrix_declared():
     assert len(DIAG_MUTATION_MATRIX) >= 15
+
+
+# ================= 3C2C2-B-DIAG-CORRECTION: secret-free error classification =================
+def _res(allow=None, code=None, body=b""):
+    return {"allow": allow, "http_code": code, "body": body}
+
+
+def test_classify_xml_error_codes():
+    d = _load_diag()
+    cases = {
+        "InvalidAccessKeyId": "invalid-access-key",
+        "SignatureDoesNotMatch": "signature-mismatch",
+        "AuthorizationHeaderMalformed": "signature-mismatch",
+        "AccessDenied": "access-denied",
+        "InvalidToken": "authentication-failed",
+        "ExpiredToken": "authentication-failed",
+    }
+    for xml_code, cat in cases.items():
+        body = (f"<Error><Code>{xml_code}</Code><Message>secret msg</Message>"
+                f"<RequestId>RID</RequestId><StringToSign>STS</StringToSign></Error>").encode()
+        assert d._classify_result(_res("deny", 403, body)) == cat, xml_code
+    # a Code not in the allowlist falls back to the numeric status class (403 -> access-denied)
+    assert d._classify_result(_res("deny", 403, b"<Error><Code>WeirdUnlisted</Code></Error>")) == "access-denied"
+
+
+def test_classify_status_classes():
+    d = _load_diag()
+    assert d._classify_result(_res("allow", 200)) == "ok"
+    assert d._classify_result(_res("unknown", 404)) == "not-found"
+    assert d._classify_result(_res("deny", 401, b"")) == "authentication-failed"
+    assert d._classify_result(_res("deny", 403, b"")) == "access-denied"
+    assert d._classify_result(_res("unknown", 500, b"")) == "service-error"
+    assert d._classify_result(_res("unknown", 503, b"")) == "service-error"
+    assert d._classify_result(_res("unknown", None, b"")) == "unknown"
+    assert d._classify_result("not-a-dict") == "unknown"
+
+
+def test_classify_malformed_xml_is_malformed_response():
+    d = _load_diag()
+    assert d._classify_result(_res("deny", 403, b"<Error><Code>AccessDen")) == "malformed-response"
+
+
+def test_all_categories_are_in_the_allowlist():
+    d = _load_diag()
+    produced = set(d._XML_CODE_CATEGORY.values()) | {
+        "ok", "not-found", "access-denied", "authentication-failed", "service-error",
+        "malformed-response", "unknown", "timeout", "tls-error", "network-error"}
+    assert produced <= set(d.DIAG_ERROR_CATEGORIES)
+    assert len(d.DIAG_ERROR_CATEGORIES) == 12
+
+
+def test_exc_category_by_type_name_only():
+    d = _load_diag()
+    T = type("ReadTimeout", (Exception,), {})
+    S = type("SSLCertVerificationError", (Exception,), {})
+    C = type("ConnectError", (Exception,), {})
+    N = type("NameResolutionError", (Exception,), {})
+    assert d._exc_category(T("http://x secret=AKIA")) == "timeout"
+    assert d._exc_category(S("cert secret")) == "tls-error"
+    assert d._exc_category(C("secret url")) == "network-error"
+    assert d._exc_category(N("secret")) == "network-error"
+    assert d._exc_category(ValueError("http://x?token=SECRET")) == "unknown"
+
+
+def test_error_summary_none_single_mixed():
+    d = _load_diag()
+    assert d._summary_from({"a": "ok", "b": d._NOT_READ}) == "none"
+    assert d._summary_from({"a": "ok", "b": "access-denied", "c": "access-denied"}) == "access-denied"
+    assert d._summary_from({"a": "access-denied", "b": "timeout"}) == "mixed"
+
+
+def _diag_run_report(d, state, over=None, extra_states=()):
+    man = d.diag_validate(_diag_args(**(over or {})), _ok_env(d), _clock())
+    creds = {"retention-admin": {"access_key": "A", "secret_key": "S"}}
+    if over and over.get("with_restore_reader"):
+        creds["restore-reader"] = {"access_key": "B", "secret_key": "S2"}
+    return d.run_diagnostic(man, creds, _load_canary(),
+                            transport_factory=_factory(state, *extra_states, record=[]), clock=_clock())
+
+
+def test_all_access_denied_yields_failed_and_single_summary():
+    d = _load_diag()
+    ad = (b"<Error><Code>AccessDenied</Code><Message>Access Denied SECRETMSG</Message>"
+          b"<RequestId>RID-LEAK</RequestId></Error>")
+    err = {op: (403, ad) for op in ("GetBucketVersioning", "GetBucketObjectLockConfiguration",
+                                    "ListBucket", "HeadObject", "GetObjectRetention")}
+    report = _diag_run_report(d, FakeState(error=err))
+    # state cannot be read -> unknown, never falsely "no"/"disabled"
+    for f in ("versioning", "object_lock", "logical_probe_exists", "pitr_probe_exists",
+              "unlocked_control_exists", "locked_control_exists"):
+        assert report[f] == "unknown", f
+    for f in ("versioning_read_status", "object_lock_read_status", "list_prefix_read_status",
+              "logical_probe_read_status", "pitr_probe_read_status", "unlocked_control_read_status",
+              "locked_control_read_status"):
+        assert report[f] == "access-denied", f
+    assert report["diagnostic_error_summary"] == "access-denied"
+    assert report["diagnostic_status"] == "FAILED"
+
+
+def test_signature_mismatch_surfaced():
+    d = _load_diag()
+    sig = (b"<Error><Code>SignatureDoesNotMatch</Code><StringToSign>STS_SECRET</StringToSign>"
+           b"<CanonicalRequest>CR_SECRET</CanonicalRequest></Error>")
+    report = _diag_run_report(d, FakeState(error={"GetBucketVersioning": (403, sig)}))
+    assert report["versioning_read_status"] == "signature-mismatch"
+    assert report["diagnostic_error_summary"] in ("signature-mismatch", "mixed")
+
+
+def test_mixed_categories_summary():
+    d = _load_diag()
+    report = _diag_run_report(d, FakeState(
+        error={"GetBucketVersioning": (403, b"<Error><Code>AccessDenied</Code></Error>")},
+        raise_on={"GetBucketObjectLockConfiguration": type("ReadTimeout", (Exception,), {})("secret")}))
+    assert report["versioning_read_status"] == "access-denied"
+    assert report["object_lock_read_status"] == "timeout"
+    assert report["diagnostic_error_summary"] == "mixed"
+
+
+def test_per_op_exception_classified_not_leaked(capsys):
+    d = _load_diag()
+    exc = type("ConnectTimeout", (Exception,), {})("https://s3.ru-3... key=AKIALEAK secret=SEKRETLEAK")
+    st = FakeState(present=[d.KEY_LOGICAL_PROBE], raise_on={"GetBucketVersioning": exc})
+    with _NoNetwork():
+        _run(d, st)
+    blob = capsys.readouterr()
+    combined = blob.out + blob.err
+    assert "versioning_read_status: timeout" in blob.out
+    for leak in ("AKIALEAK", "SEKRETLEAK", "https://s3.ru-3"):
+        assert leak not in combined, f"leaked {leak!r}"
+
+
+def test_malicious_error_body_never_leaks_message_or_ids(capsys):
+    d = _load_diag()
+    nasty = (b"<Error><Code>AccessDenied</Code><Message>SECRET_MESSAGE_LEAK</Message>"
+             b"<RequestId>RID_LEAK</RequestId><HostId>HOST_LEAK</HostId>"
+             b"<StringToSign>STS_LEAK</StringToSign><CanonicalRequest>CR_LEAK</CanonicalRequest>"
+             b"<AWSAccessKeyId>AKIA_LEAK</AWSAccessKeyId></Error>")
+    err = {op: (403, nasty) for op in ("GetBucketVersioning", "GetBucketObjectLockConfiguration",
+                                       "ListBucket", "HeadObject", "GetObjectRetention")}
+    with _NoNetwork():
+        _run(d, FakeState(error=err))
+    combined = capsys.readouterr()
+    text = combined.out + combined.err
+    for leak in ("SECRET_MESSAGE_LEAK", "RID_LEAK", "HOST_LEAK", "STS_LEAK", "CR_LEAK", "AKIA_LEAK"):
+        assert leak not in text, f"error body leaked {leak!r}"
+
+
+def test_read_status_fields_in_output_are_categories(capsys):
+    d = _load_diag()
+    st = FakeState(present=[d.KEY_LOGICAL_PROBE, d.KEY_PITR_PROBE, d.KEY_UNLOCKED, d.KEY_LOCKED],
+                   retention={"mode": "GOVERNANCE", "until": "2026-08-16T00:15:00Z"})
+    with _NoNetwork():
+        _run(d, st)
+    out = {ln.split(":", 1)[0]: ln.split(":", 1)[1].strip()
+           for ln in capsys.readouterr().out.strip().splitlines() if ":" in ln}
+    for f in ("versioning_read_status", "object_lock_read_status", "list_prefix_read_status",
+              "logical_probe_read_status", "pitr_probe_read_status", "unlocked_control_read_status",
+              "locked_control_read_status", "lock_retention_read_status", "diagnostic_error_summary"):
+        assert f in out, f
+    for f in ("versioning_read_status", "object_lock_read_status", "list_prefix_read_status"):
+        assert out[f] in d.DIAG_ERROR_CATEGORIES, (f, out[f])
+    assert out["lock_retention_read_status"] in tuple(d.DIAG_ERROR_CATEGORIES) + (d._NOT_READ,)
+    assert out["diagnostic_error_summary"] in ("none", "mixed") + tuple(d.DIAG_ERROR_CATEGORIES)
+    assert out["diagnostic_error_summary"] == "none"
+
+
+def test_missing_objects_are_not_errors():
+    d = _load_diag()
+    report = _diag_run_report(d, FakeState(present=[]))  # empty bucket, all reads succeed
+    assert report["logical_probe_read_status"] == "ok"
+    assert report["lock_retention_read_status"] == d._NOT_READ
+    assert report["diagnostic_error_summary"] == "none"

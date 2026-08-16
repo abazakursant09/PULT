@@ -456,9 +456,21 @@ bucket state; it never re-runs the canary, never widens IAM/policy, and touches 
 - **Gate**: separate env acknowledgement `PULT_SELECTEL_CANARY_DIAGNOSE`, a typed confirm, a `--ack`, and a
   deadline in `(now, now+30min]` — all validated **before** any getpass/transport/DNS/socket; ordinary
   invocation fails closed pre-network; execution needs `--execute-diagnose`.
-- **Output** is a fixed secret-free allowlist (versioning, object_lock, the four `*_exists`, lock retention
-  mode + retain-until UTC, and `diagnostic_status` PASS/PARTIAL/FAILED). It never prints a secret, version id,
-  request id, UID/PROJECT_ID, HTTP body, URI, raw transport result, or a request-bearing stack trace.
+- **Output** is a fixed secret-free allowlist: the state fields (versioning, object_lock, the four `*_exists`,
+  lock retention mode + retain-until UTC), a per-read `*_read_status` for each of the eight reads, a
+  `diagnostic_error_summary`, and `diagnostic_status` PASS/PARTIAL/FAILED. It never prints a secret, version
+  id, request id, UID/PROJECT_ID, HTTP body, URI, raw transport result, or a request-bearing stack trace.
+- **Safe error classification (3C2C2-B-DIAG-CORRECTION)**: the first read-only run returned every field
+  `unknown` because the tool over-redacted all failures. Each read is now mapped to ONE secret-free category —
+  `ok, not-found, invalid-access-key, signature-mismatch, access-denied, authentication-failed, timeout,
+  tls-error, network-error, service-error, malformed-response, unknown` — derived ONLY from the transport
+  `allow`, the numeric HTTP status class, an allowlisted XML `<Code>` (InvalidAccessKeyId / SignatureDoesNotMatch
+  / AuthorizationHeaderMalformed / AccessDenied / InvalidToken / ExpiredToken; anything else falls back to the
+  status class or `unknown`), or a fixed local exception-type category. The body is read ONLY for the `<Code>`
+  tag — never Message/Resource/RequestId/HostId/StringToSign/CanonicalRequest; malformed XML → `malformed-response`.
+  `diagnostic_error_summary` is `none` (no errors), the single category (all errors equal), or `mixed`. An
+  access-denied / signature-mismatch / invalid-key read keeps the state field `unknown` and yields PARTIAL/FAILED —
+  a failure is never turned into success.
 - **Honest limits**: results describe only current state. They do not reconstruct the past role matrix; an
   empty bucket does not explain the failure; a lock object without retention indicates an incomplete
   Object-Lock path; residual probe/unlocked objects indicate a cleanup residual. No stronger claim is made.
