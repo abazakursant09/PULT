@@ -43,9 +43,9 @@ NEG_MATRIX = CANARY / "negative-matrix.md"
 #   - an independent safety review passed;
 #   - Inal separately approved the runtime change.
 # The digest is a hard-coded literal — never computed at run time, never env-overridable, never auto-updated.
-_CANARY_RUNTIME_SHA256 = "7bdc0237e373d747bc10a1c8a433385b50c6acd0375b723add19d4cfb9665618"
+_CANARY_RUNTIME_SHA256 = "31d925d5bf28ba2f8a65a0cb41dfbefb1dff17ec8231e27c24d2a7b9843aea48"
 # Review marker — bumped with the digest on every reviewed canary.py runtime change (3C2D SigV4 canonical query).
-_CANARY_RUNTIME_REVIEW = "3C2D-v3-error-telemetry"
+_CANARY_RUNTIME_REVIEW = "3C2D-v4-identity-precheck"
 
 # Each mutation below, applied to a disposable copy, must make at least one test in this file fail.
 MUTATION_MATRIX = [
@@ -1195,6 +1195,10 @@ class _FakeLiveTransport:
         self._allow = allow_ops  # set of (op, prefix-root) that are ALLOW for this role's matrix
         self.__secret = creds["secret_key"]
 
+    @staticmethod
+    def _cat(allow):
+        return "ok" if allow == "allow" else "access-denied"
+
     def attempt(self, s3op, uri, method="GET", query="", payload=b"", amz_date=None, date_stamp=None,
                 extra_headers=None):
         hay = uri + "?" + query
@@ -1202,23 +1206,34 @@ class _FakeLiveTransport:
         if s3op == "PutObject":
             allow = ("put", root) in self._allow  # REAL policy semantics: role must be granted put on this prefix
             return {"allow": "allow" if allow else "deny", "http_code": 200 if allow else 403, "request_id": "r",
-                    "version_id": ("v-" + uri.rsplit("/", 1)[-1]) if allow else "", "body": b""}
+                    "version_id": ("v-" + uri.rsplit("/", 1)[-1]) if allow else "", "body": b"",
+                    "category": self._cat("allow" if allow else "deny")}
         if s3op == "PutObjectRetention":
             self._last_retention = payload  # echo it back on GetObjectRetention (proves round-trip)
-            return {"allow": "allow", "http_code": 200, "request_id": "r", "version_id": "", "body": b""}
+            return {"allow": "allow", "http_code": 200, "request_id": "r", "version_id": "", "body": b"",
+                    "category": "ok"}
         if s3op == "GetObjectRetention":
             return {"allow": "allow", "http_code": 200, "request_id": "r", "version_id": "",
-                    "body": getattr(self, "_last_retention", b"")}
+                    "body": getattr(self, "_last_retention", b""), "category": "ok"}
         if s3op == "DeleteObjectVersion":
             allow = "deny" if "lock-" in uri else "allow"  # locked object refused; unlocked/others deletable
             return {"allow": allow, "http_code": 403 if allow == "deny" else 204, "request_id": "r",
-                    "version_id": "", "body": b""}
+                    "version_id": "", "body": b"", "category": self._cat(allow)}
         if s3op == "AbortMultipartUpload":
-            return {"allow": "allow", "http_code": 204, "request_id": "r", "version_id": "", "body": b""}
+            return {"allow": "allow", "http_code": 204, "request_id": "r", "version_id": "", "body": b"",
+                    "category": "ok"}
+        if s3op == "GetBucketVersioning":
+            allow = "allow" if ("versioning", "") in self._allow else "deny"
+            return {"allow": allow, "http_code": 200 if allow == "allow" else 403, "request_id": "r",
+                    "version_id": "", "body": b"", "category": self._cat(allow)}
+        if s3op == "GetBucketObjectLockConfiguration":
+            allow = "allow" if ("objectlock", "") in self._allow else "deny"
+            return {"allow": allow, "http_code": 200 if allow == "allow" else 403, "request_id": "r",
+                    "version_id": "", "body": b"", "category": self._cat(allow)}
         op = self._S3_TO_OP.get(s3op, "?")
         allow = "allow" if (op, root) in self._allow else "deny"
         return {"allow": allow, "http_code": 200 if allow == "allow" else 403, "request_id": "r",
-                "version_id": "", "body": b""}
+                "version_id": "", "body": b"", "category": self._cat(allow)}
 
 
 def _execmani(deadline_h=12, deadline_mi=10):
@@ -1229,11 +1244,13 @@ def _execmani(deadline_h=12, deadline_mi=10):
 
 
 def _matrix_allow(c):
+    # includes the read-only grants the PRE-MUTATION identity check needs (list logical/ for restore-reader
+    # per canary/<RUNID>/*; versioning/objectlock + root list for retention-admin). app-deny grants nothing.
     return {
         "logical-writer": {("put", "logical/"), ("list", "logical/")},
         "pitr-writer": {("put", "pitr/"), ("get", "pitr/"), ("list", "pitr/")},
-        "restore-reader": {("list", "pitr/"), ("get", "pitr/")},
-        "retention-admin": set(),
+        "restore-reader": {("list", "pitr/"), ("get", "pitr/"), ("list", "logical/")},
+        "retention-admin": {("versioning", ""), ("objectlock", ""), ("list", "")},
         "app-deny": set(),
     }
 
@@ -1298,10 +1315,18 @@ def test_run_live_execution_deadline_expiry_stops_ops_but_cleans_up():
     c = _load_canary()
     m = c.live_validate(_exec_args(), {c.LIVE_GATE_ENV: c.LIVE_GATE_VALUE})
     creds = {r: {"access_key": "A", "secret_key": "Sx"} for r in c._CANARY_ROLES}
-    # clock is already PAST the deadline -> no matrix op runs, but cleanup finally still executes
+    # identity passes (correct per-role keys); clock is already PAST the deadline -> no matrix op runs, but
+    # cleanup finally still executes
+    allow = _matrix_allow(c)
+
+    def factory(manifest, cr, service="s3"):
+        return _FakeLiveTransport(manifest, cr, service, allow_ops=factory.map.pop(0))
+
+    factory.map = [allow[r] for r in c._CANARY_ROLES]
     with _NoNetwork():
-        res = c.run_live_execution(m, _execmani(), creds, transport_factory=_FakeLiveTransport,
+        res = c.run_live_execution(m, _execmani(), creds, transport_factory=factory,
                                    clock=_clock_at(h=12, mi=30))
+    assert res["identity"]["passed"] is True
     assert res["deadline_reached"] is True
     assert res["rows"] == []
     assert "cleanup" in res
@@ -1774,3 +1799,167 @@ def test_app_deny_category_visible_and_no_leak(capsys):
     assert "role app get pitr/ = PASS (access-denied)" in lines
     blob = "\n".join(lines)
     assert "RID" not in blob and "Error" not in blob
+
+
+# ================= SECURITY-2D-3E1B-3C2D-V4 pre-mutation effective-role (identity) check =================
+# Before any Put/Delete, each supplied key must behave as its role via read-only probes. A swapped key order,
+# wrong secret, wrong binding, or over-broad policy aborts the run with ZERO mutations. Uses only V3 categories.
+_MUTATING_OPS_SET = {"PutObject", "DeleteObject", "DeleteObjectVersion", "PutObjectRetention",
+                     "AbortMultipartUpload", "CompleteMultipartUpload", "UploadPart", "CreateMultipartUpload",
+                     "CreateBucket", "PutBucketVersioning", "PutBucketObjectLockConfiguration"}
+
+
+class _IdFake:
+    """attempt()-only fake whose read-only behaviour is driven by the ACTUAL identity behind the key
+    (`behaves_as`) so tests can simulate swaps/wrong-binding, plus a forced error category. Records every
+    mutating op into a shared list so a test can prove ZERO mutations on an identity failure."""
+
+    def __init__(self, behaves_as, mut_log, force=None):
+        self.id = behaves_as
+        self.mut = mut_log
+        self.force = force  # a category string forced on every probe (wrong secret / invalid key / timeout)
+
+    def _r(self, allow, cat):
+        return {"allow": allow, "http_code": 200 if allow == "allow" else 403, "category": cat,
+                "version_id": "v", "body": b"", "request_id": "r"}
+
+    def attempt(self, op, uri, method="GET", query="", payload=b"", amz_date=None, date_stamp=None,
+                extra_headers=None):
+        if op in _MUTATING_OPS_SET:
+            self.mut.append((self.id, op))
+        if self.force:  # auth/signature/network failure hits every request regardless of policy
+            return self._r("deny", self.force)
+        if op == "ListBucket":
+            sub = query.split("prefix=", 1)[1]
+            if self.id == "logical-writer":
+                a = sub.endswith("logical/")
+            elif self.id == "pitr-writer":
+                a = sub.endswith("pitr/")
+            elif self.id in ("restore-reader", "retention-admin"):
+                a = "canary/" in sub
+            else:
+                a = False
+            return self._r("allow", "ok") if a else self._r("deny", "access-denied")
+        if op in ("GetBucketVersioning", "GetBucketObjectLockConfiguration"):
+            a = self.id == "retention-admin"
+            return self._r("allow", "ok") if a else self._r("deny", "access-denied")
+        return self._r("allow", "ok")  # any mutating op (should not run if identity fails)
+
+
+def _id_factory(c, idmap=None, force=None):
+    idmap = idmap or {}
+    force = force or {}
+    mut = []
+    seq = [(idmap.get(r, r), force.get(r)) for r in c._CANARY_ROLES]
+
+    def factory(manifest, cr, service="s3"):
+        behaves, f = seq.pop(0)
+        return _IdFake(behaves, mut, f)
+
+    factory.mut = mut
+    return factory
+
+
+def _id_run(c, idmap=None, force=None):
+    m = c.live_validate(_exec_args(), {c.LIVE_GATE_ENV: c.LIVE_GATE_VALUE})
+    creds = {r: {"access_key": "A", "secret_key": "S"} for r in c._CANARY_ROLES}
+    fac = _id_factory(c, idmap, force)
+    with _NoNetwork():
+        res = c.run_live_execution(m, _execmani(), creds, transport_factory=fac, clock=_clock_at())
+    return res, fac.mut
+
+
+def test_identity_all_correct_then_matrix_runs():
+    c = _load_canary()
+    res, mut = _id_run(c)  # each key behaves as its own role
+    assert res["identity"]["passed"] is True
+    assert all(r["verdict"] == "PASS" for r in res["identity"]["rows"])
+    assert len(res["rows"]) > 0  # matrix actually ran after identity passed
+
+
+def test_identity_swapped_keys_fail_before_any_mutation():
+    c = _load_canary()
+    res, mut = _id_run(c, idmap={"logical-writer": "pitr-writer", "pitr-writer": "logical-writer"})
+    assert res["identity"]["passed"] is False
+    assert set(res["identity"]["failures"]) >= {"logical-writer", "pitr-writer"}
+    assert res["status"] == "FAILED"
+    assert res["rows"] == [] and res["object_lock"] == {}
+    assert res["cleanup"]["status"] == "clean"
+    assert mut == []  # ZERO mutating ops issued
+
+
+def test_identity_wrong_secret_is_signature_mismatch_fail():
+    c = _load_canary()
+    res, mut = _id_run(c, force={"logical-writer": "signature-mismatch"})
+    assert res["identity"]["passed"] is False
+    row = [r for r in res["identity"]["rows"] if r["role"] == "logical-writer"][0]
+    assert row["verdict"] == "FAIL" and row["category"] == "signature-mismatch"
+    assert mut == []
+
+
+def test_identity_invalid_access_key_fail():
+    c = _load_canary()
+    res, mut = _id_run(c, force={"pitr-writer": "invalid-access-key"})
+    row = [r for r in res["identity"]["rows"] if r["role"] == "pitr-writer"][0]
+    assert row["verdict"] == "FAIL" and row["category"] == "invalid-access-key"
+    assert res["status"] == "FAILED" and mut == []
+
+
+def test_identity_wrong_binding_accessdenied_fail():
+    c = _load_canary()
+    # logical-writer key actually behaves as app-deny (denies everything) -> allow-probe access-denied -> FAIL
+    res, mut = _id_run(c, idmap={"logical-writer": "app-deny"})
+    row = [r for r in res["identity"]["rows"] if r["role"] == "logical-writer"][0]
+    assert row["verdict"] == "FAIL" and row["category"] == "access-denied"
+    assert mut == []
+
+
+def test_identity_app_deny_accessdenied_passes_but_signature_fails():
+    c = _load_canary()
+    ok, _ = _id_run(c)  # app-deny correct -> its deny probes are real access-denied -> PASS
+    assert [r for r in ok["identity"]["rows"] if r["role"] == "app-deny"][0]["verdict"] == "PASS"
+    bad, mut = _id_run(c, force={"app-deny": "signature-mismatch"})
+    row = [r for r in bad["identity"]["rows"] if r["role"] == "app-deny"][0]
+    assert row["verdict"] == "FAIL" and row["category"] == "signature-mismatch"  # sig != a valid deny-proof
+    assert mut == []
+
+
+def test_identity_transport_categories_fail_closed():
+    c = _load_canary()
+    for cat in ("timeout", "network-error", "service-error", "malformed-response", "unknown",
+                "authentication-failed"):
+        res, mut = _id_run(c, force={"retention-admin": cat})
+        row = [r for r in res["identity"]["rows"] if r["role"] == "retention-admin"][0]
+        assert row["verdict"] == "FAIL" and row["category"] == cat, cat
+        assert res["status"] == "FAILED" and mut == []
+
+
+def test_identity_summary_secret_free_and_before_matrix():
+    c = _load_canary()
+    res, _ = _id_run(c, idmap={"pitr-writer": "logical-writer"})
+    lines = c._live_summary_lines(res)
+    idlines = [ln for ln in lines if ln.startswith("identity ")]
+    assert len(idlines) == len(c._CANARY_ROLES)
+    for ln in idlines:
+        verdict = ln.split(" = ")[1].split(" (")[0]
+        cat = ln.split("(")[1].rstrip(")")
+        assert verdict in ("PASS", "FAIL", "NOT_ATTEMPTED")
+        assert cat in tuple(c.LIVE_ERROR_CATEGORIES) + ("not_attempted",)
+    blob = "\n".join(lines)
+    for leak in ("access_key", "secret", "AKIA", "PROJECT", "versionId", "x-amz"):
+        assert leak not in blob
+
+
+def test_identity_runs_before_matrix_in_source():
+    code = _code()
+    seg = code[code.index("def run_live_execution"):code.index("def _live_summary_lines")]
+    # identity check is issued before the role-matrix loop and before any object created
+    assert seg.index("run_identity_check(transports") < seg.index("for role, ops in _LIVE_ROLE_MATRIX")
+    assert "if not identity[\"passed\"]:" in seg
+
+
+def test_identity_probes_are_read_only():
+    c = _load_canary()
+    for role, probes in c._IDENTITY_PROBES.items():
+        for op, _sub, _expect in probes:
+            assert op in c._READ_ONLY_S3_OPS, (role, op)

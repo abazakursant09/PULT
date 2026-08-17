@@ -436,6 +436,41 @@ A second review found the Object-Lock "proof" was false-positive. Fixed:
 - **Path-Style stays PROPOSED** — Gate C change to Path-Style still needs Inal's explicit approval.
 - **Runtime freeze** re-pinned; marker `3C2C2B-prelive-correction`.
 
+## SECURITY-2D-3E1B-3C2D-V4 — pre-mutation effective-role check + exact-policy contract
+
+V2 failed with two open cause-groups (policy scope vs credential/order/binding) and key-to-user mapping
+UNKNOWN. To make any future canary safe, `run_live_execution` now runs a **PRE-MUTATION EFFECTIVE-ROLE CHECK**
+using read-only ops ONLY, BEFORE the first Put/Delete:
+
+- Order: validated execute gate → masked credentials → **identity check** → (only if it fully passes) role
+  matrix → Object-Lock proof → exact cleanup.
+- Per role (`run_identity_check`, read-only ListBucket/GetBucketVersioning/GetBucketObjectLockConfiguration):
+  logical-writer must list `logical/`=allow & `pitr/`=deny; pitr-writer `pitr/`=allow & `logical/`=deny;
+  restore-reader `pitr/`=allow & `logical/`=allow (canary/<RUNID>/*); retention-admin versioning+object-lock
+  config reads=ok & root list=allow; app-deny `pitr/`=deny & versioning=deny.
+- An allow-probe passes only on `allow`(category ok); a deny-probe passes ONLY on category `access-denied` — a
+  signature-mismatch / invalid-access-key / authentication-failed / timeout / etc. is a FAIL (never a spurious
+  pass). This catches a **swapped key order, wrong Access/Secret pair, wrong project binding, or an over-broad
+  policy** (e.g. logical-writer able to list `pitr/`).
+- On ANY identity FAIL: `status=FAILED`, role matrix + Object-Lock = NOT_ATTEMPTED, ledger empty, cleanup clean,
+  **ZERO mutating ops issued** (no object/version/multipart created). The summary prints
+  `identity <role> = PASS|FAIL (category)` — secret-free (no Access/Secret/UID/PROJECT_ID/versionId/request-id/
+  URL/raw XML). Runtime freeze re-bumped: canary.py sha256
+  `31d925d5bf28ba2f8a65a0cb41dfbefb1dff17ec8231e27c24d2a7b9843aea48`, marker `3C2D-v4-identity-precheck`; both
+  guards re-pinned.
+
+**Exact policy (verified):** `ops/canary/gate-f-live-bucket-policy.json` (JSON/ARN form) is ALREADY the exact
+minimal prefix-only set — logicalWriter `bucket/canary/<RUNID>/logical/*`; pitrWriter `bucket/canary/<RUNID>/
+pitr/*`; restoreReader `bucket/canary/<RUNID>/*`; the three List rules are `bucket` + `s3:prefix` StringLike
+(bucket name NOT repeated in the prefix value); retentionAdmin `bucket` + `bucket/canary/<RUNID>/*` with NO
+PutObject/DeleteBucket/Bypass/Compliance/lifecycle; appDeny Deny `bucket`+`bucket/*`. There is **no broad
+`bucket/*` Allow** for logical/pitr/restore in the template — the V2 widening came from the Selectel visual
+editor, not this file. Read-back contract before any live run: re-read all 8 rules, expand any hidden "+N",
+confirm the exact users/actions/resources/conditions, and STOP before credentials if any extra Allow-resource
+appears; never edit the policy during a live run. The runtime identity check is the automatic backstop: an
+over-broad Allow makes an identity probe mismatch and aborts before mutations. This step is verification only
+— it does NOT prove V2's root cause and does NOT by itself authorize a live run.
+
 ## SECURITY-2D-3E1B-3C2D-V3 — secret-free live error categories (V2 postmortem)
 
 The V2 live run (run-id `1e916929485e`) failed: every expected-**allow** op FAILED and every expected-**deny**

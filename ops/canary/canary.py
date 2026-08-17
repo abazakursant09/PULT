@@ -54,7 +54,7 @@ LIVE_GATE_VALUE = "YES_I_UNDERSTAND"
 # Inal-approved 3C2C2-B execution step. So the CLI still defers.
 SELECTEL_EXECUTION_DEFERRED = "SELECTEL_EXECUTION_GATED_UNTIL_3C2C2B"
 # Runtime-change review marker — must be bumped together with the SHA-256 freeze on every canary.py change.
-CANARY_RUNTIME_REVIEW = "3C2D-v3-error-telemetry"
+CANARY_RUNTIME_REVIEW = "3C2D-v4-identity-precheck"
 # live network safety knobs (used by the real transport in 3C2C2-B; enforced/asserted now)
 LIVE_CONNECT_TIMEOUT = 10.0
 LIVE_READ_TIMEOUT = 30.0
@@ -774,6 +774,56 @@ def _live_uri(manifest, op, prefix):
     return f"/{manifest['bucket']}/{key}", "", key
 
 
+# PRE-MUTATION effective-role probes (read-only ONLY). Each supplied key must BEHAVE as its role before any
+# Put/Delete: an allow probe must return allow(ok); a deny probe must return a REAL access-denied. A swapped
+# key order, a wrong secret, a wrong project binding, or an over-broad policy (e.g. logical-writer able to list
+# pitr/) surfaces here and aborts BEFORE the first mutating op. Uses only ListBucket/GetBucketVersioning/
+# GetBucketObjectLockConfiguration (all read-only).
+_IDENTITY_PROBES = {
+    "logical-writer": (("ListBucket", "logical/", "allow"), ("ListBucket", "pitr/", "deny")),
+    "pitr-writer": (("ListBucket", "pitr/", "allow"), ("ListBucket", "logical/", "deny")),
+    "restore-reader": (("ListBucket", "pitr/", "allow"), ("ListBucket", "logical/", "allow")),
+    "retention-admin": (("GetBucketVersioning", None, "allow"),
+                        ("GetBucketObjectLockConfiguration", None, "allow"),
+                        ("ListBucket", "", "allow")),
+    "app-deny": (("ListBucket", "pitr/", "deny"), ("GetBucketVersioning", None, "deny")),
+}
+
+
+def run_identity_check(transports, manifest, clock) -> dict:
+    """Read-only proof that every supplied key behaves as its expected role, BEFORE any mutating op. An
+    expected-deny probe counts ONLY when the category is exactly access-denied; a signature-mismatch /
+    invalid-access-key / authentication failure (or any non-deny) is a FAIL, never a spurious deny-proof. No
+    mutating op is issued here. Secret-free: rows carry only role/verdict/category."""
+    bucket, prefix = manifest["bucket"], manifest["prefix"]
+    rows, failures = [], []
+    for role, probes in _IDENTITY_PROBES.items():
+        verdict, cause = "PASS", "ok"
+        for op, sub, expect in probes:
+            amz, ds = _amz_ds(clock())
+            if op == "ListBucket":
+                res = transports[role].attempt("ListBucket", f"/{bucket}", method="GET",
+                                               query=f"prefix={prefix}{sub}", amz_date=amz, date_stamp=ds)
+            elif op == "GetBucketVersioning":
+                res = transports[role].attempt("GetBucketVersioning", f"/{bucket}", method="GET",
+                                               query="versioning", amz_date=amz, date_stamp=ds)
+            elif op == "GetBucketObjectLockConfiguration":
+                res = transports[role].attempt("GetBucketObjectLockConfiguration", f"/{bucket}", method="GET",
+                                               query="object-lock", amz_date=amz, date_stamp=ds)
+            else:  # pragma: no cover - only the three read-only ops above are ever used
+                res = {"allow": "unknown", "category": "unknown"}
+            allow, cat = res.get("allow"), res.get("category", "unknown")
+            good = (expect == "allow" and allow == "allow" and cat == "ok") or \
+                   (expect == "deny" and allow == "deny" and cat == "access-denied")
+            if not good:
+                verdict, cause = "FAIL", (cat if cat in LIVE_ERROR_CATEGORIES else "unknown")
+                break
+        rows.append({"role": role, "verdict": verdict, "category": cause})
+        if verdict == "FAIL":
+            failures.append(role)
+    return {"rows": rows, "failures": failures, "passed": not failures}
+
+
 def run_live_execution(manifest, execmani, creds_by_role, transport_factory=None, clock=None) -> dict:
     """Gate-F orchestration over the attempt()-ONLY transport interface (factory/clock injected offline).
 
@@ -788,6 +838,19 @@ def run_live_execution(manifest, execmani, creds_by_role, transport_factory=None
         raise LiveGateError("run_live_execution requires an injected clock (no wall-clock in module)")
     deadline_dt = execmani.get("deadline_dt") or _parse_deadline(execmani["deadline"])
     transports = {r: transport_factory(manifest, creds_by_role[r], service="s3") for r in _CANARY_ROLES}
+    # PRE-MUTATION effective-role check: prove each key behaves as its role using read-only ops ONLY, before
+    # any Put/Delete. On ANY mismatch -> abort with an EMPTY ledger (0 objects/versions/multipart created),
+    # role matrix + Object-Lock NOT_ATTEMPTED, cleanup trivially clean, status FAILED.
+    identity = run_identity_check(transports, manifest, clock)
+    if not identity["passed"]:
+        empty = {"objects": [], "multipart": [], "users": list(_CANARY_ROLES), "policies": list(_CANARY_ROLES)}
+        cleanup = run_cleanup(transports["retention-admin"], manifest, empty, clock)  # no ledger -> no op issued
+        return {"identity": identity, "rows": [],
+                "matrix_failures": ["pre-mutation identity check failed: " + ",".join(identity["failures"])],
+                "object_lock": {}, "cleanup": cleanup, "deadline_reached": False,
+                "pgbackrest_closure": "NOT-ATTEMPTED-live (separate step)",
+                "manual_revoke_required": {"keys": list(_CANARY_ROLES), "policies": list(_CANARY_ROLES)},
+                "status": "FAILED"}
     ledger = {"objects": [], "multipart": [], "users": list(_CANARY_ROLES), "policies": list(_CANARY_ROLES)}
     rows, failures, objectlock = [], [], {}
     deadline_reached = False
@@ -880,8 +943,9 @@ def run_live_execution(manifest, execmani, creds_by_role, transport_factory=None
                                 "read-back + locked-delete DENY by the same retention-admin)")
     finally:
         cleanup = run_cleanup(transports["retention-admin"], manifest, ledger, clock)
-    result = {"rows": rows, "matrix_failures": failures, "object_lock": objectlock, "cleanup": cleanup,
-              "deadline_reached": deadline_reached, "pgbackrest_closure": "NOT-ATTEMPTED-live (separate step)",
+    result = {"identity": identity, "rows": rows, "matrix_failures": failures, "object_lock": objectlock,
+              "cleanup": cleanup, "deadline_reached": deadline_reached,
+              "pgbackrest_closure": "NOT-ATTEMPTED-live (separate step)",
               "manual_revoke_required": {"keys": ledger["users"], "policies": ledger["policies"]}}
     if failures or cleanup["status"] != "clean":
         result["status"] = "CONTROLLED_RESIDUAL" if cleanup["status"] == "controlled-residual" and not failures \
@@ -909,6 +973,16 @@ def _live_summary_lines(result) -> list:
     HTTP body/XML, canonical-request/string-to-sign, exception text/repr/args/traceback, object content, or the
     internal result-dict. Every emitted value is drawn from a fixed vocabulary; nothing else is ever printed."""
     lines = ["live-summary v1"]
+    # (0) PRE-MUTATION identity check: each key proven to behave as its role before any Put/Delete.
+    ident_rows = {r.get("role"): (r.get("verdict"), r.get("category"))
+                  for r in ((result.get("identity") or {}).get("rows") or [])}
+    for role in _CANARY_ROLES:
+        verdict, cat = ident_rows.get(role, ("NOT_ATTEMPTED", "not_attempted"))
+        if verdict not in ("PASS", "FAIL", "NOT_ATTEMPTED"):
+            verdict = "NOT_ATTEMPTED"
+        if cat not in LIVE_ERROR_CATEGORIES and cat != "not_attempted":
+            cat = "unknown"
+        lines.append(f"identity {role} = {verdict} ({cat})")
     # (A) role allow/deny matrix (covers logical-writer/pitr-writer/restore-reader/app incl. wrong-prefix rows);
     # a role/op present with actual==expected -> PASS, present but mismatched -> FAIL, absent (deadline/stopped)
     # -> NOT_ATTEMPTED. retention-admin behaviour is reported in the Object-Lock section below.
