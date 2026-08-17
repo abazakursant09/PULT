@@ -43,9 +43,9 @@ NEG_MATRIX = CANARY / "negative-matrix.md"
 #   - an independent safety review passed;
 #   - Inal separately approved the runtime change.
 # The digest is a hard-coded literal — never computed at run time, never env-overridable, never auto-updated.
-_CANARY_RUNTIME_SHA256 = "31d925d5bf28ba2f8a65a0cb41dfbefb1dff17ec8231e27c24d2a7b9843aea48"
+_CANARY_RUNTIME_SHA256 = "5656dcb6221356c49e93d2dac5742937572eabd8bbe61e75bde80a078157b8bd"
 # Review marker — bumped with the digest on every reviewed canary.py runtime change (3C2D SigV4 canonical query).
-_CANARY_RUNTIME_REVIEW = "3C2D-v4-identity-precheck"
+_CANARY_RUNTIME_REVIEW = "3C2D-v6-readback-input-safety"
 
 # Each mutation below, applied to a disposable copy, must make at least one test in this file fail.
 MUTATION_MATRIX = [
@@ -1737,7 +1737,7 @@ def test_http_result_category_goldens():
     assert set(c.LIVE_ERROR_CATEGORIES) >= {"access-denied", "signature-mismatch", "invalid-access-key",
                                             "authentication-failed", "ok", "not-found", "service-error",
                                             "malformed-response", "unknown"}
-    assert len(c.LIVE_ERROR_CATEGORIES) == 12
+    assert len(c.LIVE_ERROR_CATEGORIES) == 13
 
 
 def test_http_category_reads_only_code_never_leaks():
@@ -1963,3 +1963,199 @@ def test_identity_probes_are_read_only():
     for role, probes in c._IDENTITY_PROBES.items():
         for op, _sub, _expect in probes:
             assert op in c._READ_ONLY_S3_OPS, (role, op)
+
+
+# ================= SECURITY-2D-3E1B-3C2D-V6 retention read-back instant compare + input safety =============
+_SENT_RETAIN = "2026-08-15T12:10:00Z"  # == _execmani() deadline
+
+
+class _RetEchoFake(_FakeLiveTransport):
+    """Object-Lock fake: identity + matrix + Object-Lock behave normally, but GetObjectRetention echoes a
+    configurable Mode/RetainUntilDate (or a forced error / raw body) so the read-back instant-compare can be
+    exercised."""
+    echo_mode = "GOVERNANCE"
+    echo_time = _SENT_RETAIN
+    force = None       # a category string -> GetObjectRetention returns that (deny/error)
+    raw_body = None    # override the whole retention body (e.g. malformed XML)
+
+    def attempt(self, s3op, uri, method="GET", query="", payload=b"", amz_date=None, date_stamp=None,
+                extra_headers=None):
+        if s3op == "GetObjectRetention":
+            if _RetEchoFake.force:
+                allow = "deny" if _RetEchoFake.force in ("access-denied",) else "unknown"
+                return {"allow": allow, "http_code": 403, "category": _RetEchoFake.force,
+                        "version_id": "", "body": b"", "request_id": "r"}
+            if _RetEchoFake.raw_body is not None:
+                body = _RetEchoFake.raw_body
+            else:
+                body = (f'<Retention xmlns="http://s3.amazonaws.com/doc/2006-03-01/">'
+                        f'<Mode>{_RetEchoFake.echo_mode}</Mode>'
+                        f'<RetainUntilDate>{_RetEchoFake.echo_time}</RetainUntilDate></Retention>').encode()
+            return {"allow": "allow", "http_code": 200, "category": "ok", "version_id": "", "body": body,
+                    "request_id": "r"}
+        return super().attempt(s3op, uri, method, query, payload, amz_date, date_stamp, extra_headers)
+
+
+def _ol_run(c, echo_mode="GOVERNANCE", echo_time=_SENT_RETAIN, force=None, raw_body=None):
+    _RetEchoFake.echo_mode, _RetEchoFake.echo_time = echo_mode, echo_time
+    _RetEchoFake.force, _RetEchoFake.raw_body = force, raw_body
+    m = c.live_validate(_exec_args(), {c.LIVE_GATE_ENV: c.LIVE_GATE_VALUE})
+    creds = {r: {"access_key": "AKID", "secret_key": "Sx"} for r in c._CANARY_ROLES}
+    allow = _matrix_allow(c)
+
+    def factory(manifest, cr, service="s3"):
+        return _RetEchoFake(manifest, cr, service, allow_ops=factory.map.pop(0))
+
+    factory.map = [allow[r] for r in c._CANARY_ROLES]
+    with _NoNetwork():
+        return c.run_live_execution(m, _execmani(), creds, transport_factory=factory, clock=_clock_at())
+
+
+def test_v6_rfc3339_equivalent_forms_readback_passes():
+    c = _load_canary()
+    for equiv in ("2026-08-15T12:10:00Z", "2026-08-15T12:10:00+00:00", "2026-08-15T12:10:00.000Z",
+                  "2026-08-15T15:10:00+03:00"):
+        res = _ol_run(c, echo_time=equiv)
+        ol = res["object_lock"]
+        assert ol["retention_compare_status"] == "match", equiv
+        assert ol["readback_ok"] is True and ol["proof"] is True, equiv
+        assert ol["locked_delete_attempted"] is True and ol["locked_delete_refused"] is True
+
+
+def test_v6_different_instant_fails_and_no_locked_delete():
+    c = _load_canary()
+    res = _ol_run(c, echo_time="2026-08-15T12:10:05Z")
+    ol = res["object_lock"]
+    assert ol["retention_compare_status"] == "mismatch"
+    assert ol["readback_ok"] is False and ol["proof"] is False
+    assert ol["locked_delete_attempted"] is False  # delete runs ONLY after a valid read-back
+
+
+def test_v6_wrong_mode_fails():
+    c = _load_canary()
+    res = _ol_run(c, echo_mode="COMPLIANCE")
+    ol = res["object_lock"]
+    assert ol["readback_ok"] is False and ol["proof"] is False
+    assert ol["locked_delete_attempted"] is False
+
+
+def test_v6_naive_timestamp_fails_closed():
+    c = _load_canary()
+    res = _ol_run(c, echo_time="2026-08-15T12:10:00")  # no timezone
+    ol = res["object_lock"]
+    assert ol["retention_compare_status"] == "malformed"
+    assert ol["readback_ok"] is False and ol["proof"] is False
+
+
+def test_v6_malformed_retention_xml_fails():
+    c = _load_canary()
+    res = _ol_run(c, raw_body=b"<Retention><Mode>GOV")
+    ol = res["object_lock"]
+    assert ol["retention_parse_status"] == "malformed"
+    assert ol["readback_ok"] is False and ol["locked_delete_attempted"] is False
+
+
+def test_v6_get_retention_denied_fails():
+    c = _load_canary()
+    res = _ol_run(c, force="access-denied")
+    ol = res["object_lock"]
+    assert ol["retention_get_category"] == "access-denied"
+    assert ol["readback_ok"] is False and ol["locked_delete_attempted"] is False
+
+
+def test_v6_retention_observability_secret_free():
+    c = _load_canary()
+    res = _ol_run(c, echo_time="2026-08-15T12:10:00.000Z")
+    lines = c._live_summary_lines(res)
+    got = {ln.split(" = ")[0]: ln.split(" = ")[1] for ln in lines if " = " in ln}
+    for f in ("retention_put_category", "retention_get_category", "retention_parse_status",
+              "retention_compare_status", "locked_delete_attempted", "locked_delete_category"):
+        assert f in got, f
+    assert got["retention_parse_status"] in ("ok", "malformed", "not_attempted")
+    assert got["retention_compare_status"] in ("match", "mismatch", "malformed", "not_attempted")
+    blob = "\n".join(lines)
+    for leak in ("2026-08-15T12:10:00", "Retention", "versionId", "x-amz", "RetainUntilDate"):
+        assert leak not in blob, leak
+
+
+# ---- input safety ----
+def test_v6_rfc3339_instant_parser():
+    c = _load_canary()
+    assert c._rfc3339_instant("2026-08-15T12:10:00Z") == c._rfc3339_instant("2026-08-15T15:10:00+03:00")
+    for bad in ("2026-08-15T12:10:00", "garbage", "", None, "2026-13-40T99:99:99Z"):
+        try:
+            c._rfc3339_instant(bad)
+            raise AssertionError(f"{bad!r} should fail")
+        except c.LiveGateError:
+            pass
+
+
+def test_v6_credential_format_validator():
+    c = _load_canary()
+    ok = c._credential_format_ok
+    assert ok("AKID0123", "base64Secret+/=")
+    assert not ok("AKéID", "s")       # non-ASCII access
+    assert not ok("AK ID", "s")            # whitespace
+    assert not ok("AK\tID", "s")           # control
+    assert not ok("AKID", "sec\r\nret")    # CR/LF secret
+    assert not ok("AKID", "sec\x00ret")    # control secret
+    assert not (ok("", "s") or ok("A", "") or ok(None, "s") or ok("A", None))
+
+
+def test_v6_bad_credential_is_pre_network_fail_zero_construction():
+    c = _load_canary()
+    m = c.live_validate(_exec_args(), {c.LIVE_GATE_ENV: c.LIVE_GATE_VALUE})
+    creds = {r: {"access_key": "AKID", "secret_key": "Sx"} for r in c._CANARY_ROLES}
+    creds["pitr-writer"]["access_key"] = "AKéID"  # non-ASCII -> would UnicodeEncodeError on the wire
+
+    def boom_factory(*a, **k):
+        raise AssertionError("transport constructed on an invalid credential")
+
+    with _NoNetwork():
+        res = c.run_live_execution(m, _execmani(), creds, transport_factory=boom_factory, clock=_clock_at())
+    assert res["status"] == "FAILED"
+    assert res["identity"]["passed"] is False
+    row = [r for r in res["identity"]["rows"] if r["role"] == "pitr-writer"][0]
+    assert row["category"] == "invalid-credential-format"
+    assert res["rows"] == [] and res["object_lock"] == {} and res["cleanup"]["status"] == "clean"
+
+
+def test_v6_crlf_secret_is_pre_network_fail():
+    c = _load_canary()
+    m = c.live_validate(_exec_args(), {c.LIVE_GATE_ENV: c.LIVE_GATE_VALUE})
+    creds = {r: {"access_key": "AKID", "secret_key": "Sx"} for r in c._CANARY_ROLES}
+    creds["app-deny"]["secret_key"] = "sec\r\nret"
+
+    def boom_factory(*a, **k):
+        raise AssertionError("transport constructed on an invalid credential")
+
+    with _NoNetwork():
+        res = c.run_live_execution(m, _execmani(), creds, transport_factory=boom_factory, clock=_clock_at())
+    assert res["status"] == "FAILED" and "app-deny" in res["identity"]["failures"]
+
+
+def test_v6_attempt_unicode_error_is_fail_closed_category():
+    c = _load_canary()
+    m = _transport_manifest()
+
+    class _UniClient:
+        def request(self, *a, **k):
+            raise UnicodeEncodeError("ascii", "x", 0, 1, "ordinal not in range")
+    t = c.SelectelS3Transport(m, {"access_key": "A", "secret_key": _SEKRET}, http_client=_UniClient())
+    r = t.attempt("GetBucketVersioning", "/b", method="GET", query="versioning",
+                  amz_date="20200101T000000Z", date_stamp="20200101")
+    assert r["allow"] == "unknown" and r["category"] == "invalid-credential-format"
+
+
+def test_v6_bad_credential_no_secret_or_traceback_in_output(capsys):
+    c = _load_canary()
+    m = c.live_validate(_exec_args(), {c.LIVE_GATE_ENV: c.LIVE_GATE_VALUE})
+    creds = {r: {"access_key": "AKID", "secret_key": "Sx"} for r in c._CANARY_ROLES}
+    creds["logical-writer"]["secret_key"] = "SEKRET_MUST_NOT_LEAK\x01"
+    with _NoNetwork():
+        res = c.run_live_execution(m, _execmani(), creds, transport_factory=lambda *a, **k: None,
+                                   clock=_clock_at())
+    blob = "\n".join(c._live_summary_lines(res))
+    assert "SEKRET_MUST_NOT_LEAK" not in blob
+    assert "role logical-writer".replace("role", "identity") not in blob or "invalid-credential-format" in blob
+    assert "identity logical-writer = FAIL (invalid-credential-format)" in blob

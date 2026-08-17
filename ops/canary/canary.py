@@ -54,7 +54,7 @@ LIVE_GATE_VALUE = "YES_I_UNDERSTAND"
 # Inal-approved 3C2C2-B execution step. So the CLI still defers.
 SELECTEL_EXECUTION_DEFERRED = "SELECTEL_EXECUTION_GATED_UNTIL_3C2C2B"
 # Runtime-change review marker — must be bumped together with the SHA-256 freeze on every canary.py change.
-CANARY_RUNTIME_REVIEW = "3C2D-v4-identity-precheck"
+CANARY_RUNTIME_REVIEW = "3C2D-v6-readback-input-safety"
 # live network safety knobs (used by the real transport in 3C2C2-B; enforced/asserted now)
 LIVE_CONNECT_TIMEOUT = 10.0
 LIVE_READ_TIMEOUT = 30.0
@@ -426,8 +426,26 @@ class SelectelTransport:
 LIVE_ERROR_CATEGORIES = (
     "ok", "not-found", "invalid-access-key", "signature-mismatch", "access-denied",
     "authentication-failed", "timeout", "tls-error", "network-error", "service-error",
-    "malformed-response", "unknown",
+    "malformed-response", "invalid-credential-format", "unknown",
 )
+# Access key must be printable ASCII with no whitespace/control chars (a non-ASCII/space char would raise a
+# UnicodeEncodeError while httpx encodes the Authorization header). Validated BEFORE any transport/DNS/socket.
+_CRED_ACCESS_RE = re.compile(r"^[\x21-\x7e]+$")
+
+
+def _credential_format_ok(access, secret) -> bool:
+    """True only if the access key is a non-empty printable-ASCII token (no whitespace/control) and the secret
+    is non-empty with no control/CR/LF. The secret value itself is never inspected beyond char classes, never
+    logged, and its length is never recorded."""
+    if not isinstance(access, str) or not isinstance(secret, str) or not access or not secret:
+        return False
+    if not _CRED_ACCESS_RE.fullmatch(access):
+        return False
+    try:
+        access.encode("ascii")
+    except UnicodeEncodeError:
+        return False
+    return all(0x20 <= ord(ch) != 0x7f for ch in secret)
 _S3_ERROR_CODE_CATEGORY = {
     "InvalidAccessKeyId": "invalid-access-key",
     "SignatureDoesNotMatch": "signature-mismatch",
@@ -546,10 +564,15 @@ class SelectelS3Transport:
         attempts = 1 if mutating else (1 + LIVE_READ_RETRIES)
         last = None
         for _ in range(attempts):
-            headers = self._sign(method, op, canonical_uri, cquery, payload_hash, amz_date, date_stamp,
-                                 extra_headers)
-            url = f"{self._endpoint}{canonical_uri}" + (f"?{cquery}" if cquery else "")
-            resp = self._client.request(method, url, headers=headers, content=payload)
+            try:
+                headers = self._sign(method, op, canonical_uri, cquery, payload_hash, amz_date, date_stamp,
+                                     extra_headers)
+                url = f"{self._endpoint}{canonical_uri}" + (f"?{cquery}" if cquery else "")
+                resp = self._client.request(method, url, headers=headers, content=payload)
+            except UnicodeError:
+                # a non-ASCII credential slipped past the pre-check -> fail closed, no traceback / no key leak
+                return {"operation": op, "http_code": None, "request_id": "", "version_id": "", "body": b"",
+                        "allow": "unknown", "mutating": mutating, "category": "invalid-credential-format"}
             code = getattr(resp, "status_code", None)
             rh = getattr(resp, "headers", {}) or {}
             reqid = rh.get("x-amz-request-id", "")
@@ -720,6 +743,25 @@ def _parse_retention_xml(body):
     return {"mode": mode, "retain_until": until}
 
 
+def _rfc3339_instant(s):
+    """Parse an RFC3339 timestamp into a timezone-aware UTC datetime so two equivalent instants written in
+    different textual forms (trailing Z vs +00:00, fractional seconds, other offsets) compare EQUAL. A naive
+    (no-timezone), malformed, or out-of-range value raises LiveGateError (fail-closed — never treated as a
+    match). No part of the string is ever logged."""
+    import datetime
+    if not isinstance(s, str) or not s.strip():
+        raise LiveGateError("empty retain-until")
+    text = s.strip()
+    iso = (text[:-1] + "+00:00") if text[-1] in ("Z", "z") else text
+    try:
+        dt = datetime.datetime.fromisoformat(iso)
+    except (ValueError, TypeError):
+        raise LiveGateError("malformed retain-until")
+    if dt.tzinfo is None:
+        raise LiveGateError("naive retain-until (no timezone)")
+    return dt.astimezone(datetime.timezone.utc)
+
+
 def execute_validate(args, manifest, clock) -> dict:
     """Strict Gate-F execute gate. Raises LiveGateError BEFORE any DNS/socket/credential read unless every
     one-time condition holds. `clock` (injected, returns a UTC datetime) proves the deadline is in the future
@@ -837,6 +879,24 @@ def run_live_execution(manifest, execmani, creds_by_role, transport_factory=None
     if clock is None:
         raise LiveGateError("run_live_execution requires an injected clock (no wall-clock in module)")
     deadline_dt = execmani.get("deadline_dt") or _parse_deadline(execmani["deadline"])
+    # INPUT SAFETY: validate every credential's FORMAT before constructing any transport, so a non-ASCII /
+    # whitespace / control-char access key (which would raise UnicodeEncodeError in the HTTP header build) or a
+    # CR/LF/control secret fails closed with ZERO DNS/socket and a closed category — never a traceback/leak.
+    bad_creds = [r for r in _CANARY_ROLES
+                 if not _credential_format_ok((creds_by_role.get(r) or {}).get("access_key"),
+                                              (creds_by_role.get(r) or {}).get("secret_key"))]
+    if bad_creds:
+        return {"identity": {"rows": [{"role": r, "verdict": "FAIL",
+                                       "category": "invalid-credential-format"} for r in bad_creds],
+                             "failures": list(bad_creds), "passed": False},
+                "rows": [], "matrix_failures": ["invalid credential format (pre-network): " + ",".join(bad_creds)],
+                "object_lock": {},
+                "cleanup": {"status": "clean", "deleted": [], "residual": [], "failures": [],
+                            "manual_cleanup": {"keys": list(_CANARY_ROLES), "policies": list(_CANARY_ROLES),
+                                               "bucket": manifest["bucket"], "project": manifest.get("project")}},
+                "deadline_reached": False, "pgbackrest_closure": "NOT-ATTEMPTED-live (separate step)",
+                "manual_revoke_required": {"keys": list(_CANARY_ROLES), "policies": list(_CANARY_ROLES)},
+                "status": "FAILED"}
     transports = {r: transport_factory(manifest, creds_by_role[r], service="s3") for r in _CANARY_ROLES}
     # PRE-MUTATION effective-role check: prove each key behaves as its role using read-only ops ONLY, before
     # any Put/Delete. On ANY mismatch -> abort with an EMPTY ledger (0 objects/versions/multipart created),
@@ -905,6 +965,10 @@ def run_live_execution(manifest, execmani, creds_by_role, transport_factory=None
             locked_put_ok = pr.get("allow") == "allow" and bool(lv)
             retention_set = readback_ok = locked_delete_refused = False
             readback = {}
+            retention_put_category = retention_get_category = "not_attempted"
+            retention_parse_status = retention_compare_status = "not_attempted"
+            locked_delete_attempted = False
+            locked_delete_category = "not_attempted"
             if locked_put_ok:
                 ledger["objects"].append({"key": lk, "version": lv, "locked": True, "retain_until": retain_until})
                 xml = _retention_xml("GOVERNANCE", retain_until)
@@ -913,19 +977,34 @@ def run_live_execution(manifest, execmani, creds_by_role, transport_factory=None
                                    query=f"retention&versionId={lv}", payload=xml, extra_headers=eh,
                                    amz_date=amz, date_stamp=ds)
                 retention_set = rr.get("allow") == "allow"
+                retention_put_category = rr.get("category", "unknown")
                 if retention_set:
                     gr = admin.attempt("GetObjectRetention", f"/{b}/{lk}", method="GET",
                                        query=f"retention&versionId={lv}", amz_date=amz, date_stamp=ds)
+                    retention_get_category = gr.get("category", "unknown")
                     if gr.get("allow") == "allow":
                         try:
                             readback = _parse_retention_xml(gr.get("body", b""))
-                            readback_ok = (readback.get("mode") == "GOVERNANCE"
-                                           and readback.get("retain_until") == retain_until)
+                            retention_parse_status = "ok"
+                            mode_ok = readback.get("mode") == "GOVERNANCE"
+                            # compare the two RetainUntilDate values as UTC INSTANTS, not raw strings, so an
+                            # equivalent RFC3339 form echoed by Selectel still counts; malformed/naive -> fail.
+                            try:
+                                same = (_rfc3339_instant(retain_until)
+                                        == _rfc3339_instant(readback.get("retain_until")))
+                                retention_compare_status = "match" if same else "mismatch"
+                            except LiveGateError:
+                                same = False
+                                retention_compare_status = "malformed"
+                            readback_ok = bool(mode_ok and same)
                         except LiveGateError:
+                            retention_parse_status = "malformed"
                             readback_ok = False
                     if readback_ok:
                         dv = admin.attempt("DeleteObjectVersion", f"/{b}/{lk}", method="DELETE",
                                            query=f"versionId={lv}", amz_date=amz, date_stamp=ds)
+                        locked_delete_attempted = True
+                        locked_delete_category = dv.get("category", "unknown")
                         locked_delete_refused = dv.get("allow") == "deny"
             elif pr.get("allow") == "unknown":
                 # ambiguous locked Put — the object may exist; record it once so cleanup does not lose it
@@ -936,6 +1015,12 @@ def run_live_execution(manifest, execmani, creds_by_role, transport_factory=None
                           "readback_ok": readback_ok, "readback": readback,
                           "locked_delete_refused": locked_delete_refused, "mode": "GOVERNANCE",
                           "compliance_tested": False,
+                          "retention_put_category": retention_put_category,
+                          "retention_get_category": retention_get_category,
+                          "retention_parse_status": retention_parse_status,
+                          "retention_compare_status": retention_compare_status,
+                          "locked_delete_attempted": locked_delete_attempted,
+                          "locked_delete_category": locked_delete_category,
                           "proof": bool(unlocked_put_ok and iam_delete_ok and locked_put_ok and retention_set
                                         and readback_ok and locked_delete_refused)}
             if not objectlock.get("proof"):
@@ -1015,6 +1100,31 @@ def _live_summary_lines(result) -> list:
             b = ol.get(internal)
             value = "true" if b is True else ("false" if b is False else "not_attempted")
         lines.append(f"object_lock {label} = {value}")
+    # (B2) retention read-back observability — closed vocabulary only (categories / status / true|false), so a
+    # readback failure shows WHY (put/get category, XML parse, instant compare, whether the locked delete ran)
+    # WITHOUT ever printing the timestamp, versionId, request-id, URL or raw XML.
+    _rput = ol.get("retention_put_category", "not_attempted")
+    _rget = ol.get("retention_get_category", "not_attempted")
+    _rparse = ol.get("retention_parse_status", "not_attempted")
+    _rcmp = ol.get("retention_compare_status", "not_attempted")
+    _ldel_att = ol.get("locked_delete_attempted", False)
+    _ldel_cat = ol.get("locked_delete_category", "not_attempted")
+    if _rput not in LIVE_ERROR_CATEGORIES and _rput != "not_attempted":
+        _rput = "unknown"
+    if _rget not in LIVE_ERROR_CATEGORIES and _rget != "not_attempted":
+        _rget = "unknown"
+    if _rparse not in ("ok", "malformed", "not_attempted"):
+        _rparse = "not_attempted"
+    if _rcmp not in ("match", "mismatch", "malformed", "not_attempted"):
+        _rcmp = "not_attempted"
+    if _ldel_cat not in LIVE_ERROR_CATEGORIES and _ldel_cat != "not_attempted":
+        _ldel_cat = "unknown"
+    lines.append(f"retention_put_category = {_rput}")
+    lines.append(f"retention_get_category = {_rget}")
+    lines.append(f"retention_parse_status = {_rparse}")
+    lines.append(f"retention_compare_status = {_rcmp}")
+    lines.append(f"locked_delete_attempted = {'true' if _ldel_att else 'false'}")
+    lines.append(f"locked_delete_category = {_ldel_cat}")
     # (C) cleanup — status + honest residual + which control-plane CATEGORIES need manual F6 (labels, no values)
     cleanup = result.get("cleanup") or {}
     status = cleanup.get("status", "not_attempted")
