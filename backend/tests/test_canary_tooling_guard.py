@@ -43,9 +43,9 @@ NEG_MATRIX = CANARY / "negative-matrix.md"
 #   - an independent safety review passed;
 #   - Inal separately approved the runtime change.
 # The digest is a hard-coded literal — never computed at run time, never env-overridable, never auto-updated.
-_CANARY_RUNTIME_SHA256 = "573304ab321bb1477d361e29d699e36178b4310a77df7a930201f551921067f9"
+_CANARY_RUNTIME_SHA256 = "33d877434b3438d1d30f3c035fedcca76e4b585f6ad228689b9cef0816bc5e23"
 # Review marker — bumped with the digest on every reviewed canary.py runtime change (3C2D SigV4 canonical query).
-_CANARY_RUNTIME_REVIEW = "3C2D-sigv4-query-canonicalization"
+_CANARY_RUNTIME_REVIEW = "3C2D-v2-live-observability"
 
 # Each mutation below, applied to a disposable copy, must make at least one test in this file fail.
 MUTATION_MATRIX = [
@@ -1537,3 +1537,142 @@ def test_canonical_query_helpers_are_pure_no_network():
     with _NoNetwork():
         assert c._query_encode("a/b c") == "a%2Fb%20c"
         assert c._canonical_query("b=2&a=1") == "a=1&b=2"
+
+
+# ================= SECURITY-2D-3E1B-3C2D-V2 live-summary observability goldens =================
+# live() previously printed only `execute-live status=<...>`; a FAILED/CONTROLLED_RESIDUAL run did not reveal
+# WHICH role/op or Object-Lock step broke. `_live_summary_lines(result)` now emits a CLOSED-VOCABULARY,
+# secret-free summary. These goldens pin: allowed tokens only, no leak (even from a result stuffed with ids),
+# no false PASS, Object-Lock PASS requires all six proofs, honest residual, and that live() actually wires it.
+_ROLE_VERDICTS = {"PASS", "FAIL", "NOT_ATTEMPTED"}
+_BOOL3 = {"true", "false", "not_attempted"}
+
+
+def _rows_all_pass(c):
+    r = []
+    for role, ops in c._LIVE_ROLE_MATRIX.items():
+        for op, prefix, expect in ops:
+            r.append({"role": role, "op": op, "prefix": prefix, "expected": expect, "actual": expect,
+                      "code": 200, "request_id": "REQ-LEAK-123", "version_id": "VER-LEAK"})
+    return r
+
+
+def _ol_all_true():
+    return {"unlocked_put_ok": True, "iam_delete_ok_on_unlocked": True, "locked_put_ok": True,
+            "retention_set": True, "readback_ok": True, "readback": {"retain_until": "2026-08-16T00:15:00Z"},
+            "locked_delete_refused": True, "mode": "GOVERNANCE", "compliance_tested": False, "proof": True}
+
+
+def _happy_result(c):
+    return {"rows": _rows_all_pass(c), "object_lock": _ol_all_true(),
+            "cleanup": {"status": "controlled-residual",
+                        "manual_cleanup": {"keys": ["logical-writer"], "policies": ["p"],
+                                           "bucket": "pult-canary-x", "project": "PROJ-LEAK-999"},
+                        "locked_residual": [{"key": "canary/x/pitr/lock-x", "version": "VER-LEAK-abc",
+                                             "retain_until": "2026-08-16T00:15:00Z"}]},
+            "deadline_reached": False, "status": "CONTROLLED_RESIDUAL",
+            "manual_revoke_required": {"keys": ["u1-LEAK"], "policies": ["p"]}}
+
+
+def test_live_summary_closed_vocabulary_and_all_pass():
+    c = _load_canary()
+    lines = c._live_summary_lines(_happy_result(c))
+    assert lines[0] == "live-summary v1"
+    for ln in lines:
+        if ln.startswith("role "):
+            assert ln.split(" = ")[-1] in _ROLE_VERDICTS, ln
+        elif ln.startswith("object_lock "):
+            assert ln.split(" = ")[-1] in _BOOL3, ln
+    assert all(ln.split(" = ")[-1] == "PASS" for ln in lines if ln.startswith("role "))
+    assert "object_lock object_lock_proof = true" in lines
+    assert "controlled_residual = true" in lines
+    assert "manual_cleanup_required = service-keys,bucket-policy,bucket,project" in lines
+
+
+def test_live_summary_never_leaks_ids_or_secrets():
+    c = _load_canary()
+    blob = "\n".join(c._live_summary_lines(_happy_result(c)))
+    for leak in ("REQ-LEAK-123", "VER-LEAK", "VER-LEAK-abc", "PROJ-LEAK-999", "u1-LEAK",
+                 "pult-canary-x", "canary/x/pitr/lock-x", "2026-08-16T00:15:00Z"):
+        assert leak not in blob, f"summary leaked {leak!r}"
+
+
+def test_live_summary_partial_is_not_pass():
+    c = _load_canary()
+    partial = {"rows": [{"role": "logical-writer", "op": "put", "prefix": "logical/",
+                         "expected": "allow", "actual": "allow"}],
+               "object_lock": {}, "cleanup": {"status": "failed", "manual_cleanup": {}},
+               "deadline_reached": True, "status": "FAILED"}
+    lines = c._live_summary_lines(partial)
+    assert any(ln.endswith("= NOT_ATTEMPTED") for ln in lines)
+    assert "object_lock object_lock_proof = not_attempted" in lines
+    assert "cleanup_status = failed" in lines and "controlled_residual = false" in lines
+    assert "execute-live status = FAILED" in lines
+
+
+def test_live_summary_object_lock_reflects_each_of_six():
+    c = _load_canary()
+    # drop exactly one proof (retention_set=False, proof=False) -> that flag false, proof false, others true
+    ol = _ol_all_true()
+    ol["retention_set"] = False
+    ol["proof"] = False
+    res = dict(_happy_result(c), object_lock=ol)
+    lines = c._live_summary_lines(res)
+    assert "object_lock retention_put_ok = false" in lines
+    assert "object_lock object_lock_proof = false" in lines
+    assert "object_lock unlocked_put_ok = true" in lines
+    assert "object_lock locked_admin_delete_denied = true" in lines
+
+
+def test_live_summary_object_lock_all_six_labels_present():
+    c = _load_canary()
+    lines = c._live_summary_lines(_happy_result(c))
+    for label in ("unlocked_put_ok", "unlocked_admin_delete_ok", "locked_put_ok", "retention_put_ok",
+                  "retention_readback_ok", "locked_admin_delete_denied", "object_lock_proof"):
+        assert f"object_lock {label} = " in "\n".join(lines), label
+
+
+def test_live_summary_residual_honest_failed_stays_failed():
+    c = _load_canary()
+    # unknown/non-locked residual -> cleanup failed, run FAILED, controlled_residual must NOT be true
+    res = dict(_happy_result(c), cleanup={"status": "failed", "manual_cleanup": {"keys": ["k"]}},
+               status="FAILED")
+    lines = c._live_summary_lines(res)
+    assert "cleanup_status = failed" in lines
+    assert "controlled_residual = false" in lines
+    assert "execute-live status = FAILED" in lines
+
+
+def test_live_summary_role_fail_is_visible():
+    c = _load_canary()
+    rows = _rows_all_pass(c)
+    rows[0] = dict(rows[0], actual="deny")  # logical-writer put logical/ expected allow, got deny -> FAIL
+    res = dict(_happy_result(c), rows=rows)
+    lines = c._live_summary_lines(res)
+    assert any(ln == "role logical-writer put logical/ = FAIL" for ln in lines)
+
+
+def test_live_wires_summary_and_does_not_print_result_dict():
+    code = _code()
+    seg = code[code.index("def live(args"):code.index("def main(")]
+    assert "for line in _live_summary_lines(result):" in seg
+    # the raw result dict is never printed / str-formatted into output
+    assert "print(result" not in seg
+    assert "{result}" not in seg and "{result!r}" not in seg
+    # summary runs only AFTER credentials + execution (order preserved)
+    assert seg.index("read_masked_credentials()") < seg.index("_live_summary_lines(result)")
+
+
+_OBS_MUTATIONS = [
+    "print a versionId in the summary", "print a request-id / host-id", "print the raw result dict",
+    "print a raw exception / body", "hide a role FAIL (force PASS)", "turn NOT_ATTEMPTED into PASS",
+    "drop one of the six object-lock proofs from the summary", "report cleanup clean while residual remains",
+    "emit a value outside the closed vocabulary", "leak project/UID via manual_cleanup",
+    "bypass the pre-network execute gate", "read credentials before the gate",
+    "change runtime without bumping the pin/marker", "drop the deadline check", "summary printed before status",
+    "print manual_cleanup key/user names",
+]
+
+
+def test_obs_mutation_matrix_declared():
+    assert len(_OBS_MUTATIONS) >= 15

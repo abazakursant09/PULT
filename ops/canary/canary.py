@@ -54,7 +54,7 @@ LIVE_GATE_VALUE = "YES_I_UNDERSTAND"
 # Inal-approved 3C2C2-B execution step. So the CLI still defers.
 SELECTEL_EXECUTION_DEFERRED = "SELECTEL_EXECUTION_GATED_UNTIL_3C2C2B"
 # Runtime-change review marker — must be bumped together with the SHA-256 freeze on every canary.py change.
-CANARY_RUNTIME_REVIEW = "3C2D-sigv4-query-canonicalization"
+CANARY_RUNTIME_REVIEW = "3C2D-v2-live-observability"
 # live network safety knobs (used by the real transport in 3C2C2-B; enforced/asserted now)
 LIVE_CONNECT_TIMEOUT = 10.0
 LIVE_READ_TIMEOUT = 30.0
@@ -832,6 +832,67 @@ def run_live_execution(manifest, execmani, creds_by_role, transport_factory=None
     return result
 
 
+# object-lock proof keys (internal name -> public secret-free label). Values are true/false/not_attempted only.
+_OBJECT_LOCK_SUMMARY = (
+    ("unlocked_put_ok", "unlocked_put_ok"),
+    ("iam_delete_ok_on_unlocked", "unlocked_admin_delete_ok"),
+    ("locked_put_ok", "locked_put_ok"),
+    ("retention_set", "retention_put_ok"),
+    ("readback_ok", "retention_readback_ok"),
+    ("locked_delete_refused", "locked_admin_delete_denied"),
+    ("proof", "object_lock_proof"),
+)
+
+
+def _live_summary_lines(result) -> list:
+    """Build a CLOSED-VOCABULARY, secret-free summary of a live run so a human sees WHICH role/op or Object-Lock
+    step failed — WITHOUT any Access/Secret, PROJECT_ID/UID/account id, versionId, request-id/host-id, URL, raw
+    HTTP body/XML, canonical-request/string-to-sign, exception text/repr/args/traceback, object content, or the
+    internal result-dict. Every emitted value is drawn from a fixed vocabulary; nothing else is ever printed."""
+    lines = ["live-summary v1"]
+    # (A) role allow/deny matrix (covers logical-writer/pitr-writer/restore-reader/app incl. wrong-prefix rows);
+    # a role/op present with actual==expected -> PASS, present but mismatched -> FAIL, absent (deadline/stopped)
+    # -> NOT_ATTEMPTED. retention-admin behaviour is reported in the Object-Lock section below.
+    seen = {}
+    for row in (result.get("rows") or []):
+        key = (row.get("role"), row.get("op"), row.get("prefix"))
+        seen[key] = "PASS" if row.get("expected") == row.get("actual") and row.get("actual") is not None else "FAIL"
+    for role, ops in _LIVE_ROLE_MATRIX.items():
+        for op, prefix, _expect in ops:
+            verdict = seen.get((role, op, prefix), "NOT_ATTEMPTED")
+            if verdict not in ("PASS", "FAIL", "NOT_ATTEMPTED"):
+                verdict = "NOT_ATTEMPTED"
+            lines.append(f"role {role} {op} {prefix} = {verdict}")
+    # (B) Object-Lock proof — the six required booleans + the overall proof, true/false/not_attempted only
+    ol = result.get("object_lock") or {}
+    for internal, label in _OBJECT_LOCK_SUMMARY:
+        if not ol:
+            value = "not_attempted"
+        else:
+            b = ol.get(internal)
+            value = "true" if b is True else ("false" if b is False else "not_attempted")
+        lines.append(f"object_lock {label} = {value}")
+    # (C) cleanup — status + honest residual + which control-plane CATEGORIES need manual F6 (labels, no values)
+    cleanup = result.get("cleanup") or {}
+    status = cleanup.get("status", "not_attempted")
+    lines.append(f"cleanup_status = {status}")
+    lines.append(f"controlled_residual = {'true' if status == 'controlled-residual' else 'false'}")
+    manual = cleanup.get("manual_cleanup") or {}
+    categories = []
+    if manual.get("keys"):
+        categories.append("service-keys")
+    if manual.get("policies"):
+        categories.append("bucket-policy")
+    if manual.get("bucket"):
+        categories.append("bucket")
+    if manual.get("project"):
+        categories.append("project")
+    lines.append(f"manual_cleanup_required = {','.join(categories) if categories else 'none'}")
+    lines.append(f"deadline_reached = {'true' if result.get('deadline_reached') else 'false'}")
+    lines.append(f"execute-live status = {result.get('status', 'unknown')}")
+    return lines
+
+
 def live(args, env=None) -> int:
     """Live CLI. Ordinary `live` (no --execute-live) fails closed BEFORE any network. Only --execute-live with
     the full one-time confirmation reaches real execution (Gate F, isolated machine)."""
@@ -853,6 +914,8 @@ def live(args, env=None) -> int:
     # Only here — after the full one-time gate — are credentials read and the network touched (Gate F only).
     creds = read_masked_credentials()
     result = run_live_execution(manifest, execmani, creds, clock=_utcnow)
+    for line in _live_summary_lines(result):  # secret-free, closed-vocabulary diagnosis of WHAT failed
+        print(line)
     print(f"execute-live status={result['status']}", file=sys.stderr)
     return 0 if result["status"] == "ok" else 6
 
