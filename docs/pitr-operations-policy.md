@@ -436,6 +436,33 @@ A second review found the Object-Lock "proof" was false-positive. Fixed:
 - **Path-Style stays PROPOSED** — Gate C change to Path-Style still needs Inal's explicit approval.
 - **Runtime freeze** re-pinned; marker `3C2C2B-prelive-correction`.
 
+## SECURITY-2D-3E1B-3C2D-V2 — live-canary observability (before the final Selectel canary)
+
+The first Gate-F5 live run failed with only `execute-live status=FAILED` visible — it did not show WHICH role
+or Object-Lock step broke, and the single-run / no-re-run rule made that blindness expensive. Before the final
+V2 canary, `canary.py live` now prints a **secret-free, closed-vocabulary summary** (`_live_summary_lines`)
+after `run_live_execution`:
+
+- **Role matrix** — one line per role/op (`role <role> <op> <prefix> = PASS | FAIL | NOT_ATTEMPTED`), covering
+  logical-writer / pitr-writer / restore-reader / app including wrong-prefix rows; retention-admin behaviour is
+  reported in the Object-Lock block.
+- **Object-Lock proof** — the six required booleans + overall, each `true | false | not_attempted`:
+  `unlocked_put_ok`, `unlocked_admin_delete_ok`, `locked_put_ok`, `retention_put_ok`, `retention_readback_ok`,
+  `locked_admin_delete_denied`, `object_lock_proof`.
+- **Cleanup** — `cleanup_status`, `controlled_residual` (true only when the run ends controlled-residual),
+  `manual_cleanup_required` as control-plane CATEGORY labels (`service-keys,bucket-policy,bucket,project`) with
+  no values, `deadline_reached`, and the overall `execute-live status`.
+
+Every emitted value is drawn from a fixed vocabulary; the summary NEVER prints an Access/Secret, PROJECT_ID/
+UID/account id, versionId, request-id/host-id, URL, raw HTTP body/XML, canonical-request/string-to-sign, an
+exception (text/repr/args/traceback), object content, or the internal result-dict. A partially-run matrix stays
+`NOT_ATTEMPTED` (never PASS); Object-Lock `object_lock_proof=true` only when all six proofs hold; a non-locked
+residual keeps `cleanup_status=failed` and `controlled_residual=false`. The execute-live gate, deadline ≤30 min,
+masked getpass, exact bucket/run-id/prefix checks, no-DeleteBucket, no-Bypass/Compliance, least-privilege IAM
+and Variant-1 cleanup are unchanged. **Runtime freeze re-bumped**: canary.py sha256
+`33d877434b3438d1d30f3c035fedcca76e4b585f6ad228689b9cef0816bc5e23`, marker `3C2D-v2-live-observability`; both
+guards re-pinned; independent review required. V2 will run on a NEW run-id (`1e916929485e`), not the old one.
+
 ## SECURITY-2D-3E1B-3C2D — SigV4 canonical-query fix + read-only List fallback
 
 The classified read-only diagnose run showed `signature-mismatch` on every query-bearing request
