@@ -43,9 +43,9 @@ NEG_MATRIX = CANARY / "negative-matrix.md"
 #   - an independent safety review passed;
 #   - Inal separately approved the runtime change.
 # The digest is a hard-coded literal — never computed at run time, never env-overridable, never auto-updated.
-_CANARY_RUNTIME_SHA256 = "33d877434b3438d1d30f3c035fedcca76e4b585f6ad228689b9cef0816bc5e23"
+_CANARY_RUNTIME_SHA256 = "7bdc0237e373d747bc10a1c8a433385b50c6acd0375b723add19d4cfb9665618"
 # Review marker — bumped with the digest on every reviewed canary.py runtime change (3C2D SigV4 canonical query).
-_CANARY_RUNTIME_REVIEW = "3C2D-v2-live-observability"
+_CANARY_RUNTIME_REVIEW = "3C2D-v3-error-telemetry"
 
 # Each mutation below, applied to a disposable copy, must make at least one test in this file fail.
 MUTATION_MATRIX = [
@@ -1552,8 +1552,10 @@ def _rows_all_pass(c):
     r = []
     for role, ops in c._LIVE_ROLE_MATRIX.items():
         for op, prefix, expect in ops:
+            # a passing row: allow ops resolve ok; deny ops must be a REAL policy deny (access-denied)
+            cat = "ok" if expect == "allow" else "access-denied"
             r.append({"role": role, "op": op, "prefix": prefix, "expected": expect, "actual": expect,
-                      "code": 200, "request_id": "REQ-LEAK-123", "version_id": "VER-LEAK"})
+                      "code": 200, "request_id": "REQ-LEAK-123", "version_id": "VER-LEAK", "category": cat})
     return r
 
 
@@ -1580,10 +1582,14 @@ def test_live_summary_closed_vocabulary_and_all_pass():
     assert lines[0] == "live-summary v1"
     for ln in lines:
         if ln.startswith("role "):
-            assert ln.split(" = ")[-1] in _ROLE_VERDICTS, ln
+            # role line: "... = <VERDICT> (<category>)"
+            rhs = ln.split(" = ")[-1]
+            verdict, _, cat = rhs.partition(" (")
+            assert verdict in _ROLE_VERDICTS, ln
+            assert cat.rstrip(")") in tuple(c.LIVE_ERROR_CATEGORIES) + ("not_attempted",), ln
         elif ln.startswith("object_lock "):
             assert ln.split(" = ")[-1] in _BOOL3, ln
-    assert all(ln.split(" = ")[-1] == "PASS" for ln in lines if ln.startswith("role "))
+    assert all(ln.split(" = ")[-1].split(" (")[0] == "PASS" for ln in lines if ln.startswith("role "))
     assert "object_lock object_lock_proof = true" in lines
     assert "controlled_residual = true" in lines
     assert "manual_cleanup_required = service-keys,bucket-policy,bucket,project" in lines
@@ -1604,7 +1610,8 @@ def test_live_summary_partial_is_not_pass():
                "object_lock": {}, "cleanup": {"status": "failed", "manual_cleanup": {}},
                "deadline_reached": True, "status": "FAILED"}
     lines = c._live_summary_lines(partial)
-    assert any(ln.endswith("= NOT_ATTEMPTED") for ln in lines)
+    assert any(ln.endswith("= NOT_ATTEMPTED (not_attempted)") for ln in lines)
+    assert not any("= PASS" in ln for ln in lines if "list logical/" in ln)  # absent op never spuriously PASS
     assert "object_lock object_lock_proof = not_attempted" in lines
     assert "cleanup_status = failed" in lines and "controlled_residual = false" in lines
     assert "execute-live status = FAILED" in lines
@@ -1646,10 +1653,10 @@ def test_live_summary_residual_honest_failed_stays_failed():
 def test_live_summary_role_fail_is_visible():
     c = _load_canary()
     rows = _rows_all_pass(c)
-    rows[0] = dict(rows[0], actual="deny")  # logical-writer put logical/ expected allow, got deny -> FAIL
+    rows[0] = dict(rows[0], actual="deny", category="access-denied")  # allow op denied -> FAIL
     res = dict(_happy_result(c), rows=rows)
     lines = c._live_summary_lines(res)
-    assert any(ln == "role logical-writer put logical/ = FAIL" for ln in lines)
+    assert "role logical-writer put logical/ = FAIL (access-denied)" in lines
 
 
 def test_live_wires_summary_and_does_not_print_result_dict():
@@ -1676,3 +1683,94 @@ _OBS_MUTATIONS = [
 
 def test_obs_mutation_matrix_declared():
     assert len(_OBS_MUTATIONS) >= 15
+
+
+# ================= SECURITY-2D-3E1B-3C2D-V3 secret-free live error categories =================
+# V2 postmortem: attempt() folded every 401/403 into allow="deny", so a signature-mismatch / invalid-key /
+# auth failure on an expected-deny op read as a spurious deny-PASS, and the summary showed only PASS/FAIL.
+# Now attempt() attaches a secret-free category; an expected-deny op PASSes ONLY on access-denied.
+def _http_cat(c, code, body=b""):
+    return c._http_result_category(code, body)
+
+
+def test_http_result_category_goldens():
+    c = _load_canary()
+    assert _http_cat(c, 200) == "ok"
+    assert _http_cat(c, 204) == "ok"
+    assert _http_cat(c, 404) == "not-found"
+    assert _http_cat(c, 403, b"<Error><Code>AccessDenied</Code></Error>") == "access-denied"
+    assert _http_cat(c, 403, b"<Error><Code>SignatureDoesNotMatch</Code><StringToSign>S</StringToSign></Error>") == "signature-mismatch"
+    assert _http_cat(c, 403, b"<Error><Code>AuthorizationHeaderMalformed</Code></Error>") == "signature-mismatch"
+    assert _http_cat(c, 403, b"<Error><Code>InvalidAccessKeyId</Code></Error>") == "invalid-access-key"
+    assert _http_cat(c, 403, b"<Error><Code>InvalidToken</Code></Error>") == "authentication-failed"
+    assert _http_cat(c, 403, b"<Error><Code>ExpiredToken</Code></Error>") == "authentication-failed"
+    assert _http_cat(c, 403, b"") == "access-denied"          # bare 403 -> access-denied
+    assert _http_cat(c, 401, b"") == "authentication-failed"  # bare 401 -> auth failure
+    assert _http_cat(c, 500, b"") == "service-error"
+    assert _http_cat(c, 403, b"<Error><Code>WeirdUnlisted</Code></Error>") == "access-denied"  # unknown code -> status class
+    assert _http_cat(c, 403, b"<Err") == "malformed-response"
+    assert set(c.LIVE_ERROR_CATEGORIES) >= {"access-denied", "signature-mismatch", "invalid-access-key",
+                                            "authentication-failed", "ok", "not-found", "service-error",
+                                            "malformed-response", "unknown"}
+    assert len(c.LIVE_ERROR_CATEGORIES) == 12
+
+
+def test_http_category_reads_only_code_never_leaks():
+    c = _load_canary()
+    body = (b"<Error><Code>AccessDenied</Code><Message>SECRET_MSG</Message><RequestId>RID_LEAK</RequestId>"
+            b"<StringToSign>STS_LEAK</StringToSign><HostId>HOST_LEAK</HostId></Error>")
+    assert c._http_result_category(403, body) == "access-denied"  # a fixed label, never the body content
+
+
+def test_attempt_attaches_secret_free_category():
+    c = _load_canary()
+    m = _transport_manifest()
+
+    class _B:
+        def request(self, method, url, headers=None, content=b""):
+            return type("R", (), {"status_code": 403,
+                                  "headers": {"x-amz-request-id": "RID"},
+                                  "content": b"<Error><Code>SignatureDoesNotMatch</Code></Error>"})()
+    t = c.SelectelS3Transport(m, {"access_key": "A", "secret_key": _SEKRET}, http_client=_B())
+    r = t.attempt("GetBucketVersioning", "/b", method="GET", query="versioning",
+                  amz_date="20200101T000000Z", date_stamp="20200101")
+    assert r["allow"] == "deny" and r["category"] == "signature-mismatch"
+
+
+def _row(role, op, prefix, expected, actual, category):
+    return {"role": role, "op": op, "prefix": prefix, "expected": expected, "actual": actual,
+            "category": category, "code": 403, "request_id": "RID"}
+
+
+def test_deny_pass_only_for_access_denied():
+    c = _load_canary()
+    # expected-deny op with a REAL policy deny -> PASS
+    res = dict(_happy_result(c), rows=[_row("app", "put", "pitr/", "deny", "deny", "access-denied")])
+    lines = c._live_summary_lines(res)
+    assert "role app put pitr/ = PASS (access-denied)" in lines
+    # same op but the 403 was a signature mismatch -> NOT a valid deny-proof -> FAIL
+    res2 = dict(_happy_result(c), rows=[_row("app", "put", "pitr/", "deny", "deny", "signature-mismatch")])
+    lines2 = c._live_summary_lines(res2)
+    assert "role app put pitr/ = FAIL (signature-mismatch)" in lines2
+    # invalid-access-key / authentication-failed on a deny op also FAIL (never a spurious pass)
+    for badcat in ("invalid-access-key", "authentication-failed"):
+        r = dict(_happy_result(c), rows=[_row("app", "get", "pitr/", "deny", "deny", badcat)])
+        assert f"role app get pitr/ = FAIL ({badcat})" in c._live_summary_lines(r)
+
+
+def test_expected_allow_accessdenied_is_fail():
+    c = _load_canary()
+    res = dict(_happy_result(c), rows=[_row("pitr-writer", "put", "pitr/", "allow", "deny", "access-denied")])
+    assert "role pitr-writer put pitr/ = FAIL (access-denied)" in c._live_summary_lines(res)
+
+
+def test_app_deny_category_visible_and_no_leak(capsys):
+    c = _load_canary()
+    res = dict(_happy_result(c), rows=[
+        _row("app", "list", "pitr/", "deny", "deny", "signature-mismatch"),
+        _row("app", "get", "pitr/", "deny", "deny", "access-denied")])
+    lines = c._live_summary_lines(res)
+    assert "role app list pitr/ = FAIL (signature-mismatch)" in lines
+    assert "role app get pitr/ = PASS (access-denied)" in lines
+    blob = "\n".join(lines)
+    assert "RID" not in blob and "Error" not in blob

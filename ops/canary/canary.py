@@ -54,7 +54,7 @@ LIVE_GATE_VALUE = "YES_I_UNDERSTAND"
 # Inal-approved 3C2C2-B execution step. So the CLI still defers.
 SELECTEL_EXECUTION_DEFERRED = "SELECTEL_EXECUTION_GATED_UNTIL_3C2C2B"
 # Runtime-change review marker — must be bumped together with the SHA-256 freeze on every canary.py change.
-CANARY_RUNTIME_REVIEW = "3C2D-v2-live-observability"
+CANARY_RUNTIME_REVIEW = "3C2D-v3-error-telemetry"
 # live network safety knobs (used by the real transport in 3C2C2-B; enforced/asserted now)
 LIVE_CONNECT_TIMEOUT = 10.0
 LIVE_READ_TIMEOUT = 30.0
@@ -419,6 +419,63 @@ class SelectelTransport:
         raise LiveGateError(SELECTEL_EXECUTION_DEFERRED)
 
 
+# Secret-free live error categories (closed set; parity with diagnose.py). A 401/403 alone does NOT prove an
+# IAM policy deny — it can be an invalid key, a signature mismatch, or an auth failure. attempt() now attaches
+# a category derived ONLY from the HTTP status class + an allowlisted S3 <Code> so the summary can distinguish
+# a genuine policy deny from an auth/signature failure, WITHOUT emitting the raw body/Code/RequestId/anything.
+LIVE_ERROR_CATEGORIES = (
+    "ok", "not-found", "invalid-access-key", "signature-mismatch", "access-denied",
+    "authentication-failed", "timeout", "tls-error", "network-error", "service-error",
+    "malformed-response", "unknown",
+)
+_S3_ERROR_CODE_CATEGORY = {
+    "InvalidAccessKeyId": "invalid-access-key",
+    "SignatureDoesNotMatch": "signature-mismatch",
+    "AuthorizationHeaderMalformed": "signature-mismatch",
+    "AccessDenied": "access-denied",
+    "InvalidToken": "authentication-failed",
+    "ExpiredToken": "authentication-failed",
+}
+
+
+def _s3_error_code_category(body):
+    """Read ONLY the <Code> tag and map via the allowlist. Never returns Message/Resource/RequestId/HostId/
+    StringToSign/CanonicalRequest or raw text. Malformed XML -> 'malformed-response'; unknown/absent Code -> None."""
+    if not body:
+        return None
+    import xml.etree.ElementTree as ET
+    try:
+        root = ET.fromstring(body)
+    except Exception:
+        return "malformed-response"
+    code = None
+    for el in root.iter():
+        if el.tag.rsplit("}", 1)[-1] == "Code":
+            code = (el.text or "").strip()
+            break
+    if not code:
+        return None
+    return _S3_ERROR_CODE_CATEGORY.get(code)
+
+
+def _http_result_category(code, body):
+    """Map an HTTP status + body to ONE secret-free category (status class + allowlisted <Code> only)."""
+    if code in (200, 204, 206):
+        return "ok"
+    if code == 404:
+        return "not-found"
+    xml_cat = _s3_error_code_category(body)
+    if xml_cat:
+        return xml_cat
+    if code == 401:
+        return "authentication-failed"
+    if code == 403:
+        return "access-denied"
+    if isinstance(code, int) and 500 <= code <= 599:
+        return "service-error"
+    return "unknown"
+
+
 class SelectelS3Transport:
     """Real Selectel S3 data-plane transport: SigV4-signed HTTPS via httpx. Implemented in 3C2C2-A but its
     EXECUTION against a live endpoint is gated to 3C2C2-B (the live CLI does not drive it). Hardened:
@@ -498,10 +555,11 @@ class SelectelS3Transport:
             reqid = rh.get("x-amz-request-id", "")
             vid = rh.get("x-amz-version-id", "")
             body = getattr(resp, "content", b"") or b""
+            cat = _http_result_category(code, body)  # secret-free cause category (status class + <Code> only)
             last = {"operation": op, "http_code": code, "request_id": reqid, "version_id": vid,
-                    "body": body, "allow": None, "mutating": mutating}
+                    "body": body, "allow": None, "mutating": mutating, "category": cat}
             if code is None:
-                return {**last, "allow": "unknown", "error": "no status (ambiguous) -> STOP"}
+                return {**last, "allow": "unknown", "category": "unknown", "error": "no status (ambiguous) -> STOP"}
             if code in (200, 204, 206):
                 return {**last, "allow": "allow"}
             if code in (403, 401):
@@ -509,7 +567,7 @@ class SelectelS3Transport:
             if not mutating and code in (429, 500, 502, 503, 504):
                 continue  # idempotent read: bounded retry only
             return {**last, "allow": "unknown", "error_code": code}
-        return {**last, "allow": "unknown", "error": "read retries exhausted"}
+        return {**last, "allow": "unknown", "category": "unknown", "error": "read retries exhausted"}
 
     def __repr__(self):  # never leak the secret via repr/exceptions
         return f"<SelectelS3Transport endpoint={self._endpoint} region={self._region}>"
@@ -747,7 +805,8 @@ def run_live_execution(manifest, execmani, creds_by_role, transport_factory=None
                 allow = res.get("allow")
                 ok = (expect == "allow" and allow == "allow") or (expect == "deny" and allow == "deny")
                 rows.append({"role": role, "op": op, "prefix": prefix, "expected": expect, "actual": allow,
-                             "code": res.get("http_code"), "request_id": res.get("request_id")})
+                             "code": res.get("http_code"), "request_id": res.get("request_id"),
+                             "category": res.get("category", "unknown")})
                 if op == "put" and expect == "allow" and allow == "allow":
                     ledger["objects"].append({"key": key, "version": res.get("version_id", "")})
                 if not ok:
@@ -853,16 +912,26 @@ def _live_summary_lines(result) -> list:
     # (A) role allow/deny matrix (covers logical-writer/pitr-writer/restore-reader/app incl. wrong-prefix rows);
     # a role/op present with actual==expected -> PASS, present but mismatched -> FAIL, absent (deadline/stopped)
     # -> NOT_ATTEMPTED. retention-admin behaviour is reported in the Object-Lock section below.
+    # A 401/403 alone is NOT proof of an IAM policy deny. An expected-deny op counts as PASS ONLY when the
+    # cause category is exactly access-denied; a signature-mismatch / invalid-access-key / authentication
+    # failure (or any non-deny result) for an expected-deny op is a FAIL, never a spurious deny-proof. Each
+    # line also prints the secret-free cause category so the reader sees WHY, not just PASS/FAIL.
     seen = {}
     for row in (result.get("rows") or []):
         key = (row.get("role"), row.get("op"), row.get("prefix"))
-        seen[key] = "PASS" if row.get("expected") == row.get("actual") and row.get("actual") is not None else "FAIL"
+        expected, actual = row.get("expected"), row.get("actual")
+        cat = row.get("category") or "unknown"
+        if cat not in LIVE_ERROR_CATEGORIES:
+            cat = "unknown"
+        if expected == "allow":
+            verdict = "PASS" if actual == "allow" else "FAIL"
+        else:  # expected deny -> only a real access-denied counts
+            verdict = "PASS" if (actual == "deny" and cat == "access-denied") else "FAIL"
+        seen[key] = (verdict, cat)
     for role, ops in _LIVE_ROLE_MATRIX.items():
         for op, prefix, _expect in ops:
-            verdict = seen.get((role, op, prefix), "NOT_ATTEMPTED")
-            if verdict not in ("PASS", "FAIL", "NOT_ATTEMPTED"):
-                verdict = "NOT_ATTEMPTED"
-            lines.append(f"role {role} {op} {prefix} = {verdict}")
+            verdict, cat = seen.get((role, op, prefix), ("NOT_ATTEMPTED", "not_attempted"))
+            lines.append(f"role {role} {op} {prefix} = {verdict} ({cat})")
     # (B) Object-Lock proof — the six required booleans + the overall proof, true/false/not_attempted only
     ol = result.get("object_lock") or {}
     for internal, label in _OBJECT_LOCK_SUMMARY:

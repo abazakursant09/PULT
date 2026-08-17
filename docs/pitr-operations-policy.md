@@ -436,6 +436,43 @@ A second review found the Object-Lock "proof" was false-positive. Fixed:
 - **Path-Style stays PROPOSED** — Gate C change to Path-Style still needs Inal's explicit approval.
 - **Runtime freeze** re-pinned; marker `3C2C2B-prelive-correction`.
 
+## SECURITY-2D-3E1B-3C2D-V3 — secret-free live error categories (V2 postmortem)
+
+The V2 live run (run-id `1e916929485e`) failed: every expected-**allow** op FAILED and every expected-**deny**
+op for logical/pitr/restore "PASSED", app-deny rows FAILED, all six Object-Lock proofs false (chain broke at
+pitr-writer PutObject). **Root cause is NOT proven** — and cannot be, because F6 already deleted the keys/users/
+project and the key→user/project mapping check was sent with an unfilled template, so **key-to-user mapping =
+UNKNOWN (evidence lost during cleanup, no secret exposure)**. Two live cause-groups remain open: (1) IAM/policy/
+resource scope (the visual editor saved broad `bucket/*` Allow alongside the intended prefix); (2) credential/
+project/order/signature/authentication mismatch (wrong key order, wrong Access/Secret pair, wrong project
+binding, or a write-path SigV4 issue the read-only diagnose never exercised).
+
+The telemetry could not tell these apart: `SelectelS3Transport.attempt()` folded every 401/403 into
+`allow="deny"`, so a `SignatureDoesNotMatch` / `InvalidAccessKeyId` / auth failure on an expected-deny op read
+as a spurious deny-PASS. Fix (canary.py):
+- `attempt()` now attaches a **secret-free category** from the HTTP status class + an allowlisted S3 `<Code>`
+  only (`_http_result_category` / `_s3_error_code_category`): `ok, not-found, invalid-access-key,
+  signature-mismatch, access-denied, authentication-failed, timeout, tls-error, network-error, service-error,
+  malformed-response, unknown`. The body is read ONLY for `<Code>`; never Message/RequestId/HostId/StringToSign/
+  CanonicalRequest/raw XML.
+- `_live_summary_lines` prints each role line as `role <role> <op> <prefix> = <VERDICT> (<category>)`. An
+  expected-**deny** op is PASS **only** when the category is exactly `access-denied`; a signature/invalid-key/
+  auth 403 on a deny op is a FAIL, never a spurious deny-proof. Expected-allow is PASS only on `allow`.
+- Object-Lock and cleanup semantics, the execute-live gate, deadline ≤30 min, masked getpass, no-DeleteBucket,
+  no-Bypass/Compliance, least-privilege and Variant-1 cleanup are unchanged. Runtime freeze re-bumped: canary.py
+  sha256 `7bdc0237e373d747bc10a1c8a433385b50c6acd0375b723add19d4cfb9665618`, marker `3C2D-v3-error-telemetry`;
+  both guards re-pinned.
+
+**Policy contract for any future canary:** the intended per-role resource set is prefix-scoped only —
+logical-writer `canary/<RUNID>/logical/*`, pitr-writer/restore-reader `canary/<RUNID>/pitr/*`, list-conditions
+via `s3:prefix` StringLike (bucket name NOT repeated in the prefix value), retention-admin scoped to
+`canary/<RUNID>/*` with delete/retention but NO PutObject/DeleteBucket/Bypass/Compliance/lifecycle, app = Deny.
+The V2 read-back showed the Selectel **visual editor added broad `bucket/*` Allow** beyond the intended prefix.
+**BLOCKER for the next live canary:** until the exact minimal resource set can be applied WITHOUT the editor
+silently widening scope (e.g. via a JSON policy path or a verified minimal UI recipe), do NOT schedule another
+live run — a broad Allow makes any allow-PASS meaningless. This correction only improves diagnosability; it
+does NOT prove V2's cause and does NOT authorize a V3 live run.
+
 ## SECURITY-2D-3E1B-3C2D-V2 — live-canary observability (before the final Selectel canary)
 
 The first Gate-F5 live run failed with only `execute-live status=FAILED` visible — it did not show WHICH role
