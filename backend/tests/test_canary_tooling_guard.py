@@ -43,9 +43,9 @@ NEG_MATRIX = CANARY / "negative-matrix.md"
 #   - an independent safety review passed;
 #   - Inal separately approved the runtime change.
 # The digest is a hard-coded literal — never computed at run time, never env-overridable, never auto-updated.
-_CANARY_RUNTIME_SHA256 = "cbdf70e65eb692ec8d0e38fe7b552d3062e0092a3873b27aa989bbbdf2eea0b5"
+_CANARY_RUNTIME_SHA256 = "546294d03d4a70e7f98f1abf7a4980d649a0f21b2a3dd82d05ea1fb08f03658b"
 # Review marker — bumped with the digest on every reviewed canary.py runtime change (3C2D SigV4 canonical query).
-_CANARY_RUNTIME_REVIEW = "3C2D-v8-locked-delete-telemetry"
+_CANARY_RUNTIME_REVIEW = "3C2D-v9-stale-safe-locked-delete-probe"
 
 # Each mutation below, applied to a disposable copy, must make at least one test in this file fail.
 MUTATION_MATRIX = [
@@ -90,7 +90,8 @@ def test_modes_are_exactly_the_allowed_set():
     m = re.search(r'choices=\[([^\]]+)\]', _code())
     assert m, "argparse choices not found"
     choices = set(re.findall(r'"([^"]+)"', m.group(1)))
-    assert choices == {"validate-policies", "plan", "minio-compat", "live", "object-lock-live"}, choices
+    assert choices == {"validate-policies", "plan", "minio-compat", "live", "object-lock-live",
+                       "locked-delete-probe"}, choices
 
 
 def test_live_gate_is_double_and_fail_closed_structurally():
@@ -139,7 +140,8 @@ def test_no_credentials_on_argv():
         assert bad not in code, f"credential CLI arg {bad!r} forbidden"
     # every argparse flag must be one of the allowlisted non-secret parameters
     allowed_flags = {"--project-id", "--region", "--endpoint", "--bucket", "--run-id", "--confirm",
-                     "--execute-live", "--execute-object-lock", "--ack", "--max-object-bytes", "--deadline"}
+                     "--execute-live", "--execute-object-lock", "--execute-locked-delete-probe",
+                     "--ack", "--max-object-bytes", "--deadline"}
     flags = set(re.findall(r'add_argument\("(--[a-z-]+)"', code))
     assert flags <= allowed_flags, f"unexpected argv flags: {flags - allowed_flags}"
 
@@ -927,7 +929,10 @@ def test_redact_masks_secrets():
 
 def test_cleanup_has_no_recursive_or_wildcard_delete():
     code = _code()
-    seg = code[code.index("def run_cleanup("):code.index("def live(args")]
+    # confine to run_cleanup's OWN body (end at the next top-level def) — the old slice reached to `def live`
+    # and now spans unrelated V9 code whose legit field `delete_allow` contains the substring `delete_all`.
+    seg = code[code.index("def run_cleanup("):]
+    seg = seg[:seg.index("\ndef ", 1)]
     for bad in ("--recursive", "recursive=True", "prefix_delete", "prune", "delete_all", "rmtree"):
         assert bad not in seg, f"cleanup must not use {bad!r}"
 
@@ -2475,3 +2480,229 @@ def test_v8_refusal_invariant_and_telemetry_present_in_both_runtimes():
     assert code.count('and locked_delete_category == "access-denied")') >= 2
     assert code.count('"locked_delete_http_status": locked_delete_http_status,') >= 2
     assert code.count('locked_delete_http_status = dv.get("http_code")') >= 2
+
+
+# ================= SECURITY-2D-3E1B-3C2D-V9 stale-safe locked-delete-probe =================
+_LDP_RUN = "abc123abc123"
+_LDP_KEY = f"canary/{_LDP_RUN}/pitr/lock-{_LDP_RUN}"
+
+
+def _ldp_manifest():
+    return {"endpoint": "https://s3.ru-3.storage.selcloud.ru", "region": "ru-3",
+            "bucket": f"pult-canary-{_LDP_RUN}", "prefix": f"canary/{_LDP_RUN}/",
+            "runid": _LDP_RUN, "project": "0123456789abcdef"}
+
+
+def _ldp_exec():
+    import datetime
+    return {"deadline": _OL_SENT, "deadline_dt": datetime.datetime(2026, 8, 18, 12, 20, 0)}
+
+
+class _LDPFake:
+    def __init__(self, cfg, calls):
+        self.cfg = cfg
+        self.calls = calls
+
+    def attempt(self, op, uri, method="GET", query="", payload=b"", amz_date=None, date_stamp=None,
+                extra_headers=None):
+        self.calls.append((op, uri, query))
+        assert f"lock-{_LDP_RUN}" in uri and "%2A" not in uri and "*" not in uri  # exact key only
+        assert "prefix=" not in query                                            # never a list
+        if op == "HeadObject":
+            return self.cfg.get("head", {"allow": "allow", "category": "ok", "version_id": "VID",
+                                         "http_code": 200, "body": b""})
+        if op == "PutObjectRetention":
+            return self.cfg.get("put", {"allow": "allow", "category": "ok", "http_code": 200, "body": b""})
+        if op == "GetObjectRetention":
+            if "get" in self.cfg:
+                return self.cfg["get"]
+            mode = self.cfg.get("mode", "GOVERNANCE")
+            t = self.cfg.get("echo_time", _OL_SENT)
+            body = f"<Retention><Mode>{mode}</Mode><RetainUntilDate>{t}</RetainUntilDate></Retention>".encode()
+            return {"allow": "allow", "category": "ok", "http_code": 200, "body": body}
+        if op == "DeleteObjectVersion":
+            return self.cfg.get("delete", {"allow": "deny", "category": "access-denied",
+                                           "http_code": 403, "body": b""})
+        raise AssertionError("unexpected op " + op)
+
+
+def _ldp_run(c, **cfg):
+    calls = []
+    fake = _LDPFake(cfg, calls)
+    with _NoNetwork():
+        res = c.run_locked_delete_probe(_ldp_manifest(), _ldp_exec(),
+                                        {"retention-admin": {"access_key": "AK", "secret_key": "SK"}},
+                                        transport_factory=lambda *a, **k: fake,
+                                        clock=_clock_at(y=2026, mo=8, d=18, h=12, mi=0))
+    return res, calls
+
+
+def test_v9_happy_access_denied_is_pass_proof():
+    c = _load_canary()
+    res, calls = _ldp_run(c)
+    assert res["probe_status"] == "PASS" and res["proof"] is True
+    assert res["delete_category"] == "access-denied" and res["delete_http_status"] == 403
+    assert [op for op, _u, _q in calls] == ["HeadObject", "PutObjectRetention", "GetObjectRetention",
+                                            "DeleteObjectVersion"]
+
+
+def test_v9_stale_2xx_delete_is_breach_failed():
+    c = _load_canary()
+    res, _ = _ldp_run(c, delete={"allow": "allow", "category": "ok", "http_code": 204, "body": b""})
+    assert res["probe_status"] == "FAILED" and res["proof"] is False
+
+
+def test_v9_unknown_409_is_controlled_and_status_surfaced():
+    c = _load_canary()
+    res, _ = _ldp_run(c, delete={"allow": "unknown", "category": "unknown", "http_code": 409, "body": b""})
+    assert res["probe_status"] == "CONTROLLED_RESIDUAL" and res["proof"] is False
+    assert res["delete_http_status"] == 409
+    assert "delete_http_status = 409" in c._locked_delete_probe_summary_lines(res)
+
+
+def test_v9_signature_deny_is_not_proof():
+    c = _load_canary()
+    res, _ = _ldp_run(c, delete={"allow": "deny", "category": "signature-mismatch", "http_code": 403, "body": b""})
+    assert res["proof"] is False and res["probe_status"] == "CONTROLLED_RESIDUAL"
+
+
+def test_v9_no_version_id_means_no_mutation():
+    c = _load_canary()
+    res, calls = _ldp_run(c, head={"allow": "allow", "category": "ok", "version_id": "", "http_code": 200,
+                                   "body": b""})
+    assert res["probe_status"] == "FAILED" and res["probe_version_present"] is False
+    assert [op for op, _u, _q in calls] == ["HeadObject"]  # no retention, no delete
+
+
+def test_v9_retention_put_fail_no_get_no_delete():
+    c = _load_canary()
+    res, calls = _ldp_run(c, put={"allow": "deny", "category": "access-denied", "http_code": 403, "body": b""})
+    assert res["probe_status"] == "FAILED" and res["delete_attempted"] is False
+    assert [op for op, _u, _q in calls] == ["HeadObject", "PutObjectRetention"]
+
+
+def test_v9_readback_mismatch_malformed_wrongmode_no_delete():
+    c = _load_canary()
+    for cfg in ({"echo_time": "2026-08-18T12:20:05Z"},
+                {"get": {"allow": "allow", "category": "ok", "http_code": 200, "body": b"<Retention><Mode>GOV"}},
+                {"mode": "COMPLIANCE"},
+                {"get": {"allow": "deny", "category": "access-denied", "http_code": 403, "body": b""}}):
+        res, calls = _ldp_run(c, **cfg)
+        assert res["proof"] is False and res["delete_attempted"] is False, cfg
+        assert "DeleteObjectVersion" not in [op for op, _u, _q in calls], cfg
+
+
+def test_v9_exactly_one_delete_only_after_full_readback_no_retry():
+    c = _load_canary()
+    _res, calls = _ldp_run(c)
+    dels = sum(1 for op, _u, _q in calls if op == "DeleteObjectVersion")
+    puts = sum(1 for op, _u, _q in calls if op == "PutObjectRetention")
+    assert dels == 1 and puts == 1  # exactly one each, no retry
+
+
+def test_v9_invalid_credentials_fail_pre_network():
+    c = _load_canary()
+
+    def _boom(*a, **k):
+        raise AssertionError("transport built despite bad credential format")
+    with _NoNetwork():
+        res = c.run_locked_delete_probe(_ldp_manifest(), _ldp_exec(),
+                                        {"retention-admin": {"access_key": "bad key", "secret_key": "s"}},
+                                        transport_factory=_boom,
+                                        clock=_clock_at(y=2026, mo=8, d=18, h=12, mi=0))
+    assert res["probe_status"] == "FAILED" and res["delete_attempted"] is False
+
+
+def test_v9_summary_secret_free_and_closed_vocab():
+    c = _load_canary()
+    res, _ = _ldp_run(c, delete={"allow": "unknown", "category": "unknown", "http_code": 409,
+                                 "body": b"<Error><Code>SomeCode</Code><Message>secret</Message></Error>"})
+    lines = c._locked_delete_probe_summary_lines(res)
+    assert lines[0] == "locked-delete-probe-summary v1"
+    blob = "\n".join(lines)
+    for leak in ("VID", "versionId", "2026-08-18T12:20", "RetainUntilDate", "Retention", "<Error", "<Code",
+                 "Message", "secret", "RequestId", "HostId", "https://", "0123456789abcdef"):
+        assert leak not in blob, leak
+    keys = {ln.split(" = ")[0] for ln in lines if " = " in ln}
+    for f in ("probe_head_category", "probe_version_present", "retention_put_category", "retention_get_category",
+              "retention_parse_status", "retention_compare_status", "delete_attempted", "delete_allow",
+              "delete_category", "delete_http_status", "probe_status", "manual_cleanup_required"):
+        assert f in keys, f
+
+
+def test_v9_summary_http_status_clamped():
+    c = _load_canary()
+    res, _ = _ldp_run(c, delete={"allow": "unknown", "category": "unknown", "http_code": 409, "body": b""})
+    for bad in (99999, -1, "409", None, 42):
+        res["delete_http_status"] = bad
+        assert "delete_http_status = none" in c._locked_delete_probe_summary_lines(res), bad
+    res["delete_http_status"] = 409
+    assert "delete_http_status = 409" in c._locked_delete_probe_summary_lines(res)
+
+
+def test_v9_gate_fail_closed_no_network_no_getpass():
+    c = _load_canary()
+
+    class _A:
+        project_id = "0123456789abcdef"
+        region = "ru-3"
+        endpoint = "https://s3.ru-3.storage.selcloud.ru"
+        bucket = f"pult-canary-{_LDP_RUN}"
+        run_id = _LDP_RUN
+        confirm = ("0123456789abcdef/ru-3/https://s3.ru-3.storage.selcloud.ru/"
+                   f"pult-canary-{_LDP_RUN}/{_LDP_RUN}")
+        ack = f"PULT-CANARY-LOCKEDDELETE-{_LDP_RUN}"
+        deadline = "2020-01-01T00:00:00Z"  # past -> execute gate refuses
+        execute_locked_delete_probe = True
+
+    def _boom(*a, **k):
+        raise AssertionError("read_masked_credentials must NOT run before the gate passes")
+    c.read_masked_credentials = _boom
+    with _NoNetwork():
+        assert c.locked_delete_probe(_A(), env={}) == 5                       # no env ack
+        a = _A()
+        a.execute_locked_delete_probe = False
+        assert c.locked_delete_probe(a, env={c.LOCKED_DELETE_PROBE_GATE_ENV:
+                                             c.LOCKED_DELETE_PROBE_GATE_VALUE}) == 5   # no flag
+        assert c.locked_delete_probe(_A(), env={c.LOCKED_DELETE_PROBE_GATE_ENV:
+                                                c.LOCKED_DELETE_PROBE_GATE_VALUE}) == 4  # past deadline
+
+
+def test_v9_single_role_and_gate_constants():
+    c = _load_canary()
+    assert c._LOCKED_DELETE_PROBE_ROLES == ("retention-admin",)
+    assert c.LOCKED_DELETE_PROBE_GATE_ENV == "PULT_SELECTEL_LOCKED_DELETE_PROBE"
+    assert c.LOCKED_DELETE_PROBE_ACK_PREFIX == "PULT-CANARY-LOCKEDDELETE-"
+
+
+def test_v9_probe_source_has_no_bypass_list_or_new_object():
+    code = _code()
+    seg = code[code.index("def run_locked_delete_probe("):code.index("def _locked_delete_probe_summary_lines(")]
+    for bad in ("BypassGovernanceRetention", "Bypass", "LegalHold", "DeleteBucket", "PutLifecycleConfiguration",
+                "ListBucketVersions", "ListBucket", "ListVersions"):
+        assert bad not in seg, f"locked-delete-probe must not use {bad!r}"
+    assert "GOVERNANCE" in seg  # only ever the Governance mode
+
+
+def test_v9_summary_is_strictly_closed_vocabulary_no_stray_lines():
+    """Every non-header line must be `key = value` with an allowlisted key — so an injected raw line is caught."""
+    c = _load_canary()
+    res, _ = _ldp_run(c)
+    lines = c._locked_delete_probe_summary_lines(res)
+    assert lines[0] == "locked-delete-probe-summary v1"
+    allowed = {"probe_head_category", "probe_version_present", "retention_put_category", "retention_get_category",
+               "retention_parse_status", "retention_compare_status", "delete_attempted", "delete_allow",
+               "delete_category", "delete_http_status", "probe_status", "manual_cleanup_required"}
+    for ln in lines[1:]:
+        assert " = " in ln, f"stray non key=value line: {ln!r}"
+        assert ln.split(" = ", 1)[0] in allowed, f"unexpected summary key: {ln!r}"
+
+
+def test_v9_readback_equivalent_rfc3339_forms_still_prove():
+    """The read-back must compare UTC INSTANTS, not raw strings: an equivalent +00:00 form still proves."""
+    c = _load_canary()
+    for t in ("2026-08-18T12:20:00Z", "2026-08-18T12:20:00+00:00", "2026-08-18T12:20:00.000Z",
+              "2026-08-18T15:20:00+03:00"):
+        res, _ = _ldp_run(c, echo_time=t)
+        assert res["retention_compare_status"] == "match", t
+        assert res["probe_status"] == "PASS" and res["proof"] is True, t

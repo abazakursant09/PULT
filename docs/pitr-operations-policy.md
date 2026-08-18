@@ -513,6 +513,47 @@ extension in a later unit. That probe is a SEPARATE Inal-gated prompt — V8 aut
 does NOT run live. A blind full-canary repeat is explicitly refused. Object Lock **probably** enforced (delete
 was not a success), but no cryptographically/operationally proven final DENY exists yet.
 
+## SECURITY-2D-3E1B-3C2D-V9 — stale-safe controlled locked-delete probe (tool, not a run)
+
+The V8 telemetry made the exact HTTP status visible, but the actual V7 residual can no longer be tested by a
+bare delete: the original retention was `now+20min` and has almost certainly expired since review/merge, so a
+plain `DeleteObjectVersion` today could return `2xx` and prove nothing. V9 therefore adds a new, strictly-scoped
+`locked-delete-probe` CLI mode that is **stale-safe**:
+
+- **Single role** — retention-admin only. Creates NO new object/version/project/bucket/user/key/run-id.
+- **Own gate** — env `PULT_SELECTEL_LOCKED_DELETE_PROBE=YES_I_UNDERSTAND_LOCKED_DELETE_PROBE` +
+  `--execute-locked-delete-probe` + typed `--confirm` + `--ack PULT-CANARY-LOCKEDDELETE-<runid>`, exact
+  run-id/bucket/region/official endpoint, project-id structural validation, deadline in `(now, now+30min]`. Any
+  mismatch → exit 4/5 BEFORE getpass/DNS/socket. Exactly one masked retention-admin pair via getpass; format
+  validated before any transport.
+- **Exact scope** — only the key `canary/<runid>/pitr/lock-<runid>`. No bucket/version listing, no new object,
+  no `DeleteBucket`/`BypassGovernanceRetention`/`Compliance`/`LegalHold`/lifecycle.
+- **Sequence** — (A) `HeadObject` exact key → versionId in memory only (empty → STOP, no mutation); (B) fresh
+  `PutObjectRetention` GOVERNANCE on that exact versionId (re-locks the stale version so the delete is a real
+  lock test); (C) `GetObjectRetention` read-back — HTTP/category ok, parse ok, Mode strictly GOVERNANCE,
+  RetainUntilDate equal as a UTC instant (mismatch/malformed → STOP, no delete); (D) only then EXACTLY ONE
+  `DeleteObjectVersion` of that exact versionId. Mutations are never retried.
+- **Why the fresh PutObjectRetention is required:** without re-locking, an expired retention would let the delete
+  succeed and prove nothing about Object Lock. Re-applying a fresh GOVERNANCE retention on the same version makes
+  a subsequent denied delete attributable to the lock.
+- **Honest proof (no guessing):** `probe_status=PASS` (Object-Lock DENY proven) ONLY when the delete is
+  `access-denied`. A `2xx` delete is a lock **breach** → FAILED. `400`/`409`/`unknown`/other-deny keep
+  `proof=false` and surface the exact numeric `delete_http_status` for a later evidence-based classifier PR — this
+  PR does NOT extend the 400/409 mapping.
+- **Telemetry** (`locked-delete-probe-summary v1`, closed vocabulary): probe_head_category, probe_version_present,
+  retention_put_category, retention_get_category, retention_parse_status, retention_compare_status,
+  delete_attempted, delete_allow, delete_category, delete_http_status (`100..599|none`), probe_status
+  (`PASS|FAILED|CONTROLLED_RESIDUAL`), manual_cleanup_required. Never a versionId / retain-until / raw XML / body /
+  Code / Message / RequestId / HostId / URL / exception / credential / PROJECT_ID / UID.
+- **Cleanup:** nothing new is created, so there is no auto-delete. On a denied delete the locked version stays a
+  controlled residual until the fresh deadline; manual F6 categories = service-key, bucket-policy, bucket, users,
+  project, locked-version-after-expiry.
+
+Frozen runtime re-sealed: canary.py sha256 `546294d03d4a70e7f98f1abf7a4980d649a0f21b2a3dd82d05ea1fb08f03658b`,
+marker `3C2D-v9-stale-safe-locked-delete-probe`; both guards re-pinned; 200 tests; mutation 27/27 RED missed=0.
+**V9 builds the tool; it does NOT run the probe.** The actual run is a SEPARATE Inal-gated prompt after
+review+merge. V5 read-back root cause remains UNKNOWN.
+
 ## SECURITY-2D-3E1B-3C2D-V6 — Object-Lock read-back instant compare + credential input safety (V5 postmortem)
 
 V5 got far: identity 5/5 PASS, role matrix 18/18 PASS, and the Object-Lock chain passed unlocked-put,
