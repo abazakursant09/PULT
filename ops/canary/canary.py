@@ -54,7 +54,7 @@ LIVE_GATE_VALUE = "YES_I_UNDERSTAND"
 # Inal-approved 3C2C2-B execution step. So the CLI still defers.
 SELECTEL_EXECUTION_DEFERRED = "SELECTEL_EXECUTION_GATED_UNTIL_3C2C2B"
 # Runtime-change review marker — must be bumped together with the SHA-256 freeze on every canary.py change.
-CANARY_RUNTIME_REVIEW = "3C2D-v7-two-role-object-lock"
+CANARY_RUNTIME_REVIEW = "3C2D-v8-locked-delete-telemetry"
 # live network safety knobs (used by the real transport in 3C2C2-B; enforced/asserted now)
 LIVE_CONNECT_TIMEOUT = 10.0
 LIVE_READ_TIMEOUT = 30.0
@@ -988,6 +988,7 @@ def run_object_lock_live(manifest, execmani, creds_by_role, transport_factory=No
             retention_parse_status = retention_compare_status = "not_attempted"
             locked_delete_attempted = False
             locked_delete_category = "not_attempted"
+            locked_delete_http_status = None
             if locked_put_ok:
                 ledger["objects"].append({"key": lk, "version": lv, "locked": True, "retain_until": retain_until})
                 xml = _retention_xml("GOVERNANCE", retain_until)
@@ -1022,7 +1023,12 @@ def run_object_lock_live(manifest, execmani, creds_by_role, transport_factory=No
                                            query=f"versionId={lv}", amz_date=amz, date_stamp=ds)
                         locked_delete_attempted = True
                         locked_delete_category = dv.get("category", "unknown")
-                        locked_delete_refused = dv.get("allow") == "deny"
+                        locked_delete_http_status = dv.get("http_code")
+                        # Object-Lock proof invariant: a refusal counts as a PROVEN Object-Lock denial ONLY when
+                        # the retention-admin (already shown able to delete an UNLOCKED version) is refused with an
+                        # HTTP deny AND category access-denied. A signature/auth/service/network deny never counts.
+                        locked_delete_refused = (dv.get("allow") == "deny"
+                                                 and locked_delete_category == "access-denied")
             elif pr.get("allow") == "unknown":
                 ledger["objects"].append({"key": lk, "version": lv, "locked": True, "retain_until": retain_until,
                                           "ambiguous": True})
@@ -1037,6 +1043,7 @@ def run_object_lock_live(manifest, execmani, creds_by_role, transport_factory=No
                           "retention_compare_status": retention_compare_status,
                           "locked_delete_attempted": locked_delete_attempted,
                           "locked_delete_category": locked_delete_category,
+                          "locked_delete_http_status": locked_delete_http_status,
                           "proof": bool(unlocked_put_ok and iam_delete_ok and locked_put_ok and retention_set
                                         and readback_ok and locked_delete_refused)}
     finally:
@@ -1094,12 +1101,15 @@ def _objectlock_summary_lines(result) -> list:
         _rcmp = "not_attempted"
     if _ldc not in LIVE_ERROR_CATEGORIES and _ldc != "not_attempted":
         _ldc = "unknown"
+    _lds = ol.get("locked_delete_http_status")
+    _lds = _lds if isinstance(_lds, int) and 100 <= _lds <= 599 else "none"
     lines.append(f"retention_put_category = {_rput}")
     lines.append(f"retention_get_category = {_rget}")
     lines.append(f"retention_parse_status = {_rparse}")
     lines.append(f"retention_compare_status = {_rcmp}")
     lines.append(f"locked_delete_attempted = {'true' if ol.get('locked_delete_attempted') else 'false'}")
     lines.append(f"locked_delete_category = {_ldc}")
+    lines.append(f"locked_delete_http_status = {_lds}")
     cleanup = result.get("cleanup") or {}
     status = cleanup.get("status", "not_attempted")
     lines.append(f"cleanup_status = {status}")
@@ -1253,6 +1263,7 @@ def run_live_execution(manifest, execmani, creds_by_role, transport_factory=None
             retention_parse_status = retention_compare_status = "not_attempted"
             locked_delete_attempted = False
             locked_delete_category = "not_attempted"
+            locked_delete_http_status = None
             if locked_put_ok:
                 ledger["objects"].append({"key": lk, "version": lv, "locked": True, "retain_until": retain_until})
                 xml = _retention_xml("GOVERNANCE", retain_until)
@@ -1289,7 +1300,12 @@ def run_live_execution(manifest, execmani, creds_by_role, transport_factory=None
                                            query=f"versionId={lv}", amz_date=amz, date_stamp=ds)
                         locked_delete_attempted = True
                         locked_delete_category = dv.get("category", "unknown")
-                        locked_delete_refused = dv.get("allow") == "deny"
+                        locked_delete_http_status = dv.get("http_code")
+                        # Object-Lock proof invariant: a refusal counts as a PROVEN Object-Lock denial ONLY when
+                        # the retention-admin (already shown able to delete an UNLOCKED version) is refused with an
+                        # HTTP deny AND category access-denied. A signature/auth/service/network deny never counts.
+                        locked_delete_refused = (dv.get("allow") == "deny"
+                                                 and locked_delete_category == "access-denied")
             elif pr.get("allow") == "unknown":
                 # ambiguous locked Put — the object may exist; record it once so cleanup does not lose it
                 ledger["objects"].append({"key": lk, "version": lv, "locked": True, "retain_until": retain_until,
@@ -1305,6 +1321,7 @@ def run_live_execution(manifest, execmani, creds_by_role, transport_factory=None
                           "retention_compare_status": retention_compare_status,
                           "locked_delete_attempted": locked_delete_attempted,
                           "locked_delete_category": locked_delete_category,
+                          "locked_delete_http_status": locked_delete_http_status,
                           "proof": bool(unlocked_put_ok and iam_delete_ok and locked_put_ok and retention_set
                                         and readback_ok and locked_delete_refused)}
             if not objectlock.get("proof"):
@@ -1393,6 +1410,8 @@ def _live_summary_lines(result) -> list:
     _rcmp = ol.get("retention_compare_status", "not_attempted")
     _ldel_att = ol.get("locked_delete_attempted", False)
     _ldel_cat = ol.get("locked_delete_category", "not_attempted")
+    _ldel_status = ol.get("locked_delete_http_status")
+    _ldel_status = _ldel_status if isinstance(_ldel_status, int) and 100 <= _ldel_status <= 599 else "none"
     if _rput not in LIVE_ERROR_CATEGORIES and _rput != "not_attempted":
         _rput = "unknown"
     if _rget not in LIVE_ERROR_CATEGORIES and _rget != "not_attempted":
@@ -1409,6 +1428,7 @@ def _live_summary_lines(result) -> list:
     lines.append(f"retention_compare_status = {_rcmp}")
     lines.append(f"locked_delete_attempted = {'true' if _ldel_att else 'false'}")
     lines.append(f"locked_delete_category = {_ldel_cat}")
+    lines.append(f"locked_delete_http_status = {_ldel_status}")
     # (C) cleanup — status + honest residual + which control-plane CATEGORIES need manual F6 (labels, no values)
     cleanup = result.get("cleanup") or {}
     status = cleanup.get("status", "not_attempted")
