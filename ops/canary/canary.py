@@ -54,7 +54,7 @@ LIVE_GATE_VALUE = "YES_I_UNDERSTAND"
 # Inal-approved 3C2C2-B execution step. So the CLI still defers.
 SELECTEL_EXECUTION_DEFERRED = "SELECTEL_EXECUTION_GATED_UNTIL_3C2C2B"
 # Runtime-change review marker — must be bumped together with the SHA-256 freeze on every canary.py change.
-CANARY_RUNTIME_REVIEW = "3C2D-v8-locked-delete-telemetry"
+CANARY_RUNTIME_REVIEW = "3C2D-v9-stale-safe-locked-delete-probe"
 # live network safety knobs (used by the real transport in 3C2C2-B; enforced/asserted now)
 LIVE_CONNECT_TIMEOUT = 10.0
 LIVE_READ_TIMEOUT = 30.0
@@ -1160,6 +1160,194 @@ def object_lock_live(args, env=None) -> int:
     return 0 if result["status"] in ("ok", "CONTROLLED_RESIDUAL") else 6
 
 
+# ================= SECURITY-2D-3E1B-3C2D-V9 stale-safe controlled locked-delete probe =================
+# A strictly-scoped, SINGLE-ROLE (retention-admin) probe for the ONE existing residual locked version left by a
+# prior object-lock-live run. It creates NO new object/version/project/bucket/user/key/run-id and touches ONLY
+# the exact key canary/<runid>/pitr/lock-<runid>. It re-applies a FRESH GOVERNANCE retention (the old one has
+# almost certainly expired, so a bare Delete could 2xx and prove nothing), verifies the read-back, and only then
+# issues EXACTLY ONE DeleteObjectVersion of that exact versionId. No mapping guessing: PASS only on a proven
+# access-denied; 400/409/unknown keep proof=false and surface the numeric HTTP status for a later evidence-based
+# classifier PR. Own env/flag/ack keep it separate from `live` and `object-lock-live`.
+LOCKED_DELETE_PROBE_GATE_ENV = "PULT_SELECTEL_LOCKED_DELETE_PROBE"
+LOCKED_DELETE_PROBE_GATE_VALUE = "YES_I_UNDERSTAND_LOCKED_DELETE_PROBE"
+LOCKED_DELETE_PROBE_ACK_PREFIX = "PULT-CANARY-LOCKEDDELETE-"
+_LOCKED_DELETE_PROBE_ROLES = ("retention-admin",)
+# Manual-only control-plane residue categories (labels ONLY — never a value); the locked version stays until the
+# fresh deadline, then is manually removed in F6.
+_LOCKED_DELETE_PROBE_MANUAL = ("service-key", "bucket-policy", "bucket", "users", "project",
+                               "locked-version-after-expiry")
+
+
+def locked_delete_probe_validate(args, manifest, clock) -> dict:
+    """Strict gate for locked-delete-probe. Raises LiveGateError BEFORE any credential/DNS/socket unless every
+    one-time condition holds. Its OWN flag/ack keep it un-triggerable by `live`/`object-lock-live`. No writes and
+    no new objects are ever performed, so there is no --max-object-bytes."""
+    import datetime
+    if not getattr(args, "execute_locked_delete_probe", False):
+        raise LiveGateError("locked-delete-probe requires the explicit --execute-locked-delete-probe flag")
+    if manifest["region"] != EXECUTE_LIVE_REGION:
+        raise LiveGateError("locked-delete-probe is pinned to region ru-3")
+    if manifest["endpoint"] != LIVE_REGION_ENDPOINTS[EXECUTE_LIVE_REGION]:
+        raise LiveGateError("endpoint must be the official ru-3 S3 endpoint")
+    if getattr(args, "ack", None) != LOCKED_DELETE_PROBE_ACK_PREFIX + manifest["runid"]:
+        raise LiveGateError("--ack must equal PULT-CANARY-LOCKEDDELETE-<runid> exactly")
+    if not _DEADLINE_RE.match(getattr(args, "deadline", "") or ""):
+        raise LiveGateError("--deadline must be a UTC timestamp YYYY-MM-DDTHH:MM:SSZ")
+    deadline = _parse_deadline(args.deadline)
+    now = clock()
+    if not (now < deadline <= now + datetime.timedelta(seconds=EXECUTE_MAX_DEADLINE_WINDOW_SEC)):
+        raise LiveGateError("--deadline must be in the future and within the max window (30 min)")
+    if not manifest["bucket"].startswith("pult-canary-"):
+        raise LiveGateError("bucket must be a pult-canary-<runid> disposable bucket")
+    return {"region": EXECUTE_LIVE_REGION, "deadline": args.deadline, "deadline_dt": deadline, "ack": args.ack}
+
+
+def run_locked_delete_probe(manifest, execmani, creds_by_role, transport_factory=None, clock=None) -> dict:
+    """SINGLE-ROLE (retention-admin) stale-safe probe of the ONE existing locked version. Credential-format check
+    -> ONE transport -> HeadObject(exact key) for the in-memory versionId -> fresh PutObjectRetention(GOVERNANCE)
+    on THAT versionId -> GetObjectRetention read-back (mode + instant compare) -> only then EXACTLY ONE
+    DeleteObjectVersion of THAT versionId. No bucket/version enumeration, no new object, no retries on mutations,
+    no cleanup (nothing new was created). Fail-closed at every step; secret-free."""
+    if clock is None:
+        raise LiveGateError("run_locked_delete_probe requires an injected clock (no wall-clock in module)")
+    if transport_factory is None:
+        transport_factory = SelectelS3Transport
+    manual = list(_LOCKED_DELETE_PROBE_MANUAL)
+    role = _LOCKED_DELETE_PROBE_ROLES[0]
+    base = {"probe_head_category": "not_attempted", "probe_version_present": False,
+            "retention_put_category": "not_attempted", "retention_get_category": "not_attempted",
+            "retention_parse_status": "not_attempted", "retention_compare_status": "not_attempted",
+            "delete_attempted": False, "delete_allow": "not_attempted", "delete_category": "not_attempted",
+            "delete_http_status": None, "proof": False, "manual_cleanup": manual, "mode_name": "locked-delete-probe"}
+    cred = (creds_by_role.get(role) or {})
+    if not _credential_format_ok(cred.get("access_key"), cred.get("secret_key")):
+        return {**base, "probe_status": "FAILED", "reason": "invalid credential format (pre-network)"}
+    transport = transport_factory(manifest, creds_by_role[role], service="s3")
+    b = manifest["bucket"]
+    lock_key = f"{manifest['prefix']}pitr/lock-{manifest['runid']}"
+    retain_until = execmani.get("deadline")
+    deadline_dt = execmani.get("deadline_dt") or _parse_deadline(execmani["deadline"])
+    tel = dict(base)
+    if clock() >= deadline_dt:
+        return {**tel, "probe_status": "FAILED", "reason": "deadline reached before probe"}
+    # A. HeadObject exact key -> versionId in memory only
+    amz, ds = _amz_ds(clock())
+    hv = transport.attempt("HeadObject", f"/{b}/{lock_key}", method="HEAD", amz_date=amz, date_stamp=ds)
+    tel["probe_head_category"] = hv.get("category", "unknown")
+    version = hv.get("version_id", "") or ""
+    tel["probe_version_present"] = bool(version)
+    if not version:
+        return {**tel, "probe_status": "FAILED", "reason": "no versionId from HeadObject -> no mutation"}
+    # B. fresh PutObjectRetention(GOVERNANCE) on the exact versionId
+    amz, ds = _amz_ds(clock())
+    xml = _retention_xml("GOVERNANCE", retain_until)
+    eh = {"content-md5": _content_md5(xml), "content-type": "application/xml"}
+    rr = transport.attempt("PutObjectRetention", f"/{b}/{lock_key}", method="PUT",
+                           query=f"retention&versionId={version}", payload=xml, extra_headers=eh,
+                           amz_date=amz, date_stamp=ds)
+    tel["retention_put_category"] = rr.get("category", "unknown")
+    if rr.get("allow") != "allow":
+        return {**tel, "probe_status": "FAILED", "reason": "PutObjectRetention not allowed -> no read-back/delete"}
+    # C. GetObjectRetention read-back of the same exact versionId
+    amz, ds = _amz_ds(clock())
+    gr = transport.attempt("GetObjectRetention", f"/{b}/{lock_key}", method="GET",
+                           query=f"retention&versionId={version}", amz_date=amz, date_stamp=ds)
+    tel["retention_get_category"] = gr.get("category", "unknown")
+    readback_ok = False
+    if gr.get("allow") == "allow":
+        try:
+            rb = _parse_retention_xml(gr.get("body", b""))
+            tel["retention_parse_status"] = "ok"
+            mode_ok = rb.get("mode") == "GOVERNANCE"
+            try:
+                same = _rfc3339_instant(retain_until) == _rfc3339_instant(rb.get("retain_until"))
+                tel["retention_compare_status"] = "match" if same else "mismatch"
+            except LiveGateError:
+                same = False
+                tel["retention_compare_status"] = "malformed"
+            readback_ok = bool(mode_ok and same)
+        except LiveGateError:
+            tel["retention_parse_status"] = "malformed"
+            readback_ok = False
+    if not readback_ok:
+        return {**tel, "probe_status": "FAILED", "reason": "read-back failed/mismatch/malformed -> no delete"}
+    # D. EXACTLY ONE DeleteObjectVersion of the same exact versionId (never retried; mutations no-retry in attempt)
+    amz, ds = _amz_ds(clock())
+    dv = transport.attempt("DeleteObjectVersion", f"/{b}/{lock_key}", method="DELETE",
+                           query=f"versionId={version}", amz_date=amz, date_stamp=ds)
+    tel["delete_attempted"] = True
+    tel["delete_allow"] = dv.get("allow", "unknown")
+    tel["delete_category"] = dv.get("category", "unknown")
+    tel["delete_http_status"] = dv.get("http_code")
+    tel["proof"] = bool(dv.get("allow") == "deny" and tel["delete_category"] == "access-denied")
+    if tel["proof"]:
+        probe_status = "PASS"                       # Object-Lock DENY proven; locked version remains (residual)
+    elif dv.get("allow") == "allow":
+        probe_status = "FAILED"                     # 2xx delete -> lock NOT enforced (stale/expired) -> breach
+    else:
+        probe_status = "CONTROLLED_RESIDUAL"        # deny-not-access-denied / 400 / 409 / unknown: object remains,
+        #                                             proof false, exact status surfaced for the classifier PR
+    return {**tel, "probe_status": probe_status}
+
+
+def _locked_delete_probe_summary_lines(result) -> list:
+    """CLOSED-VOCABULARY, secret-free summary for locked-delete-probe. Never emits versionId / retain-until /
+    raw XML / body / Code / Message / RequestId / HostId / URL / exception / credentials / PROJECT_ID / UID."""
+    r = result or {}
+
+    def _cat(v):
+        return v if (v in LIVE_ERROR_CATEGORIES or v == "not_attempted") else "unknown"
+
+    lines = ["locked-delete-probe-summary v1"]
+    lines.append(f"probe_head_category = {_cat(r.get('probe_head_category', 'not_attempted'))}")
+    lines.append(f"probe_version_present = {'true' if r.get('probe_version_present') else 'false'}")
+    lines.append(f"retention_put_category = {_cat(r.get('retention_put_category', 'not_attempted'))}")
+    lines.append(f"retention_get_category = {_cat(r.get('retention_get_category', 'not_attempted'))}")
+    _rp = r.get("retention_parse_status", "not_attempted")
+    lines.append(f"retention_parse_status = {_rp if _rp in ('ok', 'malformed', 'not_attempted') else 'not_attempted'}")
+    _rc = r.get("retention_compare_status", "not_attempted")
+    lines.append("retention_compare_status = "
+                 f"{_rc if _rc in ('match', 'mismatch', 'malformed', 'not_attempted') else 'not_attempted'}")
+    lines.append(f"delete_attempted = {'true' if r.get('delete_attempted') else 'false'}")
+    _da = r.get("delete_allow", "not_attempted")
+    lines.append(f"delete_allow = {_da if _da in ('allow', 'deny', 'unknown', 'not_attempted') else 'unknown'}")
+    lines.append(f"delete_category = {_cat(r.get('delete_category', 'not_attempted'))}")
+    _ds = r.get("delete_http_status")
+    lines.append(f"delete_http_status = {_ds if isinstance(_ds, int) and 100 <= _ds <= 599 else 'none'}")
+    _st = r.get("probe_status", "FAILED")
+    lines.append(f"probe_status = {_st if _st in ('PASS', 'FAILED', 'CONTROLLED_RESIDUAL') else 'FAILED'}")
+    lines.append(f"manual_cleanup_required = {','.join(r.get('manual_cleanup') or _LOCKED_DELETE_PROBE_MANUAL)}")
+    return lines
+
+
+def locked_delete_probe(args, env=None) -> int:
+    """Single-role stale-safe locked-delete-probe CLI. Ordinary invocation fails closed BEFORE any network; only
+    the full one-time gate reaches the single masked credential pair and the exact-key probe sequence."""
+    env = os.environ if env is None else env
+    if env.get(LOCKED_DELETE_PROBE_GATE_ENV) != LOCKED_DELETE_PROBE_GATE_VALUE:
+        print("LOCKED_DELETE_PROBE_DEFERRED: requires its own env acknowledgement", file=sys.stderr)
+        return 5
+    if not getattr(args, "execute_locked_delete_probe", False):
+        print("LOCKED_DELETE_PROBE_DEFERRED: requires --execute-locked-delete-probe", file=sys.stderr)
+        return 5
+    try:
+        manifest = live_validate(args, {LIVE_GATE_ENV: LIVE_GATE_VALUE})  # structural run-id/bucket/endpoint/project
+    except LiveGateError as e:
+        print(f"LOCKED-DELETE-PROBE GATE REFUSED: {_redact(str(e), [])}", file=sys.stderr)
+        return 4
+    try:
+        execmani = locked_delete_probe_validate(args, manifest, _utcnow)  # fail-closed BEFORE creds/DNS/socket
+    except LiveGateError as e:
+        print(f"LOCKED-DELETE-PROBE EXECUTE GATE REFUSED: {_redact(str(e), [])}", file=sys.stderr)
+        return 4
+    creds = read_masked_credentials(roles=_LOCKED_DELETE_PROBE_ROLES)  # exactly one masked pair
+    result = run_locked_delete_probe(manifest, execmani, creds, clock=_utcnow)
+    for line in _locked_delete_probe_summary_lines(result):
+        print(line)
+    print(f"locked-delete-probe status={result['probe_status']}", file=sys.stderr)
+    return 0 if result["probe_status"] in ("PASS", "CONTROLLED_RESIDUAL") else 6
+
+
 def run_live_execution(manifest, execmani, creds_by_role, transport_factory=None, clock=None) -> dict:
     """Gate-F orchestration over the attempt()-ONLY transport interface (factory/clock injected offline).
 
@@ -1479,7 +1667,8 @@ def live(args, env=None) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Selectel canary tooling (offline/MinIO; live gated + dormant)")
-    ap.add_argument("mode", choices=["validate-policies", "plan", "minio-compat", "live", "object-lock-live"])
+    ap.add_argument("mode", choices=["validate-policies", "plan", "minio-compat", "live", "object-lock-live",
+                                     "locked-delete-probe"])
     # Non-secret live parameters only. Credentials are NEVER accepted on argv (env/file-descriptor only).
     ap.add_argument("--project-id", dest="project_id")
     ap.add_argument("--region")
@@ -1491,6 +1680,8 @@ def main() -> int:
     ap.add_argument("--execute-live", dest="execute_live", action="store_true")
     # object-lock-live (V7, two-role) — separate explicit flag; credentials still masked, never argv
     ap.add_argument("--execute-object-lock", dest="execute_object_lock", action="store_true")
+    # locked-delete-probe (V9, single-role stale-safe) — separate explicit flag; credentials masked, never argv
+    ap.add_argument("--execute-locked-delete-probe", dest="execute_locked_delete_probe", action="store_true")
     ap.add_argument("--ack")
     ap.add_argument("--max-object-bytes", dest="max_object_bytes", type=int)
     ap.add_argument("--deadline")
@@ -1499,6 +1690,8 @@ def main() -> int:
         return live(args)
     if args.mode == "object-lock-live":
         return object_lock_live(args)
+    if args.mode == "locked-delete-probe":
+        return locked_delete_probe(args)
     if args.mode == "validate-policies":
         return validate_policies()
     if args.mode == "plan":
