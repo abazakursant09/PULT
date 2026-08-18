@@ -481,6 +481,38 @@ has its OWN gate so the ordinary `live` path can never trigger it.
   V5 read-back root cause stays UNKNOWN. Future manual resources: one project, one bucket, TWO service users
   (pitr-writer, retention-admin), TWO S3 keys — on a NEW run-id, by separate Inal decision.
 
+## SECURITY-2D-3E1B-3C2D-V8 — locked-delete telemetry + refusal invariant (V7 live postmortem)
+
+The first V7 two-role live run (run-id `58883ca9113e`) reached the end of the Object-Lock chain — both
+identities PASS, unlocked PUT + unlocked admin-delete ALLOW, locked PUT, PutObjectRetention(GOVERNANCE),
+GetObjectRetention, parse, compare **match** — but the final locked `DeleteObjectVersion` returned
+`locked_delete_category=unknown` / `locked_delete_refused=false` → `object_lock_proof=false`, exit 6.
+
+Root cause (offline, read-only): `attempt()` marks `allow="deny"` **only** for HTTP 401/403, and
+`_http_result_category` maps only 401/403/404/2xx/5xx + a 6-entry `<Code>` allowlist; **any other status
+(e.g. 409 Conflict, 400) collapses to `allow=unknown` / `category=unknown`**. Selectel's response to a
+Governance-locked delete was NOT a 401/403, so a genuine lock refusal was invisible. The exact status was
+NOT in the secret-free summary → **unknown offline; no classification can be inferred without one probe.**
+
+V8 changes (no classification guessing):
+- **Refusal invariant tightened** — `locked_delete_refused` now requires `allow=="deny"` **AND**
+  `category=="access-denied"`. Closes a latent hole where a `403 SignatureDoesNotMatch` (allow=deny) would
+  have falsely counted as an Object-Lock proof. Never weakens a valid proof (genuine 403 AccessDenied still
+  refuses=true). Applied to BOTH the two-role and full five-role live paths.
+- **Secret-free telemetry** — one new field `locked_delete_http_status` (exact numeric HTTP status, a
+  non-secret; clamped to 100..599 else `none`) added to the object_lock result and both summaries, so a
+  single future controlled probe reveals the exact status class. NO raw body/Message/RequestId/HostId/
+  versionId/Code string/exception is ever emitted.
+- Frozen runtime re-sealed: canary.py sha256 `cbdf70e65eb692ec8d0e38fe7b552d3062e0092a3873b27aa989bbbdf2eea0b5`,
+  marker `3C2D-v8-locked-delete-telemetry`; both guards re-pinned; 184 tests; mutation 24/24 RED missed=0.
+
+BLOCKER: the final Governance DENY is still NOT proven. The proof needs ONE minimal controlled probe (single
+DeleteObjectVersion against the EXISTING residual locked object of run-id `58883ca9113e`, no new resources,
+no new run-id) with the V8 telemetry to capture the exact status; THEN a precise, evidence-based classifier
+extension in a later unit. That probe is a SEPARATE Inal-gated prompt — V8 authorizes offline work only and
+does NOT run live. A blind full-canary repeat is explicitly refused. Object Lock **probably** enforced (delete
+was not a success), but no cryptographically/operationally proven final DENY exists yet.
+
 ## SECURITY-2D-3E1B-3C2D-V6 — Object-Lock read-back instant compare + credential input safety (V5 postmortem)
 
 V5 got far: identity 5/5 PASS, role matrix 18/18 PASS, and the Object-Lock chain passed unlocked-put,

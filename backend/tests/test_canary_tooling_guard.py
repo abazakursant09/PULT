@@ -43,9 +43,9 @@ NEG_MATRIX = CANARY / "negative-matrix.md"
 #   - an independent safety review passed;
 #   - Inal separately approved the runtime change.
 # The digest is a hard-coded literal — never computed at run time, never env-overridable, never auto-updated.
-_CANARY_RUNTIME_SHA256 = "7c2a669dac74192a5c21eefee6ee4324767d496d04f54a80b7df84ab0b304972"
+_CANARY_RUNTIME_SHA256 = "cbdf70e65eb692ec8d0e38fe7b552d3062e0092a3873b27aa989bbbdf2eea0b5"
 # Review marker — bumped with the digest on every reviewed canary.py runtime change (3C2D SigV4 canonical query).
-_CANARY_RUNTIME_REVIEW = "3C2D-v7-two-role-object-lock"
+_CANARY_RUNTIME_REVIEW = "3C2D-v8-locked-delete-telemetry"
 
 # Each mutation below, applied to a disposable copy, must make at least one test in this file fail.
 MUTATION_MATRIX = [
@@ -2220,6 +2220,10 @@ class _OLFake:
                     "request_id": "RID"}
         if op == "DeleteObjectVersion":
             if "lock-" in uri:
+                ld = self.cfg.get("lock_delete_resp")
+                if ld is not None:  # V8: exact locked-delete response injection (allow/category/http_code)
+                    return {"allow": ld["allow"], "http_code": ld.get("http_code"), "category": ld["category"],
+                            "version_id": "", "body": ld.get("body", b""), "request_id": "RID"}
                 return self._r("allow", "ok") if self.cfg.get("lock_delete_allow") else self._r("deny", "access-denied")
             return self._r("allow", "ok")  # unlocked delete -> IAM allow
         return self._r("allow", "ok")
@@ -2405,3 +2409,69 @@ def test_v7_object_lock_probes_read_only():
     for role, probes in c._OBJECTLOCK_IDENTITY_PROBES.items():
         for op, _sub, _e in probes:
             assert op in c._READ_ONLY_S3_OPS, (role, op)
+
+
+# ============ SECURITY-2D-3E1B-3C2D-V8 locked-delete telemetry + refusal invariant ============
+def test_v8_locked_delete_refusal_requires_access_denied():
+    """A locked-delete DENY that is NOT category access-denied (e.g. signature-mismatch) must NOT count as an
+    Object-Lock proof. Closes the invariant hole where refused keyed only on allow=='deny' (HTTP 403/401)."""
+    c = _load_canary()
+    res, _ = _ol_live_run(c, lock_delete_resp={"allow": "deny", "category": "signature-mismatch", "http_code": 403})
+    ol = res["object_lock"]
+    assert ol["locked_delete_attempted"] is True
+    assert ol["locked_delete_category"] == "signature-mismatch"
+    assert ol["locked_delete_refused"] is False   # signature deny != Object-Lock proof
+    assert ol["proof"] is False
+    assert res["status"] == "FAILED"
+
+
+def test_v8_genuine_access_denied_still_proves():
+    """Regression: a real 403 access-denied on the locked delete still yields refused=True, proof=True."""
+    c = _load_canary()
+    res, _ = _ol_live_run(c)  # default fake denies lock- delete with access-denied
+    ol = res["object_lock"]
+    assert ol["locked_delete_refused"] is True and ol["proof"] is True
+    assert ol["locked_delete_category"] == "access-denied"
+    assert ol["locked_delete_http_status"] == 403
+
+
+def test_v8_non_deny_status_surfaced_and_not_proof():
+    """Reproduces the live 58883ca9113e result: a non-403 status (e.g. 409) collapses to allow=unknown /
+    category=unknown -> refused False -> proof False, and the numeric HTTP status is now surfaced."""
+    c = _load_canary()
+    res, _ = _ol_live_run(c, lock_delete_resp={"allow": "unknown", "category": "unknown", "http_code": 409})
+    ol = res["object_lock"]
+    assert ol["locked_delete_attempted"] is True
+    assert ol["locked_delete_category"] == "unknown"
+    assert ol["locked_delete_refused"] is False and ol["proof"] is False
+    assert ol["locked_delete_http_status"] == 409
+
+
+def test_v8_summary_emits_http_status_secret_free():
+    c = _load_canary()
+    res, _ = _ol_live_run(c, lock_delete_resp={"allow": "unknown", "category": "unknown", "http_code": 409})
+    lines = c._objectlock_summary_lines(res)
+    assert "locked_delete_http_status = 409" in lines
+    blob = "\n".join(lines)
+    for leak in ("RID", "versionId", "version_id", "x-amz", "AKID", "Sx", "RetainUntilDate", "Retention"):
+        assert leak not in blob, leak
+
+
+def test_v8_summary_http_status_clamped_to_none():
+    c = _load_canary()
+    res, _ = _ol_live_run(c, lock_delete_resp={"allow": "unknown", "category": "unknown", "http_code": 409})
+    for bad in (99999, -1, "409", None, 42):
+        res["object_lock"]["locked_delete_http_status"] = bad
+        assert "locked_delete_http_status = none" in c._objectlock_summary_lines(res), bad
+    res["object_lock"]["locked_delete_http_status"] = 409
+    assert "locked_delete_http_status = 409" in c._objectlock_summary_lines(res)
+
+
+def test_v8_refusal_invariant_and_telemetry_present_in_both_runtimes():
+    """Structural: the access-denied invariant and the http_status telemetry must exist in BOTH the two-role
+    object-lock path and the full five-role live path (each mutation to either copy flips a test RED)."""
+    code = _code()
+    assert code.count('locked_delete_refused = (dv.get("allow") == "deny"') >= 2
+    assert code.count('and locked_delete_category == "access-denied")') >= 2
+    assert code.count('"locked_delete_http_status": locked_delete_http_status,') >= 2
+    assert code.count('locked_delete_http_status = dv.get("http_code")') >= 2
