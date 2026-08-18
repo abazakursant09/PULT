@@ -22,8 +22,8 @@ CANARY_PY = CANARY / "canary.py"
 DIAG_PY = CANARY / "diagnose.py"
 
 # canary.py must remain byte-identical to the pinned runtime (3C2D SigV4 fix) — this diagnostic never edits it.
-_CANARY_RUNTIME_SHA256 = "5656dcb6221356c49e93d2dac5742937572eabd8bbe61e75bde80a078157b8bd"
-_CANARY_RUNTIME_REVIEW = "3C2D-v6-readback-input-safety"
+_CANARY_RUNTIME_SHA256 = "7c2a669dac74192a5c21eefee6ee4324767d496d04f54a80b7df84ab0b304972"
+_CANARY_RUNTIME_REVIEW = "3C2D-v7-two-role-object-lock"
 
 # S3 operations that MUST NEVER appear in the diagnostic (as an op literal or an attempt target).
 _FORBIDDEN_OPS = frozenset({

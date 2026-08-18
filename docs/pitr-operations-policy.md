@@ -436,6 +436,51 @@ A second review found the Object-Lock "proof" was false-positive. Fixed:
 - **Path-Style stays PROPOSED** — Gate C change to Path-Style still needs Inal's explicit approval.
 - **Runtime freeze** re-pinned; marker `3C2C2B-prelive-correction`.
 
+## SECURITY-2D-3E1B-3C2D-V7 — minimal TWO-ROLE Object-Lock live mode
+
+A strictly-scoped `object-lock-live` CLI mode whose ONLY purpose is the final Governance Object-Lock proof,
+using ONLY `pitr-writer` + `retention-admin`. It never runs (or weakens) the full five-role `live` matrix; it
+has its OWN gate so the ordinary `live` path can never trigger it.
+
+- **Gate**: separate env ack `PULT_SELECTEL_OBJECTLOCK_LIVE=YES_I_UNDERSTAND_OBJECTLOCK` + explicit
+  `--execute-object-lock` + typed `--confirm` + `--ack PULT-CANARY-OBJECTLOCK-<runid>` + region ru-3 + official
+  HTTPS endpoint + bucket `pult-canary-<runid>` + deadline in (now, now+30min] + `--max-object-bytes` ≤ 10 MiB
+  (canary uses ≤1 MiB) + exactly TWO masked credential pairs (pitr-writer, retention-admin). Ordinary
+  invocation fails closed pre-network (exit 5); any mismatch → exit 4 before credentials/DNS/socket.
+- **Credential input safety (from V6)** runs first: bad Access/Secret format → FAILED, 0 DNS/socket,
+  `invalid-credential-format`.
+- **Two-role identity precheck** before any mutation: pitr-writer must list its own `pitr/` prefix = allow;
+  retention-admin must GetBucketVersioning + GetBucketObjectLockConfiguration + list the exact canary prefix =
+  allow. A policy widening / mismatched key → FAIL before the first Put → 0 objects created.
+- **Exactly one Object-Lock sequence** (both control objects created by pitr-writer; retention-admin has no
+  PutObject): (1) unlocked control PUT → retention-admin DeleteObjectVersion = ALLOW (proves IAM delete, so a
+  later DENY is attributable to the lock, not IAM); (2) locked control PUT → retention-admin
+  PutObjectRetention(GOVERNANCE, retain-until = deadline) → GetObjectRetention → V6 RFC3339 INSTANT compare +
+  Mode strictly GOVERNANCE → ONLY after a valid read-back, retention-admin DeleteObjectVersion expecting
+  category `access-denied`. `proof=true` only if unlocked_put ∧ iam_delete ∧ locked_put ∧ retention_set ∧
+  readback_ok ∧ locked_delete_refused. NOTE (deviation from the literal one-sequence brief, surfaced): the
+  unlocked-delete-ALLOW control is included because without it a locked-delete DENY cannot be attributed to
+  Object Lock vs IAM — it uses only the same two roles and strengthens (never weakens) the proof.
+- **No** BypassGovernanceRetention / immutable-retention mode / Legal Hold / DeleteBucket / lifecycle /
+  default retention / mutating retry / production credentials.
+- **Cleanup**: the locked version stays until expiry → CONTROLLED_RESIDUAL with a secret-free ledger; unknown/
+  non-locked residual → FAILED; bucket/users/keys/policy/project + post-expiry object delete are MANUAL (F6).
+- **Summary** (`object-lock-live-summary v1`): two-role identity + the six proof booleans + object_lock_proof +
+  retention_put/get_category + retention_parse_status + retention_compare_status + locked_delete_attempted +
+  locked_delete_category + cleanup_status + controlled_residual + manual_cleanup_required + deadline_reached +
+  final status. Closed vocabulary only — never IDs, timestamps, XML, URL, request/version IDs, exceptions,
+  credentials.
+- **Policy template** `ops/canary/object-lock-live-policy.json`: exactly pitrWriter (object actions on
+  `canary/<RUNID>/pitr/*`) + pitrWriterList (ListBucket, s3:prefix StringLike, bucket name not repeated) +
+  retentionAdmin (`bucket` + `bucket/canary/<RUNID>/*`, delete+retention but NO PutObject/DeleteBucket/
+  Bypass/lifecycle/immutable-mode); no broad `bucket/*` Allow; structural guard.
+- The full five-role `live` mode is behaviourally unchanged (`run_identity_check` gained a defaulted `probes`
+  kwarg; default = the same five-role probes). Runtime freeze re-bumped: canary.py sha256
+  `7c2a669dac74192a5c21eefee6ee4324767d496d04f54a80b7df84ab0b304972`, marker `3C2D-v7-two-role-object-lock`;
+  both guards re-pinned. This is offline design/impl only — it does NOT run live and does NOT prove the lock;
+  V5 read-back root cause stays UNKNOWN. Future manual resources: one project, one bucket, TWO service users
+  (pitr-writer, retention-admin), TWO S3 keys — on a NEW run-id, by separate Inal decision.
+
 ## SECURITY-2D-3E1B-3C2D-V6 — Object-Lock read-back instant compare + credential input safety (V5 postmortem)
 
 V5 got far: identity 5/5 PASS, role matrix 18/18 PASS, and the Object-Lock chain passed unlocked-put,
