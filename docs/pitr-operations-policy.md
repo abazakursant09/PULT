@@ -436,6 +436,37 @@ A second review found the Object-Lock "proof" was false-positive. Fixed:
 - **Path-Style stays PROPOSED** — Gate C change to Path-Style still needs Inal's explicit approval.
 - **Runtime freeze** re-pinned; marker `3C2C2B-prelive-correction`.
 
+## SECURITY-2D-3E1B-3C2D-V6 — Object-Lock read-back instant compare + credential input safety (V5 postmortem)
+
+V5 got far: identity 5/5 PASS, role matrix 18/18 PASS, and the Object-Lock chain passed unlocked-put,
+unlocked-admin-delete, locked-put and PutObjectRetention — but `retention_readback_ok=false`, so the locked
+DeleteObjectVersion was (correctly) NOT attempted and the run ended CONTROLLED_RESIDUAL. F6 completed (0
+residual). The read-back compared `RetainUntilDate` as a RAW STRING; **suspected (NOT proven — evidence
+F6-deleted) cause: Selectel echoes an equivalent RFC3339 instant in a different textual form** (trailing `Z`
+vs `+00:00`, fractional seconds, a numeric offset). A separate real defect: a non-ASCII char in an Access Key
+raised an unhandled `UnicodeEncodeError` in the httpx header build.
+
+Fixes (canary.py):
+- **Instant compare**: `_rfc3339_instant()` parses both timestamps to timezone-aware UTC datetimes and compares
+  the INSTANT, so equivalent forms match; a naive (no-timezone) / malformed / out-of-range value fails closed
+  (never a match). Mode stays strictly `GOVERNANCE`. The locked delete still runs ONLY after a valid semantic
+  read-back — no weakening of the Object-Lock proof.
+- **Secret-free retention observability** in the summary: `retention_put_category`, `retention_get_category`,
+  `retention_parse_status` (ok|malformed|not_attempted), `retention_compare_status` (match|mismatch|malformed|
+  not_attempted), `locked_delete_attempted` (true|false), `locked_delete_category` — closed vocabulary only;
+  never the timestamp, versionId, request-id, URL, canonical request, raw XML, exception text, or credentials.
+- **Credential input safety**: `_credential_format_ok()` validates each Access Key (non-empty printable ASCII,
+  no whitespace/control) and Secret (non-empty, no CR/LF/control) BEFORE any transport is constructed — a bad
+  credential fails closed with ZERO DNS/socket and the closed category `invalid-credential-format` (added to
+  `LIVE_ERROR_CATEGORIES`), surfaced as `identity <role> = FAIL (invalid-credential-format)`. Defense-in-depth:
+  `attempt()` catches any `UnicodeError` during the header build and returns the same category — no traceback,
+  no key/length leak. Runtime freeze re-bumped: canary.py sha256
+  `5656dcb6221356c49e93d2dac5742937572eabd8bbe61e75bde80a078157b8bd`, marker `3C2D-v6-readback-input-safety`;
+  both guards re-pinned. UNCHANGED: identity precheck, exact role matrix, SigV4 canonical query, mutations
+  never retried, deadline, no-DeleteBucket/Bypass/Compliance, exact cleanup / controlled residual, least
+  privilege, production PITR inactive. Root cause of the V5 read-back mismatch remains UNKNOWN — this makes it
+  diagnosable and instant-tolerant; it does NOT prove the cause and does NOT authorize a live run.
+
 ## SECURITY-2D-3E1B-3C2D-V4 — pre-mutation effective-role check + exact-policy contract
 
 V2 failed with two open cause-groups (policy scope vs credential/order/binding) and key-to-user mapping
