@@ -54,7 +54,7 @@ LIVE_GATE_VALUE = "YES_I_UNDERSTAND"
 # Inal-approved 3C2C2-B execution step. So the CLI still defers.
 SELECTEL_EXECUTION_DEFERRED = "SELECTEL_EXECUTION_GATED_UNTIL_3C2C2B"
 # Runtime-change review marker — must be bumped together with the SHA-256 freeze on every canary.py change.
-CANARY_RUNTIME_REVIEW = "3C2D-v6-readback-input-safety"
+CANARY_RUNTIME_REVIEW = "3C2D-v7-two-role-object-lock"
 # live network safety knobs (used by the real transport in 3C2C2-B; enforced/asserted now)
 LIVE_CONNECT_TIMEOUT = 10.0
 LIVE_READ_TIMEOUT = 30.0
@@ -832,16 +832,19 @@ _IDENTITY_PROBES = {
 }
 
 
-def run_identity_check(transports, manifest, clock) -> dict:
+def run_identity_check(transports, manifest, clock, probes=None) -> dict:
     """Read-only proof that every supplied key behaves as its expected role, BEFORE any mutating op. An
     expected-deny probe counts ONLY when the category is exactly access-denied; a signature-mismatch /
     invalid-access-key / authentication failure (or any non-deny) is a FAIL, never a spurious deny-proof. No
-    mutating op is issued here. Secret-free: rows carry only role/verdict/category."""
+    mutating op is issued here. Secret-free: rows carry only role/verdict/category. `probes` defaults to the
+    full five-role set (unchanged); the two-role object-lock mode passes its own subset."""
+    if probes is None:
+        probes = _IDENTITY_PROBES
     bucket, prefix = manifest["bucket"], manifest["prefix"]
     rows, failures = [], []
-    for role, probes in _IDENTITY_PROBES.items():
+    for role, role_probes in probes.items():
         verdict, cause = "PASS", "ok"
-        for op, sub, expect in probes:
+        for op, sub, expect in role_probes:
             amz, ds = _amz_ds(clock())
             if op == "ListBucket":
                 res = transports[role].attempt("ListBucket", f"/{bucket}", method="GET",
@@ -864,6 +867,287 @@ def run_identity_check(transports, manifest, clock) -> dict:
         if verdict == "FAIL":
             failures.append(role)
     return {"rows": rows, "failures": failures, "passed": not failures}
+
+
+# ================= SECURITY-2D-3E1B-3C2D-V7 minimal TWO-ROLE Object-Lock live mode =================
+# A strictly-scoped live mode whose ONLY purpose is the final Governance Object-Lock proof, using ONLY
+# pitr-writer + retention-admin. It does NOT run (or weaken) the full five-role matrix. Its own gate env /
+# typed-confirm / ACK prefix keep it separate from `live`. The proof reuses the SAME rigour as the full mode:
+# a locked-delete DENY counts as Object-Lock ONLY because the SAME retention-admin is first proven able to
+# delete an UNLOCKED version (IAM-delete ALLOW) — otherwise a DENY could be IAM, not the lock. Both control
+# objects are created by pitr-writer (retention-admin has no PutObject). GOVERNANCE mode only (never the
+# stricter immutable mode, never a retention override).
+OBJECT_LOCK_LIVE_GATE_ENV = "PULT_SELECTEL_OBJECTLOCK_LIVE"
+OBJECT_LOCK_LIVE_GATE_VALUE = "YES_I_UNDERSTAND_OBJECTLOCK"
+OBJECT_LOCK_LIVE_ACK_PREFIX = "PULT-CANARY-OBJECTLOCK-"
+_OBJECTLOCK_ROLES = ("pitr-writer", "retention-admin")
+_OBJECTLOCK_IDENTITY_PROBES = {
+    "pitr-writer": (("ListBucket", "pitr/", "allow"),),
+    "retention-admin": (("GetBucketVersioning", None, "allow"),
+                        ("GetBucketObjectLockConfiguration", None, "allow"),
+                        ("ListBucket", "", "allow")),
+}
+
+
+def objectlock_validate(args, manifest, clock) -> dict:
+    """Strict gate for object-lock-live. Raises LiveGateError BEFORE any credential/DNS/socket unless every
+    one-time condition holds. Mirrors execute_validate but with its own flag/env/ack so it can never be
+    triggered by the ordinary `live` path."""
+    import datetime
+    if not getattr(args, "execute_object_lock", False):
+        raise LiveGateError("object-lock-live requires the explicit --execute-object-lock flag")
+    if manifest["region"] != EXECUTE_LIVE_REGION:
+        raise LiveGateError("object-lock-live is pinned to region ru-3")
+    if manifest["endpoint"] != LIVE_REGION_ENDPOINTS[EXECUTE_LIVE_REGION]:
+        raise LiveGateError("endpoint must be the official ru-3 S3 endpoint")
+    if getattr(args, "ack", None) != OBJECT_LOCK_LIVE_ACK_PREFIX + manifest["runid"]:
+        raise LiveGateError("--ack must equal PULT-CANARY-OBJECTLOCK-<runid> exactly")
+    mob = getattr(args, "max_object_bytes", None)
+    if not isinstance(mob, int) or not (0 < mob <= EXECUTE_MAX_OBJECT_BYTES):
+        raise LiveGateError("--max-object-bytes must be an int in (0, 10 MiB]")
+    if not _DEADLINE_RE.match(getattr(args, "deadline", "") or ""):
+        raise LiveGateError("--deadline must be a UTC timestamp YYYY-MM-DDTHH:MM:SSZ")
+    deadline = _parse_deadline(args.deadline)
+    now = clock()
+    if not (now < deadline <= now + datetime.timedelta(seconds=EXECUTE_MAX_DEADLINE_WINDOW_SEC)):
+        raise LiveGateError("--deadline must be in the future and within the max window (30 min)")
+    if not manifest["bucket"].startswith("pult-canary-"):
+        raise LiveGateError("bucket must be a pult-canary-<runid> disposable bucket")
+    return {"region": EXECUTE_LIVE_REGION, "max_object_bytes": mob, "deadline": args.deadline,
+            "deadline_dt": deadline, "ack": args.ack, "max_buckets": 1}
+
+
+def run_object_lock_live(manifest, execmani, creds_by_role, transport_factory=None, clock=None) -> dict:
+    """Minimal TWO-ROLE (pitr-writer + retention-admin) Object-Lock Governance proof. Credential-format check
+    -> transports -> two-role identity -> ONE object-lock sequence (unlocked control proves IAM-delete ALLOW;
+    locked control proves DENY-by-lock) -> exact cleanup. Never runs the five-role matrix. All read-only until
+    the object-lock sequence; mutations never retried; controlled-residual honest."""
+    if clock is None:
+        raise LiveGateError("run_object_lock_live requires an injected clock (no wall-clock in module)")
+    if transport_factory is None:
+        transport_factory = SelectelS3Transport
+    bad_creds = [r for r in _OBJECTLOCK_ROLES
+                 if not _credential_format_ok((creds_by_role.get(r) or {}).get("access_key"),
+                                              (creds_by_role.get(r) or {}).get("secret_key"))]
+    if bad_creds:
+        return {"identity": {"rows": [{"role": r, "verdict": "FAIL",
+                                       "category": "invalid-credential-format"} for r in bad_creds],
+                             "failures": list(bad_creds), "passed": False},
+                "matrix_skipped": True,
+                "object_lock": {}, "matrix_failures": ["invalid credential format (pre-network): "
+                                                       + ",".join(bad_creds)],
+                "cleanup": {"status": "clean", "deleted": [], "residual": [], "failures": [],
+                            "manual_cleanup": {"keys": list(_OBJECTLOCK_ROLES), "policies": list(_OBJECTLOCK_ROLES),
+                                               "bucket": manifest["bucket"], "project": manifest.get("project")}},
+                "deadline_reached": False, "pgbackrest_closure": "NOT-ATTEMPTED-live (separate step)",
+                "manual_revoke_required": {"keys": list(_OBJECTLOCK_ROLES), "policies": list(_OBJECTLOCK_ROLES)},
+                "mode_name": "object-lock-live", "status": "FAILED"}
+    transports = {r: transport_factory(manifest, creds_by_role[r], service="s3") for r in _OBJECTLOCK_ROLES}
+    identity = run_identity_check(transports, manifest, clock, probes=_OBJECTLOCK_IDENTITY_PROBES)
+    empty_manual = {"keys": list(_OBJECTLOCK_ROLES), "policies": list(_OBJECTLOCK_ROLES),
+                    "bucket": manifest["bucket"], "project": manifest.get("project")}
+    if not identity["passed"]:
+        return {"identity": identity, "matrix_skipped": True, "object_lock": {},
+                "matrix_failures": ["pre-mutation identity check failed: " + ",".join(identity["failures"])],
+                "cleanup": {"status": "clean", "deleted": [], "residual": [], "failures": [],
+                            "manual_cleanup": empty_manual},
+                "deadline_reached": False, "pgbackrest_closure": "NOT-ATTEMPTED-live (separate step)",
+                "manual_revoke_required": {"keys": list(_OBJECTLOCK_ROLES), "policies": list(_OBJECTLOCK_ROLES)},
+                "mode_name": "object-lock-live", "status": "FAILED"}
+    admin = transports["retention-admin"]
+    writer = transports["pitr-writer"]
+    b = manifest["bucket"]
+    retain_until = execmani.get("deadline")
+    deadline_dt = execmani.get("deadline_dt") or _parse_deadline(execmani["deadline"])
+    ledger = {"objects": [], "multipart": [], "users": list(_OBJECTLOCK_ROLES), "policies": list(_OBJECTLOCK_ROLES)}
+    objectlock, deadline_reached = {}, False
+    try:
+        if clock() >= deadline_dt:
+            deadline_reached = True
+        else:
+            # (1) unlocked control (pitr-writer PUT) -> retention-admin DeleteObjectVersion = ALLOW (IAM delete)
+            uk = f"{manifest['prefix']}pitr/unlocked-{manifest['runid']}"
+            amz, ds = _amz_ds(clock())
+            up = writer.attempt("PutObject", f"/{b}/{uk}", method="PUT", payload=b"u", amz_date=amz, date_stamp=ds)
+            u_ver = up.get("version_id", "")
+            unlocked_put_ok = up.get("allow") == "allow" and bool(u_ver)
+            iam_delete_ok = False
+            if unlocked_put_ok:
+                ud = admin.attempt("DeleteObjectVersion", f"/{b}/{uk}", method="DELETE",
+                                   query=f"versionId={u_ver}", amz_date=amz, date_stamp=ds)
+                iam_delete_ok = ud.get("allow") == "allow"
+            # (2) locked control (pitr-writer PUT) -> retention-admin PutObjectRetention(GOVERNANCE) -> read-back
+            lk = f"{manifest['prefix']}pitr/lock-{manifest['runid']}"
+            amz, ds = _amz_ds(clock())
+            pr = writer.attempt("PutObject", f"/{b}/{lk}", method="PUT", payload=b"x", amz_date=amz, date_stamp=ds)
+            lv = pr.get("version_id", "")
+            locked_put_ok = pr.get("allow") == "allow" and bool(lv)
+            retention_set = readback_ok = locked_delete_refused = False
+            readback = {}
+            retention_put_category = retention_get_category = "not_attempted"
+            retention_parse_status = retention_compare_status = "not_attempted"
+            locked_delete_attempted = False
+            locked_delete_category = "not_attempted"
+            if locked_put_ok:
+                ledger["objects"].append({"key": lk, "version": lv, "locked": True, "retain_until": retain_until})
+                xml = _retention_xml("GOVERNANCE", retain_until)
+                eh = {"content-md5": _content_md5(xml), "content-type": "application/xml"}
+                rr = admin.attempt("PutObjectRetention", f"/{b}/{lk}", method="PUT",
+                                   query=f"retention&versionId={lv}", payload=xml, extra_headers=eh,
+                                   amz_date=amz, date_stamp=ds)
+                retention_set = rr.get("allow") == "allow"
+                retention_put_category = rr.get("category", "unknown")
+                if retention_set:
+                    gr = admin.attempt("GetObjectRetention", f"/{b}/{lk}", method="GET",
+                                       query=f"retention&versionId={lv}", amz_date=amz, date_stamp=ds)
+                    retention_get_category = gr.get("category", "unknown")
+                    if gr.get("allow") == "allow":
+                        try:
+                            readback = _parse_retention_xml(gr.get("body", b""))
+                            retention_parse_status = "ok"
+                            mode_ok = readback.get("mode") == "GOVERNANCE"
+                            try:
+                                same = (_rfc3339_instant(retain_until)
+                                        == _rfc3339_instant(readback.get("retain_until")))
+                                retention_compare_status = "match" if same else "mismatch"
+                            except LiveGateError:
+                                same = False
+                                retention_compare_status = "malformed"
+                            readback_ok = bool(mode_ok and same)
+                        except LiveGateError:
+                            retention_parse_status = "malformed"
+                            readback_ok = False
+                    if readback_ok:
+                        dv = admin.attempt("DeleteObjectVersion", f"/{b}/{lk}", method="DELETE",
+                                           query=f"versionId={lv}", amz_date=amz, date_stamp=ds)
+                        locked_delete_attempted = True
+                        locked_delete_category = dv.get("category", "unknown")
+                        locked_delete_refused = dv.get("allow") == "deny"
+            elif pr.get("allow") == "unknown":
+                ledger["objects"].append({"key": lk, "version": lv, "locked": True, "retain_until": retain_until,
+                                          "ambiguous": True})
+            objectlock = {"unlocked_put_ok": unlocked_put_ok, "iam_delete_ok_on_unlocked": iam_delete_ok,
+                          "locked_put_ok": locked_put_ok, "retention_set": retention_set,
+                          "readback_ok": readback_ok, "readback": readback,
+                          "locked_delete_refused": locked_delete_refused, "mode": "GOVERNANCE",
+                          "compliance_tested": False,
+                          "retention_put_category": retention_put_category,
+                          "retention_get_category": retention_get_category,
+                          "retention_parse_status": retention_parse_status,
+                          "retention_compare_status": retention_compare_status,
+                          "locked_delete_attempted": locked_delete_attempted,
+                          "locked_delete_category": locked_delete_category,
+                          "proof": bool(unlocked_put_ok and iam_delete_ok and locked_put_ok and retention_set
+                                        and readback_ok and locked_delete_refused)}
+    finally:
+        cleanup = run_cleanup(admin, manifest, ledger, clock)
+    result = {"identity": identity, "matrix_skipped": True, "object_lock": objectlock, "matrix_failures": [],
+              "cleanup": cleanup, "deadline_reached": deadline_reached,
+              "pgbackrest_closure": "NOT-ATTEMPTED-live (separate step)",
+              "manual_revoke_required": {"keys": ledger["users"], "policies": ledger["policies"]},
+              "mode_name": "object-lock-live"}
+    if not objectlock.get("proof"):
+        result["status"] = "FAILED"
+    elif cleanup["status"] == "controlled-residual":
+        result["status"] = "CONTROLLED_RESIDUAL"
+    elif cleanup["status"] == "clean":
+        result["status"] = "ok"
+    else:
+        result["status"] = "FAILED"
+    return result
+
+
+def _objectlock_summary_lines(result) -> list:
+    """CLOSED-VOCABULARY, secret-free summary for object-lock-live: two-role identity + the Object-Lock proof
+    booleans + retention observability + cleanup. Never a timestamp/versionId/request-id/URL/XML/exception/cred."""
+    lines = ["object-lock-live-summary v1"]
+    ident = {r.get("role"): (r.get("verdict"), r.get("category"))
+             for r in ((result.get("identity") or {}).get("rows") or [])}
+    for role in _OBJECTLOCK_ROLES:
+        verdict, cat = ident.get(role, ("NOT_ATTEMPTED", "not_attempted"))
+        if verdict not in ("PASS", "FAIL", "NOT_ATTEMPTED"):
+            verdict = "NOT_ATTEMPTED"
+        if cat not in LIVE_ERROR_CATEGORIES and cat != "not_attempted":
+            cat = "unknown"
+        lines.append(f"identity {role} = {verdict} ({cat})")
+    ol = result.get("object_lock") or {}
+
+    def _b(key):
+        v = ol.get(key)
+        return "true" if v is True else ("false" if v is False else "not_attempted")
+
+    for key in ("unlocked_put_ok", "iam_delete_ok_on_unlocked", "locked_put_ok", "retention_set",
+                "readback_ok", "locked_delete_refused", "proof"):
+        lines.append(f"object_lock {key} = {_b(key)}")
+    _rput = ol.get("retention_put_category", "not_attempted")
+    _rget = ol.get("retention_get_category", "not_attempted")
+    _rparse = ol.get("retention_parse_status", "not_attempted")
+    _rcmp = ol.get("retention_compare_status", "not_attempted")
+    _ldc = ol.get("locked_delete_category", "not_attempted")
+    if _rput not in LIVE_ERROR_CATEGORIES and _rput != "not_attempted":
+        _rput = "unknown"
+    if _rget not in LIVE_ERROR_CATEGORIES and _rget != "not_attempted":
+        _rget = "unknown"
+    if _rparse not in ("ok", "malformed", "not_attempted"):
+        _rparse = "not_attempted"
+    if _rcmp not in ("match", "mismatch", "malformed", "not_attempted"):
+        _rcmp = "not_attempted"
+    if _ldc not in LIVE_ERROR_CATEGORIES and _ldc != "not_attempted":
+        _ldc = "unknown"
+    lines.append(f"retention_put_category = {_rput}")
+    lines.append(f"retention_get_category = {_rget}")
+    lines.append(f"retention_parse_status = {_rparse}")
+    lines.append(f"retention_compare_status = {_rcmp}")
+    lines.append(f"locked_delete_attempted = {'true' if ol.get('locked_delete_attempted') else 'false'}")
+    lines.append(f"locked_delete_category = {_ldc}")
+    cleanup = result.get("cleanup") or {}
+    status = cleanup.get("status", "not_attempted")
+    lines.append(f"cleanup_status = {status}")
+    lines.append(f"controlled_residual = {'true' if status == 'controlled-residual' else 'false'}")
+    manual = cleanup.get("manual_cleanup") or {}
+    cats = []
+    if manual.get("keys"):
+        cats.append("service-keys")
+    if manual.get("policies"):
+        cats.append("bucket-policy")
+    if manual.get("bucket"):
+        cats.append("bucket")
+    if manual.get("project"):
+        cats.append("project")
+    lines.append(f"manual_cleanup_required = {','.join(cats) if cats else 'none'}")
+    lines.append(f"deadline_reached = {'true' if result.get('deadline_reached') else 'false'}")
+    lines.append(f"object-lock-live status = {result.get('status', 'unknown')}")
+    return lines
+
+
+def object_lock_live(args, env=None) -> int:
+    """Two-role Object-Lock live CLI. Ordinary invocation (no --execute-object-lock) fails closed BEFORE any
+    network; only the full one-time gate reaches credentials + the single object-lock sequence."""
+    env = os.environ if env is None else env
+    if env.get(OBJECT_LOCK_LIVE_GATE_ENV) != OBJECT_LOCK_LIVE_GATE_VALUE:
+        print("OBJECT_LOCK_DEFERRED: object-lock-live requires its own env acknowledgement", file=sys.stderr)
+        return 5
+    if not getattr(args, "execute_object_lock", False):
+        print("OBJECT_LOCK_DEFERRED: object-lock-live requires --execute-object-lock", file=sys.stderr)
+        return 5
+    try:
+        # object-lock-live has its OWN env gate (checked above); reuse ONLY live_validate's run-id/bucket/
+        # prefix/endpoint/project/confirm structural validation, satisfying its env check internally.
+        manifest = live_validate(args, {LIVE_GATE_ENV: LIVE_GATE_VALUE})
+    except LiveGateError as e:
+        print(f"OBJECT-LOCK GATE REFUSED: {_redact(str(e), [])}", file=sys.stderr)
+        return 4
+    try:
+        execmani = objectlock_validate(args, manifest, _utcnow)  # fail-closed BEFORE creds/DNS/socket
+    except LiveGateError as e:
+        print(f"OBJECT-LOCK EXECUTE GATE REFUSED: {_redact(str(e), [])}", file=sys.stderr)
+        return 4
+    creds = read_masked_credentials(roles=_OBJECTLOCK_ROLES)  # exactly two masked pairs
+    result = run_object_lock_live(manifest, execmani, creds, clock=_utcnow)
+    for line in _objectlock_summary_lines(result):
+        print(line)
+    print(f"object-lock-live status={result['status']}", file=sys.stderr)
+    return 0 if result["status"] in ("ok", "CONTROLLED_RESIDUAL") else 6
 
 
 def run_live_execution(manifest, execmani, creds_by_role, transport_factory=None, clock=None) -> dict:
@@ -1175,7 +1459,7 @@ def live(args, env=None) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Selectel canary tooling (offline/MinIO; live gated + dormant)")
-    ap.add_argument("mode", choices=["validate-policies", "plan", "minio-compat", "live"])
+    ap.add_argument("mode", choices=["validate-policies", "plan", "minio-compat", "live", "object-lock-live"])
     # Non-secret live parameters only. Credentials are NEVER accepted on argv (env/file-descriptor only).
     ap.add_argument("--project-id", dest="project_id")
     ap.add_argument("--region")
@@ -1185,12 +1469,16 @@ def main() -> int:
     ap.add_argument("--confirm")
     # execute-live (Gate F) — non-secret confirmation params only; credentials are read masked, never argv
     ap.add_argument("--execute-live", dest="execute_live", action="store_true")
+    # object-lock-live (V7, two-role) — separate explicit flag; credentials still masked, never argv
+    ap.add_argument("--execute-object-lock", dest="execute_object_lock", action="store_true")
     ap.add_argument("--ack")
     ap.add_argument("--max-object-bytes", dest="max_object_bytes", type=int)
     ap.add_argument("--deadline")
     args = ap.parse_args()
     if args.mode == "live":
         return live(args)
+    if args.mode == "object-lock-live":
+        return object_lock_live(args)
     if args.mode == "validate-policies":
         return validate_policies()
     if args.mode == "plan":

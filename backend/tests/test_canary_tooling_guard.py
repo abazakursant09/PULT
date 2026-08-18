@@ -43,9 +43,9 @@ NEG_MATRIX = CANARY / "negative-matrix.md"
 #   - an independent safety review passed;
 #   - Inal separately approved the runtime change.
 # The digest is a hard-coded literal — never computed at run time, never env-overridable, never auto-updated.
-_CANARY_RUNTIME_SHA256 = "5656dcb6221356c49e93d2dac5742937572eabd8bbe61e75bde80a078157b8bd"
+_CANARY_RUNTIME_SHA256 = "7c2a669dac74192a5c21eefee6ee4324767d496d04f54a80b7df84ab0b304972"
 # Review marker — bumped with the digest on every reviewed canary.py runtime change (3C2D SigV4 canonical query).
-_CANARY_RUNTIME_REVIEW = "3C2D-v6-readback-input-safety"
+_CANARY_RUNTIME_REVIEW = "3C2D-v7-two-role-object-lock"
 
 # Each mutation below, applied to a disposable copy, must make at least one test in this file fail.
 MUTATION_MATRIX = [
@@ -90,7 +90,7 @@ def test_modes_are_exactly_the_allowed_set():
     m = re.search(r'choices=\[([^\]]+)\]', _code())
     assert m, "argparse choices not found"
     choices = set(re.findall(r'"([^"]+)"', m.group(1)))
-    assert choices == {"validate-policies", "plan", "minio-compat", "live"}, choices
+    assert choices == {"validate-policies", "plan", "minio-compat", "live", "object-lock-live"}, choices
 
 
 def test_live_gate_is_double_and_fail_closed_structurally():
@@ -139,7 +139,7 @@ def test_no_credentials_on_argv():
         assert bad not in code, f"credential CLI arg {bad!r} forbidden"
     # every argparse flag must be one of the allowlisted non-secret parameters
     allowed_flags = {"--project-id", "--region", "--endpoint", "--bucket", "--run-id", "--confirm",
-                     "--execute-live", "--ack", "--max-object-bytes", "--deadline"}
+                     "--execute-live", "--execute-object-lock", "--ack", "--max-object-bytes", "--deadline"}
     flags = set(re.findall(r'add_argument\("(--[a-z-]+)"', code))
     assert flags <= allowed_flags, f"unexpected argv flags: {flags - allowed_flags}"
 
@@ -2159,3 +2159,249 @@ def test_v6_bad_credential_no_secret_or_traceback_in_output(capsys):
     assert "SEKRET_MUST_NOT_LEAK" not in blob
     assert "role logical-writer".replace("role", "identity") not in blob or "invalid-credential-format" in blob
     assert "identity logical-writer = FAIL (invalid-credential-format)" in blob
+
+
+# ================= SECURITY-2D-3E1B-3C2D-V7 minimal TWO-ROLE Object-Lock live mode =================
+OL_POLICY = CANARY / "object-lock-live-policy.json"
+_OL_SENT = "2026-08-18T12:20:00Z"
+
+
+def _ol_exec():
+    import datetime
+    return {"deadline": _OL_SENT, "deadline_dt": datetime.datetime(2026, 8, 18, 12, 20, 0),
+            "max_object_bytes": 1048576, "max_buckets": 1}
+
+
+def _ol_manifest():
+    return {"endpoint": "https://s3.ru-3.storage.selcloud.ru", "region": "ru-3",
+            "bucket": "pult-canary-abc123abc123", "prefix": "canary/abc123abc123/",
+            "runid": "abc123abc123", "project": "p"}
+
+
+class _OLFake:
+    def __init__(self, role, cfg, mut):
+        self.role = role
+        self.cfg = cfg
+        self.mut = mut
+
+    def _r(self, allow, cat, ver=""):
+        return {"allow": allow, "http_code": 200 if allow == "allow" else 403, "category": cat,
+                "version_id": ver, "body": b"", "request_id": "RID"}
+
+    def attempt(self, op, uri, method="GET", query="", payload=b"", amz_date=None, date_stamp=None,
+                extra_headers=None):
+        if op in ("PutObject", "PutObjectRetention", "DeleteObjectVersion", "AbortMultipartUpload"):
+            self.mut.append((self.role, op, uri))
+        f = self.cfg.get("force", {}).get(self.role)
+        if f:
+            return self._r("deny", f)
+        if op == "ListBucket":
+            sub = query.split("prefix=", 1)[1]
+            ok = (self.role == "pitr-writer" and sub.endswith("pitr/")) or \
+                 (self.role == "retention-admin" and "canary/" in sub)
+            return self._r("allow", "ok") if ok else self._r("deny", "access-denied")
+        if op in ("GetBucketVersioning", "GetBucketObjectLockConfiguration"):
+            return self._r("allow", "ok") if self.role == "retention-admin" else self._r("deny", "access-denied")
+        if op == "PutObject":
+            return self._r("allow", "ok", "v-" + uri.rsplit("/", 1)[-1]) if self.role == "pitr-writer" \
+                else self._r("deny", "access-denied")
+        if op == "PutObjectRetention":
+            return self._r("allow", "ok")
+        if op == "GetObjectRetention":
+            if self.cfg.get("get_force"):
+                return self._r("deny", self.cfg["get_force"])
+            if self.cfg.get("raw_body") is not None:
+                return {"allow": "allow", "http_code": 200, "category": "ok", "version_id": "",
+                        "body": self.cfg["raw_body"], "request_id": "RID"}
+            mode = self.cfg.get("mode", "GOVERNANCE")
+            t = self.cfg.get("echo_time", _OL_SENT)
+            body = (f'<Retention><Mode>{mode}</Mode><RetainUntilDate>{t}</RetainUntilDate></Retention>').encode()
+            return {"allow": "allow", "http_code": 200, "category": "ok", "version_id": "", "body": body,
+                    "request_id": "RID"}
+        if op == "DeleteObjectVersion":
+            if "lock-" in uri:
+                return self._r("allow", "ok") if self.cfg.get("lock_delete_allow") else self._r("deny", "access-denied")
+            return self._r("allow", "ok")  # unlocked delete -> IAM allow
+        return self._r("allow", "ok")
+
+
+def _ol_live_run(c, **cfg):
+    mut = []
+    roles = list(c._OBJECTLOCK_ROLES)
+    seq = [(_OLFake(r, cfg, mut)) for r in roles]
+
+    def factory(manifest, cr, service="s3"):
+        return seq.pop(0)
+
+    creds = cfg.get("creds") or {r: {"access_key": "AKID", "secret_key": "Sx"} for r in roles}
+    clk = cfg.get("clock") or _clock_at(y=2026, mo=8, d=18, h=12, mi=0)
+    with _NoNetwork():
+        res = c.run_object_lock_live(_ol_manifest(), _ol_exec(), creds, transport_factory=factory, clock=clk)
+    return res, mut
+
+
+def test_v7_happy_proof_controlled_residual():
+    c = _load_canary()
+    res, mut = _ol_live_run(c)
+    ol = res["object_lock"]
+    assert res["status"] == "CONTROLLED_RESIDUAL" and ol["proof"] is True
+    assert ol["unlocked_put_ok"] and ol["iam_delete_ok_on_unlocked"] and ol["locked_put_ok"]
+    assert ol["retention_set"] and ol["readback_ok"] and ol["locked_delete_refused"]
+    assert res["identity"]["passed"] is True
+    assert res["cleanup"]["status"] == "controlled-residual"
+
+
+def test_v7_equivalent_rfc3339_forms_proof():
+    c = _load_canary()
+    for t in ("2026-08-18T12:20:00Z", "2026-08-18T12:20:00+00:00", "2026-08-18T12:20:00.000Z",
+              "2026-08-18T15:20:00+03:00"):
+        res, _ = _ol_live_run(c, echo_time=t)
+        assert res["object_lock"]["retention_compare_status"] == "match", t
+        assert res["object_lock"]["proof"] is True, t
+
+
+def test_v7_readback_mismatch_malformed_wrongmode_denied_fail():
+    c = _load_canary()
+    mm, _ = _ol_live_run(c, echo_time="2026-08-18T12:20:05Z")
+    assert mm["object_lock"]["retention_compare_status"] == "mismatch" and mm["object_lock"]["proof"] is False
+    assert mm["object_lock"]["locked_delete_attempted"] is False
+    bad, _ = _ol_live_run(c, raw_body=b"<Retention><Mode>GOV")
+    assert bad["object_lock"]["retention_parse_status"] == "malformed" and bad["object_lock"]["proof"] is False
+    wm, _ = _ol_live_run(c, mode="COMPLIANCE")
+    assert wm["object_lock"]["readback_ok"] is False and wm["object_lock"]["proof"] is False
+    dn, _ = _ol_live_run(c, get_force="access-denied")
+    assert dn["object_lock"]["retention_get_category"] == "access-denied" and dn["object_lock"]["proof"] is False
+    assert dn["object_lock"]["locked_delete_attempted"] is False
+
+
+def test_v7_locked_delete_success_instead_of_deny_is_proof_false():
+    c = _load_canary()
+    res, _ = _ol_live_run(c, lock_delete_allow=True)  # lock delete ALLOWED -> lock not enforced -> proof false
+    assert res["object_lock"]["locked_delete_attempted"] is True
+    assert res["object_lock"]["locked_delete_refused"] is False
+    assert res["object_lock"]["proof"] is False and res["status"] != "CONTROLLED_RESIDUAL"
+
+
+def test_v7_invalid_credentials_zero_transport():
+    c = _load_canary()
+    creds = {r: {"access_key": "AKID", "secret_key": "Sx"} for r in c._OBJECTLOCK_ROLES}
+    creds["pitr-writer"]["access_key"] = "AKéID"
+
+    def boom(*a, **k):
+        raise AssertionError("transport built on invalid credential")
+    with _NoNetwork():
+        res = c.run_object_lock_live(_ol_manifest(), _ol_exec(), creds, transport_factory=boom,
+                                     clock=_clock_at(y=2026, mo=8, d=18, h=12, mi=0))
+    assert res["status"] == "FAILED" and res["object_lock"] == {}
+    assert [r for r in res["identity"]["rows"] if r["role"] == "pitr-writer"][0]["category"] == "invalid-credential-format"
+
+
+def test_v7_swapped_two_keys_fail_zero_mutation():
+    c = _load_canary()
+    # pitr-writer key behaves as retention-admin and vice-versa -> identity fails, 0 object created
+    mut = []
+    seq = [_OLFake("retention-admin", {}, mut), _OLFake("pitr-writer", {}, mut)]
+
+    def factory(manifest, cr, service="s3"):
+        return seq.pop(0)
+    creds = {r: {"access_key": "AKID", "secret_key": "Sx"} for r in c._OBJECTLOCK_ROLES}
+    with _NoNetwork():
+        res = c.run_object_lock_live(_ol_manifest(), _ol_exec(), creds, transport_factory=factory,
+                                     clock=_clock_at(y=2026, mo=8, d=18, h=12, mi=0))
+    assert res["identity"]["passed"] is False and res["object_lock"] == {}
+    assert not [m for m in mut if m[1] in ("PutObject", "PutObjectRetention", "DeleteObjectVersion")]
+
+
+def test_v7_mutating_ops_issued_once_no_retry():
+    c = _load_canary()
+    res, mut = _ol_live_run(c)
+    puts = [m for m in mut if m[1] == "PutObject"]
+    assert len(puts) == 2  # exactly one unlocked + one locked control, no retry
+    assert len([m for m in mut if m[1] == "PutObjectRetention"]) == 1
+    # unlocked delete + locked delete, each once
+    assert len([m for m in mut if m[1] == "DeleteObjectVersion"]) == 2
+
+
+def test_v7_deadline_reached_zero_mutation():
+    c = _load_canary()
+    res, mut = _ol_live_run(c, clock=_clock_at(y=2026, mo=8, d=18, h=12, mi=30))  # past deadline
+    assert res["deadline_reached"] is True and res["object_lock"] == {}
+    assert res["status"] == "FAILED"
+    assert not [m for m in mut if m[1] in ("PutObject", "PutObjectRetention", "DeleteObjectVersion")]
+
+
+def test_v7_summary_secret_free():
+    c = _load_canary()
+    res, _ = _ol_live_run(c, echo_time="2026-08-18T15:20:00+03:00")
+    lines = c._objectlock_summary_lines(res)
+    assert lines[0] == "object-lock-live-summary v1"
+    keys = {ln.split(" = ")[0] for ln in lines if " = " in ln}
+    for f in ("identity pitr-writer", "identity retention-admin", "object_lock proof",
+              "retention_put_category", "retention_compare_status", "locked_delete_attempted",
+              "cleanup_status", "controlled_residual", "manual_cleanup_required", "deadline_reached",
+              "object-lock-live status"):
+        assert f in keys, f
+    blob = "\n".join(lines)
+    for leak in ("2026-08-18T15:20", "2026-08-18T12:20", "Retention", "RetainUntilDate", "versionId",
+                 "v-lock", "RID", "x-amz", "AKID", "Sx"):
+        assert leak not in blob, leak
+
+
+def test_v7_object_lock_live_gate_fail_closed():
+    c = _load_canary()
+
+    class _A:
+        project_id = "0123456789abcdef"
+        region = "ru-3"
+        endpoint = "https://s3.ru-3.storage.selcloud.ru"
+        bucket = "pult-canary-0123456789ab"
+        run_id = "0123456789ab"
+        confirm = "0123456789abcdef/ru-3/https://s3.ru-3.storage.selcloud.ru/pult-canary-0123456789ab/0123456789ab"
+        ack = "PULT-CANARY-OBJECTLOCK-0123456789ab"
+        max_object_bytes = 1048576
+        deadline = "2020-01-01T00:00:00Z"
+        execute_object_lock = True
+    with _NoNetwork():
+        # missing env ack -> deferral 5 (before creds/net)
+        assert c.object_lock_live(_A(), env={}) == 5
+        # env ok but no flag -> 5
+        a = _A()
+        a.execute_object_lock = False
+        assert c.object_lock_live(a, env={c.OBJECT_LOCK_LIVE_GATE_ENV: c.OBJECT_LOCK_LIVE_GATE_VALUE}) == 5
+        # env + flag but past deadline -> execute-gate refused 4
+        assert c.object_lock_live(_A(), env={c.OBJECT_LOCK_LIVE_GATE_ENV: c.OBJECT_LOCK_LIVE_GATE_VALUE}) == 4
+
+
+def test_v7_two_role_policy_exact_and_scoped():
+    import json as _json
+    doc = _json.loads(OL_POLICY.read_text(encoding="utf-8"))
+    assert doc["_canary"]["marker"] == "NOT_FOR_ROUTINE_BACKUP" and doc["_canary"]["active"] is False
+    sids = [s.get("Sid") for s in doc["policy"]["Statement"]]
+    assert sids == ["pitrWriter", "pitrWriterList", "retentionAdmin"]  # exactly two roles, three statements
+    blob = _json.dumps(doc["policy"])
+    assert "<BUCKET>" in blob and "<RUNID>" in blob
+    for m in re.findall(r"arn:aws:s3:::([^/\"]+)", blob):
+        assert m == "<BUCKET>", m
+    # no broad bucket/* Allow object resource
+    for s in doc["policy"]["Statement"]:
+        res = s.get("Resource", [])
+        res = [res] if isinstance(res, str) else res
+        for r in res:
+            obj = re.match(r"arn:aws:s3:::<BUCKET>/(.+)", r)
+            if obj:
+                assert obj.group(1).startswith("canary/<RUNID>/"), r
+    ra = set()
+    for s in doc["policy"]["Statement"]:
+        if s.get("Sid") == "retentionAdmin":
+            ra = set(s["Action"])
+    assert "s3:DeleteObjectVersion" in ra and "s3:PutObjectRetention" in ra
+    for forbidden in ("s3:PutObject", "s3:DeleteBucket", "s3:BypassGovernanceRetention",
+                      "s3:PutLifecycleConfiguration", "s3:PutBucketObjectLockConfiguration"):
+        assert forbidden not in ra, forbidden
+
+
+def test_v7_object_lock_probes_read_only():
+    c = _load_canary()
+    for role, probes in c._OBJECTLOCK_IDENTITY_PROBES.items():
+        for op, _sub, _e in probes:
+            assert op in c._READ_ONLY_S3_OPS, (role, op)

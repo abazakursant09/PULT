@@ -1,0 +1,43 @@
+{
+  "_canary": {
+    "role": "object-lock-live-two-role",
+    "marker": "NOT_FOR_ROUTINE_BACKUP",
+    "active": false,
+    "note": "SECURITY-2D-3E1B-3C2D-V7 minimal TWO-ROLE Object-Lock live proof. Placeholders <BUCKET>/<RUNID> only. Exactly pitr-writer + retention-admin, exact prefix, no broad bucket/* Allow. retention-admin has delete+retention but NO PutObject/DeleteBucket/BypassGovernanceRetention/PutLifecycleConfiguration and never the immutable retention mode."
+  },
+  "policy": {
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Sid": "pitrWriter",
+        "Effect": "Allow",
+        "Action": ["s3:PutObject", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"],
+        "Resource": ["arn:aws:s3:::<BUCKET>/canary/<RUNID>/pitr/*"]
+      },
+      {
+        "Sid": "pitrWriterList",
+        "Effect": "Allow",
+        "Action": ["s3:ListBucket"],
+        "Resource": "arn:aws:s3:::<BUCKET>",
+        "Condition": {"StringLike": {"s3:prefix": ["canary/<RUNID>/pitr/*"]}}
+      },
+      {
+        "Sid": "retentionAdmin",
+        "Effect": "Allow",
+        "Action": [
+          "s3:GetBucketVersioning",
+          "s3:GetBucketObjectLockConfiguration",
+          "s3:GetObjectRetention",
+          "s3:GetObjectLegalHold",
+          "s3:PutObjectRetention",
+          "s3:GetObject",
+          "s3:ListBucket",
+          "s3:DeleteObject",
+          "s3:DeleteObjectVersion",
+          "s3:AbortMultipartUpload"
+        ],
+        "Resource": ["arn:aws:s3:::<BUCKET>", "arn:aws:s3:::<BUCKET>/canary/<RUNID>/*"]
+      }
+    ]
+  }
+}
