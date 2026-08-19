@@ -1,0 +1,19 @@
+# SECURITY-2D-3E1B-3C3-A DORMANT unit TEMPLATE (.example) - NOT loaded by systemd from the repo.
+# Do NOT `systemctl enable/start`. Copy to /etc/systemd/system/ ONLY at Inal-approved activation (Phase 4,
+# docs/pitr-operations-policy.md section 9). Type=oneshot, no auto-restart directive (no retry loop),
+# bounded TimeoutStartSec, hardened, UTC. The dormant gate in the scripts refuses unless PITR_SCHEDULER_ENABLED=1.
+[Unit]
+Description=PULT PITR retention (dry-run default; Role C) (dormant 3C3-A)
+ConditionPathExists=/etc/pitr/scheduler.env
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/pitr/scheduler.env
+ExecStart=/opt/pult/ops/pitr/scheduler/retention-enforce.sh
+TimeoutStartSec=900
+Nice=10
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+# one-shot: no auto-restart directive, never a retry loop.
