@@ -54,7 +54,7 @@ LIVE_GATE_VALUE = "YES_I_UNDERSTAND"
 # Inal-approved 3C2C2-B execution step. So the CLI still defers.
 SELECTEL_EXECUTION_DEFERRED = "SELECTEL_EXECUTION_GATED_UNTIL_3C2C2B"
 # Runtime-change review marker — must be bumped together with the SHA-256 freeze on every canary.py change.
-CANARY_RUNTIME_REVIEW = "3C2D-v9-stale-safe-locked-delete-probe"
+CANARY_RUNTIME_REVIEW = "3C2D-v10-contextual-http400-lock-denial"
 # live network safety knobs (used by the real transport in 3C2C2-B; enforced/asserted now)
 LIVE_CONNECT_TIMEOUT = 10.0
 LIVE_READ_TIMEOUT = 30.0
@@ -917,6 +917,29 @@ def objectlock_validate(args, manifest, clock) -> dict:
             "deadline_dt": deadline, "ack": args.ack, "max_buckets": 1}
 
 
+def _is_contextual_object_lock_denial(delete_result, unlocked_put_ok, iam_delete_ok, locked_put_ok,
+                                      retention_set, readback_ok, retention_parse_status,
+                                      retention_compare_status, deadline_reached) -> bool:
+    """PURE, offline, secret-free. Selectel-OBSERVED contextual Object-Lock denial for HTTP 400 — NOT a global
+    400->deny mapping and NOT universal S3 behaviour (AWS documents 403 AccessDenied for a protected-version
+    delete; Selectel returned 400 in this exact differential test). True ONLY when the SAME run already
+    eliminated every alternative cause via the full same-run differential control: unlocked PUT ok, retention-
+    admin unlocked DeleteObjectVersion ALLOW (IAM-delete proven), locked PUT ok, GOVERNANCE retention set,
+    read-back parse ok + compare match (=> readback_ok), the deadline not reached, and the locked
+    DeleteObjectVersion returned allow==unknown / category==unknown / HTTP 400. Reads ONLY the normalized
+    verdict/category/status fields — never the response payload or its markup. Callers MUST be a path that
+    performed the unlocked IAM-delete control (run_object_lock_live / full-live); it is NEVER used by the V9
+    locked-delete-probe (which lacks that control)."""
+    if deadline_reached:
+        return False
+    if not (unlocked_put_ok and iam_delete_ok and locked_put_ok and retention_set and readback_ok):
+        return False
+    if retention_parse_status != "ok" or retention_compare_status != "match":
+        return False
+    dr = delete_result or {}
+    return dr.get("allow") == "unknown" and dr.get("category") == "unknown" and dr.get("http_code") == 400
+
+
 def run_object_lock_live(manifest, execmani, creds_by_role, transport_factory=None, clock=None) -> dict:
     """Minimal TWO-ROLE (pitr-writer + retention-admin) Object-Lock Governance proof. Credential-format check
     -> transports -> two-role identity -> ONE object-lock sequence (unlocked control proves IAM-delete ALLOW;
@@ -989,6 +1012,7 @@ def run_object_lock_live(manifest, execmani, creds_by_role, transport_factory=No
             locked_delete_attempted = False
             locked_delete_category = "not_attempted"
             locked_delete_http_status = None
+            contextual_lock_denial = False
             if locked_put_ok:
                 ledger["objects"].append({"key": lk, "version": lv, "locked": True, "retain_until": retain_until})
                 xml = _retention_xml("GOVERNANCE", retain_until)
@@ -1029,6 +1053,12 @@ def run_object_lock_live(manifest, execmani, creds_by_role, transport_factory=No
                         # HTTP deny AND category access-denied. A signature/auth/service/network deny never counts.
                         locked_delete_refused = (dv.get("allow") == "deny"
                                                  and locked_delete_category == "access-denied")
+                        # Selectel-observed contextual HTTP-400 denial: accepted ONLY because THIS run already
+                        # proved the unlocked-delete IAM control + retention set + read-back match (pure helper;
+                        # never a global 400 mapping, never raw-body/Code inspection). category/http_status kept.
+                        contextual_lock_denial = _is_contextual_object_lock_denial(
+                            dv, unlocked_put_ok, iam_delete_ok, locked_put_ok, retention_set, readback_ok,
+                            retention_parse_status, retention_compare_status, deadline_reached)
             elif pr.get("allow") == "unknown":
                 ledger["objects"].append({"key": lk, "version": lv, "locked": True, "retain_until": retain_until,
                                           "ambiguous": True})
@@ -1044,8 +1074,10 @@ def run_object_lock_live(manifest, execmani, creds_by_role, transport_factory=No
                           "locked_delete_attempted": locked_delete_attempted,
                           "locked_delete_category": locked_delete_category,
                           "locked_delete_http_status": locked_delete_http_status,
+                          "contextual_lock_denial": contextual_lock_denial,
                           "proof": bool(unlocked_put_ok and iam_delete_ok and locked_put_ok and retention_set
-                                        and readback_ok and locked_delete_refused)}
+                                        and readback_ok and locked_delete_refused
+                                        or contextual_lock_denial)}
     finally:
         cleanup = run_cleanup(admin, manifest, ledger, clock)
     result = {"identity": identity, "matrix_skipped": True, "object_lock": objectlock, "matrix_failures": [],
@@ -1110,6 +1142,7 @@ def _objectlock_summary_lines(result) -> list:
     lines.append(f"locked_delete_attempted = {'true' if ol.get('locked_delete_attempted') else 'false'}")
     lines.append(f"locked_delete_category = {_ldc}")
     lines.append(f"locked_delete_http_status = {_lds}")
+    lines.append(f"contextual_lock_denial = {'true' if ol.get('contextual_lock_denial') else 'false'}")
     cleanup = result.get("cleanup") or {}
     status = cleanup.get("status", "not_attempted")
     lines.append(f"cleanup_status = {status}")
@@ -1452,6 +1485,7 @@ def run_live_execution(manifest, execmani, creds_by_role, transport_factory=None
             locked_delete_attempted = False
             locked_delete_category = "not_attempted"
             locked_delete_http_status = None
+            contextual_lock_denial = False
             if locked_put_ok:
                 ledger["objects"].append({"key": lk, "version": lv, "locked": True, "retain_until": retain_until})
                 xml = _retention_xml("GOVERNANCE", retain_until)
@@ -1494,6 +1528,12 @@ def run_live_execution(manifest, execmani, creds_by_role, transport_factory=None
                         # HTTP deny AND category access-denied. A signature/auth/service/network deny never counts.
                         locked_delete_refused = (dv.get("allow") == "deny"
                                                  and locked_delete_category == "access-denied")
+                        # Selectel-observed contextual HTTP-400 denial: accepted ONLY because THIS run already
+                        # proved the unlocked-delete IAM control + retention set + read-back match (pure helper;
+                        # never a global 400 mapping, never raw-body/Code inspection). category/http_status kept.
+                        contextual_lock_denial = _is_contextual_object_lock_denial(
+                            dv, unlocked_put_ok, iam_delete_ok, locked_put_ok, retention_set, readback_ok,
+                            retention_parse_status, retention_compare_status, deadline_reached)
             elif pr.get("allow") == "unknown":
                 # ambiguous locked Put — the object may exist; record it once so cleanup does not lose it
                 ledger["objects"].append({"key": lk, "version": lv, "locked": True, "retain_until": retain_until,
@@ -1510,8 +1550,10 @@ def run_live_execution(manifest, execmani, creds_by_role, transport_factory=None
                           "locked_delete_attempted": locked_delete_attempted,
                           "locked_delete_category": locked_delete_category,
                           "locked_delete_http_status": locked_delete_http_status,
+                          "contextual_lock_denial": contextual_lock_denial,
                           "proof": bool(unlocked_put_ok and iam_delete_ok and locked_put_ok and retention_set
-                                        and readback_ok and locked_delete_refused)}
+                                        and readback_ok and locked_delete_refused
+                                        or contextual_lock_denial)}
             if not objectlock.get("proof"):
                 failures.append("object-lock: proof incomplete (need IAM-delete-on-unlocked + retention set + "
                                 "read-back + locked-delete DENY by the same retention-admin)")
@@ -1617,6 +1659,7 @@ def _live_summary_lines(result) -> list:
     lines.append(f"locked_delete_attempted = {'true' if _ldel_att else 'false'}")
     lines.append(f"locked_delete_category = {_ldel_cat}")
     lines.append(f"locked_delete_http_status = {_ldel_status}")
+    lines.append(f"contextual_lock_denial = {'true' if ol.get('contextual_lock_denial') else 'false'}")
     # (C) cleanup — status + honest residual + which control-plane CATEGORIES need manual F6 (labels, no values)
     cleanup = result.get("cleanup") or {}
     status = cleanup.get("status", "not_attempted")

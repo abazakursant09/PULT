@@ -43,9 +43,9 @@ NEG_MATRIX = CANARY / "negative-matrix.md"
 #   - an independent safety review passed;
 #   - Inal separately approved the runtime change.
 # The digest is a hard-coded literal — never computed at run time, never env-overridable, never auto-updated.
-_CANARY_RUNTIME_SHA256 = "546294d03d4a70e7f98f1abf7a4980d649a0f21b2a3dd82d05ea1fb08f03658b"
+_CANARY_RUNTIME_SHA256 = "aa4b357acc6e908341c5523db8f93a32fdf3c0305a7ddc36c4c68842fbe3ee4f"
 # Review marker — bumped with the digest on every reviewed canary.py runtime change (3C2D SigV4 canonical query).
-_CANARY_RUNTIME_REVIEW = "3C2D-v9-stale-safe-locked-delete-probe"
+_CANARY_RUNTIME_REVIEW = "3C2D-v10-contextual-http400-lock-denial"
 
 # Each mutation below, applied to a disposable copy, must make at least one test in this file fail.
 MUTATION_MATRIX = [
@@ -2706,3 +2706,128 @@ def test_v9_readback_equivalent_rfc3339_forms_still_prove():
         res, _ = _ldp_run(c, echo_time=t)
         assert res["retention_compare_status"] == "match", t
         assert res["probe_status"] == "PASS" and res["proof"] is True, t
+
+
+# ================= SECURITY-2D-3E1B-3C2D-V10 contextual HTTP-400 lock denial =================
+_V10_BASE = dict(unlocked_put_ok=True, iam_delete_ok=True, locked_put_ok=True, retention_set=True,
+                 readback_ok=True, retention_parse_status="ok", retention_compare_status="match",
+                 deadline_reached=False)
+_V10_D400 = {"allow": "unknown", "category": "unknown", "http_code": 400}
+
+
+def test_v10_helper_positive_and_standard():
+    c = _load_canary()
+    assert c._is_contextual_object_lock_denial(_V10_D400, **_V10_BASE) is True
+
+
+def test_v10_helper_each_prerequisite_false():
+    c = _load_canary()
+    for k, v in [("unlocked_put_ok", False), ("iam_delete_ok", False), ("locked_put_ok", False),
+                 ("retention_set", False), ("readback_ok", False), ("retention_parse_status", "malformed"),
+                 ("retention_parse_status", "not_attempted"), ("retention_compare_status", "mismatch"),
+                 ("retention_compare_status", "malformed"), ("retention_compare_status", "not_attempted"),
+                 ("deadline_reached", True)]:
+        b = dict(_V10_BASE)
+        b[k] = v
+        assert c._is_contextual_object_lock_denial(_V10_D400, **b) is False, (k, v)
+
+
+def test_v10_helper_response_negatives():
+    c = _load_canary()
+    for dr in ({"allow": "deny", "category": "signature-mismatch", "http_code": 400},
+               {"allow": "deny", "category": "invalid-access-key", "http_code": 400},
+               {"allow": "deny", "category": "authentication-failed", "http_code": 400},
+               {"allow": "deny", "category": "access-denied", "http_code": 400},   # allow!=unknown
+               {"allow": "unknown", "category": "unknown", "http_code": 409},
+               {"allow": "deny", "category": "access-denied", "http_code": 401},
+               {"allow": "unknown", "category": "not-found", "http_code": 404},
+               {"allow": "unknown", "category": "service-error", "http_code": 500},
+               {"allow": "unknown", "category": "service-error", "http_code": 503},
+               {"allow": "unknown", "category": "timeout", "http_code": None},
+               {"allow": "unknown", "category": "network-error", "http_code": None},
+               {"allow": "allow", "category": "ok", "http_code": 204}):
+        assert c._is_contextual_object_lock_denial(dr, **_V10_BASE) is False, dr
+
+
+def test_v10_e2e_contextual_400_is_proof_category_preserved():
+    c = _load_canary()
+    res, _ = _ol_live_run(c, lock_delete_resp=_V10_D400)
+    ol = res["object_lock"]
+    assert ol["contextual_lock_denial"] is True and ol["proof"] is True
+    assert ol["locked_delete_category"] == "unknown"           # NOT rewritten to access-denied
+    assert ol["locked_delete_http_status"] == 400
+    assert ol["locked_delete_refused"] is False                # V8 invariant untouched
+    assert res["status"] == "CONTROLLED_RESIDUAL"
+
+
+def test_v10_e2e_standard_403_still_proof_without_contextual():
+    c = _load_canary()
+    res, _ = _ol_live_run(c)  # default fake denies with access-denied
+    ol = res["object_lock"]
+    assert ol["proof"] is True and ol["contextual_lock_denial"] is False
+    assert ol["locked_delete_refused"] is True
+
+
+def test_v10_e2e_409_and_signature_400_not_proof():
+    c = _load_canary()
+    r409, _ = _ol_live_run(c, lock_delete_resp={"allow": "unknown", "category": "unknown", "http_code": 409})
+    assert r409["object_lock"]["contextual_lock_denial"] is False and r409["object_lock"]["proof"] is False
+    rsig, _ = _ol_live_run(c, lock_delete_resp={"allow": "deny", "category": "signature-mismatch",
+                                                "http_code": 400})
+    assert rsig["object_lock"]["contextual_lock_denial"] is False and rsig["object_lock"]["proof"] is False
+
+
+def test_v10_e2e_readback_mismatch_blocks_contextual():
+    c = _load_canary()
+    # read-back mismatch -> delete never attempted -> contextual cannot be true
+    res, _ = _ol_live_run(c, echo_time="2026-08-18T12:20:05Z", lock_delete_resp=_V10_D400)
+    assert res["object_lock"]["contextual_lock_denial"] is False and res["object_lock"]["proof"] is False
+    assert res["object_lock"]["locked_delete_attempted"] is False
+
+
+def test_v10_v9_probe_400_stays_false_no_contextual():
+    c = _load_canary()
+    res, _ = _ldp_run(c, delete={"allow": "unknown", "category": "unknown", "http_code": 400, "body": b""})
+    assert res["proof"] is False and res["probe_status"] == "CONTROLLED_RESIDUAL"
+    assert "contextual_lock_denial" not in res  # V9 never uses the contextual path
+    assert "contextual_lock_denial" not in "\n".join(c._locked_delete_probe_summary_lines(res))
+
+
+def test_v10_global_http_category_400_unchanged():
+    c = _load_canary()
+    assert c._http_result_category(400, b"") == "unknown"
+    assert c._http_result_category(400, b"<Error><Code>AccessDenied</Code></Error>") == "access-denied"  # via <Code>
+    assert c._http_result_category(400, b"<Error><Code>InvalidRequest</Code></Error>") == "unknown"
+
+
+def test_v10_summary_has_contextual_field_secret_free():
+    c = _load_canary()
+    res, _ = _ol_live_run(c, lock_delete_resp={"allow": "unknown", "category": "unknown", "http_code": 400,
+                                               "body": b"<Error><Code>X</Code><Message>secret</Message></Error>"})
+    lines = c._objectlock_summary_lines(res)
+    assert "contextual_lock_denial = true" in lines
+    blob = "\n".join(lines)
+    for leak in ("versionId", "version_id", "RetainUntilDate", "Retention", "<Error", "<Code", "Message",
+                 "secret", "RID", "x-amz", "AKID", "Sx"):
+        assert leak not in blob, leak
+
+
+def test_v10_helper_is_pure_no_raw_body_inspection():
+    code = _code()
+    seg = code[code.index("def _is_contextual_object_lock_denial("):code.index("def run_object_lock_live(")]
+    for bad in ("body", "Code", "Message", "ElementTree", "fromstring", "xml", "RequestId", "versionId",
+                "http_client", "attempt(", "requests", "socket"):
+        assert bad not in seg, f"contextual helper must not reference {bad!r}"
+    # only reads delete_result.get(...) + the passed booleans/statuses
+    assert 'dr.get("allow")' in seg and 'dr.get("http_code")' in seg
+
+
+def test_v10_contextual_used_only_in_control_paths_not_v9():
+    code = _code()
+    ol = code[code.index("def run_object_lock_live("):code.index("def _objectlock_summary_lines(")]
+    fl = code[code.index("def run_live_execution("):]
+    v9 = code[code.index("def run_locked_delete_probe("):code.index("def _locked_delete_probe_summary_lines(")]
+    assert "_is_contextual_object_lock_denial(" in ol       # two-role has it
+    assert "_is_contextual_object_lock_denial(" in fl       # full-live has it
+    assert "_is_contextual_object_lock_denial(" not in v9   # V9 probe MUST NOT
+    assert "contextual_lock_denial" not in v9

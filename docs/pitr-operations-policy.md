@@ -554,6 +554,54 @@ marker `3C2D-v9-stale-safe-locked-delete-probe`; both guards re-pinned; 200 test
 **V9 builds the tool; it does NOT run the probe.** The actual run is a SEPARATE Inal-gated prompt after
 review+merge. V5 read-back root cause remains UNKNOWN.
 
+## SECURITY-2D-3E1B-3C2D-V10 — Selectel HTTP-400 contextual Object-Lock classifier
+
+### Observed live evidence (secret-free), fresh-version object-lock-live, existing run-id 58883ca9113e
+```
+identity pitr-writer = PASS (ok);  identity retention-admin = PASS (ok)
+unlocked_put_ok=true; iam_delete_ok_on_unlocked=true
+locked_put_ok=true; retention_set=true; readback_ok=true
+retention_put_category=ok; retention_get_category=ok; retention_parse_status=ok; retention_compare_status=match
+locked_delete_attempted=true; locked_delete_category=unknown; locked_delete_http_status=400
+locked_delete_refused=false; proof=false; cleanup_status=controlled-residual; deadline_reached=false; exit=6
+```
+Every alternative cause was eliminated *in the same run*: identity PASS (not auth/signature/key), the SAME
+retention-admin successfully deleted an UNLOCKED version (IAM Delete proven), a fresh GOVERNANCE retention was
+set and read back with an instant match — and only the locked DeleteObjectVersion of the fresh versionId came
+back HTTP 400.
+
+### Selectel-observed vs universal S3
+AWS S3 documents a permanent DELETE of a retention-protected version as **HTTP 403 AccessDenied**. **Selectel
+returned HTTP 400** in this exact differential test. This is a **Selectel-observed** behaviour, **NOT** universal
+S3 behaviour. Therefore:
+- the global transport classifier is UNCHANGED — `_http_result_category(400)` stays `unknown`; no 400→deny mapping;
+- no raw body / XML `<Code>` / `<Message>` is inspected or depended upon;
+- **no `BypassGovernanceRetention`**, no IAM/policy change.
+
+### Contextual predicate (orchestration-level only)
+A pure helper `_is_contextual_object_lock_denial(...)` returns true ONLY when the whole same-run differential
+control holds: unlocked_put_ok ∧ iam_delete_ok_on_unlocked ∧ locked_put_ok ∧ retention_set ∧ readback_ok ∧
+retention_parse_status==ok ∧ retention_compare_status==match ∧ ¬deadline_reached ∧ the locked delete returned
+allow==unknown ∧ category==unknown ∧ HTTP 400. The helper reads only the normalized verdict/category/status —
+never the payload. It is invoked ONLY in the two paths that perform the unlocked IAM-delete control
+(`run_object_lock_live` and the full five-role live sequence). It is **NEVER** used by the V9
+`locked-delete-probe`, which lacks that control — a V9 HTTP 400 stays `proof=false` / CONTROLLED_RESIDUAL.
+
+Why the same-run unlocked control makes attribution possible: because the identical retention-admin principal,
+via the identical method/query path, was just proven able to delete an UNLOCKED version, a subsequent refusal of
+the LOCKED (fresh, GOVERNANCE, read-back-verified) version cannot be an IAM/permission/signature failure — it is
+attributable to the Object Lock, even though Selectel signalled it as 400 rather than 403.
+
+### Proof and telemetry
+`proof = standard_access_denied_proof OR contextual_lock_denial`, still requiring every prior Object-Lock stage.
+Telemetry is preserved and NOT rewritten: `locked_delete_category` stays `unknown`, `locked_delete_http_status`
+stays `400`; a new closed-vocabulary field `contextual_lock_denial = true|false` is added to both summaries.
+Old and new locked residual versions of `pitr/lock-58883ca9113e` remain for manual F6 after their deadlines.
+V5 read-back root cause remains UNKNOWN.
+
+Frozen runtime re-sealed: canary.py sha256 `aa4b357acc6e908341c5523db8f93a32fdf3c0305a7ddc36c4c68842fbe3ee4f`,
+marker `3C2D-v10-contextual-http400-lock-denial`; both guards re-pinned; 212 tests; mutation 31/31 RED missed=0.
+
 ## SECURITY-2D-3E1B-3C2D-V6 — Object-Lock read-back instant compare + credential input safety (V5 postmortem)
 
 V5 got far: identity 5/5 PASS, role matrix 18/18 PASS, and the Object-Lock chain passed unlocked-put,
