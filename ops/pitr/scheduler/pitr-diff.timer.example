@@ -1,0 +1,12 @@
+# SECURITY-2D-3E1B-3C3-A DORMANT timer TEMPLATE (.example) - NOT loaded by systemd from the repo.
+# Do NOT enable here. Persistent=true handles missed runs after downtime/reboot. Activation is Inal-gated.
+[Unit]
+Description=PULT PITR differential backup timer (dormant 3C3-A)
+
+[Timer]
+OnCalendar=*-*-* 03:00:00 UTC
+Persistent=true
+Unit=pitr-diff.service
+
+[Install]
+WantedBy=timers.target
