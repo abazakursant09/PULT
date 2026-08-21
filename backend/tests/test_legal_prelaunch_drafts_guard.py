@@ -153,6 +153,50 @@ def test_minimal_chain_includes_late_blockers():
     head = "Минимальные блокеры до первой оплаты"
     assert head in chk, "minimal-blocker section heading missing"
     tail = chk.split(head, 1)[1]
-    for tok in ("#12", "#13", "#14", "#22"):
+    for tok in ("#12", "#13", "#14", "#22", "#23"):
         assert tok in tail, f"minimal-blocker chain must include {tok}"
     assert "NOT READY" in chk, "checklist must keep launch gate NOT READY"
+
+
+# --- CORRECTION-2 / gap M7: blocker #23 must survive as a real, unfinished blocker ---
+
+def _table_row(name: str, num: int) -> list[str] | None:
+    """Return the parsed cells of the markdown table row whose first cell is `num`."""
+    prefix = f"| {num} |"
+    for line in _r(name).splitlines():
+        if line.strip().startswith(prefix):
+            return [c.strip() for c in line.strip().strip("|").split("|")]
+    return None
+
+
+def test_blocker_23_official_source_verification_is_a_live_blocker():
+    chk = _r("launch-legal-checklist.md")
+    cells = _table_row("launch-legal-checklist.md", 23)
+    assert cells is not None, "blocker #23 row missing from the full table"
+    # cells: [#, требование, доказательство, статус, владелец, staging, production, оплата]
+    assert len(cells) >= 4, f"#23 row is malformed: {cells}"
+    req = cells[1].lower()
+    status = cells[3].upper()
+    # (2) #23 is about official-source / line-by-line verification
+    assert ("verification" in req or "сверк" in req) and (
+        "источник" in req or "первоисточник" in req or "official" in req
+    ), f"#23 must be the official-source verification blocker, got requirement: {cells[1]!r}"
+    # (3) status is NOT ready/pass/done — it stays an open blocker
+    assert status in {"BLOCKED", "UNKNOWN", "PARTIAL"}, f"#23 status must stay a blocker, got {cells[3]!r}"
+    for bad in ("DONE", "PASS", "READY", "VERIFIED"):
+        assert bad not in status, f"#23 must not be marked {bad} without real counsel verification"
+    # (4) #23 present in the minimal-blocker summary chain
+    tail = chk.split("Минимальные блокеры до первой оплаты", 1)[1]
+    assert "#23" in tail, "#23 must appear in the minimal-blocker chain"
+
+
+# --- CORRECTION-2 / gap M8: EVERY future-email occurrence must carry NOT ACTIVE on its own line ---
+
+def test_every_future_email_line_marked_not_active():
+    # A file-level NOT ACTIVE is not enough: a second, unmarked address must not hide behind it.
+    for name in ALL_DOCS:
+        for i, line in enumerate(_r(name).splitlines(), 1):
+            if any(c in line for c in MAIL_CONTACTS):
+                assert "NOT ACTIVE" in line, (
+                    f"{name}:{i} names a future pult-os.ru email without NOT ACTIVE on the same line: {line!r}"
+                )
