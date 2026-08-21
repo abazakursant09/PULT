@@ -106,3 +106,53 @@ def test_live_privacy_page_still_old_domain():
         assert "biznes-pult.ru" in priv.read_text(encoding="utf-8"), (
             "live pages must remain unchanged by the docs-only legal package"
         )
+
+
+# --- CORRECTION-1: no false global "no email in logs" claim ---
+
+def test_no_global_no_email_in_logs_claim():
+    # The SMTP mailer (services/email.py) DOES log recipient email + subject. The docs must not
+    # reintroduce the false global invariant that removed docs once carried.
+    forbidden = ("без записи email/IP/токенов", "логи пишут только")
+    for name in ALL_DOCS:
+        body = _r(name)
+        for phrase in forbidden:
+            assert phrase not in body, f"false global no-email-in-logs claim '{phrase}' in {name}"
+
+
+def test_smtp_log_gap_is_documented():
+    # The honest SMTP-log fact must be present where logging is discussed.
+    for name in ("privacy-policy.DRAFT.md", "personal-data-register.md", "source-evidence.md"):
+        assert "email.py" in _r(name), f"{name} must cite services/email.py logging fact"
+    for name in ("privacy-policy.DRAFT.md", "personal-data-register.md"):
+        assert "адрес получателя" in _r(name), f"{name} must acknowledge mailer logs recipient"
+
+
+# --- CORRECTION-2: localization is a future obligation, not a present fact ---
+
+def test_localization_not_stated_as_present_fact():
+    priv = _r("privacy-policy.DRAFT.md")
+    assert "осуществляются в базах данных на территории Российской Федерации" not in priv, (
+        "localization must not be stated as an already-operating fact"
+    )
+    assert "до начала production-обработки" in priv, "localization must be a future fail-closed obligation"
+
+
+# --- CORRECTION-1/4: SMTP/application-log blocker present in checklist ---
+
+def test_checklist_has_smtp_log_blocker():
+    chk = _r("launch-legal-checklist.md")
+    assert "application-log" in chk, "checklist must carry the SMTP/application-log blocker"
+    assert "services/email.py" in chk, "checklist SMTP blocker must cite the evidence"
+
+
+# --- CORRECTION-4: minimal blocker chain must include #12/#13/#14 (and the new SMTP-log one) ---
+
+def test_minimal_chain_includes_late_blockers():
+    chk = _r("launch-legal-checklist.md")
+    head = "Минимальные блокеры до первой оплаты"
+    assert head in chk, "minimal-blocker section heading missing"
+    tail = chk.split(head, 1)[1]
+    for tok in ("#12", "#13", "#14", "#22"):
+        assert tok in tail, f"minimal-blocker chain must include {tok}"
+    assert "NOT READY" in chk, "checklist must keep launch gate NOT READY"

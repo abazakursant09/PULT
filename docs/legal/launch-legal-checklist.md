@@ -10,7 +10,7 @@
 |---|---|---|---|---|---|---|---|
 | 1 | **Mail Gate**: рабочий ящик на pult-os.ru для обращений субъектов ПДн | почта не активна; контакты помечены NOT ACTIVE | BLOCKED | Inal + mail | нет | **да** | да |
 | 2 | Финальные реквизиты оператора (ИНН/ОГРНИП/адрес) | плейсхолдеры `[REQUIRES INAL — INSERT LOCALLY]` | BLOCKED | Inal | нет | **да** | да |
-| 3 | Договор/поручение Selectel (ст. 6(3) 152-ФЗ): данные, цель, операции, регионы, инциденты, уничтожение | Selectel = PLANNED/CONTRACT PENDING; сервер не заказан | BLOCKED | Inal + Selectel + lawyer | нет | **да** | да |
+| 3 | Договор/поручение Selectel (ст. 6(3) 152-ФЗ) + локализация ПДн граждан РФ (ст. 18(5)) до начала production: данные, цель, операции, регионы, инциденты, уничтожение | Selectel = PLANNED/CONTRACT PENDING; сервер не заказан; локализация — будущее обязательство, не факт | BLOCKED | Inal + Selectel + lawyer | нет | **да** | да |
 | 4 | Определение УЗ ПДн и модель угроз (ПП №1119, Приказ ФСТЭК №21) | конкретный УЗ не заявлен | BLOCKED | lawyer + Inal | нет | **да** | да |
 | 5 | Решение по уведомлению Роскомнадзора (ст. 22 152-ФЗ) | не подано; вывод не сделан | BLOCKED | lawyer + Inal | нет | **да** | да |
 | 6 | Server-side consent evidence (версия+UTC-время+способ) | согласие только на frontend, на сервер не идёт | BLOCKED | developer | рекомендуется | **да** | да |
@@ -29,10 +29,12 @@
 | 19 | Ротация/отзыв marketplace-credentials (`expires_at` не enforced) | `api_credential.py:26,43` | UNKNOWN | developer | нет | рекомендуется | рекомендуется |
 | 20 | Активация домена pult-os.ru (DNS + сайт) и переключение legal-страниц | live-страницы всё ещё `biznes-pult.ru` | BLOCKED | Inal + developer | нет | **да** | да |
 | 21 | Финальная проверка профильным юристом РФ (152-ФЗ/149-ФЗ/54-ФЗ/ЗоЗПП) | не проведена | BLOCKED | lawyer | рекомендуется | **да** | да |
+| 22 | SMTP / application-log: убрать или псевдонимизировать email получателя и `str(exc)` в логах mailer; определить retention/access для application logs | `services/email.py:49,53,56` логирует `to=` + subject + exc | BLOCKED | developer | рекомендуется | **да** | да |
+| 23 | Official-source line-by-line verification нормативных актов (полная сверка редакций 152-ФЗ/1119/ФСТЭК №21/54-ФЗ по первоисточнику) | URL подтверждены 2026-08-21; построчная сверка не завершена | UNKNOWN | lawyer + developer | рекомендуется | **да** | да |
 
 ## Минимальные блокеры до первой оплаты
 
-Mail Gate (1) → реквизиты (2) → поручение Selectel (3) → УЗ+модель угроз (4) → решение по РКН (5) → server-side consent (6) → hard-delete/anonymization (7) → retention (8) → процедура запросов субъектов (9) → incident response (10) → SMTP agreement + география (11) → тарифы/возвраты/касса/чеки (15) → ЮKassa (16) → финальная оферта (17) → review юриста РФ (21).
+Mail Gate (#1) → реквизиты (#2) → поручение Selectel + локализация (#3) → УЗ+модель угроз (#4) → решение по РКН (#5) → server-side consent (#6) → hard-delete/anonymization (#7) → retention (#8) → процедура запросов субъектов (#9) → incident response (#10) → SMTP agreement + география (#11) → устранить промис «логи ≤90 дней» или реализовать TTL (#12) → убрать фиктивные `bp_session`/`bp_analytics` (#13) → удалить два отслеживаемых CSV из Git (#14) → тарифы/возвраты/касса/чеки (#15) → ЮKassa (#16) → финальная оферта (#17) → SMTP/application-log: убрать email+exc из логов (#22) → official-source verification (#23) → review юриста РФ (#21).
 
 ## Резюме
 
