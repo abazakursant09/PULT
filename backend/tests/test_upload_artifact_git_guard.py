@@ -67,6 +67,40 @@ def test_runtime_upload_path_and_ttl_unchanged():
     assert "_ORPHAN_TTL_SECONDS = 3600" in src, "orphan TTL must be unchanged by this unit"
 
 
+def _table_row(name: str, num: int) -> list[str] | None:
+    """Parsed cells of the markdown table row in a docs/legal file whose first cell is `num`."""
+    prefix = f"| {num} |"
+    for line in _r(LEGAL / name).splitlines():
+        if line.strip().startswith(prefix):
+            return [c.strip() for c in line.strip().strip("|").split("|")]
+    return None
+
+
+def test_blocker_24_history_exposure_pinned():
+    # Structural: the #24 row itself must exist and stay an open, unfinished history-exposure
+    # blocker — a generic "OPEN" elsewhere (e.g. the #14 row) must not stand in for it.
+    row = _table_row("launch-legal-checklist.md", 24)
+    assert row is not None, "blocker #24 row missing from the checklist table"
+    assert len(row) >= 4, f"#24 row malformed: {row}"
+    joined = " ".join(row).lower()
+    status = row[3].upper()
+    # (2) meaning: git-history exposure / assessment / rewrite
+    assert ("history" in joined or "истори" in joined) and (
+        "rewrite" in joined or "blob" in joined or "экспозиц" in joined
+    ), f"#24 must be the git-history exposure blocker, got: {row[1]!r}"
+    # (3) explicitly not purged / needs a separate coordinated decision
+    assert ("not performed" in joined) or ("separate" in joined) or ("отдельн" in joined), (
+        "#24 must state history purge is NOT PERFORMED / requires a separate decision"
+    )
+    # (4) status stays open
+    assert status in {"OPEN", "BLOCKED", "UNKNOWN", "PARTIAL"}, f"#24 status must stay open, got {row[3]!r}"
+    for bad in ("DONE", "PASS", "READY", "VERIFIED", "CLOSED"):
+        assert bad not in status, f"#24 must not be marked {bad} without a real decision"
+    # (5) #14 stays PARTIAL and cannot substitute for #24
+    r14 = _table_row("launch-legal-checklist.md", 14)
+    assert r14 is not None and "PARTIAL" in r14[3].upper(), "#14 must stay PARTIAL, distinct from #24"
+
+
 def test_docs_do_not_claim_history_purge():
     chk = _r(LEGAL / "launch-legal-checklist.md")
     ev = _r(LEGAL / "source-evidence.md")
