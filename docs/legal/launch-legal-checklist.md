@@ -21,7 +21,7 @@
 | 11 | SMTP agreement + география данных | provider не выбран; в dev письмо логируется | BLOCKED | Inal + mail | рекомендуется | **да** | да |
 | 12 | Устранить публичный промис «логи ≤ 90 дней» или реализовать TTL | claim `privacy:116`; sweep не найден | BLOCKED | developer | рекомендуется | **да** | да |
 | 13 | Убрать фиктивные cookie `bp_session`/`bp_analytics` из баннера или подкрепить реализацией | `CookieBanner.tsx:19,21,51-55` | BLOCKED | developer | рекомендуется | **да** | да |
-| 14 | Удалить 2 отслеживаемых CSV из Git (уже загруженные данные не хранить в репо) | `backend/uploads/imports/.../*.csv` | BLOCKED | developer | **да** | да | да |
+| 14 | Удалить отслеживаемые CSV из Git + запретить повтор | current-tree cleanup + recursive ignore + guard **IMPLEMENTED** (LEGAL-PRELAUNCH-C1); историческая экспозиция OPEN (см. #24) | PARTIAL | developer + security counsel | **да** | да | да |
 | 15 | Тарифы / возвраты / онлайн-касса / чеки по 54-ФЗ | не определены; оферта — каркас | BLOCKED | Inal + lawyer | нет | нет | **да** |
 | 16 | ЮKassa: договор + активация + вебхук | код есть, путь закрыт, env не задан | BLOCKED | Inal | нет | нет | **да** |
 | 17 | Финальная оферта (после 15–16) | HOLD-каркас | BLOCKED | lawyer + Inal | нет | нет | **да** |
@@ -31,6 +31,7 @@
 | 21 | Финальная проверка профильным юристом РФ (152-ФЗ/149-ФЗ/54-ФЗ/ЗоЗПП) | не проведена | BLOCKED | lawyer | рекомендуется | **да** | да |
 | 22 | SMTP / application-log: убрать или псевдонимизировать email получателя и `str(exc)` в логах mailer; определить retention/access для application logs | `services/email.py:49,53,56` логирует `to=` + subject + exc | BLOCKED | developer | рекомендуется | **да** | да |
 | 23 | Official-source line-by-line verification нормативных актов (полная сверка редакций 152-ФЗ/1119/ФСТЭК №21/54-ФЗ по первоисточнику) | URL подтверждены 2026-08-21; построчная сверка не завершена | UNKNOWN | lawyer + developer | рекомендуется | **да** | да |
+| 24 | Git history: оценить, содержали ли исторические blobs удалённых CSV реальные ПДн, и решить о history rewrite. Rewrite — отдельный destructive coordinated gate (backup + уведомление collaborators + reclone/rotation plan). Content НЕ читать для этого решения | tracked CSV в HEAD = 0 (LEGAL-PRELAUNCH-C1); history purge NOT PERFORMED — старые commits сохраняют blobs | OPEN | Inal + security counsel | нет | рекомендуется | рекомендуется |
 
 ## Минимальные блокеры до первой оплаты
 

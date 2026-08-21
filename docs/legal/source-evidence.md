@@ -34,7 +34,8 @@
 | Base URL по умолчанию localhost; prod hard-fail при localhost | `backend/config.py:37-38,310-313` | dev default |
 | Prod hard-fail при незаданных `CRED_ENC_KEY` / `SMTP_HOST` / `SECRET_KEY` | `backend/config.py:301-302,308-309`, credential_vault fail | IMPLEMENTED |
 | Живые страницы всё ещё используют `biznes-pult.ru` / `hello@biznes-pult.ru` (домен pult-os.ru не активирован) | `frontend/app/terms/page.tsx:58,70,86`, охрана `backend/tests/test_domain_migration_prep_guard.py:66` | live pages unchanged |
-| 2 CSV-файла отслеживаются в Git | `backend/uploads/imports/f28cfd6d-.../*.csv` | BLOCKER (не устранено) |
+| tracked CSV в current tree = 0 (удалены LEGAL-PRELAUNCH-C1, содержимое не читалось); recursive ignore + guard | `.gitignore` (`backend/uploads/imports/**/*.csv`) + `backend/tests/test_upload_artifact_git_guard.py` | current-tree cleanup IMPLEMENTED |
+| Git history purge исторических CSV blobs | старые commits сохраняют blobs; history НЕ переписывалась | **history purge = NOT PERFORMED / REQUIRES SEPARATE DECISION** (blocker #24) |
 
 ## B. Нормативные источники (первичные/официальные)
 
