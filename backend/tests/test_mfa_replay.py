@@ -275,21 +275,44 @@ def test_enable_then_login_same_code_is_replay(monkeypatch):
     assert r.status_code == 401                                        # same step already consumed
 
 
-def test_disable_with_already_spent_code_rejected(monkeypatch):
+def _freeze_mfa_clock(monkeypatch, t: int):
+    """Pin the clock the MFA runtime reads (routers/mfa.py:58 `int(time.time())`) to a single instant.
+
+    A test that fixes a TOTP step must not read the wall clock more than once: the historical flake
+    (`assert 59580525 == 59580526`) was a 30-second TOTP-window boundary falling between two
+    independent `int(time.time())` reads. Freezing the runtime clock to the SAME `t` the test uses for
+    seed/code/assert makes the whole path deterministic. `monkeypatch` restores the real clock at
+    teardown, so nothing leaks into neighbouring tests. Runtime MFA behaviour is unchanged — only the
+    instant it observes is fixed for the duration of one test."""
+    monkeypatch.setattr(mfa_mod.time, "time", lambda: float(t))
+
+
+@pytest.mark.parametrize("t", [
+    _NOW0,           # mid-window
+    _NOW0 - 1,       # 1 s before a 30-s boundary
+    _NOW0 + 29,      # 1 s before the next boundary
+    _NOW0 + 30,      # exactly on the boundary (the flake's failure region)
+])
+def test_disable_with_already_spent_code_rejected(monkeypatch, t):
     # A code whose step is <= the last spent step cannot turn MFA off; MFA stays enabled.
+    # Deterministic across the 30-s boundary: one frozen instant `t` drives seed, code, endpoint clock
+    # and assert, so there is no off-by-one and the replay/disable rejection is proven either side of
+    # (and exactly on) a boundary.
+    _freeze_mfa_clock(monkeypatch, t)
+    spent_step = t // 30 + 5                      # seed as if a newer step was already used
     async def go():
         db = await _new_db()
-        # seed as if the current step was already used
-        uid, secret = await _seed_mfa(db, enabled=True, last_step=int(time.time()) // 30 + 5)
+        uid, secret = await _seed_mfa(db, enabled=True, last_step=spent_step)
         user = (await db.execute(select(User).where(User.id == uid))).scalar_one()
         return db, uid, secret, user
     db, uid, secret, user = _run(go())
 
     mc = _mfa_client(db, user)
-    r = mc.request("DELETE", "/api/mfa/disable", json={"code": _totp(secret, int(time.time()))})
+    # A valid current code (in-window) whose step (t//30) is <= the spent step (t//30+5) → rejected.
+    r = mc.request("DELETE", "/api/mfa/disable", json={"code": _totp(secret, t)})
     assert r.status_code == 400
     still = _run(_step_of(db, uid))
-    assert still == int(time.time()) // 30 + 5                          # unchanged
+    assert still == spent_step                    # unchanged — no off-by-one on any boundary
 
     async def _check():
         rec = (await db.execute(select(MFASecret).where(MFASecret.user_id == uid))).scalar_one()
