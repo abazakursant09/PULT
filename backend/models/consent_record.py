@@ -29,7 +29,7 @@ class ConsentRecord(Base):
     id              = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     # Soft-delete + recovery reuse the same user row (routers/referrals.py, routers/auth.py), so the
     # referenced user never disappears; no ON DELETE behaviour is required (matches Workspace).
-    user_id         = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    user_id         = Column(String(36), ForeignKey("users.id"), nullable=False)
     # SERVER clock only — the client never supplies a timestamp. Naive UTC (datetime.utcnow), matching
     # the project-wide DateTime idiom (User.created_at, Workspace.created_at, automation_rule/protection
     # consent_at); the value is server-authoritative UTC regardless of tz-awareness.
