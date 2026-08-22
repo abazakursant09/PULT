@@ -2,7 +2,7 @@
 
 **DRAFT — НЕ ПУБЛИКОВАТЬ / НЕ ИСПОЛЬЗОВАТЬ ДЛЯ ПРИЁМА ОПЛАТЫ**
 
-Ниже — фактическое состояние по коду (`origin/master` `5584cd6`).
+Ниже — фактическое состояние по коду (`origin/master` `b5a2e1c`).
 
 ## Необходимые технологии
 
@@ -15,7 +15,7 @@
 - `user` — несекретный профиль для отрисовки интерфейса, **не токен** (`frontend/lib/session.ts:18`);
 - `bp_remember_email` — email для «запомнить меня», только по выбору пользователя (`frontend/app/login/page.tsx:48`);
 - `lang` — язык интерфейса; `pult_theme` — тема; `pult_cabinet_mode` — режим кабинета; `pult_onboarded` — флаг пройденного онбординга;
-- `cookie_consent` — выбор в баннере cookie `{analytics, timestamp}` (`frontend/components/CookieBanner.tsx:17`);
+- `cookie_consent` — отметка, что уведомление о cookie показано на этом устройстве `{acknowledged, timestamp}`; баннер сам не устанавливает никакую JS-cookie (`frontend/components/CookieBanner.tsx`);
 - локальные черновики и истории отдельных функций: `bp_support_tickets` (обращения поддержки), `bp_success_stories`, `bp_voted_ideas`, `bp_referral_stats_v2`/`bp_referral_invitees_v2` (демо), `startup_step1`/`startup_step2`/`startPlan` (мастер), `ae_active_count`, `chist_<productKey>` (история скоринга креативов);
 - `sessionStorage.copilot_dismissed` — скрытый элемент подсказки.
 
@@ -25,7 +25,7 @@
 
 Поведенческий сбор событий, visitor ID, UTM/referrer и CTA telemetry в production-коде **удалён** и охраняется тестом `frontend/tests/noBehavioralEvents.test.ts`. Аналитического клиента (gtag/dataLayer/posthog/mixpanel/segment) в исходниках нет.
 
-**Расхождение, которое нужно устранить до публикации:** текущий баннер (`frontend/components/CookieBanner.tsx:51-55`) заявляет, что «аналитические cookie помогают улучшать продукт», и по кнопке «Принять все» ставит cookie `bp_analytics=1` (`:21`), а также `bp_session=1` (`:19`) — при этом никакой аналитики за ними нет, и `bp_session` не имеет отношения к реальной сессии `__Host-pult_session`. До launch нужно убрать фиктивные `bp_session`/`bp_analytics` из баннера либо привести реализацию и текст к одному доказанному поведению.
+**Исправлено (LEGAL-PRELAUNCH-C2):** прежний баннер заявлял, что «аналитические cookie помогают улучшать продукт», и ставил фиктивные `bp_session=1` (всегда) и `bp_analytics=1` (по «Принять все») — при отсутствии какой-либо аналитики, и `bp_session` не имел отношения к реальной сессии `__Host-pult_session`. Теперь баннер **не устанавливает никакую JS-cookie**, не заявляет работающую аналитику и работает как уведомление-подтверждение: он лишь записывает в `localStorage` факт показа. Единственная cookie продукта — backend-управляемая HttpOnly сессионная cookie (см. раздел «Необходимые технологии»). Юридическая квалификация cookie как ПДн и необходимость отдельного согласия — **REQUIRES RUSSIAN COUNSEL REVIEW**, самостоятельный вывод не делается.
 
 Если аналитика будет добавлена:
 
