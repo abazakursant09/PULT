@@ -15,11 +15,60 @@ from __future__ import annotations
 import asyncio
 import logging
 import smtplib
+import ssl
 from email.message import EmailMessage
 
 from config import settings
 
 log = logging.getLogger(__name__)
+
+# LEGAL-PRELAUNCH-D (blocker #22) — mail logs must never carry the recipient address, the subject, the
+# body, a live token, or any raw exception text. A send failure is logged as a single closed-vocabulary
+# CATEGORY derived ONLY from the exception TYPE, so the operator still sees what broke without any PII /
+# secret / attacker-controlled string landing in application logs.
+#
+# Frozen allowlist — the ONLY values the classifier may return. Ordered most-specific first; the classifier
+# returns the category of the first type that matches (subclass before superclass). smtplib.SMTPException,
+# ssl.SSLError and TimeoutError all subclass OSError, so the SMTP/TLS/timeout buckets MUST be tested before
+# the generic OSError -> "network" bucket.
+_SMTP_ERROR_CATEGORIES: frozenset[str] = frozenset(
+    {
+        "smtp_auth",
+        "smtp_recipient_rejected",
+        "smtp_connect",
+        "smtp_disconnected",
+        "smtp_tls",
+        "smtp_timeout",
+        "smtp_protocol",
+        "network",
+        "unknown",
+    }
+)
+
+# (exception type, category) pairs, evaluated top-to-bottom. Types only — never the exception's value.
+_SMTP_ERROR_RULES: tuple[tuple[type[BaseException], str], ...] = (
+    (smtplib.SMTPAuthenticationError, "smtp_auth"),
+    (smtplib.SMTPRecipientsRefused, "smtp_recipient_rejected"),
+    (smtplib.SMTPConnectError, "smtp_connect"),
+    (smtplib.SMTPServerDisconnected, "smtp_disconnected"),
+    (ssl.SSLError, "smtp_tls"),
+    (TimeoutError, "smtp_timeout"),
+    (smtplib.SMTPException, "smtp_protocol"),
+    (ConnectionError, "network"),
+    (OSError, "network"),
+)
+
+
+def _smtp_error_category(exc: BaseException) -> str:
+    """Map an exception to ONE frozen category, by TYPE only.
+
+    Pure: no logging, no I/O, no network. Dispatches on the exception TYPE alone and never reads the
+    exception's value, so nothing attacker- or PII-bearing can leak through the category. Unknown types
+    collapse to "unknown"."""
+    for exc_type, category in _SMTP_ERROR_RULES:
+        if isinstance(exc, exc_type):
+            return category
+    return "unknown"
 
 
 def _send_sync(to: str, subject: str, body: str) -> None:
@@ -42,18 +91,21 @@ async def send_email(to: str, subject: str, body: str) -> bool:
     """Send an email. Returns True if handed to SMTP, False if only logged/failed.
     Never raises — auth flows must complete regardless of mail-server state."""
     if not settings.smtp_host:
-        # Development fallback: no mail server configured. Log that a mail WOULD have gone out, but
-        # NEVER the body — it carries the reset / verification link with a live raw token, which must
-        # not land in application logs (SECURITY-2C-3B). Tests obtain the token through the mailer
-        # seam (they patch send_password_reset_email / send_verification_email), never from this log.
-        log.warning("EMAIL (not sent — SMTP not configured) to=%s subject=%s", to, subject)
+        # Development fallback: no mail server configured. Log ONLY that a mail would have gone out — never
+        # the recipient, subject, body, or token (the body carries the reset/verification link with a live
+        # raw token — LEGAL-PRELAUNCH-D / SECURITY-2C-3B). Tests obtain the token through the mailer seam
+        # (they patch send_password_reset_email / send_verification_email), never from this log.
+        log.warning("email_not_sent category=%s", "smtp_not_configured")
         return False
     try:
         await asyncio.to_thread(_send_sync, to, subject, body)
-        log.info("email_sent to=%s subject=%s", to, subject)
+        # No recipient / subject / body — a bare success event only.
+        log.info("email_sent")
         return True
     except Exception as exc:  # pragma: no cover - operator-visible, non-fatal
-        log.error("email_send_failed to=%s subject=%s err=%s", to, subject, exc)
+        # Closed-vocabulary category by exception TYPE only — no recipient/subject/body/token, and no raw
+        # exception value or stack of any kind.
+        log.error("email_send_failed category=%s", _smtp_error_category(exc))
         return False
 
 
