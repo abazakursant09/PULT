@@ -20,7 +20,7 @@
 | 10 | Incident response (в т.ч. уведомление РКН об инцидентах) | процедуры нет в документах | BLOCKED | lawyer + Inal | нет | **да** | да |
 | 11 | SMTP agreement + география данных | provider не выбран; в dev письмо логируется | BLOCKED | Inal + mail | рекомендуется | **да** | да |
 | 12 | Устранить публичный промис «логи ≤ 90 дней» или реализовать TTL | claim `privacy:116`; sweep не найден | BLOCKED | developer | рекомендуется | **да** | да |
-| 13 | Убрать фиктивные cookie `bp_session`/`bp_analytics` из баннера или подкрепить реализацией | `CookieBanner.tsx:19,21,51-55` | BLOCKED | developer | рекомендуется | **да** | да |
+| 13 | Убрать фиктивные cookie `bp_session`/`bp_analytics` из баннера или подкрепить реализацией | фиктивные cookie удалены, баннер не ставит JS-cookie, текст исправлен **IMPLEMENTED** (LEGAL-PRELAUNCH-C2, `CookieBanner.tsx`); юр. квалификация cookie/необходимость consent — REQUIRES COUNSEL | PARTIAL | developer + lawyer | рекомендуется | **да** | да |
 | 14 | Удалить отслеживаемые CSV из Git + запретить повтор | current-tree cleanup + recursive ignore + guard **IMPLEMENTED** (LEGAL-PRELAUNCH-C1); историческая экспозиция OPEN (см. #24) | PARTIAL | developer + security counsel | **да** | да | да |
 | 15 | Тарифы / возвраты / онлайн-касса / чеки по 54-ФЗ | не определены; оферта — каркас | BLOCKED | Inal + lawyer | нет | нет | **да** |
 | 16 | ЮKassa: договор + активация + вебхук | код есть, путь закрыт, env не задан | BLOCKED | Inal | нет | нет | **да** |

@@ -36,6 +36,8 @@
 | Живые страницы всё ещё используют `biznes-pult.ru` / `hello@biznes-pult.ru` (домен pult-os.ru не активирован) | `frontend/app/terms/page.tsx:58,70,86`, охрана `backend/tests/test_domain_migration_prep_guard.py:66` | live pages unchanged |
 | tracked CSV в current tree = 0 (удалены LEGAL-PRELAUNCH-C1, содержимое не читалось); recursive ignore + guard | `.gitignore` (`backend/uploads/imports/**/*.csv`) + `backend/tests/test_upload_artifact_git_guard.py` | current-tree cleanup IMPLEMENTED |
 | Git history purge исторических CSV blobs | старые commits сохраняют blobs; history НЕ переписывалась | **history purge = NOT PERFORMED / REQUIRES SEPARATE DECISION** (blocker #24) |
+| Cookie banner: фиктивные `bp_session`/`bp_analytics` удалены; баннер не ставит JS-cookie, не заявляет работающую аналитику (LEGAL-PRELAUNCH-C2) | `frontend/components/CookieBanner.tsx`; охрана `backend/tests/test_cookie_truth_guard.py` | FIXED (юр. квалификация = REQUIRES COUNSEL) |
+| Реальная сессия — HttpOnly cookie `__Host-pult_session`/`pult_session_dev`, backend-managed, JS не читает; frontend не хранит/не шлёт токен | `backend/auth_cookie.py:30-31,55-78`; `frontend/tests/sessionCookieGuard.test.ts` | IMPLEMENTED (не изменено C2) |
 
 ## B. Нормативные источники (первичные/официальные)
 

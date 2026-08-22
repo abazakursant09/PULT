@@ -2,7 +2,12 @@
 import { useState, useEffect } from 'react'
 import { Cookie, X } from 'lucide-react'
 
-type Consent = { analytics: boolean; timestamp: number }
+// LEGAL-PRELAUNCH-C2 — this banner is an ACKNOWLEDGEMENT notice, not a consent gate.
+// The only cookie the product sets is the backend-managed, HttpOnly session cookie, which
+// JavaScript cannot read or write. There is no analytics cookie and no behavioural tracking,
+// so this component sets NO browser cookie at all — doing so would be a fictional claim. It
+// only records, in localStorage, that the notice was shown on this device so it is not repeated.
+type Ack = { acknowledged: boolean; timestamp: number }
 
 export function CookieBanner() {
   const [visible, setVisible] = useState(false)
@@ -12,14 +17,9 @@ export function CookieBanner() {
     if (!saved) setVisible(true)
   }, [])
 
-  function accept(analytics: boolean) {
-    const consent: Consent = { analytics, timestamp: Date.now() }
-    localStorage.setItem('cookie_consent', JSON.stringify(consent))
-    // Set technical cookie (always)
-    document.cookie = 'bp_session=1; path=/; SameSite=Strict; Secure; max-age=31536000'
-    if (analytics) {
-      document.cookie = 'bp_analytics=1; path=/; SameSite=Strict; Secure; max-age=31536000'
-    }
+  function acknowledge() {
+    const ack: Ack = { acknowledged: true, timestamp: Date.now() }
+    localStorage.setItem('cookie_consent', JSON.stringify(ack))
     setVisible(false)
   }
 
@@ -48,15 +48,16 @@ export function CookieBanner() {
 
           <div className="flex-1 min-w-0">
             <p className="font-semibold text-sm mb-1" style={{ color: '#FFFFFF' }}>
-              Мы используем файлы cookie
+              Файлы cookie и локальное хранилище
             </p>
             <p className="text-sm" style={{ color: '#71717A' }}>
-              Технические cookie необходимы для работы сервиса. Аналитические cookie помогают нам улучшать продукт — мы не передаём данные третьим лицам.
+              Для защищённого входа используется необходимая сессионная cookie. Необязательная
+              аналитика сейчас не используется. Настройки интерфейса хранятся локально в вашем браузере.
             </p>
           </div>
 
           <button
-            onClick={() => accept(false)}
+            onClick={acknowledge}
             className="shrink-0 p-1.5 rounded-lg transition-colors"
             style={{ color: '#71717A' }}
             onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.06)' }}
@@ -71,16 +72,9 @@ export function CookieBanner() {
           <button
             className="btn btn-primary"
             style={{ height: 40, fontSize: '0.875rem', padding: '0 20px' }}
-            onClick={() => accept(true)}
+            onClick={acknowledge}
           >
-            Принять все
-          </button>
-          <button
-            className="btn btn-ghost"
-            style={{ height: 40, fontSize: '0.875rem', padding: '0 20px' }}
-            onClick={() => accept(false)}
-          >
-            Только необходимые
+            Понятно
           </button>
           <a
             href="/privacy"
