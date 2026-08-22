@@ -76,7 +76,7 @@ def test_register_no_token_sends_email(monkeypatch):
 
     async def go():
         db = await _engine()
-        resp = await register(UserRegister(email="a@b.com", name="Ann", password="Passw0rd"),
+        resp = await register(UserRegister(email="a@b.com", name="Ann", password="Passw0rd", consent=True),
                               _Req(), db)
         assert isinstance(resp, RegisterResponse)
         dumped = resp.model_dump()
@@ -101,7 +101,7 @@ def test_verify_email_flow(monkeypatch):
 
     async def go():
         db = await _engine()
-        await register(UserRegister(email="v@b.com", name="V", password="Passw0rd"), _Req(), db)
+        await register(UserRegister(email="v@b.com", name="V", password="Passw0rd", consent=True), _Req(), db)
         user = (await db.execute(select(User).where(User.email == "v@b.com"))).scalar_one()
         tok = user.verification_token
         from fastapi import Response as _Resp
@@ -119,7 +119,7 @@ def test_forgot_password_no_token_sends_email(monkeypatch):
 
     async def go():
         db = await _engine()
-        await register(UserRegister(email="f@b.com", name="F", password="Passw0rd"), _Req(), db)
+        await register(UserRegister(email="f@b.com", name="F", password="Passw0rd", consent=True), _Req(), db)
         sent.clear()
         resp = await forgot_password(ForgotPasswordIn(email="f@b.com"), _Req(), db)
         assert isinstance(resp, ForgotPasswordResponse)
@@ -139,7 +139,7 @@ def test_reset_password_flow(monkeypatch):
 
     async def go():
         db = await _engine()
-        await register(UserRegister(email="r@b.com", name="R", password="Passw0rd"), _Req(), db)
+        await register(UserRegister(email="r@b.com", name="R", password="Passw0rd", consent=True), _Req(), db)
         await forgot_password(ForgotPasswordIn(email="r@b.com"), _Req(), db)
         tok = sent[-1][2]
         resp = await reset_password(ResetPasswordIn(token=tok, password="NewPass0rd"), _Req(), db)

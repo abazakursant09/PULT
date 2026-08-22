@@ -1262,10 +1262,13 @@ export const api = {
     // SECURITY-2B-2 — backend clears the HttpOnly session cookie. Idempotent; safe to ignore errors.
     logout: () => req<void>('/api/auth/logout', { method: 'POST' }),
     me: () => req<User>('/api/auth/me'),
-    register: (email: string, name: string, password: string, ref_code?: string) =>
+    // LEGAL-PRELAUNCH-F2 (blocker #6): consent is sent to the server (StrictBool) only after the two
+    // required checkboxes pass on the page. The server records append-only evidence (its own UTC time
+    // and document version); the client never sends a timestamp or a version.
+    register: (email: string, name: string, password: string, ref_code?: string, consent = true) =>
       req<RegisterResponse>('/api/auth/register', {
         method: 'POST',
-        body: JSON.stringify({ email, name, password, ...(ref_code ? { ref_code } : {}) }),
+        body: JSON.stringify({ email, name, password, consent, ...(ref_code ? { ref_code } : {}) }),
       }),
     verifyEmail: (token: string) =>
       req<AuthResponse>(`/api/auth/verify-email?token=${encodeURIComponent(token)}`),

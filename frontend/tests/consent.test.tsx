@@ -100,5 +100,9 @@ describe('registration consents', () => {
 
     await userEvent.click(submit)
     expect(api.auth.register).toHaveBeenCalled()
+    // LEGAL-PRELAUNCH-F2 (blocker #6): the explicit consent flag must reach the server.
+    expect(api.auth.register).toHaveBeenCalledWith(
+      'seller@example.com', 'E2E Seller', 'Passw0rd!', undefined, true,
+    )
   })
 })

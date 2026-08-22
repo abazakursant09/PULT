@@ -68,7 +68,7 @@ GOOD_PW = "Passw0rdOk"
 
 def _register(client, email=None):
     return client.post("/api/auth/register", json={
-        "email": email or f"{uuid.uuid4()}@example.com", "name": "S", "password": GOOD_PW,
+        "email": email or f"{uuid.uuid4()}@example.com", "name": "S", "password": GOOD_PW, "consent": True,
     })
 
 

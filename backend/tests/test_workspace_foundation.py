@@ -40,7 +40,7 @@ import routers.auth as auth
 from routers.auth import register
 from schemas.auth import UserRegister
 
-REV = "rob1a2b3c4d01"      # current alembic head; these tests upgrade to "head"
+REV = "csr1a2b3c4d01"      # current alembic head (LEGAL-PRELAUNCH-F2 consent_records); tests upgrade to "head"
 PRIOR = "mcs1a2b3c4d01"    # the revision before F1.0 — where `workspaces` does not exist yet
 TABLE = "workspaces"
 
@@ -301,7 +301,7 @@ def test_new_user_registration_creates_exactly_one_workspace(monkeypatch):
 
     async def go():
         db = await _orm_session()
-        await register(UserRegister(email="n@b.com", name="N", password="Passw0rd"), _Req(), db)
+        await register(UserRegister(email="n@b.com", name="N", password="Passw0rd", consent=True), _Req(), db)
 
         user = (await db.execute(sa.select(User).where(User.email == "n@b.com"))).scalar_one()
         ws = (await db.execute(
@@ -327,7 +327,7 @@ def test_user_and_workspace_are_created_in_one_transaction(monkeypatch):
         monkeypatch.setattr(db, "commit", _boom)
 
         with pytest.raises(RuntimeError):
-            await register(UserRegister(email="rb@b.com", name="RB", password="Passw0rd"),
+            await register(UserRegister(email="rb@b.com", name="RB", password="Passw0rd", consent=True),
                            _Req(), db)
 
         await db.rollback()
@@ -356,7 +356,7 @@ def test_soft_delete_and_restore_keep_exactly_one_workspace(monkeypatch):
     async def go():
         db = await _orm_session()
 
-        await register(UserRegister(email="sd@b.com", name="SD", password="Passw0rd"),
+        await register(UserRegister(email="sd@b.com", name="SD", password="Passw0rd", consent=True),
                        _Req(), db)
         user = (await db.execute(sa.select(User).where(User.email == "sd@b.com"))).scalar_one()
         original_ws = (await db.execute(
@@ -373,7 +373,7 @@ def test_soft_delete_and_restore_keep_exactly_one_workspace(monkeypatch):
         assert still[0].id == original_ws.id
 
         # re-registration restores the SAME user row -> must not mint a 2nd workspace
-        await register(UserRegister(email="sd@b.com", name="SD", password="Passw0rd"),
+        await register(UserRegister(email="sd@b.com", name="SD", password="Passw0rd", consent=True),
                        _Req(), db)
 
         restored = (await db.execute(

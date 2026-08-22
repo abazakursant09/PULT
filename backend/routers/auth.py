@@ -22,6 +22,7 @@ from services.mfa_crypto import load_secret
 from models.referral_record import ReferralRecord
 from models.user import User
 from models.workspace import Workspace
+from models.consent_record import ConsentRecord
 from routers.mfa import claim_totp_step
 from services.email import send_verification_email, send_password_reset_email
 from services.reset_token import hash_reset_token
@@ -120,6 +121,13 @@ async def register(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
+    # LEGAL-PRELAUNCH-F2 (blocker #6) — server-side consent is mandatory and checked BEFORE any DB
+    # mutation (throttle reserve, user create, recovery). A missing/non-boolean `consent` is already a
+    # 422 from the schema (StrictBool); an explicit `false` is refused here. So no user or consent row
+    # is ever written without consent, and a direct API call cannot bypass the frontend checkbox.
+    if data.consent is not True:
+        raise HTTPException(status_code=400, detail="Требуется согласие на обработку персональных данных")
+
     ip = _client_ip(request)
     # SECURITY-2C-2 — request-rate throttle (per email + per IP) on top of the existing 24h creation cap;
     # catches rapid existing-email probing that the creation cap (counts only CREATED users) would miss.
@@ -159,6 +167,15 @@ async def register(
         existing.registered_ip         = ip
         # Preserve referral_code, referred_by_id, was_referrer, was_referred
         # Do NOT create a new ReferralRecord — bonuses don't repeat
+        # LEGAL-PRELAUNCH-F2 — a recovery is a fresh consent ACTION: append ONE new evidence row (never
+        # overwrite the user's prior rows) in the SAME transaction as the restore, so a failure rolls
+        # back both. Server UTC time + server document version; nothing client-supplied.
+        db.add(ConsentRecord(
+            user_id=existing.id,
+            consent_at=datetime.utcnow(),
+            consent_version=settings.consent_doc_version,
+            context="recovery",
+        ))
         await db.commit()
         await db.refresh(existing)
         log.info("account_restored: user=%s", existing.id)   # no email/IP in application logs
@@ -202,6 +219,16 @@ async def register(
     if referrer and user.referred_by_id:
         from models.referral_record import ReferralRecord
         db.add(ReferralRecord(referrer_id=referrer.id, invitee_id=user.id))
+
+    # LEGAL-PRELAUNCH-F2 — exactly ONE append-only consent evidence row, in the SAME transaction as the
+    # user + workspace: server UTC time + server document-set version, never client-supplied. A failure
+    # here rolls the whole registration back — no user without evidence, no evidence without a user.
+    db.add(ConsentRecord(
+        user_id=user.id,
+        consent_at=datetime.utcnow(),
+        consent_version=settings.consent_doc_version,
+        context="registration",
+    ))
 
     await db.commit()
     await db.refresh(user)

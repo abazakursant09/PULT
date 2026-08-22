@@ -116,7 +116,9 @@ export default function RegisterPage() {
     if (!/\d/.test(form.password))             { setError('Пароль должен содержать хотя бы одну цифру'); return }
     setLoading(true)
     try {
-      const res = await api.auth.register(form.email, form.name, form.password, refCode ?? undefined)
+      // LEGAL-PRELAUNCH-F2 (blocker #6): both consent checkboxes are already required above; send the
+      // explicit consent flag to the server so it records append-only evidence.
+      const res = await api.auth.register(form.email, form.name, form.password, refCode ?? undefined, agreed && agreedTerms)
       // The account exists either way. Whether a letter is actually on its way decides what this
       // screen is allowed to claim — telling someone to check an inbox we failed to write to is
       // what left sellers locked out of accounts they could not enter and could not recover.

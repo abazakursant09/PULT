@@ -62,6 +62,13 @@ class Settings(BaseSettings):
     smtp_from: str = ""
     smtp_starttls: bool = True
 
+    # ── Consent evidence (LEGAL-PRELAUNCH-F2, blocker #6) ─────────────────────
+    # SERVER-authoritative version tag for the document set shown at registration. The client never
+    # sends this — the backend stamps it into every consent_records row. Stable, <=16 chars. The real
+    # legal naming / versioning scheme REQUIRES RUSSIAN COUNSEL REVIEW; this is a technical marker only,
+    # NOT the DRAFT placeholder `[VERSION]`.
+    consent_doc_version: str = "2026-08-22.1"
+
     # ── Error tracking (Sentry) ───────────────────────────────────────────────
     # If set, backend errors are reported to Sentry. If empty, tracking is a
     # graceful no-op — the app runs normally either way.

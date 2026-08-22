@@ -1,6 +1,8 @@
 from .user import User
 # Ownership boundary (F1.0) — workspace owns marketplace accounts and, later, evidence
 from .workspace import Workspace
+# LEGAL-PRELAUNCH-F2 (blocker #6) — append-only server-side registration/recovery consent evidence
+from .consent_record import ConsentRecord
 # External seller-cabinet identity (F1.1) — imported here so that the FK target of
 # marketplace_connections.marketplace_account_id is registered before that model loads
 from .marketplace_account import MarketplaceAccount

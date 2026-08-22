@@ -1,7 +1,7 @@
 import uuid
 import re
 from datetime import datetime
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, StrictBool, field_validator
 
 
 class UserRegister(BaseModel):
@@ -9,6 +9,12 @@ class UserRegister(BaseModel):
     name:     str
     password: str
     ref_code: str | None = None   # optional referral code from the inviter
+    # LEGAL-PRELAUNCH-F2 (blocker #6) — server-side consent gate. REQUIRED and STRICT: a missing field
+    # is a 422 (no endpoint mutation runs), and StrictBool rejects "true"/1/other truthy coercions so a
+    # non-boolean can never be silently read as True. `consent=false` parses, then the endpoint refuses
+    # it before creating/restoring the user. The client CANNOT send a timestamp or a document version —
+    # both are server-generated (consent_at / settings.consent_doc_version).
+    consent:  StrictBool
 
     @field_validator("password")
     @classmethod
