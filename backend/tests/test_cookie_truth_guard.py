@@ -123,6 +123,97 @@ def test_blocker_13_not_falsely_done_and_drafts_intact():
     assert "NOT READY" in _r(LEGAL / "launch-legal-checklist.md"), "launch gate must stay NOT READY"
 
 
+# --- cookie_consent localStorage payload shape (Correction-1) --------------------------------
+# These pin the exact object serialized into localStorage.cookie_consent, independently of any
+# frontend test run. The check is scoped to the object literal actually passed to
+# JSON.stringify(...) for the `cookie_consent` key (resolving the one-hop `const <id> = {...}`
+# indirection) plus its TS type alias — NOT a global word search over the component, so the
+# localStorage KEY name `cookie_consent` cannot itself trip the forbidden-field check.
+
+# A consent-shaped field would (falsely) imply the acknowledgement toggles optional processing.
+_CONSENT_FORBIDDEN_KEYS = (
+    "analytics",
+    "marketing",
+    "tracking",
+    "advertising",
+    "personalization",
+    "consent",
+    "consented",
+    "optin",
+    "opt_in",
+)
+
+
+def _object_keys(literal_body: str) -> list[str]:
+    """Top-level object keys from a small `{ a: 1, b: x }` literal / type body (no nesting here)."""
+    return re.findall(r"(?:^|[{,;])\s*([A-Za-z_$][\w$]*)\s*[:?]", literal_body)
+
+
+def _consent_payload_and_type(banner: str) -> tuple[str, str]:
+    """Return (runtime object literal body, TS type body) for the cookie_consent payload.
+
+    Resolves `localStorage.setItem('cookie_consent', JSON.stringify(<id>))` -> `const <id>: <T> = {..}`
+    and, when the value is typed, the `type <T> = { .. }` alias. Fails loudly if the write is not a
+    JSON.stringify of a resolvable object literal (e.g. a raw string or a spread hides the shape)."""
+    m = re.search(
+        r"localStorage\.setItem\(\s*['\"]cookie_consent['\"]\s*,\s*JSON\.stringify\(\s*([A-Za-z_$][\w$]*)\s*\)\s*\)",
+        banner,
+    )
+    assert m, "cookie_consent must be written via localStorage.setItem('cookie_consent', JSON.stringify(<obj>))"
+    ident = m.group(1)
+    decl = re.search(
+        rf"\b(?:const|let|var)\s+{re.escape(ident)}\s*(?::\s*([A-Za-z_$][\w$]*))?\s*=\s*(\{{[^{{}}]*\}})",
+        banner,
+    )
+    assert decl, f"could not resolve the object literal bound to cookie_consent payload ({ident!r})"
+    type_name = decl.group(1)
+    literal_body = decl.group(2)
+    type_body = ""
+    if type_name:
+        tm = re.search(rf"\btype\s+{re.escape(type_name)}\s*=\s*(\{{[^{{}}]*\}})", banner)
+        type_body = tm.group(1) if tm else ""
+    return literal_body, type_body
+
+
+def test_cookie_consent_payload_shape_pinned():
+    banner = _r(BANNER)
+    literal_body, type_body = _consent_payload_and_type(banner)
+
+    literal_keys = _object_keys(literal_body)
+    assert "acknowledged" in literal_keys, "cookie_consent payload must keep the `acknowledged` field"
+    assert "timestamp" in literal_keys, "cookie_consent payload must keep the `timestamp` field"
+
+    # `acknowledged` is a plain acknowledgement flag, set true when the notice is dismissed.
+    assert re.search(r"\backnowledged\s*:\s*true\b", literal_body), (
+        "cookie_consent.acknowledged must be the literal `true` (acknowledgement, not a stored toggle)"
+    )
+
+    # No field may imply analytics / tracking / marketing / (fictional) consent processing.
+    for scope, keys in (("literal", literal_keys), ("type", _object_keys(type_body))):
+        lowered = {k.lower() for k in keys}
+        for bad in _CONSENT_FORBIDDEN_KEYS:
+            assert bad not in lowered, f"cookie_consent payload ({scope}) must not carry a `{bad}` field"
+
+    # When the value is typed, the type alias must agree with the runtime literal (no drift).
+    if type_body:
+        type_keys = _object_keys(type_body)
+        assert "acknowledged" in type_keys and "timestamp" in type_keys, (
+            "cookie_consent type alias must declare exactly the acknowledged/timestamp contract"
+        )
+
+
+def test_cookie_notice_matches_consent_payload():
+    """The notice's cookie_consent description must name the real fields and no invented ones."""
+    n = _r(LEGAL / "cookie-notice.DRAFT.md")
+    line = next((ln for ln in n.splitlines() if "`cookie_consent`" in ln), "")
+    assert line, "cookie notice must document the cookie_consent localStorage key"
+    low = line.lower()
+    assert "acknowledged" in low, "notice must describe the cookie_consent `acknowledged` field"
+    assert "timestamp" in low, "notice must describe the cookie_consent `timestamp` field"
+    for bad in ("analytics", "marketing", "tracking", "advertising", "personalization"):
+        assert bad not in low, f"notice must not describe a `{bad}` field on cookie_consent"
+
+
 def test_live_domain_and_runtime_unchanged():
     cfg = _r(CONFIG)
     assert 'frontend_url: str = "http://localhost:3000"' in cfg, "app origin must stay localhost"
