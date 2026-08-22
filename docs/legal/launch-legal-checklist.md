@@ -19,7 +19,7 @@
 | 9 | Процедура запросов субъектов (доступ/исправление/блокирование/выгрузка/удаление) | нет self-service; экспорт не найден | BLOCKED | developer + lawyer | нет | **да** | да |
 | 10 | Incident response (в т.ч. уведомление РКН об инцидентах) | процедуры нет в документах | BLOCKED | lawyer + Inal | нет | **да** | да |
 | 11 | SMTP agreement + география данных | provider не выбран; в dev письмо логируется | BLOCKED | Inal + mail | рекомендуется | **да** | да |
-| 12 | Устранить публичный промис «логи ≤ 90 дней» или реализовать TTL | claim `privacy:116`; sweep не найден | BLOCKED | developer | рекомендуется | **да** | да |
+| 12 | Устранить публичный промис «логи ≤ 90 дней» (или реализовать enforced TTL) | недоказанный публичный срок «≤90 дней» удалён из privacy-страницы **IMPLEMENTED** (LEGAL-PRELAUNCH-E2, `frontend/app/privacy/page.tsx`); enforced rotation/deletion/max-age в коде отсутствуют (логи → stdout/stderr, `backend/main.py:10`); реальная настройка retention = FUTURE-INFRA, operational-блокер #25 | PARTIAL | developer | рекомендуется | **да** | да |
 | 13 | Убрать фиктивные cookie `bp_session`/`bp_analytics` из баннера или подкрепить реализацией | фиктивные cookie удалены, баннер не ставит JS-cookie, текст исправлен **IMPLEMENTED** (LEGAL-PRELAUNCH-C2, `CookieBanner.tsx`); юр. квалификация cookie/необходимость consent — REQUIRES COUNSEL | PARTIAL | developer + lawyer | рекомендуется | **да** | да |
 | 14 | Удалить отслеживаемые CSV из Git + запретить повтор | current-tree cleanup + recursive ignore + guard **IMPLEMENTED** (LEGAL-PRELAUNCH-C1); историческая экспозиция OPEN (см. #24) | PARTIAL | developer + security counsel | **да** | да | да |
 | 15 | Тарифы / возвраты / онлайн-касса / чеки по 54-ФЗ | не определены; оферта — каркас | BLOCKED | Inal + lawyer | нет | нет | **да** |
@@ -36,7 +36,7 @@
 
 ## Минимальные блокеры до первой оплаты
 
-Mail Gate (#1) → реквизиты (#2) → поручение Selectel + локализация (#3) → УЗ+модель угроз (#4) → решение по РКН (#5) → server-side consent (#6) → hard-delete/anonymization (#7) → retention (#8) → процедура запросов субъектов (#9) → incident response (#10) → SMTP agreement + география (#11) → устранить промис «логи ≤90 дней» или реализовать TTL (#12) → убрать фиктивные `bp_session`/`bp_analytics` (#13) → удалить два отслеживаемых CSV из Git (#14) → тарифы/возвраты/касса/чеки (#15) → ЮKassa (#16) → финальная оферта (#17) → SMTP/application-log: убрать email+exc из логов (#22, IMPLEMENTED) → retention/access для логов (#25) → official-source verification (#23) → review юриста РФ (#21).
+Mail Gate (#1) → реквизиты (#2) → поручение Selectel + локализация (#3) → УЗ+модель угроз (#4) → решение по РКН (#5) → server-side consent (#6) → hard-delete/anonymization (#7) → retention (#8) → процедура запросов субъектов (#9) → incident response (#10) → SMTP agreement + география (#11) → устранить недоказанный промис «логи ≤90 дней» (#12, скорректировано; enforced TTL/retention → #25) → убрать фиктивные `bp_session`/`bp_analytics` (#13) → удалить два отслеживаемых CSV из Git (#14) → тарифы/возвраты/касса/чеки (#15) → ЮKassa (#16) → финальная оферта (#17) → SMTP/application-log: убрать email+exc из логов (#22, IMPLEMENTED) → retention/access для логов (#25) → official-source verification (#23) → review юриста РФ (#21).
 
 ## Резюме
 
