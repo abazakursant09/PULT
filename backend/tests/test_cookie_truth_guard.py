@@ -149,17 +149,39 @@ def _object_keys(literal_body: str) -> list[str]:
     return re.findall(r"(?:^|[{,;])\s*([A-Za-z_$][\w$]*)\s*[:?]", literal_body)
 
 
-def _consent_payload_and_type(banner: str) -> tuple[str, str]:
-    """Return (runtime object literal body, TS type body) for the cookie_consent payload.
+# Any localStorage write to the cookie_consent key, independent of the value form (so a rogue
+# second write is COUNTED even if it is not a JSON.stringify(<id>)). Tolerates ' or " quotes and
+# formatter whitespace/newlines around the arguments. Deliberately does NOT match getItem reads or
+# historical prose — only a real `localStorage.setItem(<quote>cookie_consent<quote>,` call.
+_CONSENT_WRITE_RE = re.compile(
+    r"""localStorage\s*\.\s*setItem\(\s*['"]cookie_consent['"]\s*,""",
+    re.S,
+)
 
-    Resolves `localStorage.setItem('cookie_consent', JSON.stringify(<id>))` -> `const <id>: <T> = {..}`
-    and, when the value is typed, the `type <T> = { .. }` alias. Fails loudly if the write is not a
-    JSON.stringify of a resolvable object literal (e.g. a raw string or a spread hides the shape)."""
-    m = re.search(
-        r"localStorage\.setItem\(\s*['\"]cookie_consent['\"]\s*,\s*JSON\.stringify\(\s*([A-Za-z_$][\w$]*)\s*\)\s*\)",
-        banner,
+
+def _consent_payload_and_type(banner: str) -> tuple[str, str]:
+    """Return (runtime object literal body, TS type body) for the SINGLE cookie_consent payload.
+
+    Fail-closed on ambiguity: there must be EXACTLY ONE localStorage.setItem write to
+    `cookie_consent` (0 -> missing, 2+ -> ambiguous, so a rogue/duplicate second write cannot hide
+    a forbidden payload behind the first). That one write must be `JSON.stringify(<id>)` resolving
+    to a single flat object literal `const <id>: <T> = {..}`; the `type <T> = { .. }` alias is also
+    returned when used. Any other value form (raw string, spread, nesting) fails loudly."""
+    writes = _CONSENT_WRITE_RE.findall(banner)
+    assert len(writes) != 0, "no localStorage.setItem('cookie_consent', ...) write found in the banner"
+    assert len(writes) == 1, (
+        f"ambiguous: exactly one cookie_consent write is allowed, found {len(writes)} "
+        "(a second/duplicate setItem could smuggle a forbidden payload past the shape check)"
     )
-    assert m, "cookie_consent must be written via localStorage.setItem('cookie_consent', JSON.stringify(<obj>))"
+    m = re.search(
+        r"localStorage\s*\.\s*setItem\(\s*['\"]cookie_consent['\"]\s*,\s*JSON\.stringify\(\s*([A-Za-z_$][\w$]*)\s*\)\s*\)",
+        banner,
+        re.S,
+    )
+    assert m, (
+        "malformed cookie_consent write: the single write must be "
+        "localStorage.setItem('cookie_consent', JSON.stringify(<obj>))"
+    )
     ident = m.group(1)
     decl = re.search(
         rf"\b(?:const|let|var)\s+{re.escape(ident)}\s*(?::\s*([A-Za-z_$][\w$]*))?\s*=\s*(\{{[^{{}}]*\}})",
