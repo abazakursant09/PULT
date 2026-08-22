@@ -256,4 +256,4 @@ def test_body_forbids_extra_fields():
 def test_single_head_is_rob():
     from alembic.config import Config
     from alembic.script import ScriptDirectory
-    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["rob1a2b3c4d01"]
+    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["csr1a2b3c4d01"]

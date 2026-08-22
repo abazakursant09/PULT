@@ -6,7 +6,7 @@
 set -eu
 : "${PGHOST:?}"; : "${PGDATABASE:?}"; : "${PGUSER:?}"
 if [ -n "${PGPASSWORD_FILE:-}" ]; then PGPASSWORD="$(cat "$PGPASSWORD_FILE")"; export PGPASSWORD; fi
-EXPECTED_ALEMBIC_HEAD="${EXPECTED_ALEMBIC_HEAD:-rob1a2b3c4d01}"
+EXPECTED_ALEMBIC_HEAD="${EXPECTED_ALEMBIC_HEAD:-csr1a2b3c4d01}"
 : "${EXPECTED_SCHEMA_SHA:?}"; : "${EXPECTED_USERS_COUNT:?}"; : "${EXPECTED_USERS_CKSUM:?}"
 q() { psql -tAc "$1"; }
 fail() { echo "integrity FAIL: $1" >&2; exit 1; }

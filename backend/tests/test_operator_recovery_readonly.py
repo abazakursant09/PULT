@@ -250,4 +250,4 @@ def test_router_not_added_to_broad_csrf_exemption():
 def test_alembic_single_head_is_rop():
     from alembic.config import Config
     from alembic.script import ScriptDirectory
-    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["rob1a2b3c4d01"]
+    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["csr1a2b3c4d01"]
