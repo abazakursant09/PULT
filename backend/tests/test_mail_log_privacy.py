@@ -8,7 +8,6 @@ through every path and asserted absent from the captured logs.
 from __future__ import annotations
 
 import asyncio
-import logging
 import smtplib
 import ssl
 
@@ -41,36 +40,68 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-def _assert_clean(caplog):
-    blob = caplog.text
+class _StubLog:
+    """A capturing stand-in for the mailer's module logger.
+
+    We replace `services.email.log` outright rather than capture through the logging framework
+    (pytest's `caplog`, or a handler on the real logger): in the full suite another test can leave the
+    global logging state suppressed (`logging.disable`, a raised root level, `propagate=False`, a
+    `disabled` logger), which silently empties any framework-based capture. Substituting the logger
+    object records exactly the (message, args) the mailer passes — which is the whole leak surface — and
+    is immune to global logging state. Every level renders `msg % args` the way logging would."""
+
+    def __init__(self) -> None:
+        self.messages: list[str] = []
+
+    def _cap(self, msg, *args, **kwargs) -> None:
+        try:
+            self.messages.append(msg % args if args else str(msg))
+        except Exception:  # pragma: no cover - defensive; a bad format still records the raw msg
+            self.messages.append(str(msg))
+
+    # All the levels the mailer might use (incl. exception(), in case a regression introduces it).
+    debug = info = warning = error = critical = exception = _cap
+
+    @property
+    def text(self) -> str:
+        return "\n".join(self.messages)
+
+
+@pytest.fixture
+def maillog(monkeypatch):
+    stub = _StubLog()
+    monkeypatch.setattr(email, "log", stub)
+    return stub
+
+
+def _assert_clean(cap):
+    blob = cap.text
     for token in _ALL_HOSTILE:
         assert token not in blob, f"hostile marker leaked into logs: {token!r}"
 
 
 # --- send_email: smtp not configured -------------------------------------------------------------
-def test_not_configured_logs_no_pii(monkeypatch, caplog):
+def test_not_configured_logs_no_pii(monkeypatch, maillog):
     monkeypatch.setattr(email.settings, "smtp_host", "", raising=False)
-    with caplog.at_level(logging.DEBUG, logger="services.email"):
-        result = _run(send_email(H_TO, H_SUBJECT, H_BODY))
+    result = _run(send_email(H_TO, H_SUBJECT, H_BODY))
     assert result is False  # return contract unchanged
-    _assert_clean(caplog)
-    assert "email_not_sent" in caplog.text
-    assert "smtp_not_configured" in caplog.text
+    _assert_clean(maillog)
+    assert "email_not_sent" in maillog.text
+    assert "smtp_not_configured" in maillog.text
 
 
 # --- send_email: success -------------------------------------------------------------------------
-def test_success_logs_no_recipient_subject_body(monkeypatch, caplog):
+def test_success_logs_no_recipient_subject_body(monkeypatch, maillog):
     monkeypatch.setattr(email.settings, "smtp_host", "smtp.example.test", raising=False)
 
     def _ok(to, subject, body):  # patched send: no network
         return None
 
     monkeypatch.setattr(email, "_send_sync", _ok)
-    with caplog.at_level(logging.DEBUG, logger="services.email"):
-        result = _run(send_email(H_TO, H_SUBJECT, H_BODY))
+    result = _run(send_email(H_TO, H_SUBJECT, H_BODY))
     assert result is True  # return contract unchanged
-    _assert_clean(caplog)
-    assert "email_sent" in caplog.text
+    _assert_clean(maillog)
+    assert "email_sent" in maillog.text
 
 
 # --- send_email: failure -> category, never raw exception ----------------------------------------
@@ -90,19 +121,18 @@ def test_success_logs_no_recipient_subject_body(monkeypatch, caplog):
         (ValueError(H_EXC), "unknown"),
     ],
 )
-def test_failure_logs_category_not_raw_exception(monkeypatch, caplog, exc, expected):
+def test_failure_logs_category_not_raw_exception(monkeypatch, maillog, exc, expected):
     monkeypatch.setattr(email.settings, "smtp_host", "smtp.example.test", raising=False)
 
     def _raise(to, subject, body):
         raise exc
 
     monkeypatch.setattr(email, "_send_sync", _raise)
-    with caplog.at_level(logging.DEBUG, logger="services.email"):
-        result = _run(send_email(H_TO, H_SUBJECT, H_BODY))
+    result = _run(send_email(H_TO, H_SUBJECT, H_BODY))
     assert result is False  # never raises, contract unchanged
-    _assert_clean(caplog)
-    assert "email_send_failed" in caplog.text
-    assert f"category={expected}" in caplog.text
+    _assert_clean(maillog)
+    assert "email_send_failed" in maillog.text
+    assert f"category={expected}" in maillog.text
 
 
 # --- classifier: pure, type-only, frozen allowlist -----------------------------------------------
