@@ -200,3 +200,116 @@ def test_every_future_email_line_marked_not_active():
                 assert "NOT ACTIVE" in line, (
                     f"{name}:{i} names a future pult-os.ru email without NOT ACTIVE on the same line: {line!r}"
                 )
+
+
+# ============================================================================
+# LEGAL-PRELAUNCH-E2 (blocker #12) — the unproven "logs ≤ 90 days" retention
+# promise is removed from the live privacy page; drafts reflect the proven state
+# (logs → stdout/stderr, no enforced rotation/deletion; real retention = #25).
+# ============================================================================
+
+PRIVACY_PAGE = REPO / "frontend" / "app" / "privacy" / "page.tsx"
+
+# A line is "about logs" if it mentions a log/journal term. Retention promise = such a line ALSO
+# stating a concrete duration. We scope the duration check to log-lines so unrelated durations
+# (e.g. the offer's "90 дней" subscription window, the "30 дней" deletion SLA) stay legal.
+_LOG_TERMS = ("журнал", "лог входа", "логи входа", "лог событий", "security log", "login log")
+# Concrete retention duration: a number followed by a day/month/hour unit (covers a CSV-TTL-style
+# "1 час" mixed onto a log line as well as day/month figures).
+_DURATION_RE = re.compile(r"\d+\s*(?:дн|дня|дней|сут|нед|мес|час|hour|hr|month|week|day)", re.IGNORECASE)
+
+
+def _privacy_log_lines() -> list[str]:
+    if not PRIVACY_PAGE.is_file():
+        return []
+    return [ln for ln in PRIVACY_PAGE.read_text(encoding="utf-8").splitlines()
+            if any(t in ln.lower() for t in _LOG_TERMS)]
+
+
+def test_e2_privacy_page_has_no_90day_log_promise():
+    # (1) No "≤90 days" (or any concrete duration) promise attached to a log line on the LIVE page.
+    for ln in _privacy_log_lines():
+        assert "90" not in ln, f"log-retention line must not promise 90 days: {ln!r}"
+
+
+def test_e2_privacy_page_has_no_other_concrete_log_duration():
+    # (4) No NEW unproven concrete retention figure smuggled onto a log line.
+    for ln in _privacy_log_lines():
+        m = _DURATION_RE.search(ln)
+        assert m is None, f"log-retention line must not state a concrete duration: {m.group(0)!r} in {ln!r}"
+
+
+def test_e2_unrelated_durations_still_allowed():
+    # (2) The check is scoped: it must NOT wipe legitimate non-log durations elsewhere on the page.
+    if PRIVACY_PAGE.is_file():
+        body = PRIVACY_PAGE.read_text(encoding="utf-8")
+        # the manual deletion SLA (30 дней) is a real, separate statement and must survive
+        assert "30 дней" in body, "unrelated deletion SLA must remain on the privacy page"
+
+
+def test_e2_privacy_page_keeps_security_log_purpose():
+    # (3) The truthful PURPOSE of security logs must remain (security + incident investigation).
+    lines = _privacy_log_lines()
+    assert lines, "privacy page must still describe security/login logs"
+    joined = " ".join(lines).lower()
+    assert "безопасност" in joined, "security-log purpose (security) must remain"
+    assert "инцидент" in joined, "security-log purpose (incident investigation) must remain"
+
+
+def test_e2_privacy_page_still_old_domain_and_no_prod_flip():
+    # dormancy: E2 is a copy correction, not a live-domain flip.
+    if PRIVACY_PAGE.is_file():
+        assert "biznes-pult.ru" in PRIVACY_PAGE.read_text(encoding="utf-8"), (
+            "E2 must not flip the live domain"
+        )
+
+
+def test_e2_blocker_12_partial_not_done():
+    # (5) #12 stays PARTIAL — promise removed, but enforced retention NOT implemented.
+    cells = _table_row("launch-legal-checklist.md", 12)
+    assert cells is not None and len(cells) >= 4, "blocker #12 row missing/malformed"
+    joined = " ".join(cells).lower()
+    assert "лог" in joined or "log" in joined, "#12 must be the log-retention blocker"
+    status = cells[3].upper()
+    assert "PARTIAL" in status, "#12 must be PARTIAL (copy corrected, enforcement still open)"
+    for bad in ("DONE", "READY", "VERIFIED", "CLOSED", "PASS"):
+        assert bad not in status, f"#12 must not be marked {bad} — enforced TTL is not implemented"
+
+
+def test_e2_blocker_25_still_open_and_separate():
+    # (6) #25 remains a separate OPEN operational blocker (retention/access/storage/deletion).
+    cells = _table_row("launch-legal-checklist.md", 25)
+    assert cells is not None and len(cells) >= 4, "blocker #25 row missing"
+    status = cells[3].upper()
+    assert "OPEN" in status or "BLOCKED" in status, "#25 must stay OPEN/BLOCKED"
+    for bad in ("DONE", "READY", "VERIFIED", "CLOSED", "PASS"):
+        assert bad not in status, f"#25 must not be marked {bad}"
+
+
+def test_e2_stdout_stderr_and_future_infra_documented():
+    # (7) Honest current logging state must be reflected in the evidence docs.
+    for name in ("personal-data-register.md", "source-evidence.md"):
+        body = _r(name)
+        assert "stdout/stderr" in body, f"{name} must state the real log destination (stdout/stderr)"
+        assert "#25" in body, f"{name} must point production retention to blocker #25"
+    chk = _r("launch-legal-checklist.md")
+    assert "FUTURE-INFRA" in chk, "checklist #12 must mark enforced retention as FUTURE-INFRA"
+
+
+def test_e2_launch_gate_still_not_ready():
+    # (8) Launch gate untouched.
+    assert "NOT READY" in _r("launch-legal-checklist.md"), "launch gate must stay NOT READY"
+
+
+def test_e2_draft_gate_preserved():
+    # (9) The corrected DRAFT still carries the publish gate.
+    assert "НЕ ПУБЛИКОВАТЬ" in _r("privacy-policy.DRAFT.md"), "privacy DRAFT must keep publish gate"
+
+
+def test_e2_stale_email_refs_removed_and_post302_contract_reflected():
+    # (10) Stale pre-#302 mailer line refs gone; post-#302 category-only contract reflected.
+    body = _r("privacy-policy.DRAFT.md")
+    assert "email.py:49,53,56" not in body, "stale pre-#302 email.py:49,53,56 reference must be removed"
+    assert "email_send_failed" in body, "post-#302 mail-log contract (category events) must be reflected"
+    # the false pre-#302 claim that the mailer logs recipient/subject must not remain as a present fact
+    assert "логирует адрес получателя (`to=`)" not in body, "pre-#302 'mailer logs recipient' fact is stale"

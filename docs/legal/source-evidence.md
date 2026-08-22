@@ -28,7 +28,7 @@
 | Все 8 automation/sync/recovery флагов = False; 2 dry-run = True | `backend/config.py:98,107,112,116,131,135,154,157,205,220` | OFF |
 | CSV orphan sweep активен: TTL 3600 с, интервал 15 мин, без флага | `backend/routers/csv_import.py:51-55,730-766`, `backend/tasks/uploads_cleanup.py:29,84`, `backend/tasks/scheduler.py:449,704-718` | IMPLEMENTED (active) |
 | Observation retention 180/30 дн — feature-flagged OFF | `backend/services/marketplace/retention/observation_sweep.py:43-44`, `backend/config.py:112,116` | OFF |
-| Публичный промис «логи ≤ 90 дней» — sweep в коде НЕ найден | claim `frontend/app/privacy/page.tsx:116`; реализация не найдена | UNKNOWN / промис без реализации |
+| Недоказанный публичный срок «логи ≤ 90 дней» удалён из privacy-страницы (LEGAL-PRELAUNCH-E2); application/security logs → stdout/stderr (`backend/main.py:10`), enforced rotation/deletion/max-age отсутствуют; production retention = FUTURE-INFRA (blocker #25) | `frontend/app/privacy/page.tsx`; `backend/main.py:10`; sweep не найден | промис скорректирован; enforced retention НЕ реализован |
 | Полное удаление «в течение 30 дней» — ручной SLA, не джоба | claim `frontend/app/privacy/page.tsx:113` | DOCUMENTED-ONLY |
 | Backups/PITR dormant (compose profiles), Object Lock не enabled | `docker-compose.backup.yml:1-14`, `docker-compose.pitr.yml:1-13`, `docs/backup-restore-policy.md:13-15,45-47,107-109` | dormant |
 | Base URL по умолчанию localhost; prod hard-fail при localhost | `backend/config.py:37-38,310-313` | dev default |
