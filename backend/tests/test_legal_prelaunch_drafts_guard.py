@@ -425,18 +425,20 @@ _ATTORNEY_LITERAL_FORBIDDEN = (
 # the next clause. Covers questions (?/ли/какой/…), obligation/future (должн/будет/необходимо/нужно),
 # infinitives (определить/обеспечить), negated/undecided/open, and "документ не утверждает …".
 _ATTORNEY_CLAUSE_META = re.compile(
-    r"\?|\bли\b|\bкак(?:ой|ая|ие|ое)\b|должн[аоы]?\b|\bбуд(?:ет|ут)\b|необходимо|нужно обеспечить|"
+    r"\?|\bли\b|\bкак(?:ой|ая|ие|ое)\b|долж(?:ен|на|но|ны)\b|\bбуд(?:ет|ут)\b|необходимо|нужно обеспечить|"
     r"определить|обеспечить|реализовать|исполнить|соблюсти|"
     r"не утвержда|не заявля|не делает|не трактуется|не принят|не устанавливается|не определяет|"
     r"не решён|не решен|остаётся открыт|остается открыт|не подтвержд|"
     r"не выполнен|не соблюд|не обеспечен|не реализован|не исполнен|не соответств|"
+    # negated DETERMINATION (participle) — "УЗ не установлено/не определён/…" is a disclaimer, not a verdict.
+    r"не установлен\w*|не определ[её]н\w*|не присвоен\w*|не утвержд[её]н\w*|"
     r"попрос|просьба|запрос(?!ов)|вопрос",
     re.IGNORECASE,
 )
 # Split a line into clauses on strong separators so each clause is judged on its own.
 _ATTORNEY_CLAUSE_SPLIT = re.compile(r"[.;:?!]|\s[—–-]\s")
 
-_UZ_SUBJECT = re.compile(r"УЗ|уровень защищённост|уровень защищенност", re.IGNORECASE)
+_UZ_SUBJECT = re.compile(r"УЗ|уровень защищённост|уровень защищенност|\bрешени\w*", re.IGNORECASE)
 # Completed PARTICIPLE forms only (определён/…), NOT the noun «определения» or infinitive «определить».
 _UZ_DONE = re.compile(
     r"определ[её]н(?:а|о|ы)?\b|установлен(?:а|о|ы)?\b|присвоен(?:а|о|ы)?\b|утвержд[её]н(?:а|о|ы)?\b",
@@ -448,12 +450,15 @@ _RKN_VERDICT = re.compile(
     r"обязательн\w*|обязан[аоы]?\b|требуется|не требуется|не нужно|освобожд\w*|подан[оа]|направлен[оа]|подача",
     re.IGNORECASE)
 _ATT_SUBJECT = re.compile(r"аттестаци", re.IGNORECASE)
-_ATT_VERDICT = re.compile(r"обязательн\w*|требуется|не требуется|освобожд\w*", re.IGNORECASE)
-# Compliance-fulfilled conclusion: a subject + a COMPLETED assertive verdict.
-_COMPLY_SUBJECT = re.compile(r"требовани\w*|соответстви\w*|\bмер[аы]\b|compliance|соблюд\w*|обязательн\w* мер",
-                            re.IGNORECASE)
+_ATT_VERDICT = re.compile(r"обязательн\w*|требуется|не требуется|не нужн\w*|освобожд\w*", re.IGNORECASE)
+# Compliance-fulfilled conclusion: a subject + a COMPLETED assertive verdict. Subject now also covers
+# оператора's DUTIES (обязанность/обязанности/duties); done also covers EN completion verbs.
+_COMPLY_SUBJECT = re.compile(
+    r"требовани\w*|соответстви\w*|\bмер[аы]\b|меры\b|compliance|соблюд\w*|обязанност\w*|duties",
+    re.IGNORECASE)
 _COMPLY_DONE = re.compile(
-    r"выполнен\w*|соблюден\w*|обеспечен\w*|реализован\w*|исполнен\w*|соответствует\b",
+    r"выполнен\w*|соблюден\w*|обеспечен\w*|реализован\w*|исполнен\w*|соответствует\b|"
+    r"fulfilled|completed|implemented|satisfied",
     re.IGNORECASE)
 
 
@@ -553,6 +558,16 @@ def test_attorney_conclusion_detector_flags_assertions():
         "правовые требования соблюдены",
         "все обязательные меры реализованы",
         "требования регулятора исполнены",
+        # GUARDFIX-3: operator DUTIES fulfilled + negated-determination boundary + more verdicts
+        "обязанности оператора исполнены",
+        "обязанности исполнены",
+        "обязанность выполнена",
+        "обязанности соблюдены",
+        "все обязанности исполнены",
+        "legal duties fulfilled",
+        "compliance duties completed",
+        "решение утверждено",
+        "аттестация не нужна",
     ):
         assert _attorney_conclusion_hits(s), f"detector must flag conclusion: {s!r}"
 
@@ -579,6 +594,16 @@ def test_attorney_conclusion_detector_allows_questions_and_disclaimers():
         "документ не утверждает, что требования выполнены",
         "соответствие не подтверждено",
         "вопрос соответствия остаётся открытым",
+        # GUARDFIX-3: negated determination + masc «должен» + duties-not-confirmed must stay allowed
+        "УЗ не установлено окончательно, юрист должен подтвердить",
+        "УЗ не определён, юрист должен определить его",
+        "уровень не присвоен",
+        "решение не утверждено",
+        "требования не установлены",
+        "обязанности оператора не подтверждены",
+        "исполнение обязанностей будет проверено юристом",
+        "должен ли оператор уведомлять РКН?",
+        "какие обязанности должен подтвердить юрист?",
     ):
         assert _attorney_conclusion_hits(s) == [], f"detector must NOT flag a question/disclaimer: {s!r}"
 
