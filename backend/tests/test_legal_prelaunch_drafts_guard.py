@@ -313,3 +313,82 @@ def test_e2_stale_email_refs_removed_and_post302_contract_reflected():
     assert "email_send_failed" in body, "post-#302 mail-log contract (category events) must be reflected"
     # the false pre-#302 claim that the mailer logs recipient/subject must not remain as a present fact
     assert "логирует адрес получателя (`to=`)" not in body, "pre-#302 'mailer logs recipient' fact is stale"
+
+
+# ============================================================================
+# LEGAL-PRELAUNCH-G1 (blocker #23, developer slice) — every 149-ФЗ mention in
+# docs/legal carries an UNVERIFIED / counsel-review caveat; no doc asserts the
+# law's applicability; #23 stays UNKNOWN; source-evidence stays the status source.
+# ============================================================================
+
+_149_RE = re.compile(r"149-?\s?ФЗ|Федеральный закон[^\n]{0,6}149", re.IGNORECASE)
+# A file mentioning 149-ФЗ must ALSO carry a deferral/caveat marker (local or a pointer
+# to the single source of truth) — semantic, not line-pinned.
+_149_CAVEAT_MARKERS = ("UNVERIFIED", "official-source verification pending",
+                       "REQUIRES RUSSIAN COUNSEL", "юрист", "source-evidence", "#23")
+# Positive applicability / compliance claims that must NEVER appear for 149-ФЗ.
+_149_FORBIDDEN = (
+    "149-ФЗ применяется", "подпадает под 149", "подпадает под действие 149",
+    "соответствует требованиям 149", "соответствует 149-ФЗ",
+    "является организатором распространения", "не подпадает под 149",
+    "149-ФЗ не применяется",
+)
+
+
+def test_g1_149fz_every_mention_near_a_caveat():
+    # Per-occurrence, not per-file: a bare 149-ФЗ mention dropped far from any caveat must fail,
+    # even in a file that carries an unrelated marker elsewhere. Window ±3 lines is semantic,
+    # not a line-number contract.
+    found_any = False
+    for name in ALL_DOCS:
+        lines = _r(name).splitlines()
+        for i, ln in enumerate(lines):
+            if _149_RE.search(ln):
+                found_any = True
+                window = "\n".join(lines[max(0, i - 3):i + 4])
+                assert any(m in window for m in _149_CAVEAT_MARKERS), (
+                    f"{name}:{i + 1} — 149-ФЗ mention without a caveat marker within ±3 lines: {ln!r}"
+                )
+    assert found_any, "expected at least one 149-ФЗ mention in docs/legal"
+
+
+def test_g1_readme_149fz_caveat_has_all_markers():
+    # README lists 149-ФЗ among "Ключевые" acts, so it must carry the full caveat — checked WITHIN
+    # the caveat window (not anywhere in the body), so removing a marker from the caveat fails even
+    # if the same phrase survives elsewhere in README.
+    lines = _r("README.md").splitlines()
+    idx = next((i for i, ln in enumerate(lines)
+                if _149_RE.search(ln) and "UNVERIFIED" in "\n".join(lines[max(0, i - 3):i + 4])), None)
+    assert idx is not None, "README must carry a dedicated 149-ФЗ UNVERIFIED caveat"
+    window = "\n".join(lines[max(0, idx - 3):idx + 5])
+    assert "UNVERIFIED" in window, "README 149-ФЗ caveat must say UNVERIFIED"
+    assert ("official-source verification pending" in window or "не подтверждены" in window), (
+        "README 149-ФЗ caveat must state the source/edition is not confirmed"
+    )
+    assert "REQUIRES RUSSIAN COUNSEL REVIEW" in window, "README 149-ФЗ caveat must require RF counsel"
+
+
+def test_g1_source_evidence_keeps_149fz_unverified_status():
+    body = _r("source-evidence.md")
+    assert "149-ФЗ" in body
+    assert "UNVERIFIED" in body and "official-source verification pending" in body, (
+        "source-evidence must keep the single-source 149-ФЗ UNVERIFIED status"
+    )
+
+
+def test_g1_no_149fz_applicability_conclusion_anywhere():
+    for name in ALL_DOCS:
+        body = _r(name)
+        for bad in _149_FORBIDDEN:
+            assert bad not in body, f"{name} must not draw a 149-ФЗ applicability conclusion: {bad!r}"
+
+
+def test_g1_blocker_23_not_closed_and_gate_open():
+    chk = _r("launch-legal-checklist.md")
+    row = _table_row("launch-legal-checklist.md", 23)
+    assert row is not None and len(row) >= 4, "#23 row missing"
+    status = row[3].upper()
+    for bad in ("CLOSED", "DONE", "FIXED", "PASS", "VERIFIED", "READY"):
+        assert bad not in status, f"#23 must stay open — not {bad}"
+    assert "UNKNOWN" in status or "BLOCKED" in status or "PARTIAL" in status, "#23 must remain a live blocker"
+    assert "NOT READY" in chk, "launch gate must stay NOT READY"
