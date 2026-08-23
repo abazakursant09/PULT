@@ -48,7 +48,7 @@
 |---|---|---|---|
 | Selectel | сервер, БД, резервные копии, S3 | **PLANNED / CONTRACT PENDING** (сервер не заказан, поручение не подписано, регионы не финализированы) | `docs/backup-restore-policy.md:19-21,56`; env-плейсхолдеры `docker-compose.backup.yml:33-40` |
 | SMTP-провайдер | имя, email, verification/reset link | **PLANNED** (в dev письмо логируется; provider не зафиксирован; в production обязателен) | `config.py:58-63,308-309`, `services/email.py:25-50` |
-| Яндекс 360 (почта) | адреса поддержки/ПДн на pult-os.ru | **PLANNED / MAIL GATE PENDING** | настраивается Иналом отдельно |
+| Яндекс 360 (почта) | адреса поддержки/ПДн на pult-os.ru (support/privacy/security), dmarc@ — технический alias | **MAIL GATE PASS** — TECHNICALLY ACTIVE, но NOT PUBLICLY ACTIVATED (документы NOT PUBLISHED); 1 организация, 1 оплачиваемый ящик; application SMTP по-прежнему OFF (`config.py` `smtp_host` пуст) | инфраструктура почты настроена; поручение обработчику/публикация отдельно |
 | Telegram | chat ID и текст выбранных уведомлений | только по явному подключению; фактически OFF (пустой токен) | `services/telegram.py:11-19`, `config.py:41` |
 | Wildberries/Ozon/Яндекс Маркет | токены, cabinet IDs, запросы, разрешённые изменения | по подключению и scopes; ingest OFF (`api_data_sync_enabled=False`), execution OFF (`automation_enabled=False`) | `config.py:80-98,107` |
 | ЮKassa | сумма, назначение, идентификатор платежа | не включать до коммерческого launch; env-ключи не заданы | `config.py:71-73`, `payments.py:190` |
