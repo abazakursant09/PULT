@@ -410,16 +410,60 @@ _ATTORNEY_SECTIONS = (
     "защите прав потребителей",
     "## 14. Retention",
 )
-# Conclusions the package must NEVER state (it asks, it does not answer).
-_ATTORNEY_FORBIDDEN = (
+# --- forbidden legal conclusions: literal classes + SEMANTIC per-line classes -----------------
+# Literal conclusions (149-ФЗ / 54-ФЗ applicability, publish-readiness, #23 closure). These forms
+# never appear as questions in the package, so a plain substring check is safe.
+_ATTORNEY_LITERAL_FORBIDDEN = (
     "149-ФЗ применяется", "149-ФЗ не применяется",
     "54-ФЗ применяется", "54-ФЗ не применяется",
-    "УЗ установлен", "УЗ определён", "УЗ определен",
-    "уведомление РКН не требуется", "уведомление РКН обязательно",
-    "уведомление в Роскомнадзор не требуется",
     "готов к публикации", "готова к публикации", "готовы к публикации",
     "#23 CLOSED", "#23 DONE", "#23 FIXED", "blocker #23 закрыт",
 )
+
+# A line is a QUESTION or a META-disclaimer (not a conclusion) if it matches this. Such lines are
+# skipped by the semantic classes so "требуется ли уведомление?" / "УЗ не устанавливается" / "решение
+# не принято" / "документ не утверждает, что …" stay allowed.
+_ATTORNEY_Q_OR_META = re.compile(
+    r"\?|\bли\b|\bкак(?:ой|ая|ие|ое)\b|должн[аоы]?\b|определить|"
+    r"не утвержда|не заявля|не делает|не трактуется|не принят|не устанавливается|"
+    r"не определяет|не решён|не решен|попрос|просьба|запрос(?!ов)|вопрос",
+    re.IGNORECASE,
+)
+# Assertive-completion verbs for УЗ, and the УЗ subject. Both must be on the same (non-question) line.
+_UZ_SUBJECT = re.compile(r"УЗ|уровень защищённост|уровень защищенност", re.IGNORECASE)
+# Completed PARTICIPLE forms only (определён/определена/…), NOT the noun «определения» or the
+# infinitive «определить» — those are question/obligation wording, not a decision.
+_UZ_DONE = re.compile(
+    r"определ[её]н(?:а|о|ы)?\b|установлен(?:а|о|ы)?\b|присвоен(?:а|о|ы)?\b|утвержд[её]н(?:а|о|ы)?\b",
+    re.IGNORECASE,
+)
+# РКН notification conclusion: regulator token + notification word + an assertive verdict.
+_RKN_SUBJECT = re.compile(r"РКН|Роскомнадзор", re.IGNORECASE)
+_RKN_NOTIF = re.compile(r"уведомл", re.IGNORECASE)
+_RKN_VERDICT = re.compile(
+    r"обязательн\w*|не требуется|не нужно|освобожд\w*|подан[оа]|направлен[оа]|подача", re.IGNORECASE)
+# Аттестация conclusion.
+_ATT_SUBJECT = re.compile(r"аттестаци", re.IGNORECASE)
+_ATT_VERDICT = re.compile(r"обязательн\w*|не требуется|освобожд\w*", re.IGNORECASE)
+
+
+def _attorney_conclusion_hits(body: str) -> list[str]:
+    """Return forbidden legal-conclusion hits: literal matches + semantic per-line matches.
+    Question / meta-disclaimer lines are excluded so the package's questions stay legal."""
+    hits: list[str] = []
+    for lit in _ATTORNEY_LITERAL_FORBIDDEN:
+        if lit in body:
+            hits.append(lit)
+    for ln in body.splitlines():
+        if _ATTORNEY_Q_OR_META.search(ln):
+            continue
+        if _UZ_SUBJECT.search(ln) and _UZ_DONE.search(ln):
+            hits.append(f"УЗ determined: {ln.strip()[:70]}")
+        if _RKN_SUBJECT.search(ln) and _RKN_NOTIF.search(ln) and _RKN_VERDICT.search(ln):
+            hits.append(f"РКН notification verdict: {ln.strip()[:70]}")
+        if _ATT_SUBJECT.search(ln) and _ATT_VERDICT.search(ln):
+            hits.append(f"аттестация verdict: {ln.strip()[:70]}")
+    return hits
 
 
 def test_attorney_package_exists_with_gates():
@@ -452,9 +496,43 @@ def test_attorney_package_has_all_required_sections():
 
 
 def test_attorney_package_draws_no_legal_conclusion():
-    body = _r(_ATTORNEY)
-    for bad in _ATTORNEY_FORBIDDEN:
-        assert bad not in body, f"attorney package must not state a conclusion: {bad!r}"
+    hits = _attorney_conclusion_hits(_r(_ATTORNEY))
+    assert hits == [], f"attorney package must not state legal conclusions: {hits}"
+
+
+def test_attorney_conclusion_detector_flags_assertions():
+    # Positive controls: assertive conclusions the detector MUST flag (guard-hardening regression).
+    for s in (
+        "УЗ ПДн определён.",
+        "для ИСПДн установлен уровень защищённости.",
+        "для ИСПДн установлен УЗ-2.",
+        "уведомление Роскомнадзора не требуется.",
+        "уведомление Роскомнадзора обязательно.",
+        "уведомлять РКН не нужно.",
+        "подача уведомления в Роскомнадзор обязательна.",
+        "аттестация обязательна.",
+        "аттестация не требуется.",
+        "система освобождена от аттестации.",
+        "149-ФЗ применяется",
+        "54-ФЗ не применяется",
+    ):
+        assert _attorney_conclusion_hits(s), f"detector must flag conclusion: {s!r}"
+
+
+def test_attorney_conclusion_detector_allows_questions_and_disclaimers():
+    # Negative controls: questions / not-decided / meta-disclaimers must stay allowed (no false positive).
+    for s in (
+        "какой УЗ должен быть определён?",
+        "требуется ли уведомление Роскомнадзора?",
+        "обязательна ли аттестация?",
+        "решение по УЗ не принято",
+        "УЗ не устанавливается этим документом",
+        "документ не утверждает, что уведомление обязательно",
+        "требуется определить УЗ",
+        "юрист должен определить, требуется ли уведомление",
+        "вопрос об аттестации не решён",
+    ):
+        assert _attorney_conclusion_hits(s) == [], f"detector must NOT flag a question/disclaimer: {s!r}"
 
 
 def test_attorney_package_carries_no_requisites():
