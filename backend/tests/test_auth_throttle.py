@@ -129,9 +129,9 @@ def test_register_throttle_blocks():
     db = _run(_new_db())
     c = _client(db)
     for i in range(settings.auth_throttle_register_ip_limit):
-        c.post("/api/auth/register", json={"email": f"r{i}@b.c", "name": "N", "password": GOOD_PW},
+        c.post("/api/auth/register", json={"email": f"r{i}@b.c", "name": "N", "password": GOOD_PW, "consent": True},
                headers={"origin": ORIGIN})
-    r = c.post("/api/auth/register", json={"email": "over@b.c", "name": "N", "password": GOOD_PW},
+    r = c.post("/api/auth/register", json={"email": "over@b.c", "name": "N", "password": GOOD_PW, "consent": True},
                headers={"origin": ORIGIN})
     assert r.status_code == 429
 

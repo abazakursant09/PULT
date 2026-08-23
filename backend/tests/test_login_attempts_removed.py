@@ -107,7 +107,7 @@ def test_register_works_without_login_attempts_table(monkeypatch):
     db = _run(_new_db())
     c = _client(db)
     r = c.post("/api/auth/register",
-               json={"email": "new@b.c", "name": "N", "password": "Passw0rd"},
+               json={"email": "new@b.c", "name": "N", "password": "Passw0rd", "consent": True},
                headers={"origin": ORIGIN})
     assert r.status_code == 201
 
@@ -122,7 +122,7 @@ def test_auth_flows_do_not_log_email_or_ip(monkeypatch, caplog):
     with caplog.at_level(logging.DEBUG):
         c.post("/api/auth/login", json={"email": "log@b.c", "password": "wrong"},
                headers={"origin": ORIGIN, "x-forwarded-for": "203.0.113.55"})
-        c.post("/api/auth/register", json={"email": "reg@b.c", "name": "N", "password": "Passw0rd"},
+        c.post("/api/auth/register", json={"email": "reg@b.c", "name": "N", "password": "Passw0rd", "consent": True},
                headers={"origin": ORIGIN})
     app = [r.getMessage() for r in caplog.records
            if not r.name.startswith(("aiosqlite", "sqlalchemy", "asyncio"))]
