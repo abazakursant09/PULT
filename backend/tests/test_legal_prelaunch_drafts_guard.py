@@ -392,3 +392,73 @@ def test_g1_blocker_23_not_closed_and_gate_open():
         assert bad not in status, f"#23 must stay open — not {bad}"
     assert "UNKNOWN" in status or "BLOCKED" in status or "PARTIAL" in status, "#23 must remain a live blocker"
     assert "NOT READY" in chk, "launch gate must stay NOT READY"
+
+
+# ============================================================================
+# LEGAL-PRELAUNCH-#23-COUNSEL — attorney-review request package. Questions only,
+# no legal conclusions; #23 stays UNKNOWN; DRAFT / launch gate preserved.
+# ============================================================================
+
+_ATTORNEY = "attorney-review-request-23.md"
+_ATTORNEY_SECTIONS = (
+    "## 3. 152-ФЗ",
+    "Постановление Правительства РФ № 1119",
+    "Приказ ФСТЭК России № 21",
+    "## 7. Роскомнадзор и статья 22",
+    "## 8. 149-ФЗ",
+    "## 9. 54-ФЗ",
+    "защите прав потребителей",
+    "## 14. Retention",
+)
+# Conclusions the package must NEVER state (it asks, it does not answer).
+_ATTORNEY_FORBIDDEN = (
+    "149-ФЗ применяется", "149-ФЗ не применяется",
+    "54-ФЗ применяется", "54-ФЗ не применяется",
+    "УЗ установлен", "УЗ определён", "УЗ определен",
+    "уведомление РКН не требуется", "уведомление РКН обязательно",
+    "уведомление в Роскомнадзор не требуется",
+    "готов к публикации", "готова к публикации", "готовы к публикации",
+    "#23 CLOSED", "#23 DONE", "#23 FIXED", "blocker #23 закрыт",
+)
+
+
+def test_attorney_package_exists_with_gates():
+    body = _r(_ATTORNEY)
+    assert body.strip(), "attorney package must exist and be non-empty"
+    assert "DRAFT" in body, "attorney package must carry DRAFT"
+    assert "НЕ ПУБЛИКОВАТЬ" in body, "attorney package must carry НЕ ПУБЛИКОВАТЬ"
+    assert "ATTORNEY REVIEW REQUIRED" in body, "attorney package must be marked ATTORNEY REVIEW REQUIRED"
+    assert "NOT READY" in body, "attorney package must keep launch gate NOT READY"
+    assert "#23 = UNKNOWN" in body or "blocker #23 = UNKNOWN" in body, "#23 must stay UNKNOWN"
+
+
+def test_attorney_package_is_questions_not_conclusions():
+    body = _r(_ATTORNEY)
+    assert ("не юридическое заключение" in body or "НЕ юридическое заключение" in body
+            or "перечень ВОПРОСОВ" in body), "package must state it is questions, not a legal conclusion"
+    # honest record that primary-source verification failed from the environment
+    assert ("certificate/socket" in body or "certificate" in body.lower()), (
+        "package must honestly record the primary-source verification failure"
+    )
+    assert "REQUIRES RUSSIAN COUNSEL REVIEW" in body
+
+
+def test_attorney_package_has_all_required_sections():
+    body = _r(_ATTORNEY)
+    for sec in _ATTORNEY_SECTIONS:
+        assert sec in body, f"attorney package missing required section marker: {sec!r}"
+    assert "Формат ответа юриста" in body, "package must define the lawyer response format"
+    assert "Exit criteria" in body or "Exit-criteria" in body, "package must define #23 exit criteria"
+
+
+def test_attorney_package_draws_no_legal_conclusion():
+    body = _r(_ATTORNEY)
+    for bad in _ATTORNEY_FORBIDDEN:
+        assert bad not in body, f"attorney package must not state a conclusion: {bad!r}"
+
+
+def test_attorney_package_carries_no_requisites():
+    # No real ИНН/ОГРН/account (11+ digit run), no keys — requisites go to counsel outside Git.
+    body = _r(_ATTORNEY)
+    assert not re.search(r"\d{11,}", body), "no requisite-like long digit run in the attorney package"
+    assert "AKIA" not in body and "-----BEGIN" not in body, "no secret material in the attorney package"
