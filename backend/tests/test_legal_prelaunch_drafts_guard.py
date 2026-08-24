@@ -432,11 +432,14 @@ _ATTORNEY_CLAUSE_META = re.compile(
     r"не выполнен|не соблюд|не обеспечен|не реализован|не исполнен|не соответств|"
     # negated DETERMINATION (participle) — "УЗ не установлено/не определён/…" is a disclaimer, not a verdict.
     r"не установлен\w*|не определ[её]н\w*|не присвоен\w*|не утвержд[её]н\w*|"
+    # EN question / modal / negation — so EN duties/obligations questions & disclaimers stay allowed.
+    r"\bmust\b|\bshould\b|\bwhether\b|not fulfilled|not implemented|not completed|not satisfied|"
+    r"\bhave not\b|\bhas not\b|\bnot been\b|\bnot yet\b|"
     r"попрос|просьба|запрос(?!ов)|вопрос",
     re.IGNORECASE,
 )
 # Split a line into clauses on strong separators so each clause is judged on its own.
-_ATTORNEY_CLAUSE_SPLIT = re.compile(r"[.;:?!]|\s[—–-]\s")
+_ATTORNEY_CLAUSE_SPLIT = re.compile(r"([.;:?!]|\s[—–-]\s)")
 
 _UZ_SUBJECT = re.compile(r"УЗ|уровень защищённост|уровень защищенност|\bрешени\w*", re.IGNORECASE)
 # Completed PARTICIPLE forms only (определён/…), NOT the noun «определения» or infinitive «определить».
@@ -454,7 +457,7 @@ _ATT_VERDICT = re.compile(r"обязательн\w*|требуется|не тр
 # Compliance-fulfilled conclusion: a subject + a COMPLETED assertive verdict. Subject now also covers
 # оператора's DUTIES (обязанность/обязанности/duties); done also covers EN completion verbs.
 _COMPLY_SUBJECT = re.compile(
-    r"требовани\w*|соответстви\w*|\bмер[аы]\b|меры\b|compliance|соблюд\w*|обязанност\w*|duties",
+    r"требовани\w*|соответстви\w*|\bмер[аы]\b|меры\b|compliance|соблюд\w*|обязанност\w*|duties|obligation\w*",
     re.IGNORECASE)
 _COMPLY_DONE = re.compile(
     r"выполнен\w*|соблюден\w*|обеспечен\w*|реализован\w*|исполнен\w*|соответствует\b|"
@@ -471,8 +474,13 @@ def _attorney_conclusion_hits(body: str) -> list[str]:
         if lit in body:
             hits.append(lit)
     for ln in body.splitlines():
-        for clause in _ATTORNEY_CLAUSE_SPLIT.split(ln):
-            if not clause.strip() or _ATTORNEY_CLAUSE_META.search(clause):
+        # Split into clauses but KEEP the separators, so a clause that ENDS with "?" is still seen as a
+        # question (a "?" that were merely a split boundary would otherwise strip the interrogative signal).
+        parts = _ATTORNEY_CLAUSE_SPLIT.split(ln)
+        for idx in range(0, len(parts), 2):
+            clause = parts[idx]
+            trailing = parts[idx + 1] if idx + 1 < len(parts) else ""
+            if not clause.strip() or _ATTORNEY_CLAUSE_META.search(clause + trailing):
                 continue
             if _UZ_SUBJECT.search(clause) and _UZ_DONE.search(clause):
                 hits.append(f"УЗ determined: {clause.strip()[:70]}")
@@ -568,6 +576,11 @@ def test_attorney_conclusion_detector_flags_assertions():
         "compliance duties completed",
         "решение утверждено",
         "аттестация не нужна",
+        # GUARDFIX-4: EN «obligations» completion (parity with «duties»)
+        "legal obligations implemented",
+        "legal obligations fulfilled",
+        "compliance obligations completed",
+        "operator obligations satisfied",
     ):
         assert _attorney_conclusion_hits(s), f"detector must flag conclusion: {s!r}"
 
@@ -604,6 +617,13 @@ def test_attorney_conclusion_detector_allows_questions_and_disclaimers():
         "исполнение обязанностей будет проверено юристом",
         "должен ли оператор уведомлять РКН?",
         "какие обязанности должен подтвердить юрист?",
+        # GUARDFIX-4: EN obligations questions / modal / negation stay allowed
+        "are legal obligations fulfilled?",
+        "legal obligations must be fulfilled",
+        "legal obligations are not fulfilled",
+        "legal obligations have not been implemented",
+        "whether legal obligations are fulfilled",
+        "the lawyer must determine whether obligations are fulfilled",
     ):
         assert _attorney_conclusion_hits(s) == [], f"detector must NOT flag a question/disclaimer: {s!r}"
 
