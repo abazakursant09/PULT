@@ -4,7 +4,7 @@
 
 Дата инвентаризации: 21 августа 2026 года. База: `origin/master` на `5584cd6726cf9ec19ffd6523a614372b1368b304` (после DOMAIN-PREP pult-os.ru).
 
-Бренд: **Пульт OS**. Планируемый основной домен: **pult-os.ru**. Домен зарегистрирован и идентифицирован, но **сайт, DNS и корпоративная почта ещё НЕ активны**. До Mail Gate публиковать эти документы нельзя.
+Бренд: **Пульт OS**. Планируемый основной домен: **pult-os.ru**. Домен зарегистрирован и идентифицирован. **Mail Gate: PASS** — почтовые ящики технически работают (см. блок контактов ниже). Но **сайт, публичная website-DNS и TLS ещё НЕ активны**, live-domain swap не выполнялся, и эти документы **НЕ ОПУБЛИКОВАНЫ**. Работоспособность почты на уровне инфраструктуры **не** делает документы или контакты публично активированными.
 
 Этот каталог — рабочий комплект перед юридической проверкой. Он не активирует регистрацию, платежи, production, Selectel, Яндекс 360 или обработку данных реальных пользователей. Тексты — инженерно-юридические черновики, а не заключение юриста.
 
@@ -30,13 +30,20 @@
 
 ## Контакты для обращений субъектов ПДн
 
-До Mail Gate почтовые адреса **НЕ ACTIVE**:
+Mail Gate PASS: адреса технически работают, но **ещё не опубликованы как продуктовые контакты**:
 
-- `support@pult-os.ru` — **NOT ACTIVE**;
-- `privacy@pult-os.ru` — **NOT ACTIVE**;
-- `security@pult-os.ru` — **NOT ACTIVE**.
+- `support@pult-os.ru` — TECHNICALLY ACTIVE — DOCUMENT NOT PUBLISHED — NOT A PUBLIC PRODUCT CONTACT YET;
+- `privacy@pult-os.ru` — TECHNICALLY ACTIVE — DOCUMENT NOT PUBLISHED — NOT A PUBLIC PRODUCT CONTACT YET;
+- `security@pult-os.ru` — TECHNICALLY ACTIVE — DOCUMENT NOT PUBLISHED — NOT A PUBLIC PRODUCT CONTACT YET.
 
-Нельзя публиковать документ, ссылающийся на неработающий адрес для обращений субъекта ПДн. Старый адрес `hello@biznes-pult.ru` в новые документы Пульт OS не подставляется. Рабочий адрес фиксируется только после Mail Gate (настройка Яндекс 360 выполняется Иналом отдельно).
+Маршрутизация (для будущей активации, ещё не применена): `support@` — пользовательская поддержка;
+`privacy@` — вопросы ПДн; `security@` — сообщения об уязвимостях (security-vulnerability contact → **security@**,
+не support@). `dmarc@pult-os.ru` — **технический DMARC-alias только** (агрегированные отчёты), не пользовательский
+контакт; он не должен попадать в публикуемые документы или интерфейс.
+
+SECURITY-VULN CONTACT: security@pult-os.ru — NOT A PUBLIC PRODUCT CONTACT YET
+
+Публикация документа, ссылающегося на эти адреса как на действующие продуктовые контакты, всё ещё запрещена: адреса TECHNICALLY ACTIVE, но NOT PUBLICLY ACTIVATED. Старый адрес `hello@biznes-pult.ru` в новые документы Пульт OS не подставляется.
 
 ## Критические стопы перед публикацией
 
@@ -58,7 +65,9 @@
 
 - Расчётный счёт ИП открыт — подтверждено Иналом. Банковские реквизиты намеренно не записаны в Git и не переданы в чат; подставляются локально только в утверждённые оферту, счета и платёжные документы.
 - Selectel — **PLANNED / CONTRACT PENDING**: кандидат на production-инфраструктуру, сервер ещё не заказан, поручение не подписано.
-- Яндекс 360 — **PLANNED / MAIL GATE PENDING**: настраивается Иналом отдельно.
+- Яндекс 360 — **MAIL GATE PASS**: одна организация, один оплачиваемый ящик; support/privacy/security технически работают, dmarc@ — технический alias. Контакты TECHNICALLY ACTIVE, но NOT PUBLICLY ACTIVATED; публикация документов от этого не разблокируется.
+- Инвентарь внешних ресурсов: domains=1; Yandex 360 organizations=1; paid mailboxes/employees=1; public website DNS/TLS activation=0; application SMTP activation=0; production deployment=0.
+- application SMTP — **OFF** (`config.py` `smtp_host` пуст по умолчанию → mailer не отправляет).
 - production, платежи и launch gate — **OFF / NOT READY**.
 
 ## Нормативная опора
