@@ -6,7 +6,7 @@
 
 ## 1. Стороны и статус продукта
 
-Оператор сервиса «Пульт OS»: ИП Муратков Иналь Олегович, ИНН `[REQUIRES INAL — INSERT LOCALLY BEFORE PUBLICATION]`, ОГРНИП `[REQUIRES INAL — INSERT LOCALLY BEFORE PUBLICATION]`, адрес `[REQUIRES INAL — INSERT LOCALLY BEFORE PUBLICATION]`, email `support@pult-os.ru` (**NOT ACTIVE до Mail Gate**).
+Оператор сервиса «Пульт OS»: ИП Муратков Иналь Олегович, ИНН `[REQUIRES INAL — INSERT LOCALLY BEFORE PUBLICATION]`, ОГРНИП `[REQUIRES INAL — INSERT LOCALLY BEFORE PUBLICATION]`, адрес `[REQUIRES INAL — INSERT LOCALLY BEFORE PUBLICATION]`, email `support@pult-os.ru` (**Технически работает. Документ не опубликован. Адрес ещё не активирован как публичный контакт продукта.** — TECHNICALLY ACTIVE · DOCUMENT NOT PUBLISHED · NOT A PUBLIC PRODUCT CONTACT YET).
 
 На текущем этапе Пульт OS предоставляется как бесплатный Advisory MVP. Сервис анализирует предоставленные пользователем данные и формирует рекомендации. Платные тарифы, гарантированная автоматизация и production-исполнение действий не входят в это соглашение, пока не будут отдельно запущены и описаны.
 
@@ -50,7 +50,7 @@ MVP предоставляется «как есть» в допустимых �
 
 ## 10. Изменения и споры
 
-Существенные изменения сообщаются заранее. Продолжение использования не заменяет новое согласие, если закон требует отдельного подтверждения. Претензии направляются на `support@pult-os.ru` (**NOT ACTIVE до Mail Gate**); применимо право Российской Федерации.
+Существенные изменения сообщаются заранее. Продолжение использования не заменяет новое согласие, если закон требует отдельного подтверждения. Претензии направляются на `support@pult-os.ru` (**Технически работает. Документ не опубликован. Адрес ещё не активирован как публичный контакт продукта.** — TECHNICALLY ACTIVE · DOCUMENT NOT PUBLISHED · NOT A PUBLIC PRODUCT CONTACT YET); применимо право Российской Федерации.
 
 ---
 

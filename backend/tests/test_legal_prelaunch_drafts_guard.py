@@ -592,3 +592,93 @@ def test_security_vuln_contact_routes_to_security_not_support():
         assert "SECURITY-VULN CONTACT: support@" not in body, (
             f"{path.name} must not route the security-vulnerability contact to support@"
         )
+
+
+# ============================================================================
+# DOMAIN-MAIL-ACTIVATION-FOLLOWUP — the publishable DRAFT contact lines are
+# corrected from the stale pre-Mail-Gate "NOT ACTIVE до Mail Gate" wording to
+# the truthful post-Mail-Gate status: the mailbox is technically active, but the
+# DOCUMENT is NOT published and the address is NOT yet a public product contact.
+#
+# Per-file / per-contact-line — no repo-wide grep, no line-number pinning. A
+# correct token in a neighbouring file must NOT mask a defect in another file,
+# so every check reads each file on its own.
+# ============================================================================
+
+# Publishable DRAFT docs that carry a pult-os.ru mail-contact line.
+FOLLOWUP_CONTACT_DOCS = (
+    "privacy-policy.DRAFT.md",
+    "personal-data-consent.DRAFT.md",
+    "user-agreement.DRAFT.md",
+)
+
+# The truthful post-Mail-Gate semantics; each accepts the RU phrasing OR the
+# closed English status token, so alternative wording that keeps the meaning
+# stays GREEN.
+_TECH_ACTIVE = ("TECHNICALLY ACTIVE", "Технически работает")
+_NOT_PUBLISHED = ("DOCUMENT NOT PUBLISHED", "Документ не опубликован")
+_NOT_PUBLIC_CONTACT = ("NOT A PUBLIC PRODUCT CONTACT YET", "не активирован как публичный контакт")
+
+# The ПДн subject-rights contact in the privacy docs must stay privacy@, never support@.
+PRIVACY_ROUTED_DOCS = ("privacy-policy.DRAFT.md", "personal-data-consent.DRAFT.md")
+
+
+def _followup_contact_lines(name: str) -> list[str]:
+    return [ln for ln in _r(name).splitlines() if any(c in ln for c in MAIL_CONTACTS)]
+
+
+def test_followup_every_draft_contact_line_states_post_mail_gate_truth():
+    # Each mail-contact line in each publishable DRAFT must carry all three truths ON ITS OWN LINE.
+    for name in FOLLOWUP_CONTACT_DOCS:
+        lines = _followup_contact_lines(name)
+        assert lines, f"{name} must still carry a pult-os.ru mail-contact line"
+        for ln in lines:
+            assert any(m in ln for m in _TECH_ACTIVE), (
+                f"{name}: contact line missing technical-active status: {ln!r}"
+            )
+            assert any(m in ln for m in _NOT_PUBLISHED), (
+                f"{name}: contact line missing DOCUMENT-NOT-PUBLISHED status: {ln!r}"
+            )
+            assert any(m in ln for m in _NOT_PUBLIC_CONTACT), (
+                f"{name}: contact line missing NOT-A-PUBLIC-CONTACT status: {ln!r}"
+            )
+
+
+def test_followup_no_legacy_pre_mail_gate_wording_in_publishable_drafts():
+    # The stale pre-Mail-Gate wording must be gone from every publishable DRAFT.
+    for name in FOLLOWUP_CONTACT_DOCS:
+        body = _r(name)
+        assert "NOT ACTIVE до Mail Gate" not in body, f"{name} must drop the stale pre-Mail-Gate wording"
+        assert "MAIL GATE PENDING" not in body, f"{name} must not carry MAIL GATE PENDING"
+        assert "подставить рабочий адрес только после проверки почты" not in body, (
+            f"{name} must drop the stale 'wire the address only after mail check' instruction"
+        )
+
+
+def test_followup_draft_contacts_do_not_overclaim_public_activation():
+    # Truthful status must not tip over into a public-activation / live-site / production claim.
+    for name in FOLLOWUP_CONTACT_DOCS:
+        body = _r(name)
+        assert "PUBLICLY ACTIVE" not in body, f"{name} must not claim the contact is PUBLICLY ACTIVE"
+        assert "PUBLICLY ACTIVATED" not in body, f"{name} must not claim public activation"
+
+
+def test_followup_privacy_docs_route_subject_rights_to_privacy_not_support():
+    # Routing not confused: the ПДн subject-rights contact stays privacy@, never support@.
+    for name in PRIVACY_ROUTED_DOCS:
+        for ln in _followup_contact_lines(name):
+            assert "privacy@pult-os.ru" in ln, f"{name}: subject-rights contact must be privacy@: {ln!r}"
+            assert "support@pult-os.ru" not in ln, f"{name}: subject-rights contact must not be support@: {ln!r}"
+
+
+def test_followup_dmarc_alias_absent_from_updated_drafts():
+    # The technical dmarc@ alias must never leak into a publishable DRAFT.
+    for name in FOLLOWUP_CONTACT_DOCS:
+        assert DMARC_ALIAS not in _r(name), f"{name} must not carry the technical dmarc@ alias"
+
+
+def test_followup_draft_and_launch_gates_preserved():
+    # DRAFT publish gate stays on every edited doc; launch gate stays NOT READY.
+    for name in FOLLOWUP_CONTACT_DOCS:
+        assert "НЕ ПУБЛИКОВАТЬ" in _r(name), f"{name} must keep the publish gate"
+    assert "NOT READY" in _r("launch-legal-checklist.md"), "launch gate must stay NOT READY"
