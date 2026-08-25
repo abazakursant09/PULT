@@ -682,3 +682,49 @@ def test_followup_draft_and_launch_gates_preserved():
     for name in FOLLOWUP_CONTACT_DOCS:
         assert "НЕ ПУБЛИКОВАТЬ" in _r(name), f"{name} must keep the publish gate"
     assert "NOT READY" in _r("launch-legal-checklist.md"), "launch gate must stay NOT READY"
+
+
+# --- GUARDFIX: pin each publishable DRAFT's contact ADDRESS and contact-line COUNT ---
+#
+# Two review-confirmed completeness gaps are closed here:
+#   (1) routing was only pinned for the privacy docs — user-agreement could be
+#       silently misrouted support@ -> privacy@/security@ without a RED;
+#   (2) only "at least one truthful contact line" was required — dropping one of
+#       several redundant contact lines went unnoticed.
+#
+# Per-file / per-contact-line, data-driven. No line-number pinning, no repo-wide
+# grep. Every check reads each file on its own, so a correct value in a
+# neighbouring line or another document cannot mask a defect.
+
+# name -> (the ONLY pult-os.ru mail address allowed on that doc's contact lines,
+#          exact number of contact lines that doc must carry)
+FOLLOWUP_DOC_CONTRACT = {
+    "privacy-policy.DRAFT.md": ("privacy@pult-os.ru", 3),
+    "personal-data-consent.DRAFT.md": ("privacy@pult-os.ru", 1),
+    "user-agreement.DRAFT.md": ("support@pult-os.ru", 2),
+}
+
+
+def test_followup_each_draft_routes_to_its_designated_address():
+    # Every contact line in a doc must use that doc's designated address and must
+    # NOT carry either of the other two pult-os.ru addresses (no confusion, both
+    # directions — support<->privacy<->security).
+    for name, (want, _count) in FOLLOWUP_DOC_CONTRACT.items():
+        others = [c for c in MAIL_CONTACTS if c != want]
+        lines = _followup_contact_lines(name)
+        assert lines, f"{name} must carry a pult-os.ru mail-contact line"
+        for ln in lines:
+            assert want in ln, f"{name}: contact line must route to {want}: {ln!r}"
+            for other in others:
+                assert other not in ln, (
+                    f"{name}: contact line must not route to {other} (expected {want}): {ln!r}"
+                )
+
+
+def test_followup_each_draft_keeps_its_exact_contact_line_count():
+    # Dropping (or adding) a contact line in any publishable DRAFT must RED.
+    for name, (_want, count) in FOLLOWUP_DOC_CONTRACT.items():
+        got = len(_followup_contact_lines(name))
+        assert got == count, (
+            f"{name} must carry exactly {count} pult-os.ru contact line(s), found {got}"
+        )
