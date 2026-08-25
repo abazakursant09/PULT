@@ -41,6 +41,11 @@ ALL_DOCS = PUBLIC_DOCS + INTERNAL_DOCS
 
 MAIL_CONTACTS = ("support@pult-os.ru", "privacy@pult-os.ru", "security@pult-os.ru")
 
+# A mail-contact occurrence is honest if its line carries EITHER the legacy pre-Mail-Gate marker
+# ("NOT ACTIVE", still used by the out-of-scope DRAFT docs) OR the post-Mail-Gate marker
+# ("NOT A PUBLIC PRODUCT CONTACT YET" — technically active but not published as a product contact).
+CONTACT_STATUS_MARKERS = ("NOT ACTIVE", "NOT A PUBLIC PRODUCT CONTACT YET")
+
 
 def _r(name: str) -> str:
     return (LEGAL / name).read_text(encoding="utf-8")
@@ -67,11 +72,14 @@ def test_no_real_requisites_or_secrets():
 
 
 def test_mail_contacts_marked_not_active():
-    # Any doc that names a pult-os.ru mail contact must also flag NOT ACTIVE.
+    # Any doc that names a pult-os.ru mail contact must also flag its non-public status
+    # (legacy "NOT ACTIVE" or post-Mail-Gate "NOT A PUBLIC PRODUCT CONTACT YET").
     for name in ALL_DOCS:
         body = _r(name)
         if any(c in body for c in MAIL_CONTACTS):
-            assert "NOT ACTIVE" in body, f"{name} names a mail contact without NOT ACTIVE"
+            assert any(m in body for m in CONTACT_STATUS_MARKERS), (
+                f"{name} names a mail contact without a non-public status marker"
+            )
 
 
 def test_old_domain_not_reintroduced_in_public_docs():
@@ -193,12 +201,14 @@ def test_blocker_23_official_source_verification_is_a_live_blocker():
 # --- CORRECTION-2 / gap M8: EVERY future-email occurrence must carry NOT ACTIVE on its own line ---
 
 def test_every_future_email_line_marked_not_active():
-    # A file-level NOT ACTIVE is not enough: a second, unmarked address must not hide behind it.
+    # A file-level marker is not enough: a second, unmarked address must not hide behind it.
+    # Each contact line must carry a non-public status marker (legacy or post-Mail-Gate) on its own line.
     for name in ALL_DOCS:
         for i, line in enumerate(_r(name).splitlines(), 1):
             if any(c in line for c in MAIL_CONTACTS):
-                assert "NOT ACTIVE" in line, (
-                    f"{name}:{i} names a future pult-os.ru email without NOT ACTIVE on the same line: {line!r}"
+                assert any(m in line for m in CONTACT_STATUS_MARKERS), (
+                    f"{name}:{i} names a future pult-os.ru email without a non-public status marker "
+                    f"on the same line: {line!r}"
                 )
 
 
@@ -633,3 +643,250 @@ def test_attorney_package_carries_no_requisites():
     body = _r(_ATTORNEY)
     assert not re.search(r"\d{11,}", body), "no requisite-like long digit run in the attorney package"
     assert "AKIA" not in body and "-----BEGIN" not in body, "no secret material in the attorney package"
+
+
+# ============================================================================
+# DOMAIN-MAIL-DOCS-GUARD-FIRST — dormant mail-state correction fence.
+#
+# Mail Gate is PASS at the infrastructure layer, but nothing about the website,
+# the legal documents, or the public product contacts is activated. This fence
+# proves the dormant planning/evidence docs tell that exact truth and that the
+# technical `dmarc@` alias never leaks into a publishable document or a live page.
+#
+# Explicit allowlisted / forbidden FILE SETS (no repo-wide grep that would
+# collide with the legitimate planning docs).
+# ============================================================================
+
+# Planning / evidence docs where `dmarc@` and the applied DMARC state may appear.
+DMARC_ALLOWLISTED = (
+    REPO / "docs" / "dns-runbook-pult-os.md",
+    REPO / "docs" / "domain-migration-pult-os.md",
+    LEGAL / "README.md",
+    LEGAL / "source-evidence.md",
+    LEGAL / "personal-data-register.md",
+)
+
+# The two migration/DNS planning docs that must state the applied DMARC state + gates.
+MIGRATION_DOCS = (
+    REPO / "docs" / "dns-runbook-pult-os.md",
+    REPO / "docs" / "domain-migration-pult-os.md",
+)
+
+# Live-facing frontend pages — the technical dmarc@ alias must never appear here.
+LIVE_FRONTEND_PAGES = tuple(
+    REPO / "frontend" / "app" / p for p in (
+        "privacy/page.tsx", "terms/page.tsx", "offer/page.tsx", "agreement/page.tsx",
+        "rules/page.tsx", "support/page.tsx", "dashboard/account/page.tsx",
+    )
+)
+
+# `dmarc@` is FORBIDDEN in every publishable legal doc and every live-facing page.
+DMARC_FORBIDDEN = tuple(LEGAL / n for n in PUBLIC_DOCS) + LIVE_FRONTEND_PAGES
+
+DMARC_ALIAS = "dmarc@pult-os.ru"
+
+# Applied/current-state DMARC anchor + policy tokens (structural, not line-pinned). The APPLIED
+# policy line is the one asserting the state that is live now ("DMARC applied"); a p=none sitting
+# elsewhere in the doc must never mask a wrong applied policy, and a quarantine/reject value is only
+# legal on a clearly FUTURE / NOT-APPLIED / Inal-gated line.
+_DMARC_APPLIED_RE = re.compile(r"DMARC\s+applied", re.IGNORECASE)
+_P_NONE_RE = re.compile(r"p\s*=\s*none", re.IGNORECASE)
+_P_QUARANTINE_RE = re.compile(r"p\s*=\s*quarantine", re.IGNORECASE)
+_P_REJECT_RE = re.compile(r"p\s*=\s*reject", re.IGNORECASE)
+# Markers that make a NON-applied quarantine/reject mention legal (future/planned, gated, superseded).
+_DMARC_FUTURE_MARKERS = ("future", "not applied", "not enabled", "inal-gated", "inal gate",
+                         "superseded", "only after", "separate")
+
+
+def _read(path: Path) -> str | None:
+    return path.read_text(encoding="utf-8") if path.is_file() else None
+
+
+# --- 1/2. dmarc@ alias containment ------------------------------------------
+
+def test_dmarc_alias_absent_from_publishable_and_live_facing():
+    # (1) dmarc@ must not surface in any publishable legal doc or live-facing page.
+    for path in DMARC_FORBIDDEN:
+        body = _read(path)
+        if body is not None:
+            assert DMARC_ALIAS not in body, f"dmarc@ technical alias leaked into {path.name} ({path})"
+
+
+def test_dmarc_alias_only_in_allowlisted_dormant_docs():
+    # (2) dmarc@ is allowed ONLY in the explicitly allowlisted dormant planning/evidence files,
+    #     and it must actually be documented there as a technical alias.
+    documented = False
+    for path in DMARC_ALLOWLISTED:
+        body = _read(path)
+        if body and DMARC_ALIAS in body:
+            documented = True
+    assert documented, "dmarc@ must be documented as a technical alias in an allowlisted dormant doc"
+
+
+def test_dmarc_alias_marked_technical_only():
+    # dmarc@ where present in allowlisted docs must be marked technical / not a user contact.
+    for path in DMARC_ALLOWLISTED:
+        body = _read(path)
+        if body and DMARC_ALIAS in body:
+            low = body.lower()
+            assert ("технический" in low or "technical" in low) and (
+                "не пользовательский" in low or "not a public" in low or "never a public" in low
+                or "not a user" in low
+            ), f"{path.name} must mark dmarc@ as a technical-only, non-user contact"
+
+
+def test_attorney_document_has_no_dmarc_alias():
+    # CROSS-BYPASS fix (proven MISS, not a merge loss): the attorney package is a legal-review
+    # document, NOT a DMARC runbook — the technical dmarc@ aggregate alias must never appear in it.
+    # Narrow and fail-closed: only the attorney file is fenced here (infra/runbook docs keep their
+    # allowlist), and a missing file is RED. Not line-number pinned.
+    path = LEGAL / _ATTORNEY
+    assert path.is_file(), f"attorney package missing: {path}"
+    assert DMARC_ALIAS not in path.read_text(encoding="utf-8"), (
+        "technical dmarc@ alias must not leak into the attorney package"
+    )
+
+
+# --- 3. applied DMARC state in the planning docs ----------------------------
+
+def test_planning_docs_state_actual_dmarc_policy():
+    # (3) The planning docs must carry the ACTUAL applied DMARC state, not the stale runbook value.
+    for path in MIGRATION_DOCS:
+        body = _read(path)
+        assert body is not None, f"missing planning doc {path}"
+        assert "p=none" in body, f"{path.name} must state the applied DMARC policy p=none"
+        assert "rua=mailto:dmarc@pult-os.ru" in body, f"{path.name} must state rua=dmarc@ (not security@)"
+        assert "quarantine/reject" in body and "NOT ENABLED" in body, (
+            f"{path.name} must state quarantine/reject NOT ENABLED"
+        )
+        # unambiguous, mutation-resistant token (plain "monitoring"/"7" recur elsewhere in prose)
+        assert "DMARC MONITORING PERIOD: MIN 7 DAYS BEFORE ANY RAISE" in body, (
+            f"{path.name} must carry the canonical ≥7-day DMARC monitoring token"
+        )
+
+
+def test_planning_docs_reject_stale_dmarc_value():
+    # The exact stale applied value (p=quarantine + rua=security@) must not be presented as applied.
+    stale = "p=quarantine; rua=mailto:security@pult-os.ru"
+    for path in MIGRATION_DOCS:
+        body = _read(path) or ""
+        assert stale not in body, f"{path.name} must not carry the stale applied DMARC value {stale!r}"
+
+
+def test_applied_dmarc_policy_is_none_not_quarantine_or_reject():
+    # CROSS-BYPASS fix (proven MISS, not a merge loss): the earlier check was presence-only
+    # ("p=none" in body), so an applied policy flipped to p=quarantine/p=reject slipped through as
+    # long as a decoy p=none survived somewhere else. This locates the APPLIED/current-state line
+    # structurally and enforces the policy on THAT line; a stray p=none elsewhere cannot mask it.
+    # Future/planned quarantine stays legal only on a clearly FUTURE / NOT-APPLIED / gated line.
+    for path in MIGRATION_DOCS:
+        body = _read(path)
+        assert body is not None, f"missing planning doc {path}"        # fail-closed
+        lines = body.splitlines()
+        applied = [ln for ln in lines if _DMARC_APPLIED_RE.search(ln)]
+        assert applied, f"{path.name} must carry an explicit 'DMARC applied' policy line"  # fail-closed
+        for ln in applied:
+            assert _P_NONE_RE.search(ln), f"{path.name} applied DMARC policy must be p=none: {ln!r}"
+            assert not _P_QUARANTINE_RE.search(ln), (
+                f"{path.name} applied DMARC policy must NOT be p=quarantine: {ln!r}"
+            )
+            assert not _P_REJECT_RE.search(ln), (
+                f"{path.name} applied DMARC policy must NOT be p=reject: {ln!r}"
+            )
+        # A quarantine/reject value OFF the applied line is legal only when explicitly marked
+        # future / not-applied / gated / superseded within a small window (±3 lines).
+        for i, ln in enumerate(lines):
+            if _DMARC_APPLIED_RE.search(ln):
+                continue
+            if _P_QUARANTINE_RE.search(ln) or _P_REJECT_RE.search(ln):
+                window = " ".join(lines[max(0, i - 3):i + 4]).lower()
+                assert any(mk in window for mk in _DMARC_FUTURE_MARKERS), (
+                    f"{path.name}:{i + 1} quarantine/reject without a FUTURE/NOT-APPLIED/gated "
+                    f"marker within ±3 lines: {ln!r}"
+                )
+
+
+# --- 4. no false public-activation claim ------------------------------------
+
+def test_migration_docs_keep_not_performed_gates():
+    # (4) Planning docs must not imply the website / live swap / launch happened.
+    for path in MIGRATION_DOCS:
+        body = _read(path)
+        assert body is not None
+        assert "PUBLIC WEBSITE ACTIVATION: NOT PERFORMED" in body, f"{path.name} website-activation gate missing"
+        assert "LIVE DOMAIN SWAP: NOT PERFORMED" in body, f"{path.name} live-swap gate missing"
+        assert "legal documents NOT PUBLISHED" in body, f"{path.name} legal-not-published gate missing"
+        assert "application SMTP OFF" in body, f"{path.name} app-SMTP-OFF gate missing"
+        assert "launch gate NOT READY" in body, f"{path.name} launch-gate-not-ready gate missing"
+
+
+# --- 5. contacts technically active but not publicly activated ---------------
+
+CONTACT_STATUS_DOCS = (
+    REPO / "docs" / "domain-migration-pult-os.md",
+    LEGAL / "README.md",
+    LEGAL / "personal-data-register.md",
+)
+
+
+def test_contacts_marked_technically_active_not_publicly_activated():
+    # (5) support/privacy/security must be shown as technically active but NOT publicly activated.
+    for path in CONTACT_STATUS_DOCS:
+        body = _read(path)
+        assert body is not None, f"missing contact-status doc {path}"
+        assert "TECHNICALLY ACTIVE" in body, f"{path.name} must state contacts are TECHNICALLY ACTIVE"
+        assert ("NOT A PUBLIC PRODUCT CONTACT YET" in body or "NOT PUBLICLY ACTIVATED" in body), (
+            f"{path.name} must state contacts are NOT publicly activated"
+        )
+
+
+def test_no_stale_not_active_until_mail_gate_in_edited_docs():
+    # The stale "NOT ACTIVE до Mail Gate" phrasing must be gone from the docs corrected by this slice
+    # (it is only allowed to survive in the out-of-scope DRAFT public docs, not here).
+    for path in (LEGAL / "README.md", LEGAL / "personal-data-register.md",
+                 REPO / "docs" / "domain-migration-pult-os.md"):
+        body = _read(path) or ""
+        assert "NOT ACTIVE до Mail Gate" not in body, f"{path.name} must not keep the stale NOT-ACTIVE phrasing"
+
+
+# --- 6/7. launch gate + live domain ----------------------------------------
+
+def test_launch_gate_still_not_ready_in_readme():
+    # (6)
+    assert "NOT READY" in _r("README.md"), "README must keep launch gate NOT READY"
+
+
+def test_live_facing_pages_stay_old_domain():
+    # (7) live-facing pages remain on biznes-pult.ru (no live-domain swap performed).
+    checked = False
+    for path in LIVE_FRONTEND_PAGES:
+        body = _read(path)
+        if body is not None:
+            checked = True
+            assert "biznes-pult.ru" in body, f"{path.name} must stay on biznes-pult.ru (no swap)"
+            assert "pult-os.ru" not in body, f"{path.name} must not adopt pult-os.ru before activation"
+    assert checked, "expected at least one live-facing page to verify"
+
+
+# --- 8/9/10. runtime config untouched + app SMTP OFF ------------------------
+
+def test_runtime_config_localhost_no_pultos_and_smtp_off():
+    # (8) frontend_url localhost, (9) no pult-os.ru hardcoded, (10) application SMTP OFF.
+    cfg = CONFIG.read_text(encoding="utf-8")
+    assert 'frontend_url: str = "http://localhost:3000"' in cfg, "app origin must stay localhost"
+    assert "pult-os.ru" not in cfg, "no production domain hardcoded in config"
+    assert 'smtp_host: str = ""' in cfg, "application SMTP must stay OFF (empty smtp_host default)"
+
+
+# --- 12. security-vulnerability contact routes to security@, never support@ ---
+
+def test_security_vuln_contact_routes_to_security_not_support():
+    for path in (REPO / "docs" / "domain-migration-pult-os.md", LEGAL / "README.md"):
+        body = _read(path)
+        assert body is not None, f"missing routing doc {path}"
+        assert "SECURITY-VULN CONTACT: security@pult-os.ru" in body, (
+            f"{path.name} must route the security-vulnerability contact to security@"
+        )
+        assert "SECURITY-VULN CONTACT: support@" not in body, (
+            f"{path.name} must not route the security-vulnerability contact to support@"
+        )
