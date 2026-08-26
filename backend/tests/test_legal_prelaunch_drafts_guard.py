@@ -42,9 +42,46 @@ ALL_DOCS = PUBLIC_DOCS + INTERNAL_DOCS
 MAIL_CONTACTS = ("support@pult-os.ru", "privacy@pult-os.ru", "security@pult-os.ru")
 
 # A mail-contact occurrence is honest if its line carries EITHER the legacy pre-Mail-Gate marker
-# ("NOT ACTIVE", still used by the out-of-scope DRAFT docs) OR the post-Mail-Gate marker
-# ("NOT A PUBLIC PRODUCT CONTACT YET" — technically active but not published as a product contact).
-CONTACT_STATUS_MARKERS = ("NOT ACTIVE", "NOT A PUBLIC PRODUCT CONTACT YET")
+# ("NOT ACTIVE", still used by the out-of-scope DRAFT docs) OR a post-Mail-Gate marker in EN/RU.
+# Keep one shared, case-insensitive predicate so the legacy and follow-up guards cannot disagree.
+_LEGACY_CONTACT_STATUS_MARKERS = ("NOT ACTIVE",)
+_POST_MAIL_GATE_CONTACT_STATUS_MARKERS = (
+    "NOT A PUBLIC PRODUCT CONTACT YET",
+    "не активирован как публичный контакт",
+)
+CONTACT_STATUS_MARKERS = _LEGACY_CONTACT_STATUS_MARKERS + _POST_MAIL_GATE_CONTACT_STATUS_MARKERS
+
+
+def _contains_casefold(text: str, markers: tuple[str, ...]) -> bool:
+    folded = text.casefold()
+    return any(marker.casefold() in folded for marker in markers)
+
+
+def _has_truthful_contact_status(text: str, *, allow_legacy: bool = True) -> bool:
+    markers = _POST_MAIL_GATE_CONTACT_STATUS_MARKERS
+    if allow_legacy:
+        markers = _LEGACY_CONTACT_STATUS_MARKERS + markers
+    return _contains_casefold(text, markers)
+
+
+_PUBLIC_ACTIVATION_CLAIMS = (
+    re.compile(r"\bpublicly\s+activ(?:e|ated)\b", re.IGNORECASE),
+    re.compile(r"\bpublic\s+product\s+contact\s+is\s+active\b", re.IGNORECASE),
+    re.compile(r"\bпублично\s+активирован\w*\b", re.IGNORECASE),
+    re.compile(r"\bактивирован\w*\s+как\s+публичн\w*\s+контакт\w*\b", re.IGNORECASE),
+)
+_PUBLIC_ACTIVATION_NEGATIONS = ("not ", "not yet ", "не ", "ещё не ")
+
+
+def _has_public_activation_overclaim(text: str) -> bool:
+    folded = " ".join(text.casefold().split())
+    for pattern in _PUBLIC_ACTIVATION_CLAIMS:
+        for match in pattern.finditer(folded):
+            prefix = folded[max(0, match.start() - 12):match.start()]
+            if any(prefix.endswith(negation) for negation in _PUBLIC_ACTIVATION_NEGATIONS):
+                continue
+            return True
+    return False
 
 
 def _r(name: str) -> str:
@@ -77,7 +114,7 @@ def test_mail_contacts_marked_not_active():
     for name in ALL_DOCS:
         body = _r(name)
         if any(c in body for c in MAIL_CONTACTS):
-            assert any(m in body for m in CONTACT_STATUS_MARKERS), (
+            assert _has_truthful_contact_status(body), (
                 f"{name} names a mail contact without a non-public status marker"
             )
 
@@ -206,7 +243,7 @@ def test_every_future_email_line_marked_not_active():
     for name in ALL_DOCS:
         for i, line in enumerate(_r(name).splitlines(), 1):
             if any(c in line for c in MAIL_CONTACTS):
-                assert any(m in line for m in CONTACT_STATUS_MARKERS), (
+                assert _has_truthful_contact_status(line), (
                     f"{name}:{i} names a future pult-os.ru email without a non-public status marker "
                     f"on the same line: {line!r}"
                 )
@@ -889,4 +926,174 @@ def test_security_vuln_contact_routes_to_security_not_support():
         )
         assert "SECURITY-VULN CONTACT: support@" not in body, (
             f"{path.name} must not route the security-vulnerability contact to support@"
+        )
+
+
+# ============================================================================
+# DOMAIN-MAIL-ACTIVATION-FOLLOWUP — the publishable DRAFT contact lines are
+# corrected from the stale pre-Mail-Gate "NOT ACTIVE до Mail Gate" wording to
+# the truthful post-Mail-Gate status: the mailbox is technically active, but the
+# DOCUMENT is NOT published and the address is NOT yet a public product contact.
+#
+# Per-file / per-contact-line — no repo-wide grep, no line-number pinning. A
+# correct token in a neighbouring file must NOT mask a defect in another file,
+# so every check reads each file on its own.
+# ============================================================================
+
+# Publishable DRAFT docs that carry a pult-os.ru mail-contact line.
+FOLLOWUP_CONTACT_DOCS = (
+    "privacy-policy.DRAFT.md",
+    "personal-data-consent.DRAFT.md",
+    "user-agreement.DRAFT.md",
+)
+
+# The truthful post-Mail-Gate semantics; each accepts the RU phrasing OR the
+# closed English status token, so alternative wording that keeps the meaning
+# stays GREEN.
+_TECH_ACTIVE = ("TECHNICALLY ACTIVE", "Технически работает")
+_NOT_PUBLISHED = ("DOCUMENT NOT PUBLISHED", "Документ не опубликован")
+_NOT_PUBLIC_CONTACT = _POST_MAIL_GATE_CONTACT_STATUS_MARKERS
+
+# The ПДн subject-rights contact in the privacy docs must stay privacy@, never support@.
+PRIVACY_ROUTED_DOCS = ("privacy-policy.DRAFT.md", "personal-data-consent.DRAFT.md")
+
+
+def _followup_contact_lines(name: str) -> list[str]:
+    return [ln for ln in _r(name).splitlines() if any(c in ln for c in MAIL_CONTACTS)]
+
+
+def test_followup_every_draft_contact_line_states_post_mail_gate_truth():
+    # Each mail-contact line in each publishable DRAFT must carry all three truths ON ITS OWN LINE.
+    for name in FOLLOWUP_CONTACT_DOCS:
+        lines = _followup_contact_lines(name)
+        assert lines, f"{name} must still carry a pult-os.ru mail-contact line"
+        for ln in lines:
+            assert any(m in ln for m in _TECH_ACTIVE), (
+                f"{name}: contact line missing technical-active status: {ln!r}"
+            )
+            assert any(m in ln for m in _NOT_PUBLISHED), (
+                f"{name}: contact line missing DOCUMENT-NOT-PUBLISHED status: {ln!r}"
+            )
+            assert _has_truthful_contact_status(ln, allow_legacy=False), (
+                f"{name}: contact line missing NOT-A-PUBLIC-CONTACT status: {ln!r}"
+            )
+
+
+def test_followup_no_legacy_pre_mail_gate_wording_in_publishable_drafts():
+    # The stale pre-Mail-Gate wording must be gone from every publishable DRAFT.
+    for name in FOLLOWUP_CONTACT_DOCS:
+        body = _r(name)
+        assert "NOT ACTIVE до Mail Gate" not in body, f"{name} must drop the stale pre-Mail-Gate wording"
+        assert "MAIL GATE PENDING" not in body, f"{name} must not carry MAIL GATE PENDING"
+        assert "подставить рабочий адрес только после проверки почты" not in body, (
+            f"{name} must drop the stale 'wire the address only after mail check' instruction"
+        )
+
+
+def test_followup_draft_contacts_do_not_overclaim_public_activation():
+    # Truthful status must not tip over into a public-activation / live-site / production claim.
+    for name in FOLLOWUP_CONTACT_DOCS:
+        for ln in _followup_contact_lines(name):
+            assert not _has_public_activation_overclaim(ln), (
+                f"{name} must not claim public activation on a contact line: {ln!r}"
+            )
+
+
+def test_followup_public_activation_detector_is_case_and_locale_safe():
+    dangerous = (
+        "NOT A PUBLIC PRODUCT CONTACT YET · publicly active",
+        "NOT A PUBLIC PRODUCT CONTACT YET · Publicly Activated",
+        "не активирован как публичный контакт · публично активирован",
+        "не активирован как публичный контакт · ПУБЛИЧНО АКТИВИРОВАНА",
+        "public product contact is active",
+        "активирована как публичный контакт",
+    )
+    for text in dangerous:
+        assert _has_public_activation_overclaim(text), f"affirmative activation must be rejected: {text!r}"
+
+    safe = (
+        "NOT A PUBLIC PRODUCT CONTACT YET",
+        "not publicly active",
+        "not yet publicly activated",
+        "не публично активирован",
+        "ещё не публично активирована",
+        "не активирован как публичный контакт",
+        "ещё не активирована как публичный контакт",
+    )
+    for text in safe:
+        assert not _has_public_activation_overclaim(text), f"negated status must stay valid: {text!r}"
+
+
+def test_followup_contact_status_predicate_accepts_en_ru_and_scopes_legacy():
+    assert _has_truthful_contact_status("NOT A PUBLIC PRODUCT CONTACT YET", allow_legacy=False)
+    assert _has_truthful_contact_status("Не активирован как публичный контакт", allow_legacy=False)
+    assert _has_truthful_contact_status("not a public product contact yet", allow_legacy=False)
+    assert not _has_truthful_contact_status("NOT ACTIVE до Mail Gate", allow_legacy=False)
+    assert _has_truthful_contact_status("NOT ACTIVE до Mail Gate", allow_legacy=True)
+
+
+def test_followup_privacy_docs_route_subject_rights_to_privacy_not_support():
+    # Routing not confused: the ПДн subject-rights contact stays privacy@, never support@.
+    for name in PRIVACY_ROUTED_DOCS:
+        for ln in _followup_contact_lines(name):
+            assert "privacy@pult-os.ru" in ln, f"{name}: subject-rights contact must be privacy@: {ln!r}"
+            assert "support@pult-os.ru" not in ln, f"{name}: subject-rights contact must not be support@: {ln!r}"
+
+
+def test_followup_dmarc_alias_absent_from_updated_drafts():
+    # The technical dmarc@ alias must never leak into a publishable DRAFT.
+    for name in FOLLOWUP_CONTACT_DOCS:
+        assert DMARC_ALIAS not in _r(name), f"{name} must not carry the technical dmarc@ alias"
+
+
+def test_followup_draft_and_launch_gates_preserved():
+    # DRAFT publish gate stays on every edited doc; launch gate stays NOT READY.
+    for name in FOLLOWUP_CONTACT_DOCS:
+        assert "НЕ ПУБЛИКОВАТЬ" in _r(name), f"{name} must keep the publish gate"
+    assert "NOT READY" in _r("launch-legal-checklist.md"), "launch gate must stay NOT READY"
+
+
+# --- GUARDFIX: pin each publishable DRAFT's contact ADDRESS and contact-line COUNT ---
+#
+# Two review-confirmed completeness gaps are closed here:
+#   (1) routing was only pinned for the privacy docs — user-agreement could be
+#       silently misrouted support@ -> privacy@/security@ without a RED;
+#   (2) only "at least one truthful contact line" was required — dropping one of
+#       several redundant contact lines went unnoticed.
+#
+# Per-file / per-contact-line, data-driven. No line-number pinning, no repo-wide
+# grep. Every check reads each file on its own, so a correct value in a
+# neighbouring line or another document cannot mask a defect.
+
+# name -> (the ONLY pult-os.ru mail address allowed on that doc's contact lines,
+#          exact number of contact lines that doc must carry)
+FOLLOWUP_DOC_CONTRACT = {
+    "privacy-policy.DRAFT.md": ("privacy@pult-os.ru", 3),
+    "personal-data-consent.DRAFT.md": ("privacy@pult-os.ru", 1),
+    "user-agreement.DRAFT.md": ("support@pult-os.ru", 2),
+}
+
+
+def test_followup_each_draft_routes_to_its_designated_address():
+    # Every contact line in a doc must use that doc's designated address and must
+    # NOT carry either of the other two pult-os.ru addresses (no confusion, both
+    # directions — support<->privacy<->security).
+    for name, (want, _count) in FOLLOWUP_DOC_CONTRACT.items():
+        others = [c for c in MAIL_CONTACTS if c != want]
+        lines = _followup_contact_lines(name)
+        assert lines, f"{name} must carry a pult-os.ru mail-contact line"
+        for ln in lines:
+            assert want in ln, f"{name}: contact line must route to {want}: {ln!r}"
+            for other in others:
+                assert other not in ln, (
+                    f"{name}: contact line must not route to {other} (expected {want}): {ln!r}"
+                )
+
+
+def test_followup_each_draft_keeps_its_exact_contact_line_count():
+    # Dropping (or adding) a contact line in any publishable DRAFT must RED.
+    for name, (_want, count) in FOLLOWUP_DOC_CONTRACT.items():
+        got = len(_followup_contact_lines(name))
+        assert got == count, (
+            f"{name} must carry exactly {count} pult-os.ru contact line(s), found {got}"
         )
