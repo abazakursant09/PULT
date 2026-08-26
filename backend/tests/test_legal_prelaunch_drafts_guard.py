@@ -405,6 +405,247 @@ def test_g1_blocker_23_not_closed_and_gate_open():
 
 
 # ============================================================================
+# LEGAL-PRELAUNCH-#23-COUNSEL — attorney-review request package. Questions only,
+# no legal conclusions; #23 stays UNKNOWN; DRAFT / launch gate preserved.
+# ============================================================================
+
+_ATTORNEY = "attorney-review-request-23.md"
+_ATTORNEY_SECTIONS = (
+    "## 3. 152-ФЗ",
+    "Постановление Правительства РФ № 1119",
+    "Приказ ФСТЭК России № 21",
+    "## 7. Роскомнадзор и статья 22",
+    "## 8. 149-ФЗ",
+    "## 9. 54-ФЗ",
+    "защите прав потребителей",
+    "## 14. Retention",
+)
+# --- forbidden legal conclusions: literal classes + SEMANTIC per-line classes -----------------
+# Literal conclusions (149-ФЗ / 54-ФЗ applicability, publish-readiness, #23 closure). These forms
+# never appear as questions in the package, so a plain substring check is safe.
+_ATTORNEY_LITERAL_FORBIDDEN = (
+    "149-ФЗ применяется", "149-ФЗ не применяется",
+    "54-ФЗ применяется", "54-ФЗ не применяется",
+    "готов к публикации", "готова к публикации", "готовы к публикации",
+    "#23 CLOSED", "#23 DONE", "#23 FIXED", "blocker #23 закрыт",
+)
+
+# A CLAUSE is a QUESTION or a META-disclaimer (not a conclusion) if it matches this. Applied PER
+# CLAUSE (not per line), so a meta/question word in a neighbouring clause cannot hide an assertion in
+# the next clause. Covers questions (?/ли/какой/…), obligation/future (должн/будет/необходимо/нужно),
+# infinitives (определить/обеспечить), negated/undecided/open, and "документ не утверждает …".
+_ATTORNEY_CLAUSE_META = re.compile(
+    r"\?|\bли\b|\bкак(?:ой|ая|ие|ое)\b|долж(?:ен|на|но|ны)\b|\bбуд(?:ет|ут)\b|необходимо|нужно обеспечить|"
+    r"определить|обеспечить|реализовать|исполнить|соблюсти|"
+    r"не утвержда|не заявля|не делает|не трактуется|не принят|не устанавливается|не определяет|"
+    r"не решён|не решен|остаётся открыт|остается открыт|не подтвержд|"
+    r"не выполнен|не соблюд|не обеспечен|не реализован|не исполнен|не соответств|"
+    # negated DETERMINATION (participle) — "УЗ не установлено/не определён/…" is a disclaimer, not a verdict.
+    r"не установлен\w*|не определ[её]н\w*|не присвоен\w*|не утвержд[её]н\w*|"
+    # EN question / modal / negation — so EN duties/obligations questions & disclaimers stay allowed.
+    r"\bmust\b|\bshould\b|\bwhether\b|not fulfilled|not implemented|not completed|not satisfied|"
+    r"\bhave not\b|\bhas not\b|\bnot been\b|\bnot yet\b|"
+    r"попрос|просьба|запрос(?!ов)|вопрос",
+    re.IGNORECASE,
+)
+# Split a line into clauses on strong separators so each clause is judged on its own.
+_ATTORNEY_CLAUSE_SPLIT = re.compile(r"([.;:?!]|\s[—–-]\s)")
+
+_UZ_SUBJECT = re.compile(r"УЗ|уровень защищённост|уровень защищенност|\bрешени\w*", re.IGNORECASE)
+# Completed PARTICIPLE forms only (определён/…), NOT the noun «определения» or infinitive «определить».
+_UZ_DONE = re.compile(
+    r"определ[её]н(?:а|о|ы)?\b|установлен(?:а|о|ы)?\b|присвоен(?:а|о|ы)?\b|утвержд[её]н(?:а|о|ы)?\b",
+    re.IGNORECASE,
+)
+_RKN_SUBJECT = re.compile(r"РКН|Роскомнадзор", re.IGNORECASE)
+_RKN_NOTIF = re.compile(r"уведомл", re.IGNORECASE)
+_RKN_VERDICT = re.compile(
+    r"обязательн\w*|обязан[аоы]?\b|требуется|не требуется|не нужно|освобожд\w*|подан[оа]|направлен[оа]|подача",
+    re.IGNORECASE)
+_ATT_SUBJECT = re.compile(r"аттестаци", re.IGNORECASE)
+_ATT_VERDICT = re.compile(r"обязательн\w*|требуется|не требуется|не нужн\w*|освобожд\w*", re.IGNORECASE)
+# Compliance-fulfilled conclusion: a subject + a COMPLETED assertive verdict. Subject now also covers
+# оператора's DUTIES (обязанность/обязанности/duties); done also covers EN completion verbs.
+_COMPLY_SUBJECT = re.compile(
+    r"требовани\w*|соответстви\w*|\bмер[аы]\b|меры\b|compliance|соблюд\w*|обязанност\w*|duties|obligation\w*",
+    re.IGNORECASE)
+_COMPLY_DONE = re.compile(
+    r"выполнен\w*|соблюден\w*|обеспечен\w*|реализован\w*|исполнен\w*|соответствует\b|"
+    r"fulfilled|completed|implemented|satisfied",
+    re.IGNORECASE)
+
+
+def _attorney_conclusion_hits(body: str) -> list[str]:
+    """Forbidden legal-conclusion hits: literal (body-wide) + semantic (per CLAUSE). Question / meta /
+    negated / future / obligation clauses are excluded, but only the clause they occur in — a meta or
+    question word in one clause cannot shield an assertion in another clause of the same line."""
+    hits: list[str] = []
+    for lit in _ATTORNEY_LITERAL_FORBIDDEN:
+        if lit in body:
+            hits.append(lit)
+    for ln in body.splitlines():
+        # Split into clauses but KEEP the separators, so a clause that ENDS with "?" is still seen as a
+        # question (a "?" that were merely a split boundary would otherwise strip the interrogative signal).
+        parts = _ATTORNEY_CLAUSE_SPLIT.split(ln)
+        for idx in range(0, len(parts), 2):
+            clause = parts[idx]
+            trailing = parts[idx + 1] if idx + 1 < len(parts) else ""
+            if not clause.strip() or _ATTORNEY_CLAUSE_META.search(clause + trailing):
+                continue
+            if _UZ_SUBJECT.search(clause) and _UZ_DONE.search(clause):
+                hits.append(f"УЗ determined: {clause.strip()[:70]}")
+            if _RKN_SUBJECT.search(clause) and _RKN_NOTIF.search(clause) and _RKN_VERDICT.search(clause):
+                hits.append(f"РКН verdict: {clause.strip()[:70]}")
+            if _ATT_SUBJECT.search(clause) and _ATT_VERDICT.search(clause):
+                hits.append(f"аттестация verdict: {clause.strip()[:70]}")
+            if _COMPLY_SUBJECT.search(clause) and _COMPLY_DONE.search(clause):
+                hits.append(f"compliance-done: {clause.strip()[:70]}")
+    return hits
+
+
+def test_attorney_package_exists_with_gates():
+    body = _r(_ATTORNEY)
+    assert body.strip(), "attorney package must exist and be non-empty"
+    assert "DRAFT" in body, "attorney package must carry DRAFT"
+    assert "НЕ ПУБЛИКОВАТЬ" in body, "attorney package must carry НЕ ПУБЛИКОВАТЬ"
+    assert "ATTORNEY REVIEW REQUIRED" in body, "attorney package must be marked ATTORNEY REVIEW REQUIRED"
+    assert "NOT READY" in body, "attorney package must keep launch gate NOT READY"
+    assert "#23 = UNKNOWN" in body or "blocker #23 = UNKNOWN" in body, "#23 must stay UNKNOWN"
+
+
+def test_attorney_package_is_questions_not_conclusions():
+    body = _r(_ATTORNEY)
+    assert ("не юридическое заключение" in body or "НЕ юридическое заключение" in body
+            or "перечень ВОПРОСОВ" in body), "package must state it is questions, not a legal conclusion"
+    # honest record that primary-source verification failed from the environment
+    assert ("certificate/socket" in body or "certificate" in body.lower()), (
+        "package must honestly record the primary-source verification failure"
+    )
+    assert "REQUIRES RUSSIAN COUNSEL REVIEW" in body
+
+
+def test_attorney_package_has_all_required_sections():
+    body = _r(_ATTORNEY)
+    for sec in _ATTORNEY_SECTIONS:
+        assert sec in body, f"attorney package missing required section marker: {sec!r}"
+    assert "Формат ответа юриста" in body, "package must define the lawyer response format"
+    assert "Exit criteria" in body or "Exit-criteria" in body, "package must define #23 exit criteria"
+
+
+def test_attorney_package_draws_no_legal_conclusion():
+    hits = _attorney_conclusion_hits(_r(_ATTORNEY))
+    assert hits == [], f"attorney package must not state legal conclusions: {hits}"
+
+
+def test_attorney_conclusion_detector_flags_assertions():
+    # Positive controls: assertive conclusions the detector MUST flag (guard-hardening regression).
+    for s in (
+        "УЗ ПДн определён.",
+        "для ИСПДн установлен уровень защищённости.",
+        "для ИСПДн установлен УЗ-2.",
+        "уведомление Роскомнадзора не требуется.",
+        "уведомление Роскомнадзора обязательно.",
+        "уведомлять РКН не нужно.",
+        "подача уведомления в Роскомнадзор обязательна.",
+        "аттестация обязательна.",
+        "аттестация не требуется.",
+        "система освобождена от аттестации.",
+        "149-ФЗ применяется",
+        "54-ФЗ не применяется",
+        # mixed-context: assertion in a clause after a question/meta clause (GUARDFIX-2 regression)
+        "Вопрос рассмотрен: УЗ ПДн определён",
+        "Какой статус? УЗ ПДн определён",
+        "Документ не утверждает обратного: уведомление РКН обязательно",
+        "Требуется ли уведомление? Уведомление Роскомнадзора не требуется",
+        "Юрист должен определить статус; аттестация не требуется",
+        "Вопрос об УЗ открыт — уровень защищённости установлен",
+        "Применим ли закон? 149-ФЗ применяется к Пульт OS",
+        "Документ не утверждает обратного. 54-ФЗ не применяется",
+        "Какой статус? уведомление Роскомнадзора обязательно",
+        "Вопрос рассмотрен — аттестация обязательна",
+        "Юрист уточнит: подача уведомления в Роскомнадзор обязательна",
+        "Открытый вопрос: УЗ информационной системы установлен",
+        # compliance-done conclusions
+        "требования законодательства выполнены",
+        "все требования законодательства выполнены",
+        "Пульт OS соответствует требованиям законодательства",
+        "сервис соответствует требованиям 152-ФЗ",
+        "полностью соответствует требованиям закона",
+        "соответствие законодательству обеспечено",
+        "compliance выполнен",
+        "правовые требования соблюдены",
+        "все обязательные меры реализованы",
+        "требования регулятора исполнены",
+        # GUARDFIX-3: operator DUTIES fulfilled + negated-determination boundary + more verdicts
+        "обязанности оператора исполнены",
+        "обязанности исполнены",
+        "обязанность выполнена",
+        "обязанности соблюдены",
+        "все обязанности исполнены",
+        "legal duties fulfilled",
+        "compliance duties completed",
+        "решение утверждено",
+        "аттестация не нужна",
+        # GUARDFIX-4: EN «obligations» completion (parity with «duties»)
+        "legal obligations implemented",
+        "legal obligations fulfilled",
+        "compliance obligations completed",
+        "operator obligations satisfied",
+    ):
+        assert _attorney_conclusion_hits(s), f"detector must flag conclusion: {s!r}"
+
+
+def test_attorney_conclusion_detector_allows_questions_and_disclaimers():
+    # Negative controls: questions / not-decided / future / obligation / meta-disclaimers stay allowed.
+    for s in (
+        "какой УЗ должен быть определён?",
+        "требуется ли уведомление Роскомнадзора?",
+        "обязательна ли аттестация?",
+        "решение по УЗ не принято",
+        "УЗ не устанавливается этим документом",
+        "документ не утверждает, что уведомление обязательно",
+        "требуется определить УЗ",
+        "юрист должен определить, требуется ли уведомление",
+        "вопрос об аттестации не решён",
+        # compliance negative controls
+        "выполнены ли требования законодательства?",
+        "какие требования должны быть выполнены?",
+        "требования пока не выполнены",
+        "требования будут выполнены до запуска",
+        "необходимо обеспечить соответствие",
+        "юрист должен определить применимые требования",
+        "документ не утверждает, что требования выполнены",
+        "соответствие не подтверждено",
+        "вопрос соответствия остаётся открытым",
+        # GUARDFIX-3: negated determination + masc «должен» + duties-not-confirmed must stay allowed
+        "УЗ не установлено окончательно, юрист должен подтвердить",
+        "УЗ не определён, юрист должен определить его",
+        "уровень не присвоен",
+        "решение не утверждено",
+        "требования не установлены",
+        "обязанности оператора не подтверждены",
+        "исполнение обязанностей будет проверено юристом",
+        "должен ли оператор уведомлять РКН?",
+        "какие обязанности должен подтвердить юрист?",
+        # GUARDFIX-4: EN obligations questions / modal / negation stay allowed
+        "are legal obligations fulfilled?",
+        "legal obligations must be fulfilled",
+        "legal obligations are not fulfilled",
+        "legal obligations have not been implemented",
+        "whether legal obligations are fulfilled",
+        "the lawyer must determine whether obligations are fulfilled",
+    ):
+        assert _attorney_conclusion_hits(s) == [], f"detector must NOT flag a question/disclaimer: {s!r}"
+
+
+def test_attorney_package_carries_no_requisites():
+    # No real ИНН/ОГРН/account (11+ digit run), no keys — requisites go to counsel outside Git.
+    body = _r(_ATTORNEY)
+    assert not re.search(r"\d{11,}", body), "no requisite-like long digit run in the attorney package"
+    assert "AKIA" not in body and "-----BEGIN" not in body, "no secret material in the attorney package"
+
+
+# ============================================================================
 # DOMAIN-MAIL-DOCS-GUARD-FIRST — dormant mail-state correction fence.
 #
 # Mail Gate is PASS at the infrastructure layer, but nothing about the website,
@@ -444,6 +685,18 @@ DMARC_FORBIDDEN = tuple(LEGAL / n for n in PUBLIC_DOCS) + LIVE_FRONTEND_PAGES
 
 DMARC_ALIAS = "dmarc@pult-os.ru"
 
+# Applied/current-state DMARC anchor + policy tokens (structural, not line-pinned). The APPLIED
+# policy line is the one asserting the state that is live now ("DMARC applied"); a p=none sitting
+# elsewhere in the doc must never mask a wrong applied policy, and a quarantine/reject value is only
+# legal on a clearly FUTURE / NOT-APPLIED / Inal-gated line.
+_DMARC_APPLIED_RE = re.compile(r"DMARC\s+applied", re.IGNORECASE)
+_P_NONE_RE = re.compile(r"p\s*=\s*none", re.IGNORECASE)
+_P_QUARANTINE_RE = re.compile(r"p\s*=\s*quarantine", re.IGNORECASE)
+_P_REJECT_RE = re.compile(r"p\s*=\s*reject", re.IGNORECASE)
+# Markers that make a NON-applied quarantine/reject mention legal (future/planned, gated, superseded).
+_DMARC_FUTURE_MARKERS = ("future", "not applied", "not enabled", "inal-gated", "inal gate",
+                         "superseded", "only after", "separate")
+
 
 def _read(path: Path) -> str | None:
     return path.read_text(encoding="utf-8") if path.is_file() else None
@@ -482,6 +735,18 @@ def test_dmarc_alias_marked_technical_only():
             ), f"{path.name} must mark dmarc@ as a technical-only, non-user contact"
 
 
+def test_attorney_document_has_no_dmarc_alias():
+    # CROSS-BYPASS fix (proven MISS, not a merge loss): the attorney package is a legal-review
+    # document, NOT a DMARC runbook — the technical dmarc@ aggregate alias must never appear in it.
+    # Narrow and fail-closed: only the attorney file is fenced here (infra/runbook docs keep their
+    # allowlist), and a missing file is RED. Not line-number pinned.
+    path = LEGAL / _ATTORNEY
+    assert path.is_file(), f"attorney package missing: {path}"
+    assert DMARC_ALIAS not in path.read_text(encoding="utf-8"), (
+        "technical dmarc@ alias must not leak into the attorney package"
+    )
+
+
 # --- 3. applied DMARC state in the planning docs ----------------------------
 
 def test_planning_docs_state_actual_dmarc_policy():
@@ -506,6 +771,39 @@ def test_planning_docs_reject_stale_dmarc_value():
     for path in MIGRATION_DOCS:
         body = _read(path) or ""
         assert stale not in body, f"{path.name} must not carry the stale applied DMARC value {stale!r}"
+
+
+def test_applied_dmarc_policy_is_none_not_quarantine_or_reject():
+    # CROSS-BYPASS fix (proven MISS, not a merge loss): the earlier check was presence-only
+    # ("p=none" in body), so an applied policy flipped to p=quarantine/p=reject slipped through as
+    # long as a decoy p=none survived somewhere else. This locates the APPLIED/current-state line
+    # structurally and enforces the policy on THAT line; a stray p=none elsewhere cannot mask it.
+    # Future/planned quarantine stays legal only on a clearly FUTURE / NOT-APPLIED / gated line.
+    for path in MIGRATION_DOCS:
+        body = _read(path)
+        assert body is not None, f"missing planning doc {path}"        # fail-closed
+        lines = body.splitlines()
+        applied = [ln for ln in lines if _DMARC_APPLIED_RE.search(ln)]
+        assert applied, f"{path.name} must carry an explicit 'DMARC applied' policy line"  # fail-closed
+        for ln in applied:
+            assert _P_NONE_RE.search(ln), f"{path.name} applied DMARC policy must be p=none: {ln!r}"
+            assert not _P_QUARANTINE_RE.search(ln), (
+                f"{path.name} applied DMARC policy must NOT be p=quarantine: {ln!r}"
+            )
+            assert not _P_REJECT_RE.search(ln), (
+                f"{path.name} applied DMARC policy must NOT be p=reject: {ln!r}"
+            )
+        # A quarantine/reject value OFF the applied line is legal only when explicitly marked
+        # future / not-applied / gated / superseded within a small window (±3 lines).
+        for i, ln in enumerate(lines):
+            if _DMARC_APPLIED_RE.search(ln):
+                continue
+            if _P_QUARANTINE_RE.search(ln) or _P_REJECT_RE.search(ln):
+                window = " ".join(lines[max(0, i - 3):i + 4]).lower()
+                assert any(mk in window for mk in _DMARC_FUTURE_MARKERS), (
+                    f"{path.name}:{i + 1} quarantine/reject without a FUTURE/NOT-APPLIED/gated "
+                    f"marker within ±3 lines: {ln!r}"
+                )
 
 
 # --- 4. no false public-activation claim ------------------------------------
