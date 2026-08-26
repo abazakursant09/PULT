@@ -42,9 +42,46 @@ ALL_DOCS = PUBLIC_DOCS + INTERNAL_DOCS
 MAIL_CONTACTS = ("support@pult-os.ru", "privacy@pult-os.ru", "security@pult-os.ru")
 
 # A mail-contact occurrence is honest if its line carries EITHER the legacy pre-Mail-Gate marker
-# ("NOT ACTIVE", still used by the out-of-scope DRAFT docs) OR the post-Mail-Gate marker
-# ("NOT A PUBLIC PRODUCT CONTACT YET" — technically active but not published as a product contact).
-CONTACT_STATUS_MARKERS = ("NOT ACTIVE", "NOT A PUBLIC PRODUCT CONTACT YET")
+# ("NOT ACTIVE", still used by the out-of-scope DRAFT docs) OR a post-Mail-Gate marker in EN/RU.
+# Keep one shared, case-insensitive predicate so the legacy and follow-up guards cannot disagree.
+_LEGACY_CONTACT_STATUS_MARKERS = ("NOT ACTIVE",)
+_POST_MAIL_GATE_CONTACT_STATUS_MARKERS = (
+    "NOT A PUBLIC PRODUCT CONTACT YET",
+    "не активирован как публичный контакт",
+)
+CONTACT_STATUS_MARKERS = _LEGACY_CONTACT_STATUS_MARKERS + _POST_MAIL_GATE_CONTACT_STATUS_MARKERS
+
+
+def _contains_casefold(text: str, markers: tuple[str, ...]) -> bool:
+    folded = text.casefold()
+    return any(marker.casefold() in folded for marker in markers)
+
+
+def _has_truthful_contact_status(text: str, *, allow_legacy: bool = True) -> bool:
+    markers = _POST_MAIL_GATE_CONTACT_STATUS_MARKERS
+    if allow_legacy:
+        markers = _LEGACY_CONTACT_STATUS_MARKERS + markers
+    return _contains_casefold(text, markers)
+
+
+_PUBLIC_ACTIVATION_CLAIMS = (
+    re.compile(r"\bpublicly\s+activ(?:e|ated)\b", re.IGNORECASE),
+    re.compile(r"\bpublic\s+product\s+contact\s+is\s+active\b", re.IGNORECASE),
+    re.compile(r"\bпублично\s+активирован\w*\b", re.IGNORECASE),
+    re.compile(r"\bактивирован\w*\s+как\s+публичн\w*\s+контакт\w*\b", re.IGNORECASE),
+)
+_PUBLIC_ACTIVATION_NEGATIONS = ("not ", "not yet ", "не ", "ещё не ")
+
+
+def _has_public_activation_overclaim(text: str) -> bool:
+    folded = " ".join(text.casefold().split())
+    for pattern in _PUBLIC_ACTIVATION_CLAIMS:
+        for match in pattern.finditer(folded):
+            prefix = folded[max(0, match.start() - 12):match.start()]
+            if any(prefix.endswith(negation) for negation in _PUBLIC_ACTIVATION_NEGATIONS):
+                continue
+            return True
+    return False
 
 
 def _r(name: str) -> str:
@@ -77,7 +114,7 @@ def test_mail_contacts_marked_not_active():
     for name in ALL_DOCS:
         body = _r(name)
         if any(c in body for c in MAIL_CONTACTS):
-            assert any(m in body for m in CONTACT_STATUS_MARKERS), (
+            assert _has_truthful_contact_status(body), (
                 f"{name} names a mail contact without a non-public status marker"
             )
 
@@ -206,7 +243,7 @@ def test_every_future_email_line_marked_not_active():
     for name in ALL_DOCS:
         for i, line in enumerate(_r(name).splitlines(), 1):
             if any(c in line for c in MAIL_CONTACTS):
-                assert any(m in line for m in CONTACT_STATUS_MARKERS), (
+                assert _has_truthful_contact_status(line), (
                     f"{name}:{i} names a future pult-os.ru email without a non-public status marker "
                     f"on the same line: {line!r}"
                 )
@@ -915,7 +952,7 @@ FOLLOWUP_CONTACT_DOCS = (
 # stays GREEN.
 _TECH_ACTIVE = ("TECHNICALLY ACTIVE", "Технически работает")
 _NOT_PUBLISHED = ("DOCUMENT NOT PUBLISHED", "Документ не опубликован")
-_NOT_PUBLIC_CONTACT = ("NOT A PUBLIC PRODUCT CONTACT YET", "не активирован как публичный контакт")
+_NOT_PUBLIC_CONTACT = _POST_MAIL_GATE_CONTACT_STATUS_MARKERS
 
 # The ПДн subject-rights contact in the privacy docs must stay privacy@, never support@.
 PRIVACY_ROUTED_DOCS = ("privacy-policy.DRAFT.md", "personal-data-consent.DRAFT.md")
@@ -937,7 +974,7 @@ def test_followup_every_draft_contact_line_states_post_mail_gate_truth():
             assert any(m in ln for m in _NOT_PUBLISHED), (
                 f"{name}: contact line missing DOCUMENT-NOT-PUBLISHED status: {ln!r}"
             )
-            assert any(m in ln for m in _NOT_PUBLIC_CONTACT), (
+            assert _has_truthful_contact_status(ln, allow_legacy=False), (
                 f"{name}: contact line missing NOT-A-PUBLIC-CONTACT status: {ln!r}"
             )
 
@@ -956,9 +993,43 @@ def test_followup_no_legacy_pre_mail_gate_wording_in_publishable_drafts():
 def test_followup_draft_contacts_do_not_overclaim_public_activation():
     # Truthful status must not tip over into a public-activation / live-site / production claim.
     for name in FOLLOWUP_CONTACT_DOCS:
-        body = _r(name)
-        assert "PUBLICLY ACTIVE" not in body, f"{name} must not claim the contact is PUBLICLY ACTIVE"
-        assert "PUBLICLY ACTIVATED" not in body, f"{name} must not claim public activation"
+        for ln in _followup_contact_lines(name):
+            assert not _has_public_activation_overclaim(ln), (
+                f"{name} must not claim public activation on a contact line: {ln!r}"
+            )
+
+
+def test_followup_public_activation_detector_is_case_and_locale_safe():
+    dangerous = (
+        "NOT A PUBLIC PRODUCT CONTACT YET · publicly active",
+        "NOT A PUBLIC PRODUCT CONTACT YET · Publicly Activated",
+        "не активирован как публичный контакт · публично активирован",
+        "не активирован как публичный контакт · ПУБЛИЧНО АКТИВИРОВАНА",
+        "public product contact is active",
+        "активирована как публичный контакт",
+    )
+    for text in dangerous:
+        assert _has_public_activation_overclaim(text), f"affirmative activation must be rejected: {text!r}"
+
+    safe = (
+        "NOT A PUBLIC PRODUCT CONTACT YET",
+        "not publicly active",
+        "not yet publicly activated",
+        "не публично активирован",
+        "ещё не публично активирована",
+        "не активирован как публичный контакт",
+        "ещё не активирована как публичный контакт",
+    )
+    for text in safe:
+        assert not _has_public_activation_overclaim(text), f"negated status must stay valid: {text!r}"
+
+
+def test_followup_contact_status_predicate_accepts_en_ru_and_scopes_legacy():
+    assert _has_truthful_contact_status("NOT A PUBLIC PRODUCT CONTACT YET", allow_legacy=False)
+    assert _has_truthful_contact_status("Не активирован как публичный контакт", allow_legacy=False)
+    assert _has_truthful_contact_status("not a public product contact yet", allow_legacy=False)
+    assert not _has_truthful_contact_status("NOT ACTIVE до Mail Gate", allow_legacy=False)
+    assert _has_truthful_contact_status("NOT ACTIVE до Mail Gate", allow_legacy=True)
 
 
 def test_followup_privacy_docs_route_subject_rights_to_privacy_not_support():
