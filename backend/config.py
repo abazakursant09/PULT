@@ -75,6 +75,9 @@ class Settings(BaseSettings):
     sentry_dsn: str = ""
 
     # ── YooKassa ──────────────────────────────────────────────────────────────
+    # Commercial master switch. Default OFF: every payment endpoint returns a neutral 404 before
+    # DB or network work. Frontend NEXT_PUBLIC_BILLING_ENABLED is visibility only and cannot unlock it.
+    billing_enabled: bool = False
     yookassa_shop_id: str = ""
     yookassa_secret_key: str = ""
     yookassa_return_url: str = ""
@@ -329,7 +332,7 @@ if not _is_dev_env:
     # Non-fatal advisories — the app runs, but these should be set.
     if not settings.sentry_dsn:
         logger.warning("⚠️  SENTRY_DSN not set — error tracking disabled.")
-    if not settings.yookassa_secret_key:
+    if settings.billing_enabled and not settings.yookassa_secret_key:
         logger.warning("⚠️  YOOKASSA_SECRET_KEY not set — payments will fail until configured.")
 
 # ── Development / test warnings (a weak default is tolerated ONLY here) ───────

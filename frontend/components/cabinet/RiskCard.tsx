@@ -33,7 +33,7 @@ export function RiskCard({ item }: { item: FlatSignal }) {
         <Cell k="✓ Действие" kc="var(--violet-text)" v={signal.solution} />
       </div>
 
-      <Link href={`/dashboard/products/${product.id}?lens=${lens}`} style={btnV}>{signal.solution} →</Link>
+      <Link href="/dashboard" style={btnV}>{signal.solution} →</Link>
     </div>
   )
 }

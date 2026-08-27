@@ -241,11 +241,9 @@ def _fmt_seo_opportunity(insight: dict) -> tuple[str, list[list[dict]]]:
         f"{_memory_line(insight)}"
         f"{_feedback_line(insight)}"
     )
-    params    = insight.get("action_params") or {}
-    product_q = params.get("product", name)
     keyboard  = [[
-        {"text": "✨ Авто-пересборка", "url": f"{_FE}/dashboard/seo-cards?product={product_q}&auto=1"},
-        {"text": "📋 SEO-карточки",    "url": f"{_FE}/dashboard/seo-cards"},
+        {"text": "📦 Товары и данные", "url": f"{_FE}/dashboard/data"},
+        {"text": "🏠 Открыть Пульт",   "url": f"{_FE}/dashboard"},
     ]]
     return text, keyboard
 
@@ -275,7 +273,7 @@ def _fmt_sales_growth(insight: dict) -> tuple[str, list[list[dict]]]:
         f"{insight.get('scenario_context', '')}"
     )
     keyboard = [[
-        {"text": "📊 Открыть финансы", "url": f"{_FE}/dashboard/finance"},
+        {"text": "📊 Экономика",       "url": f"{_FE}/profit-calculator"},
         {"text": "🏠 Дашборд",          "url": f"{_FE}/dashboard"},
     ]]
     return text, keyboard
@@ -293,10 +291,8 @@ def _fmt_high_rating(insight: dict) -> tuple[str, list[list[dict]]]:
         f"💡 {est}\n\n"
         f"Используйте момент — масштабируйте рекламу!"
     )
-    params    = insight.get("action_params") or {}
-    product_q = params.get("product", name)
     keyboard  = [[
-        {"text": "✨ Пересобрать карточку", "url": f"{_FE}/dashboard/seo-cards?product={product_q}&auto=1"},
+        {"text": "📦 Товары и данные",     "url": f"{_FE}/dashboard/data"},
         {"text": "🏠 Дашборд",              "url": f"{_FE}/dashboard"},
     ]]
     return text, keyboard
@@ -336,8 +332,8 @@ def _fmt_critical_alert(insight: dict) -> tuple[str, list[list[dict]]]:
         f"{insight.get('scenario_context', '')}"
     )
     action_url = {
-        "margin_crisis": f"{_FE}/dashboard/finance",
-        "high_ad_spend": f"{_FE}/dashboard/finance",
+        "margin_crisis": f"{_FE}/profit-calculator",
+        "high_ad_spend": f"{_FE}/profit-calculator",
         "low_stock":     f"{_FE}/suppliers",
     }.get(insight.get("rule_type", ""), f"{_FE}/dashboard")
 
@@ -372,7 +368,7 @@ def _fmt_digest(product_name: str, mp_raw: str, insights: list[dict]) -> tuple[s
     lines += ["", "👉 Откройте Разведку для деталей и решений."]
     text     = "\n".join(lines)
     keyboard = [[
-        {"text": "🚀 Разведка", "url": f"{_FE}/dashboard/action-engine"},
+        {"text": "🚀 Открыть Пульт", "url": f"{_FE}/dashboard"},
         {"text": "🏠 Дашборд",  "url": f"{_FE}/dashboard"},
     ]]
     return text, keyboard
@@ -389,7 +385,7 @@ def _fmt_retention(user_name: str, insight_count: int) -> tuple[str, list[list[d
     )
     keyboard = [[
         {"text": "🚀 Открыть Пульт",  "url": f"{_FE}/dashboard"},
-        {"text": "🔍 Action Engine", "url": f"{_FE}/dashboard/action-engine"},
+        {"text": "🔍 Решения",       "url": f"{_FE}/dashboard"},
     ]]
     return text, keyboard
 
@@ -1178,7 +1174,7 @@ async def _process_user(
             if focus.secondary_action:
                 briefing_text += f"\n↳ {focus.secondary_action}"
             keyboard = [[
-                {"text": "⚡ Детали", "url": f"{_FE}/dashboard/action-engine"},
+                {"text": "⚡ Детали", "url": f"{_FE}/dashboard"},
                 {"text": "🏠 Дашборд", "url": f"{_FE}/dashboard"},
             ]]
             ok = await send_message_with_keyboard(chat_id, briefing_text, keyboard)
@@ -1322,7 +1318,7 @@ async def _process_user(
                 if recovery_cap_line:
                     portfolio_text += f"\n{recovery_cap_line}"
                 keyboard_pp = [[
-                    {"text": "🔍 Разведка", "url": f"{_FE}/dashboard/action-engine"},
+                    {"text": "🔍 Разведка", "url": f"{_FE}/dashboard"},
                     {"text": "🏠 Дашборд",  "url": f"{_FE}/dashboard"},
                 ]]
                 ok = await send_message_with_keyboard(chat_id, portfolio_text, keyboard_pp)
@@ -1356,7 +1352,7 @@ async def _process_user(
                 )
                 keyboard_digest = [[
                     {"text": "📊 Дашборд", "url": f"{_FE}/dashboard"},
-                    {"text": "⚡ Детали",  "url": f"{_FE}/dashboard/action-engine"},
+                    {"text": "⚡ Детали",  "url": f"{_FE}/dashboard"},
                 ]]
                 ok = await send_message_with_keyboard(chat_id, digest_text, keyboard_digest)
                 if ok:

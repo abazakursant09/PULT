@@ -52,10 +52,10 @@ export function ProductCard({ product }: { product: ProductWithLenses }) {
 
       {/* решение главного */}
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        <Link href={`/dashboard/products/${product.id}${top ? `?lens=${top}` : ''}`} style={btnV}>
-          {top ? `Решить главное (${LENS[top].label}) →` : 'Открыть товар →'}
+        <Link href="/dashboard/stores" style={btnV}>
+          {top ? `Открыть магазин (${LENS[top].label}) →` : 'Открыть магазин →'}
         </Link>
-        <Link href={`/dashboard/products/${product.id}`} style={btnGhost}>Все действия</Link>
+        <Link href="/dashboard" style={btnGhost}>Решения на главной</Link>
       </div>
     </div>
   )

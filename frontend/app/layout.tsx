@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { Inter, JetBrains_Mono } from 'next/font/google'
 import '../styles/globals.css'
+import '../styles/seller.css'
 import { LangProvider } from '@/lib/lang-context'
 import { RippleProvider } from '@/components/RippleProvider'
 import { CookieBanner } from '@/components/CookieBanner'

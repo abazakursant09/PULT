@@ -626,8 +626,8 @@ export default function MarketOverviewPage() {
               style={{ padding: '13px 28px', fontSize: '1rem', background: A, color: '#fff', borderRadius: 12, fontWeight: 600, border: 'none', boxShadow: '0 4px 16px rgba(26,115,232,0.3)' }}>
               Начать бесплатно <ArrowRight size={16} />
             </Link>
-            <Link href="/academy" className="btn btn-ghost" style={{ padding: '13px 28px', fontSize: '1rem' }}>
-              Академия
+            <Link href="/dashboard/data" className="btn btn-ghost" style={{ padding: '13px 28px', fontSize: '1rem' }}>
+              Мои данные
             </Link>
           </div>
         </div>

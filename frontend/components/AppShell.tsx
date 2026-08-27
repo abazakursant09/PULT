@@ -1,16 +1,16 @@
-import { Sidebar } from '@/components/Sidebar'
-import { DashboardTopBar } from '@/components/DashboardTopBar'
+import { Rail, NavProvider, ShellFrame, SellerBar } from '@/components/seller/Shell'
+import { ErrorBoundary } from '@/components/system/ErrorBoundary'
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex" style={{ minHeight: '100vh', background: '#09090B' }}>
-      <Sidebar />
-      <div className="flex-1 min-w-0 flex flex-col" style={{ minHeight: '100vh' }}>
-        <DashboardTopBar />
-        <main className="flex-1" style={{ background: '#09090B' }}>
-          {children}
+    <NavProvider>
+      <ShellFrame>
+        <ErrorBoundary name="Rail"><Rail /></ErrorBoundary>
+        <main className="s-main">
+          <SellerBar title="Пульт" sub="Рабочий контур" />
+          <ErrorBoundary name="LegacyToolPage">{children}</ErrorBoundary>
         </main>
-      </div>
-    </div>
+      </ShellFrame>
+    </NavProvider>
   )
 }
