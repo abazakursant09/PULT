@@ -27,4 +27,3 @@ def test_every_payment_endpoint_carries_the_gate():
     for route in payments.router.routes:
         calls = {dependency.call for dependency in route.dependant.dependencies}
         assert payments._require_billing_enabled in calls, route.path
-
