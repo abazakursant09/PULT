@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 
 import { middleware } from '@/middleware'
 import {
+  AUTHENTICATED_TOOL_PREFIXES,
   BILLING_ROUTE_PREFIXES,
   GROWTH_ROUTE_PREFIXES,
   UNAVAILABLE_ROUTE_PREFIXES,
@@ -23,6 +24,45 @@ function filesUnder(dir: string): string[] {
 }
 
 describe('route release policy is fail-closed', () => {
+  it('pins the complete release inventory so a route cannot silently leave its gate', () => {
+    expect(UNAVAILABLE_ROUTE_PREFIXES).toEqual([
+      '/ad-strategy',
+      '/auto-promotions',
+      '/community',
+      '/dashboard/finance',
+      '/dashboard/leaks',
+      '/dashboard/opportunities',
+      '/dashboard/products',
+      '/dashboard/risks',
+      '/dashboard/seo',
+      '/dashboard/sklad',
+      '/dashboard/zakazy',
+    ])
+    expect(GROWTH_ROUTE_PREFIXES).toEqual([
+      '/academy',
+      '/ideas',
+      '/market-overview',
+      '/dashboard/deals',
+      '/dashboard/referrals',
+    ])
+    expect(BILLING_ROUTE_PREFIXES).toEqual([
+      '/checkout',
+      '/dashboard/billing',
+      '/payment/result',
+      '/startup',
+    ])
+    expect(AUTHENTICATED_TOOL_PREFIXES).toEqual([
+      '/academy',
+      '/ai-agents',
+      '/ideas',
+      '/logistics',
+      '/market-overview',
+      '/profit-calculator',
+      '/suppliers',
+      '/admin',
+    ])
+  })
+
   it('blocks every placeholder regardless of feature flags', () => {
     for (const route of UNAVAILABLE_ROUTE_PREFIXES) {
       expect(isRouteUnavailable(route, { growthContour: true, billing: true })).toBe(true)
