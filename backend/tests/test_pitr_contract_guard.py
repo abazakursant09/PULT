@@ -65,6 +65,17 @@ def test_dockerfile_pinned_source_and_exact_apk():
     assert "postgresql18-client" in df and "PG18 package in final image" in df, "final stage must assert no PG18 client"
 
 
+def test_dockerfile_openssl_build_runtime_versions_match():
+    """The dev package and both runtime libraries must move as one closure."""
+    df = _code(_r(DOCKERFILE))
+    versions = {
+        package: re.findall(rf"\b{package}=([0-9][0-9A-Za-z.]*-r[0-9]+)\b", df)
+        for package in ("openssl-dev", "libssl3", "libcrypto3")
+    }
+    assert all(len(found) == 1 for found in versions.values()), versions
+    assert len({found[0] for found in versions.values()}) == 1, versions
+
+
 def test_postgresql_conf_valid_and_no_secrets():
     c = _r(PGCONF)
     assert "archive_mode = on" in c
