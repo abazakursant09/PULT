@@ -175,26 +175,25 @@ const DEFAULT_MECHANISM: L1Mechanism = {
 
 // url → verb + business outcome + causal mechanism (only known L3 routes)
 const ACTION_META: Record<string, { verb: string; outcome: string; mechanism: string }> = {
-  '/ad-strategy':       { verb: 'Снизить рекламу',          outcome: 'снять давление на маржу',    mechanism: 'снижение ставок → меньше CAC → реклама окупается → растёт маржа' },
-  '/dashboard/seo':     { verb: 'Пересобрать карточку',     outcome: 'поднять CTR и продажи',      mechanism: 'новая карточка → выше CTR → больше органики → ниже зависимость от рекламы' },
   '/dashboard/data':    { verb: 'Проверить экономику',      outcome: 'найти источник потери',      mechanism: 'разбор затрат → находим статью потери → корректируем → восстанавливается маржа' },
   '/suppliers':         { verb: 'Пополнить склад',          outcome: 'сохранить позиции в поиске', mechanism: 'пополнение → нет out-of-stock → сохраняются позиции → не теряем продажи' },
   '/logistics':         { verb: 'Оптимизировать логистику', outcome: 'снизить издержки доставки',  mechanism: 'оптимизация упаковки/схемы → ниже стоимость доставки → растёт маржа' },
-  '/dashboard/monitor': { verb: 'Отслеживать',              outcome: 'контролировать динамику',    mechanism: 'наблюдение → раннее обнаружение отклонений → своевременная реакция' },
 }
+const RELEASED_ACTION_ROUTES = new Set(Object.keys(ACTION_META))
 
 function buildActions(p: InsightItem): L1Action[] {
   const target = p.product_name ?? p.subtitle ?? ''
   const impactRub = impactOf(p)
   return (p.actions ?? []).slice(0, 3).map((a, idx) => {
-    const meta = ACTION_META[a.url]
+    const url = RELEASED_ACTION_ROUTES.has(a.url) ? a.url : '/dashboard/data'
+    const meta = ACTION_META[url]
     return {
       label: meta?.verb ?? a.label,                        // verb, not nav label
       outcome: meta?.outcome ?? '',
       estimated_impact: idx === 0 && impactRub > 0 ? `вернуть до ${rub(impactRub)}/мес` : '',
       target,
       mechanism: meta?.mechanism ?? '',                    // HOW the action works
-      url: a.url,
+      url,
       type: idx === 0 ? 'primary' : 'secondary',
     }
   })

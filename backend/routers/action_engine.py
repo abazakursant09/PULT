@@ -1161,11 +1161,11 @@ async def _compute_insights(
                 ),
                 actions=[
                     InsightAction(
-                        label="Авто-пересборка", type="primary",
-                        url="/dashboard/seo-cards",
+                        label="Товары и данные", type="primary",
+                        url="/dashboard/data",
                         params={"product": title, "category": "auto", "auto": "1"},
                     ),
-                    InsightAction(label="SEO-карточки", type="secondary", url="/dashboard/seo-cards"),
+                    InsightAction(label="Товары и данные", type="secondary", url="/dashboard/data"),
                 ],
                 status=st[0], record_id=st[1],
                 product_name=title, product_sku=sku,
@@ -1235,8 +1235,8 @@ async def _compute_insights(
                         deviation=f"+{dev_pct}% выше нормы",
                     ),
                     actions=[
-                        InsightAction(label="Открыть рекламу", url="/auto-promotions", type="primary"),
-                        InsightAction(label="Финансы", url="/dashboard/finance", type="secondary"),
+                        InsightAction(label="Открыть Пульт", url="/dashboard", type="primary"),
+                        InsightAction(label="Экономика", url="/profit-calculator", type="secondary"),
                     ],
                     status=st[0], record_id=st[1],
                     product_name=title, product_sku=sku,
@@ -1300,8 +1300,8 @@ async def _compute_insights(
                         deviation=f"-{gap_pp} п.п. ниже нормы",
                     ),
                     actions=[
-                        InsightAction(label="Финансы", url="/dashboard/finance", type="primary"),
-                        InsightAction(label="Калькулятор", url="/profit-calculator", type="secondary"),
+                        InsightAction(label="Экономика", url="/profit-calculator", type="primary"),
+                        InsightAction(label="Мои данные", url="/dashboard/data", type="secondary"),
                     ],
                     status=st[0], record_id=st[1],
                     product_name=title, product_sku=sku,
@@ -1358,7 +1358,7 @@ async def _compute_insights(
                 ),
                 benchmark=None,
                 actions=[
-                    InsightAction(label="Финансы", url="/dashboard/finance", type="primary"),
+                    InsightAction(label="Экономика", url="/profit-calculator", type="primary"),
                 ],
                 status=st[0], record_id=st[1],
                 product_name=title, product_sku=sku,
@@ -1452,8 +1452,8 @@ async def _compute_insights(
                 ),
                 actions=[
                     InsightAction(
-                        label="Авто-пересборка карточки", type="primary",
-                        url="/dashboard/seo-cards",
+                        label="Товары и данные", type="primary",
+                        url="/dashboard/data",
                         params={"product": title, "auto": "1"},
                     ),
                 ],

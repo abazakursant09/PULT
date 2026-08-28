@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { MessageCircle, X, Send, Sparkles } from 'lucide-react'
 import { api, type AssistantResponse } from '@/lib/api'
+import { FLAGS } from '@/lib/featureFlags'
 
 interface Message {
   role: 'user' | 'assistant'
@@ -49,7 +50,7 @@ export function SmartAssistant() {
     } else if (action === 'go_dashboard') {
       router.push('/dashboard')
     } else if (action === 'go_startup') {
-      router.push('/startup')
+      router.push(FLAGS.billing ? '/startup' : '/dashboard')
     }
   }
 

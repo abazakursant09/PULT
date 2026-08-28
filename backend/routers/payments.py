@@ -17,7 +17,13 @@ from dependencies import get_current_user
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+def _require_billing_enabled() -> None:
+    """Hide the complete commercial surface until the operator explicitly releases it."""
+    if settings.billing_enabled is not True:
+        raise HTTPException(status_code=404, detail="Not found")
+
+
+router = APIRouter(dependencies=[Depends(_require_billing_enabled)])
 
 TARIFF_CONFIG = {
     "basic": {"amount": Decimal("990.00"),  "plan": "master"},

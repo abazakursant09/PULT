@@ -1,4 +1,3 @@
-import '../../styles/seller.css'
 import { Rail, NavProvider, ShellFrame } from '@/components/seller/Shell'
 import { ErrorBoundary } from '@/components/system/ErrorBoundary'
 

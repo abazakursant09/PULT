@@ -331,9 +331,9 @@ async def _build_weekly_report(user: User) -> tuple[str, list[list[dict]]]:
 
     text = "\n".join(lines)
     keyboard = [[
-        {"text": "📈 Финансы",      "url": f"{_FRONTEND}/dashboard/finance"},
-        {"text": "✨ SEO-карточки", "url": f"{_FRONTEND}/dashboard/seo-cards"},
-        {"text": "🚀 Разведка",     "url": f"{_FRONTEND}/dashboard/action-engine"},
+        {"text": "📈 Экономика",    "url": f"{_FRONTEND}/profit-calculator"},
+        {"text": "📦 Данные",       "url": f"{_FRONTEND}/dashboard/data"},
+        {"text": "🚀 Открыть Пульт", "url": f"{_FRONTEND}/dashboard"},
     ]]
     return text, keyboard
 

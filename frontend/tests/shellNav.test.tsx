@@ -50,8 +50,8 @@ describe('P5 — navigation contents (unchanged)', () => {
 
   it('does not offer a page that is still a stub', () => {
     renderShell()
-    // The global products page is a ComingSoon stub, and Decisions has no page at all. A nav
-    // item pointing at either would be a promise the product cannot keep.
+    // The unreleased global products route is fail-closed, and Decisions has no standalone page.
+    // A nav item pointing at either would be a promise the product cannot keep.
     expect(screen.queryByRole('link', { name: /^Товары/ })).toBeNull()
     expect(screen.queryByRole('link', { name: /Решения/ })).toBeNull()
   })

@@ -154,7 +154,7 @@
       [
         {
           "text": "⚡ Решить сейчас",
-          "url": "http://localhost:3000/dashboard/finance"
+          "url": "http://localhost:3000/profit-calculator"
         },
         {
           "text": "🏠 Дашборд",
@@ -168,8 +168,8 @@
     [
       [
         {
-          "text": "🚀 Разведка",
-          "url": "http://localhost:3000/dashboard/action-engine"
+          "text": "🚀 Открыть Пульт",
+          "url": "http://localhost:3000/dashboard"
         },
         {
           "text": "🏠 Дашборд",
@@ -183,8 +183,8 @@
     [
       [
         {
-          "text": "✨ Пересобрать карточку",
-          "url": "http://localhost:3000/dashboard/seo-cards?product=Кружка&auto=1"
+          "text": "📦 Товары и данные",
+          "url": "http://localhost:3000/dashboard/data"
         },
         {
           "text": "🏠 Дашборд",
@@ -202,8 +202,8 @@
           "url": "http://localhost:3000/dashboard"
         },
         {
-          "text": "🔍 Action Engine",
-          "url": "http://localhost:3000/dashboard/action-engine"
+          "text": "🔍 Решения",
+          "url": "http://localhost:3000/dashboard"
         }
       ]
     ]
@@ -213,8 +213,8 @@
     [
       [
         {
-          "text": "📊 Открыть финансы",
-          "url": "http://localhost:3000/dashboard/finance"
+          "text": "📊 Экономика",
+          "url": "http://localhost:3000/profit-calculator"
         },
         {
           "text": "🏠 Дашборд",
@@ -228,12 +228,12 @@
     [
       [
         {
-          "text": "✨ Авто-пересборка",
-          "url": "http://localhost:3000/dashboard/seo-cards?product=Кружка&auto=1"
+          "text": "📦 Товары и данные",
+          "url": "http://localhost:3000/dashboard/data"
         },
         {
-          "text": "📋 SEO-карточки",
-          "url": "http://localhost:3000/dashboard/seo-cards"
+          "text": "🏠 Открыть Пульт",
+          "url": "http://localhost:3000/dashboard"
         }
       ]
     ]

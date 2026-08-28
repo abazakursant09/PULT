@@ -45,14 +45,13 @@ const UNKNOWN_PERIOD = 'период не определён'
 
 // Only these L3 routes may appear in actions. Nothing else is allowed.
 const L3_ROUTES = new Set([
-  '/ad-strategy', '/dashboard/seo', '/dashboard/data',
-  '/suppliers', '/logistics', '/ai-agents', '/dashboard/monitor',
+  '/dashboard/data', '/suppliers', '/logistics', '/ai-agents',
 ])
 
 // keyword → primary L3 route (deterministic mapping, no new routes)
 const ROUTE_MAP: Array<[RegExp, string, string]> = [
-  [/реклам|дрр|\bads?\b|буст|продвиж/i, '/ad-strategy',       'Снизить рекламную нагрузку'],
-  [/карточк|ctr|seo|конверс|видим/i,    '/dashboard/seo',      'Пересобрать карточку'],
+  [/реклам|дрр|\bads?\b|буст|продвиж/i, '/dashboard/data',     'Проверить рекламные затраты'],
+  [/карточк|ctr|seo|конверс|видим/i,    '/dashboard/data',     'Проверить данные карточки'],
   [/маржа|цена|затрат|комисс|себестоим/i,'/dashboard/data',    'Проверить экономику товара'],
   [/остаток|склад|out.?of.?stock|поставк/i,'/suppliers',       'Пополнить склад'],
   [/логистик|доставк|отгрузк/i,         '/logistics',          'Оптимизировать логистику'],
@@ -67,9 +66,8 @@ function buildActions(ins: RawInsight): PreparedAction[] {
     if (re.test(hay)) { out.push({ label, url, priority: 1 }); break }
   }
   if (out.length === 0) out.push({ label: 'Открыть данные', url: '/dashboard/data', priority: 1 })
-  // secondary: always allow checking facts + tracking the change (L3 only)
+  // Secondary actions stay on released factual surfaces; no placeholder route is emitted.
   out.push({ label: 'Проверить факты', url: '/dashboard/data', priority: 2 })
-  out.push({ label: 'Отслеживать изменение', url: '/dashboard/monitor', priority: 3 })
   // dedup by url, keep order, cap 3, enforce allowed routes
   const seen = new Set<string>()
   return out.filter(a => L3_ROUTES.has(a.url) && !seen.has(a.url) && seen.add(a.url)).slice(0, 3)

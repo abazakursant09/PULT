@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { BarChart2, Upload, Calculator, Target, Users, FileText } from 'lucide-react'
+import { Upload, Calculator, Store, Truck, FileText } from 'lucide-react'
 
 // L2 — Truth Layer hub. Single home for facts. No recommendations, no "what to do" CTAs.
 // Pure navigation launcher into existing factual screens (one entity = one home).
@@ -11,11 +11,10 @@ const VIOLET = '#C4B5FD'
 const MUTED = '#8A8A93'
 
 const ITEMS = [
-  { href: '/dashboard/finance', icon: BarChart2,  title: 'Финансы',    desc: 'Выручка, прибыль и маржа по товарам' },
+  { href: '/dashboard/stores',  icon: Store,      title: 'Магазины',   desc: 'Источники и данные каждого магазина' },
   { href: '/dashboard/import',  icon: Upload,     title: 'Товары и импорт', desc: 'Загрузка и список товаров' },
   { href: '/profit-calculator', icon: Calculator, title: 'Цены',       desc: 'Юнит-экономика и расчёт цены' },
-  { href: '/market-overview',   icon: Target,     title: 'Конкуренты', desc: 'Сравнение с рынком' },
-  { href: '/dashboard/deals',   icon: Users,      title: 'Сделки',     desc: 'История и статусы сделок' },
+  { href: '/logistics',         icon: Truck,      title: 'Логистика',  desc: 'Расчёт и сравнение вариантов доставки' },
   { href: '/dashboard/marking', icon: FileText,   title: 'Маркировка', desc: 'Маркировка товаров' },
 ]
 

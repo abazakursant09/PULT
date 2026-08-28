@@ -73,7 +73,7 @@ export default function AcademyPage() {
                     Ниша, площадка, карточка товара и первые шаги к продажам — всё автоматически.
                   </p>
                   <Link
-                    href="/checkout?plan=start"
+                    href="/dashboard"
                     className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm text-white transition-all hover:-translate-y-0.5"
                     style={{ background: '#1A73E8', boxShadow: '0 4px 14px rgba(26,115,232,0.3)' }}
                   >
