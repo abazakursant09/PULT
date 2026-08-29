@@ -52,13 +52,15 @@ switching users to an unpublished address).
 | Category | Files | Old value | New value | Activation status |
 |---|---|---|---|---|
 | A. runtime/config | none hardcoded | app origin via `settings.frontend_url` env (`FRONTEND_URL`) / `NEXT_PUBLIC_API_URL` (default localhost) | prod: `FRONTEND_URL=https://pult-os.ru` (env only) | **gate 1** (env at deploy; not in repo) |
-| B. legal pages | `frontend/app/{privacy,offer,terms,agreement,rules}.tsx` | `biznes-pult.ru/<page>`, `hello@biznes-pult.ru` | `pult-os.ru/<page>`, `privacy@pult-os.ru` | **gate 1 + gate 2 + legal review** |
-| C. brand/contact | `frontend/app/{support,dashboard/account}.tsx`, `frontend/app/rules` (security report) | `hello@biznes-pult.ru` | `support@pult-os.ru`; **security-vuln → `security@pult-os.ru`** | **gate 1 + gate 2 + legal review** |
-| D. tests | `backend/tests/test_cors_prod_origins.py` (example `app.biznes-pult.ru`), `frontend/tests/{legalConsistency,notificationHonesty}.test.tsx` | old contact/domain | new contact/domain | **change together with B/C at activation** |
-| E. immutable | none | — | — | never mechanically edited (no audit/SHA-pin/evidence/snapshot references the domain) |
+| B. legal pages | `frontend/app/{privacy,offer,terms,agreement,rules}/page.tsx` | `biznes-pult.ru/<page>`, `hello@biznes-pult.ru` | `pult-os.ru/<page>`, `privacy@pult-os.ru` | **gate 1 + gate 2 + legal review** |
+| C. brand/contact | `frontend/app/{support,dashboard/account}/page.tsx`, `frontend/app/rules/page.tsx` (security report) | `hello@biznes-pult.ru` | `support@pult-os.ru`; **security-vuln → `security@pult-os.ru`** | **gate 1 + gate 2 + legal review** |
+| D. tests/guards | `backend/tests/{test_cors_prod_origins,test_cookie_truth_guard,test_domain_migration_prep_guard,test_legal_prelaunch_drafts_guard}.py` | examples and dormancy assertions for the old contact/domain | update deliberately together with B/C; never hide the transition by weakening guards | **activation PR only** |
+| E. immutable historical snapshot | `docs/legal/attorney-review-request-23.md` | records the then-current old-domain/mail state | **do not mechanically replace**; it is a SHA-pinned historical review package | immutable |
+| F. dormant planning/evidence | this file, DNS runbook, legal README/checklist/source-evidence | truthfully record that live pages still use the old domain | update facts only when the corresponding gate actually passes | docs-only |
 
-**This PR changes NONE of A–E.** It is a dormant docs/guard correction only (this document + the DNS
-runbook + legal evidence docs + a dormancy guard).
+The preparation remains dormant: it changes no runtime origin, live page, public DNS/TLS, contact
+publication, immutable attorney snapshot, SMTP or deploy state. Documentation corrections must preserve
+that separation and must not simulate activation.
 
 ## What changes AT activation (post gate 1 + gate 2 + legal review — separate Inal-gated PR)
 1. Frontend legal/brand pages (B, C): swap `biznes-pult.ru` → `pult-os.ru`, `hello@biznes-pult.ru` →
