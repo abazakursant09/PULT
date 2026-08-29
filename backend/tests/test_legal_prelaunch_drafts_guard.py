@@ -1097,3 +1097,31 @@ def test_followup_each_draft_keeps_its_exact_contact_line_count():
         assert got == count, (
             f"{name} must carry exactly {count} pult-os.ru contact line(s), found {got}"
         )
+
+
+# --- POST-MERGE FACT CORRECTION: Mail Gate is complete, publication is not ---
+
+def test_privacy_draft_separates_mail_gate_from_public_activation():
+    body = _r("privacy-policy.DRAFT.md")
+    assert "Mail Gate PASS" in body, "privacy DRAFT must record the completed mail gate"
+    assert not re.search(r"почт\w*\s+не\s*актив", body, re.IGNORECASE), (
+        "privacy DRAFT must not deny the working mail infrastructure"
+    )
+    assert "сайт не активирован" in body, "website activation must remain explicitly off"
+    assert "документ не опубликован" in body, "publication gate must remain explicit"
+    assert "не активированы как публичные контакты" in body, "contacts must not be presented as public"
+
+
+def test_launch_checklist_records_mail_gate_done_without_launch_promotion():
+    body = _r("launch-legal-checklist.md")
+    mail_rows = [line for line in body.splitlines() if line.startswith("| 1 |")]
+    assert len(mail_rows) == 1, "launch checklist must carry exactly one Mail Gate row"
+    row = mail_rows[0]
+    assert "Mail Gate PASS" in row and "| DONE |" in row, "Mail Gate row must be completed"
+    assert not re.search(r"почт\w*\s+не\s*актив", row, re.IGNORECASE), (
+        "stale pre-Mail-Gate state must be absent"
+    )
+    assert "| BLOCKED |" not in row, "completed Mail Gate must not remain BLOCKED"
+    assert "dmarc@" in row and "технический alias" in row, "DMARC alias must remain technical-only"
+    assert "не активированы публично" in row, "completed mail infrastructure must not imply public activation"
+    assert "launch gate = NOT READY" in body, "launch gate must remain NOT READY"
