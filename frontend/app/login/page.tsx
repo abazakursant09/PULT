@@ -94,7 +94,7 @@ export default function LoginPage() {
             ПУЛЬТ
           </h1>
           <p style={{ fontSize: 12.5, color: '#52525B', letterSpacing: '0.03em', textAlign: 'center' }}>
-            Центр управления бизнесом на маркетплейсах
+            Операционная система селлера
           </p>
         </div>
 
