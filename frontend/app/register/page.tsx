@@ -8,6 +8,7 @@ import { api } from '@/lib/api'
 import { useLang } from '@/lib/lang-context'
 import { LanguageSwitcher } from '@/components/LanguageSwitcher'
 import { MathCaptcha } from '@/components/MathCaptcha'
+import { PultMark } from '@/components/brand/PultMark'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -150,7 +151,7 @@ export default function RegisterPage() {
         <BlurFade className="w-full max-w-[460px]" inView>
           <div className="text-center mb-8">
             <Link href="/" className="inline-flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-lg" style={{ background: '#1A73E8', color: '#fff' }}>П</div>
+              <PultMark width={32} height={37} style={{ color: '#383180' }} />
               <span className="font-bold text-xl tracking-tight" style={{ color: '#0A2540' }}>ПУЛЬТ</span>
             </Link>
           </div>
@@ -226,7 +227,7 @@ export default function RegisterPage() {
 
         <div className="text-center mb-8">
           <Link href="/" className="inline-flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-lg" style={{ background: '#1A73E8', color: '#fff' }}>П</div>
+            <PultMark width={32} height={37} style={{ color: '#383180' }} />
             <span className="font-bold text-xl tracking-tight" style={{ color: '#0A2540' }}>ПУЛЬТ</span>
           </Link>
           <p className="mt-2 text-sm text-muted-foreground">{t('common.marketplace')}</p>

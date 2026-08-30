@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { CheckCircle2, XCircle, Loader2 } from 'lucide-react'
+import { PultMark } from '@/components/brand/PultMark'
 import { api } from '@/lib/api'
 import { setUser } from '@/lib/session'
 import { Card } from '@/components/ui/card'
@@ -84,7 +85,8 @@ function VerifyEmailContent() {
       <div aria-hidden style={{ position: 'fixed', bottom: '10%', left: '-6%', width: 300, height: 300, background: 'radial-gradient(circle, rgba(26,115,232,0.04) 0%, transparent 65%)', animation: 'orbDrift2 22s ease-in-out infinite', filter: 'blur(38px)', pointerEvents: 'none', zIndex: 0 }} />
       <div className="w-full max-w-[420px]">
         <div className="text-center mb-10">
-          <Link href="/" className="inline-flex items-baseline">
+          <Link href="/" className="inline-flex items-center gap-3">
+            <PultMark width={28} height={32} style={{ color: '#383180' }} />
             <span className="font-bold tracking-tight" style={{ fontSize: '2rem', color: '#202124' }}>Бизнес‑</span>
             <span className="font-bold tracking-tight text-gradient-gold" style={{ fontSize: '2rem' }}>Пульт</span>
           </Link>

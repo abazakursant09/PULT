@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { KeyRound, ArrowRight, CheckCircle2, Loader2 } from 'lucide-react'
+import { PultMark } from '@/components/brand/PultMark'
 import { api } from '@/lib/api'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -90,7 +91,8 @@ function ResetPasswordContent() {
 
       <div className="w-full max-w-[440px] animate-fade-in relative" style={{ zIndex: 2 }}>
         <div className="text-center mb-10">
-          <Link href="/" className="inline-flex items-baseline">
+          <Link href="/" className="inline-flex items-center gap-3">
+            <PultMark width={30} height={35} style={{ color: '#383180' }} />
             <span className="font-bold tracking-tight" style={{ fontSize: '2.25rem', color: '#202124' }}>Бизнес‑</span>
             <span className="font-bold tracking-tight text-gradient-gold" style={{ fontSize: '2.25rem' }}>Пульт</span>
           </Link>

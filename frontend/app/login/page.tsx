@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ArrowRight, Shield } from 'lucide-react'
+import { PultMark } from '@/components/brand/PultMark'
 import { api } from '@/lib/api'
 import { setUser } from '@/lib/session'
 import { useLang } from '@/lib/lang-context'
@@ -83,12 +84,7 @@ export default function LoginPage() {
             marginBottom: 18,
             boxShadow: '0 0 0 1px rgba(124,58,237,0.15), 0 8px 24px rgba(0,0,0,0.5)',
           }}>
-            {/* ПУЛЬТ icon */}
-            <svg width="26" height="26" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <circle cx="10" cy="10" r="8.25" stroke="#A78BFA" strokeWidth="1.5"/>
-              <circle cx="10" cy="10" r="4" stroke="#A78BFA" strokeWidth="1" strokeOpacity="0.45"/>
-              <circle cx="10" cy="10" r="1.75" fill="#A78BFA"/>
-            </svg>
+            <PultMark width={29} height={32} style={{ color: '#E9E6FF' }} />
           </div>
           <h1 style={{ fontSize: 24, fontWeight: 700, color: '#FFFFFF', letterSpacing: '-0.03em', lineHeight: 1, marginBottom: 6 }}>
             ПУЛЬТ
