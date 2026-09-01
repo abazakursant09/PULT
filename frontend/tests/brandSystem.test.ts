@@ -75,6 +75,13 @@ function faviconDefects(favicon: string): string[] {
   return defects
 }
 
+function releasedShellNamingDefects(source: string): string[] {
+  const defects: string[] = []
+  if (!source.includes('<div className="pl">Пульт OS</div>')) defects.push('canonical-product-name')
+  if (source.includes('Бизнес-Пульт')) defects.push('retired-product-name')
+  return defects
+}
+
 describe('canonical PULT mark is fail-closed', () => {
   it('owns the approved П, converging facets, routed flow, and hub in one component', () => {
     expect(markDefects(read('components/brand/PultMark.tsx'))).toEqual([])
@@ -112,5 +119,17 @@ describe('canonical PULT mark is fail-closed', () => {
     ['unrelated icon circle remains allowed', () => surfaceDefects('app/login/page.tsx', `${read('app/login/page.tsx')}<circle cx="5" cy="5" r="2" />`)],
   ])('safe control GREEN: %s', (_name, mutate) => {
     expect(mutate()).toEqual([])
+  })
+})
+
+describe('released seller shell uses the canonical product name', () => {
+  const shell = () => read('components/seller/Shell.tsx')
+
+  it('labels the active cabinet as Пульт OS', () => {
+    expect(releasedShellNamingDefects(shell())).toEqual([])
+  })
+
+  it('fails closed if the retired Бизнес-Пульт label returns', () => {
+    expect(releasedShellNamingDefects(shell().replace('Пульт OS', 'Бизнес-Пульт'))).not.toEqual([])
   })
 })

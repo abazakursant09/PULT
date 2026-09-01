@@ -109,7 +109,7 @@ export function Rail() {
         </div>
       ))}
       <Link href="/dashboard/account" onClick={close} className="s-foot s-clk">
-        <span className="av">П</span><div><div className="nm">Мой кабинет</div><div className="pl">Бизнес-Пульт</div></div>
+        <span className="av">П</span><div><div className="nm">Мой кабинет</div><div className="pl">Пульт OS</div></div>
       </Link>
     </aside>
   )
