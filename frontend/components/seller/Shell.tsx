@@ -4,6 +4,7 @@ import { usePathname } from 'next/navigation'
 import { createContext, useContext, useEffect, useState, useCallback } from 'react'
 import { Home, Store, Upload, MessageSquare, Settings, User, Menu, X } from 'lucide-react'
 import { useRouter } from 'next/navigation'
+import { PultMark } from '@/components/brand/PultMark'
 
 // ── Shell responsive state (P5) ───────────────────────────────────────────────
 // On desktop the rail is a fixed 258px column and the drawer state is inert. Below ~1024px the
@@ -88,7 +89,7 @@ export function Rail() {
     <aside className="s-rail">
       <div className="s-rail-top">
         <Link href="/dashboard" className="s-logo" onClick={close}>
-          <span className="mk"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0A0B0D" strokeWidth="2.2"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.6" fill="#0A0B0D" stroke="none"/></svg></span>
+          <span className="mk"><PultMark width={20} height={23} style={{ color: 'var(--tx-2)' }} /></span>
           <b>ПУЛЬТ</b>
         </Link>
         <DrawerClose />

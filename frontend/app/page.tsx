@@ -10,6 +10,7 @@ import {
   Settings, LogOut, Home,
 } from 'lucide-react'
 import { NotificationBell } from '@/components/NotificationBell'
+import { PultMark } from '@/components/brand/PultMark'
 import { api, type User } from '@/lib/api'
 import { clearSession } from '@/lib/session'
 import { LANDING_PROOF } from '@/config/landing-proof'
@@ -34,17 +35,6 @@ const R = {
 }
 
 function rub(n: number): string { return `${Math.round(n).toLocaleString('ru-RU')} ₽` }
-
-/* ─── ПУЛЬТ logo mark — concentric target / control center ──────────────────── */
-function PultIcon({ size = 18, color = '#FFFFFF' }: { size?: number; color?: string }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="10" cy="10" r="8.25" stroke={color} strokeWidth="1.5" />
-      <circle cx="10" cy="10" r="4" stroke={color} strokeWidth="1" strokeOpacity="0.45" />
-      <circle cx="10" cy="10" r="1.75" fill={color} />
-    </svg>
-  )
-}
 
 /* ─── Real product mock — L1 decision card (the screenshot) ─────────────────── */
 function L1Mock({
@@ -140,7 +130,7 @@ function LandingNav({ user }: { user: User | null }) {
           <div className="flex items-center justify-center" style={{
             width: 30, height: 30, borderRadius: 8, background: R.surf, border: `1px solid ${R.line}`,
           }}>
-            <PultIcon size={16} />
+            <PultMark width={18} height={21} style={{ color: '#D5D0F7' }} />
           </div>
           <span style={{ fontSize: '1.0625rem', fontWeight: 700, letterSpacing: '-0.02em', color: R.text }}>ПУЛЬТ</span>
         </Link>
@@ -531,7 +521,7 @@ export default function LandingPage() {
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-8 mb-10">
             <div>
               <div className="flex items-center gap-2.5 mb-3">
-                <PultIcon size={18} />
+                <PultMark width={18} height={21} style={{ color: '#D5D0F7' }} />
                 <span style={{ fontSize: '1rem', fontWeight: 700, letterSpacing: '-0.02em', color: R.text }}>ПУЛЬТ</span>
               </div>
               <p style={{ fontSize: '0.875rem', color: R.text3, maxWidth: 320, lineHeight: 1.6 }}>
