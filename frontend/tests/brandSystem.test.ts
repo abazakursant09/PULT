@@ -19,8 +19,29 @@ const CANONICAL_BODY = 'M7.25 2.75h13.5a4 4 0 0 1 4 4V29.25h-7.2V16.1'
 const CANONICAL_FLOW = 'M5.05 5.35 12.15 11M22.95 5.35 12.15 11'
 const CANONICAL_HUB = 'cx="12.15" cy="11" r="2.15"'
 const IMPORT = "import { PultMark } from '@/components/brand/PultMark'"
-const RETIRED_TARGET = /<circle\s+cx=["'](?:10|12)["']\s+cy=["'](?:10|12)["']\s+r=["'](?:8|8\.25)["']/
-const LETTER_BOX = /(?:background|backgroundColor)\s*:\s*["']#1A73E8["'][\s\S]{0,180}>П<\/div>/
+const LETTER_BOX = /<(div|span)\b(?=[^>]*(?:background(?:Color)?\s*:|className\s*=\s*["'][^"']*\bbg-))[^>]*>\s*П\s*<\/\1>/
+
+function circleAttribute(tag: string, name: string): string | undefined {
+  return tag.match(new RegExp(`\\b${name}\\s*=\\s*["']([^"']+)["']`, 'i'))?.[1]
+}
+
+function hasConcentricTarget(source: string): boolean {
+  const circles = [...source.matchAll(/<circle\b[^>]*>/gi)].map(match => ({
+    cx: circleAttribute(match[0], 'cx'),
+    cy: circleAttribute(match[0], 'cy'),
+    r: Number(circleAttribute(match[0], 'r')),
+  }))
+
+  return circles.some((circle, index) => {
+    if (!circle.cx || !circle.cy || !Number.isFinite(circle.r)) return false
+    return circles.slice(index + 1).some(other =>
+      other.cx === circle.cx
+      && other.cy === circle.cy
+      && Number.isFinite(other.r)
+      && Math.max(circle.r, other.r) >= 4,
+    )
+  })
+}
 
 function markDefects(mark: string): string[] {
   const defects: string[] = []
@@ -29,6 +50,7 @@ function markDefects(mark: string): string[] {
   if (!mark.includes(CANONICAL_FLOW)) defects.push('flow')
   if (!mark.includes(CANONICAL_HUB)) defects.push('hub')
   if ((mark.match(/className="pult-mark-facet"/g) ?? []).length !== 3) defects.push('facets')
+  if (hasConcentricTarget(mark)) defects.push('retired-target')
   return defects
 }
 
@@ -36,7 +58,7 @@ function surfaceDefects(path: string, source: string): string[] {
   const defects: string[] = []
   if (!source.includes(IMPORT)) defects.push('import')
   if ((source.match(/<PultMark\b/g) ?? []).length !== SURFACES[path]) defects.push('usage-count')
-  if (RETIRED_TARGET.test(source)) defects.push('retired-target')
+  if (hasConcentricTarget(source)) defects.push('retired-target')
   if (/function\s+PultIcon\b/.test(source)) defects.push('local-copy')
   if (LETTER_BOX.test(source)) defects.push('letter-box')
   return defects
@@ -49,6 +71,7 @@ function faviconDefects(favicon: string): string[] {
   if (!favicon.includes(CANONICAL_FLOW)) defects.push('flow')
   if (!favicon.includes(CANONICAL_HUB)) defects.push('hub')
   if (/<text\b/i.test(favicon)) defects.push('font-glyph')
+  if (hasConcentricTarget(favicon)) defects.push('retired-target')
   return defects
 }
 
@@ -72,10 +95,14 @@ describe('canonical PULT mark is fail-closed', () => {
     ['routed flow removed', () => markDefects(read('components/brand/PultMark.tsx').replace(CANONICAL_FLOW, 'M0 0'))],
     ['hub moved', () => markDefects(read('components/brand/PultMark.tsx').replace(CANONICAL_HUB, 'cx="14" cy="12" r="2.15"'))],
     ['surface use removed', () => surfaceDefects('app/login/page.tsx', read('app/login/page.tsx').replace('<PultMark', '<div'))],
-    ['target restored', () => surfaceDefects('app/login/page.tsx', `${read('app/login/page.tsx')}<circle cx="10" cy="10" r="8.25" />`)],
+    ['target restored', () => surfaceDefects('app/login/page.tsx', `${read('app/login/page.tsx')}<circle cx="10" cy="10" r="8.25" /><circle cx="10" cy="10" r="4" />`)],
+    ['reordered target restored', () => surfaceDefects('app/login/page.tsx', `${read('app/login/page.tsx')}<circle r="8.25" cy="10" cx="10" /><circle r="4" cx="10" cy="10" />`)],
+    ['target inserted into canonical component', () => markDefects(`${read('components/brand/PultMark.tsx')}<circle r="8.25" cx="10" cy="10" /><circle cx="10" cy="10" r="4" />`)],
     ['letter box restored', () => surfaceDefects('app/register/page.tsx', `${read('app/register/page.tsx')}<div style={{ background: '#1A73E8' }}>П</div>`) ],
+    ['tailwind letter box restored', () => surfaceDefects('app/register/page.tsx', `${read('app/register/page.tsx')}<div className="bg-blue-600 rounded-xl">П</div>`) ],
     ['favicon font glyph restored', () => faviconDefects(`${read('public/favicon.svg')}<text>П</text>`) ],
     ['favicon flow changed', () => faviconDefects(read('public/favicon.svg').replace(CANONICAL_FLOW, 'M0 0'))],
+    ['target inserted into favicon', () => faviconDefects(`${read('public/favicon.svg')}<circle cx="10" cy="10" r="4"/><circle r="8.25" cy="10" cx="10"/>`)],
   ])('mutation RED: %s', (_name, mutate) => {
     expect(mutate()).not.toEqual([])
   })
