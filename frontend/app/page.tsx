@@ -423,7 +423,7 @@ export default function LandingPage() {
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4 max-w-[920px] mx-auto">
             {[
               { icon: FileText, title: 'SEO-карточки' },
-              { icon: MessageSquare, title: 'Автоответы' },
+              { icon: MessageSquare, title: 'Автоответы на отзывы — Wildberries' },
               { icon: Megaphone, title: 'Реклама' },
               { icon: Calculator, title: 'Калькулятор прибыли' },
               { icon: Eye, title: 'Разведка конкурентов' },
