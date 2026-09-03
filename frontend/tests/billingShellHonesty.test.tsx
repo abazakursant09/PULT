@@ -4,6 +4,7 @@ import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 import { Rail } from '@/components/seller/Shell'
+import { ThemeProvider } from '@/components/theme/ThemeProvider'
 import { PLAN_LABELS, planLabel, hasActiveSubscription } from '@/lib/plans'
 
 // Release-honesty guards, slice 2. Each of these fails the day one of the fabrications
@@ -19,7 +20,7 @@ describe('seller navigation exposes no unreleasable surface', () => {
     // "Финансовый модуль". The Advisory MVP delivers none of them, and the button below that
     // list creates a real payment. No seller-visible path may lead there until the commercial
     // contents are approved. The page and payments.py are untouched.
-    render(<Rail />)
+    render(<ThemeProvider><Rail /></ThemeProvider>)
 
     expect(screen.queryByRole('link', { name: /Тариф/ })).not.toBeInTheDocument()
     expect(document.querySelector('a[href="/dashboard/billing"]')).toBeNull()
@@ -29,7 +30,7 @@ describe('seller navigation exposes no unreleasable surface', () => {
   it('does not lead to Идеи — that page reopens the legacy cabinet', () => {
     // /ideas renders AppShell, i.e. the old Sidebar: a green "МОНИТОРИНГ АКТИВЕН" beacon for
     // the contour removed for inventing news, plus four "Раздел в разработке" sections.
-    render(<Rail />)
+    render(<ThemeProvider><Rail /></ThemeProvider>)
 
     expect(screen.queryByRole('link', { name: /Идеи/ })).not.toBeInTheDocument()
     expect(document.querySelector('a[href="/ideas"]')).toBeNull()
