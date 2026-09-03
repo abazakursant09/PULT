@@ -291,7 +291,7 @@ export default function CalculatorPage() {
               </p>
 
               <Link href="/register" className="btn btn-primary" style={{ padding: '12px', justifyContent: 'center' }}>
-                Начать с Бизнес-Пультом <ArrowRight size={14} />
+                Начать с Пультом <ArrowRight size={14} />
               </Link>
             </Card>
           ) : (
@@ -319,7 +319,7 @@ export default function CalculatorPage() {
         <div className="mt-10 text-center">
           <p className="text-sm mb-4" style={{ color: 'rgba(0,0,0,0.38)' }}>Нужна более точная аналитика?</p>
           <Link href="/register" className="btn btn-primary" style={{ padding: '13px 32px', fontSize: '0.95rem' }}>
-            Начать с Бизнес-Пультом <ArrowRight size={16} />
+            Начать с Пультом <ArrowRight size={16} />
           </Link>
         </div>
 

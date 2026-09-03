@@ -209,7 +209,7 @@ export default function SecurityPage() {
               {[
                 'Установите Google Authenticator, Authy или 1Password',
                 'Нажмите «+» → «Ввести ключ вручную»',
-                'Введите секретный ключ выше и название «Бизнес-Пульт»',
+                'Введите секретный ключ выше и название «Пульт»',
                 'Введите 6-значный код ниже для подтверждения',
               ].map((s, i) => (
                 <div key={i} className="flex items-start gap-3">
