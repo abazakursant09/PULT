@@ -616,7 +616,7 @@ function Step6() {
           <h3 style={{ fontWeight: 700, color: T, fontSize: '0.9375rem' }}>Что дальше?</h3>
         </div>
         <p style={{ color: M, lineHeight: 1.75, fontSize: '0.9375rem' }}>
-          Вы запустили продажи. <strong style={{ color: T }}>Бизнес-Пульт берёт всё на автопилот</strong>: отзывы, цены, конкурентов, финансы. А если возникнут вопросы — ассистент поможет в любой момент.
+          Вы запустили продажи. <strong style={{ color: T }}>Пульт берёт всё на автопилот</strong>: отзывы, цены, конкурентов, финансы. А если возникнут вопросы — ассистент поможет в любой момент.
         </p>
         <button onClick={() => router.push('/dashboard')}
           style={{ marginTop: 18, width: '100%', paddingTop: 15, paddingBottom: 15, borderRadius: 12, background: A, color: '#fff', fontWeight: 600, fontSize: '1rem', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, boxShadow: '0 4px 20px rgba(26,115,232,0.3)' }}>

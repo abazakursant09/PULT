@@ -21,7 +21,7 @@ const mono = JetBrains_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'Пульт OS — операционная система селлера',
+  title: 'Пульт — операционная система селлера',
   description: 'Спрос, продажи, маржа, остатки и ежедневные решения для продавцов на маркетплейсах — в едином операционном контуре.',
   icons: {
     icon: '/favicon.svg',
