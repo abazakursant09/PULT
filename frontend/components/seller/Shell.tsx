@@ -5,6 +5,9 @@ import { createContext, useContext, useEffect, useState, useCallback } from 'rea
 import { Home, Store, Upload, MessageSquare, Settings, User, Menu, X } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { PultMark } from '@/components/brand/PultMark'
+import { ThemeToggle } from '@/components/cabinet/ThemeToggle'
+import { ThemeProvider } from '@/components/theme/ThemeProvider'
+import { THEME_BOOTSTRAP_SCRIPT } from '@/lib/theme'
 
 // ── Shell responsive state (P5) ───────────────────────────────────────────────
 // On desktop the rail is a fixed 258px column and the drawer state is inert. Below ~1024px the
@@ -39,10 +42,13 @@ export function NavProvider({ children }: { children: React.ReactNode }) {
 export function ShellFrame({ children }: { children: React.ReactNode }) {
   const { open, close } = useContext(NavContext)
   return (
-    <div className={`s-app${open ? ' nav-open' : ''}`}>
-      {children}
-      <button type="button" className="s-scrim" aria-hidden={!open} tabIndex={-1} onClick={close} />
-    </div>
+    <ThemeProvider>
+      <script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP_SCRIPT }} />
+      <div className={`s-app${open ? ' nav-open' : ''}`}>
+        {children}
+        <button type="button" className="s-scrim" aria-hidden={!open} tabIndex={-1} onClick={close} />
+      </div>
+    </ThemeProvider>
   )
 }
 
@@ -108,6 +114,10 @@ export function Rail() {
           ))}
         </div>
       ))}
+      <div className="s-rail-theme">
+        <span className="s-glabel">Оформление</span>
+        <ThemeToggle />
+      </div>
       <Link href="/dashboard/account" onClick={close} className="s-foot s-clk">
         <span className="av">П</span><div><div className="nm">Мой кабинет</div><div className="pl">Пульт</div></div>
       </Link>

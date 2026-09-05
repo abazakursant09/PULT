@@ -1,21 +1,26 @@
 /* ПУЛЬТ — Seller OS design layer (V2). Изолировано под .s-app — глобальные стили не трогает.
    Премиум тёмный, серый металлик-акцент, стекло на кнопках, фирменные точки маркетплейсов. */
 .s-app{
+  /* Rebind aliases here: inherited custom properties resolve at their defining element. */
+  --panel:var(--surface);--panel-2:var(--elevated);--panel-3:var(--surface-h);
+  --hair:var(--line);--tx:var(--text);--tx-2:var(--text-2);--tx-3:var(--text-3);
+  --ac:var(--violet);--ac-2:var(--violet-text);--ac-soft:var(--violet-dim);
   /* Palette lives in globals.css :root (P0 unified tokens). The shell no longer redefines
      --bg/--panel/--tx/... — it inherits them, so the seller chrome and the React components
      inside it resolve to exactly one palette. Only layout + typography structure stays here. */
-  display:grid; grid-template-columns:258px 1fr; min-height:100vh;
+  display:grid; grid-template-columns:258px 1fr; min-height:100vh; position:relative; isolation:isolate;
   background:var(--bg); color:var(--tx); font-size:14px; line-height:1.5; letter-spacing:-.006em;
   font-family:"Inter","SF Pro Text",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
   -webkit-font-smoothing:antialiased;
 }
+.s-app::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;background:radial-gradient(900px 520px at 12% -8%,var(--ambient-a),transparent 62%),radial-gradient(760px 460px at 92% 104%,var(--ambient-b),transparent 64%)}
 .s-app *{box-sizing:border-box}
 .s-app .num{font-variant-numeric:tabular-nums;letter-spacing:0}
 .s-app button{font-family:inherit;cursor:pointer}
 .s-app a{color:inherit;text-decoration:none}
 
 /* rail */
-.s-rail{border-right:1px solid var(--hair);padding:18px 14px;display:flex;flex-direction:column;position:sticky;top:0;height:100vh;overflow:auto}
+.s-rail{border-right:1px solid var(--hair);padding:18px 14px;display:flex;flex-direction:column;position:sticky;top:0;height:100vh;overflow:auto;background:var(--rail-bg);box-shadow:inset -1px 0 0 var(--glass-highlight);backdrop-filter:blur(20px)}
 .s-rail-top{display:flex;align-items:center;justify-content:space-between}
 .s-logo{display:flex;align-items:center;gap:10px;padding:6px 8px 14px}
 .s-logo .mk{width:28px;height:28px;border-radius:8px;background:linear-gradient(140deg,var(--metal-1),var(--metal-2));box-shadow:inset 0 1px 0 rgba(255,255,255,.45),0 2px 6px rgba(0,0,0,.35);display:grid;place-items:center}
@@ -29,12 +34,14 @@
 .s-nav-ic{display:inline-flex;flex:0 0 auto;opacity:.85}
 .s-nav-ic svg{width:17px;height:17px;stroke-width:1.7}
 .s-nav.on .s-nav-ic{color:var(--violet-text);opacity:1}
+.s-rail-theme{margin-top:auto;padding:12px 4px 10px;border-top:1px solid var(--hair)}
+.s-rail-theme .theme-menu__popover{left:0;width:100%;max-height:min(360px,65vh);overflow-y:auto}
 /* Executive Ledger store routes only (PULT-LAUNCH-1.4.5I): green active accent, other sections keep
    the default. Scoped by the s-nav--ledger modifier the Shell adds on /dashboard/stores*. */
 .s-nav.on.s-nav--ledger{background:rgba(46,94,78,.18);color:#fff}
 .s-nav.on.s-nav--ledger .s-nav-ic{color:#6FBF9B}
 .s-nav--ledger:focus-visible{outline:none;box-shadow:0 0 0 1px #2E5E4E}
-.s-foot{margin-top:auto;display:flex;align-items:center;gap:9px;padding:12px 8px 4px;border-top:1px solid var(--hair)}
+.s-foot{margin-top:8px;display:flex;align-items:center;gap:9px;padding:12px 8px 4px;border-top:1px solid var(--hair)}
 .s-foot .av{width:30px;height:30px;border-radius:50%;background:var(--panel-2);border:1px solid var(--hair-2);display:grid;place-items:center;font-size:12px;font-weight:600;color:var(--tx-2)}
 .s-foot .nm{font-size:12.5px;font-weight:550}.s-foot .pl{font-size:11px;color:var(--tx-3)}
 
@@ -50,7 +57,7 @@
 
 /* main + bar */
 .s-main{min-width:0;overflow-x:hidden}
-.s-bar{height:60px;border-bottom:1px solid var(--hair);display:flex;align-items:center;gap:16px;padding:0 clamp(16px,3vw,34px);position:sticky;top:0;background:rgba(10,11,13,.82);backdrop-filter:blur(14px);z-index:10}
+.s-bar{height:60px;border-bottom:1px solid var(--hair);display:flex;align-items:center;gap:16px;padding:0 clamp(16px,3vw,34px);position:sticky;top:0;background:var(--glass);backdrop-filter:blur(14px);z-index:10}
 .s-bar .ttl{font-size:15px;font-weight:600}.s-bar .sub{font-size:12.5px;color:var(--tx-3)}
 .s-bar .sp{flex:1}
 

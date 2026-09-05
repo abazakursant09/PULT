@@ -10,6 +10,7 @@ import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
+import { ThemePicker } from '@/components/theme/ThemePicker'
 
 const A   = 'var(--violet)'
 const ABG = 'var(--violet-dim)'
@@ -122,6 +123,7 @@ export default function SettingsPage() {
       <SellerBar title="Настройки" sub="Магазины · Telegram-уведомления · аккаунт" />
       <div className="s-canvas">
         <div className="max-w-2xl mx-auto space-y-8">
+      <ThemePicker />
       {/* CONNECTION-UI: connecting a marketplace is the second step of the seller's first run —
           it lives first on this page because nothing else in PULT works until it is done. */}
       <ConnectionsSection />
