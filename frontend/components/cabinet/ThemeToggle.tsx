@@ -20,21 +20,24 @@ export function ThemeToggle() {
     const onPointer = (event: MouseEvent) => {
       if (root.current && !root.current.contains(event.target as Node)) setOpen(false)
     }
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return
-      setOpen(false)
-      trigger.current?.focus()
-    }
     document.addEventListener('mousedown', onPointer)
-    window.addEventListener('keydown', onKey)
     return () => {
       document.removeEventListener('mousedown', onPointer)
-      window.removeEventListener('keydown', onKey)
     }
   }, [open])
 
   return (
-    <div className="theme-menu" ref={root}>
+    <div
+      className="theme-menu"
+      ref={root}
+      onKeyDown={(event) => {
+        if (!open || event.key !== 'Escape') return
+        event.preventDefault()
+        event.stopPropagation()
+        setOpen(false)
+        trigger.current?.focus()
+      }}
+    >
       <button
         ref={trigger}
         type="button"

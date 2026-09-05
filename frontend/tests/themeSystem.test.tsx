@@ -60,7 +60,7 @@ describe('seller theme contract', () => {
     fireEvent.keyDown(screen.getByRole('radiogroup'), { key: 'ArrowRight' })
     expect(screen.getByRole('radio', { name: /Обсидиан/ })).toHaveFocus()
     expect(document.documentElement.dataset.sellerTheme).toBe('obsidian')
-    fireEvent.keyDown(window, { key: 'Escape' })
+    fireEvent.keyDown(screen.getByRole('radiogroup'), { key: 'Escape' })
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(trigger).toHaveFocus()
   })

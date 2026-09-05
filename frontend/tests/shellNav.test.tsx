@@ -124,6 +124,18 @@ describe('P5 — drawer open / close', () => {
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(container.querySelector('.s-app')?.className).not.toContain('nav-open')
   })
+
+  it('Escape closes the nested theme picker before the drawer', () => {
+    const { container } = renderShell()
+    fireEvent.click(screen.getByRole('button', { name: /Открыть меню/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Тема:/ }))
+
+    const themes = screen.getByRole('radiogroup', { name: 'Тема оформления' })
+    fireEvent.keyDown(themes, { key: 'Escape' })
+
+    expect(screen.queryByRole('dialog', { name: 'Выбор рабочей темы' })).toBeNull()
+    expect(container.querySelector('.s-app')?.className).toContain('nav-open')
+  })
 })
 
 describe('P5 — SellerBar API preserved', () => {
