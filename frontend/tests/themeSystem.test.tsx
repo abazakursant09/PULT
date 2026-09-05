@@ -25,6 +25,7 @@ function missingThemeSelectors(css: string): string[] {
 
 describe('seller theme contract', () => {
   it('ships the approved calm default and four explicit alternatives', () => {
+    expect(THEME_STORAGE_KEY).toBe('pult_theme')
     expect(DEFAULT_THEME).toBe('champagne')
     expect(THEME_IDS).toEqual(['champagne', 'obsidian', 'titanium', 'pearl', 'system'])
     expect(THEME_OPTIONS).toHaveLength(5)

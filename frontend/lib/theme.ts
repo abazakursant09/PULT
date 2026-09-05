@@ -1,4 +1,5 @@
-export const THEME_STORAGE_KEY = 'pult_seller_theme_v1'
+// Public legal draft already inventories this browser-local preference by this exact key.
+export const THEME_STORAGE_KEY = 'pult_theme'
 
 export const THEME_IDS = ['champagne', 'obsidian', 'titanium', 'pearl', 'system'] as const
 
