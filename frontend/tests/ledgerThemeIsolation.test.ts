@@ -66,10 +66,10 @@ describe('the ledger theme stays on the store screens', () => {
     }
   })
 
-  it('uses the approved palette and nothing else', () => {
+  it('inherits the seller palette while retaining scoped semantic aliases', () => {
     const css = read('styles', 'ledger.css')
-    for (const hex of ['#FCFCFA', '#15171B', '#4A4E56', '#83878F', '#DBDBD3', '#B9B9AE', '#2E5E4E', '#8A3B24']) {
-      expect(css).toContain(hex)
-    }
+    expect(css).not.toMatch(/--(?:bg|surface|surface-h|text|text-2|text-3|violet|success|danger|warning)\s*:/)
+    expect(css).toContain('--ledger-green: var(--success)')
+    expect(css).toContain('--ledger-oxide: var(--danger)')
   })
 })

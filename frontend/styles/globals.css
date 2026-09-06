@@ -355,7 +355,7 @@ body[data-focus="1"] [data-smart-assistant] { display: none !important; }
   /* Primary */
   .btn-primary {
     background: var(--violet);
-    color: #FFFFFF;
+    color: hsl(var(--primary-foreground));
     font-weight: 600;
   }
   .btn-primary:hover:not(:disabled) {

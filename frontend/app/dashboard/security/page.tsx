@@ -102,17 +102,17 @@ export default function SecurityPage() {
 
   return (
     <div className="min-h-screen" style={{ background: 'var(--bg)', position: 'relative' }}>
-      <div aria-hidden style={{ position: 'fixed', top: '8%', right: '-5%', width: 360, height: 360, background: 'radial-gradient(circle, rgba(124,58,237,0.06) 0%, transparent 65%)', filter: 'blur(44px)', pointerEvents: 'none', zIndex: 0 }} />
+      <div aria-hidden style={{ position: 'fixed', top: '8%', right: '-5%', width: 360, height: 360, background: 'radial-gradient(circle, color-mix(in srgb, var(--violet) 6%, transparent) 0%, transparent 65%)', filter: 'blur(44px)', pointerEvents: 'none', zIndex: 0 }} />
       <main className="max-w-[720px] mx-auto px-5 sm:px-8 py-10 sm:py-14 animate-fade-in" style={{ position: 'relative', zIndex: 1 }}>
 
         <div className="mb-10">
           <button onClick={() => router.push('/dashboard/account?tab=security')}
                   className="sm:hidden flex items-center gap-1.5 text-sm mb-4 rounded-lg px-2.5 py-1.5"
-                  style={{ color: 'var(--text-3)', border: '1px solid rgba(255,255,255,0.08)', background: 'none', cursor: 'pointer' }}>
+                  style={{ color: 'var(--text-3)', border: '1px solid color-mix(in srgb, var(--text) 8%, transparent)', background: 'none', cursor: 'pointer' }}>
             <ArrowLeft size={13} /> Назад
           </button>
           <p className="text-xs font-medium mb-2.5 uppercase tracking-wide" style={{ color: 'var(--violet)' }}>Настройки</p>
-          <h1 className="font-bold tracking-tight mb-2" style={{ fontSize: 'clamp(1.75rem,3vw,2.25rem)', color: '#FFFFFF' }}>
+          <h1 className="font-bold tracking-tight mb-2" style={{ fontSize: 'clamp(1.75rem,3vw,2.25rem)', color: 'var(--text)' }}>
             Безопасность
           </h1>
           <p style={{ fontSize: '1rem', color: 'var(--text-3)' }}>
@@ -122,7 +122,7 @@ export default function SecurityPage() {
 
         {success && (
           <div className="mb-6 px-4 py-3 rounded-xl flex items-center gap-3 animate-slide-up"
-               style={{ background: 'rgba(124,58,237,0.10)', border: '1px solid rgba(124,58,237,0.25)', color: 'var(--violet)' }}>
+               style={{ background: 'color-mix(in srgb, var(--violet) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--violet) 25%, transparent)', color: 'var(--violet)' }}>
             <Check size={16} /> {success}
           </div>
         )}
@@ -137,14 +137,14 @@ export default function SecurityPage() {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
             <div className="flex items-center gap-4">
               <div className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0"
-                   style={{ background: mfaEnabled ? 'rgba(124,58,237,0.12)' : 'rgba(124,58,237,0.08)', border: `1px solid ${mfaEnabled ? 'rgba(124,58,237,0.28)' : 'rgba(124,58,237,0.16)'}` }}>
+                   style={{ background: mfaEnabled ? 'color-mix(in srgb, var(--violet) 12%, transparent)' : 'color-mix(in srgb, var(--violet) 8%, transparent)', border: `1px solid ${mfaEnabled ? 'color-mix(in srgb, var(--violet) 28%, transparent)' : 'color-mix(in srgb, var(--violet) 16%, transparent)'}` }}>
                 {mfaEnabled
                   ? <ShieldCheck size={22} style={{ color: 'var(--violet)' }} />
                   : <Shield      size={22} style={{ color: 'var(--violet)' }} />
                 }
               </div>
               <div>
-                <h2 className="font-semibold text-base" style={{ color: '#FFFFFF' }}>
+                <h2 className="font-semibold text-base" style={{ color: 'var(--text)' }}>
                   Двухфакторная аутентификация (2FA)
                 </h2>
                 <p className="text-sm mt-0.5" style={{ color: 'var(--text-3)' }}>
@@ -155,7 +155,7 @@ export default function SecurityPage() {
 
             <div className="flex items-center gap-3 shrink-0">
               <Badge variant={mfaEnabled ? 'outline' : 'secondary'}
-                     style={mfaEnabled ? { background: 'rgba(124,58,237,0.12)', color: 'var(--violet)', borderColor: 'rgba(124,58,237,0.28)' } : {}}>
+                     style={mfaEnabled ? { background: 'color-mix(in srgb, var(--violet) 12%, transparent)', color: 'var(--violet)', borderColor: 'color-mix(in srgb, var(--violet) 28%, transparent)' } : {}}>
                 {mfaEnabled ? '✓ Включено' : 'Выключено'}
               </Badge>
 
@@ -177,19 +177,19 @@ export default function SecurityPage() {
 
         {phase === 'setup' && (
           <Card className="p-7 sm:p-9 animate-slide-up mb-6">
-            <h3 className="font-semibold text-base mb-1" style={{ color: '#FFFFFF' }}>
+            <h3 className="font-semibold text-base mb-1" style={{ color: 'var(--text)' }}>
               Настройка приложения аутентификатора
             </h3>
             <p className="text-sm mb-6" style={{ color: 'var(--text-3)' }}>
-              Откройте <strong style={{ color: '#FFFFFF' }}>Google Authenticator</strong>,{' '}
-              <strong style={{ color: '#FFFFFF' }}>Authy</strong> или{' '}
-              <strong style={{ color: '#FFFFFF' }}>любое совместимое приложение</strong> и добавьте аккаунт вручную или по ссылке.
+              Откройте <strong style={{ color: 'var(--text)' }}>Google Authenticator</strong>,{' '}
+              <strong style={{ color: 'var(--text)' }}>Authy</strong> или{' '}
+              <strong style={{ color: 'var(--text)' }}>любое совместимое приложение</strong> и добавьте аккаунт вручную или по ссылке.
             </p>
 
             <div className="mb-5">
               <Label className="mb-2 block" style={{ color: 'var(--text-3)' }}>Секретный ключ (ввести вручную)</Label>
               <div className="flex items-center gap-3 px-4 py-3 rounded-xl"
-                   style={{ background: 'rgba(124,58,237,0.06)', border: '1px solid rgba(124,58,237,0.18)' }}>
+                   style={{ background: 'color-mix(in srgb, var(--violet) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--violet) 18%, transparent)' }}>
                 <code className="flex-1 text-sm font-semibold tracking-widest break-all font-mono" style={{ color: 'var(--violet)' }}>
                   {secret}
                 </code>
@@ -205,7 +205,7 @@ export default function SecurityPage() {
                 src or an href" is one we can actually enforce and test. The key above is copyable
                 and is the supported way in. */}
 
-            <div className="mb-8 rounded-xl px-5 py-4 space-y-2" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+            <div className="mb-8 rounded-xl px-5 py-4 space-y-2" style={{ background: 'color-mix(in srgb, var(--text) 4%, transparent)', border: '1px solid color-mix(in srgb, var(--text) 8%, transparent)' }}>
               {[
                 'Установите Google Authenticator, Authy или 1Password',
                 'Нажмите «+» → «Ввести ключ вручную»',
@@ -214,7 +214,7 @@ export default function SecurityPage() {
               ].map((s, i) => (
                 <div key={i} className="flex items-start gap-3">
                   <span className="w-5 h-5 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0 mt-0.5"
-                        style={{ background: 'rgba(124,58,237,0.15)', color: 'var(--violet)' }}>
+                        style={{ background: 'color-mix(in srgb, var(--violet) 15%, transparent)', color: 'var(--violet)' }}>
                     {i + 1}
                   </span>
                   <p className="text-sm" style={{ color: 'var(--text-3)' }}>{s}</p>
@@ -252,7 +252,7 @@ export default function SecurityPage() {
           <Card className="p-7 sm:p-9 animate-slide-up mb-6">
             <div className="flex items-center gap-3 mb-5">
               <AlertTriangle size={18} style={{ color: 'var(--danger)' }} />
-              <h3 className="font-semibold text-base" style={{ color: '#FFFFFF' }}>
+              <h3 className="font-semibold text-base" style={{ color: 'var(--text)' }}>
                 Отключение двухфакторной аутентификации
               </h3>
             </div>
@@ -289,8 +289,8 @@ export default function SecurityPage() {
         )}
 
         {phase === 'idle' && (
-          <div className="rounded-2xl px-6 py-5 mt-4" style={{ background: 'rgba(124,58,237,0.06)', border: '1px solid rgba(124,58,237,0.14)' }}>
-            <h3 className="text-sm font-semibold mb-3" style={{ color: '#FFFFFF' }}>
+          <div className="rounded-2xl px-6 py-5 mt-4" style={{ background: 'color-mix(in srgb, var(--violet) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--violet) 14%, transparent)' }}>
+            <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--text)' }}>
               Зачем нужна двухфакторная аутентификация?
             </h3>
             <ul className="space-y-1.5">

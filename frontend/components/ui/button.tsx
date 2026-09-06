@@ -10,7 +10,7 @@ type Variant =
   | 'default' | 'destructive' | 'outline' | 'link'   // back-compat aliases
 type Size = 'default' | 'sm' | 'lg' | 'icon'
 
-const _primary   = 'bg-[var(--violet)] text-white font-semibold hover:bg-[var(--violet-h)]'
+const _primary   = 'bg-[var(--violet)] text-[hsl(var(--primary-foreground))] font-semibold hover:bg-[var(--violet-h)]'
 const _danger    = 'bg-[var(--danger)] text-white font-semibold hover:opacity-90'
 const _secondary = 'bg-transparent border border-[var(--line)] text-[var(--text)] hover:border-[var(--violet-text)] hover:text-[var(--violet-text)]'
 const _ghost     = 'bg-transparent text-[var(--text-2)] hover:bg-[var(--surface-h)] hover:text-[var(--text)]'

@@ -10,9 +10,9 @@ import { Card } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { Badge } from '@/components/ui/badge'
 
-const A   = '#3B82F6'
-const ABG = 'rgba(26,115,232,0.08)'
-const ABR = 'rgba(26,115,232,0.18)'
+const A   = 'var(--violet)'
+const ABG = 'color-mix(in srgb, var(--violet) 8%, transparent)'
+const ABR = 'color-mix(in srgb, var(--violet) 18%, transparent)'
 
 interface Step {
   id:    number
@@ -130,30 +130,30 @@ export default function DowntimePage() {
         <div className="flex items-center gap-3 mb-3">
           <div className="w-10 h-10 rounded-2xl flex items-center justify-center shrink-0"
                style={{ background: 'rgba(220,38,38,0.08)', border: '1px solid rgba(220,38,38,0.2)' }}>
-            <AlertTriangle size={20} style={{ color: '#DC2626' }} />
+            <AlertTriangle size={20} style={{ color: 'var(--danger)' }} />
           </div>
           <div>
-            <h1 className="font-bold" style={{ fontSize: '1.375rem', color: '#202124' }}>
+            <h1 className="font-bold" style={{ fontSize: '1.375rem', color: 'var(--text)' }}>
               Даунтайм-план
             </h1>
-            <p className="text-xs" style={{ color: 'rgba(0,0,0,0.38)' }}>
+            <p className="text-xs" style={{ color: 'var(--text-2)' }}>
               Только для администратора · /dashboard/admin/downtime
             </p>
           </div>
         </div>
-        <p style={{ fontSize: '0.9375rem', color: '#5F6368', lineHeight: 1.65 }}>
+        <p style={{ fontSize: '0.9375rem', color: 'var(--text-2)', lineHeight: 1.65 }}>
           Чек-лист действий при падении сайта. Выполняйте шаги последовательно.
         </p>
       </Card>
 
       <Card className="p-5">
         <div className="flex items-center justify-between mb-3">
-          <span className="text-sm font-medium" style={{ color: '#202124' }}>Прогресс</span>
+          <span className="text-sm font-medium" style={{ color: 'var(--text)' }}>Прогресс</span>
           <span className="text-sm font-semibold" style={{ color: A }}>{done.size}/{STEPS.length} шагов</span>
         </div>
         <Progress value={progress} className="h-2" />
         {progress === 100 && (
-          <p className="text-sm mt-2 font-medium" style={{ color: '#1A73E8' }}>
+          <p className="text-sm mt-2 font-medium" style={{ color: 'var(--violet-text)' }}>
             ✅ Все шаги выполнены — сайт должен работать!
           </p>
         )}
@@ -168,7 +168,7 @@ export default function DowntimePage() {
               className="p-5 sm:p-6 transition-all duration-200"
               style={{
                 opacity: isDone ? 0.65 : 1,
-                borderColor: isDone ? 'rgba(26,115,232,0.25)' : step.critical ? 'rgba(220,38,38,0.15)' : undefined,
+                borderColor: isDone ? 'color-mix(in srgb, var(--violet) 25%, transparent)' : step.critical ? 'rgba(220,38,38,0.15)' : undefined,
               }}
             >
               <div className="flex items-start gap-4">
@@ -178,8 +178,8 @@ export default function DowntimePage() {
                   title={isDone ? 'Отметить как незавершённый' : 'Отметить как выполненный'}
                 >
                   {isDone
-                    ? <CheckCircle size={22} style={{ color: '#1A73E8' }} />
-                    : <Circle size={22} style={{ color: 'rgba(0,0,0,0.2)' }} />
+                    ? <CheckCircle size={22} style={{ color: 'var(--violet-text)' }} />
+                    : <Circle size={22} style={{ color: 'var(--text-2)' }} />
                   }
                 </button>
 
@@ -189,7 +189,7 @@ export default function DowntimePage() {
                          style={{ background: ABG, color: A }}>
                       {step.icon}
                     </div>
-                    <span className="font-semibold text-sm" style={{ color: isDone ? '#9CA3AF' : '#202124' }}>
+                    <span className="font-semibold text-sm" style={{ color: isDone ? 'var(--text-2)' : 'var(--text)' }}>
                       Шаг {step.id}: {step.title}
                     </span>
                     {step.critical && !isDone && (
@@ -197,28 +197,28 @@ export default function DowntimePage() {
                     )}
                   </div>
 
-                  <p className="text-sm mb-3" style={{ color: '#5F6368', lineHeight: 1.6 }}>
+                  <p className="text-sm mb-3" style={{ color: 'var(--text-2)', lineHeight: 1.6 }}>
                     {step.desc}
                   </p>
 
                   {step.cmds && (
                     <div className="rounded-xl overflow-hidden mb-3"
-                         style={{ background: 'var(--surface)', border: '1px solid rgba(0,0,0,0.06)' }}>
+                         style={{ background: 'var(--surface)', border: '1px solid color-mix(in srgb, var(--text) 6%, transparent)' }}>
                       {step.cmds.map((cmd, i) => (
                         <div
                           key={i}
                           className="flex items-center justify-between group px-4 py-1.5"
-                          style={{ borderBottom: i < step.cmds!.length - 1 ? '1px solid rgba(0,0,0,0.05)' : 'none' }}
+                          style={{ borderBottom: i < step.cmds!.length - 1 ? '1px solid color-mix(in srgb, var(--text) 5%, transparent)' : 'none' }}
                         >
                           <code className="text-xs font-mono flex-1"
-                                style={{ color: cmd.startsWith('#') ? '#9A9897' : '#A8FFAE' }}>
+                                style={{ color: cmd.startsWith('#') ? 'var(--text-2)' : 'var(--success)' }}>
                             {cmd}
                           </code>
                           {!cmd.startsWith('#') && (
                             <button
                               onClick={() => copyCmd(cmd)}
                               className="ml-3 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-xs px-2 py-0.5 rounded"
-                              style={{ color: copiedCmd === cmd ? '#3B82F6' : '#9A9897', background: 'rgba(0,0,0,0.06)' }}
+                              style={{ color: copiedCmd === cmd ? 'var(--violet)' : 'var(--text-2)', background: 'color-mix(in srgb, var(--text) 6%, transparent)' }}
                             >
                               {copiedCmd === cmd ? '✓' : 'copy'}
                             </button>
@@ -254,7 +254,7 @@ export default function DowntimePage() {
       <Card className="p-5">
         <div className="flex items-center gap-2 mb-3">
           <Clock size={15} style={{ color: A }} />
-          <span className="font-semibold text-sm" style={{ color: '#202124' }}>Ожидаемое время восстановления</span>
+          <span className="font-semibold text-sm" style={{ color: 'var(--text)' }}>Ожидаемое время восстановления</span>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
           {[
@@ -263,9 +263,9 @@ export default function DowntimePage() {
             { issue: 'Проблема хостинга',   time: '30 мин – 2 ч' },
           ].map(r => (
             <div key={r.issue} className="px-3 py-2.5 rounded-xl"
-                 style={{ background: '#F1F3F4', border: '1px solid rgba(26,115,232,0.1)' }}>
-              <p className="font-medium" style={{ color: '#202124' }}>{r.time}</p>
-              <p className="text-xs mt-0.5" style={{ color: 'rgba(0,0,0,0.38)' }}>{r.issue}</p>
+                 style={{ background: 'var(--surface-h)', border: '1px solid color-mix(in srgb, var(--violet) 10%, transparent)' }}>
+              <p className="font-medium" style={{ color: 'var(--text)' }}>{r.time}</p>
+              <p className="text-xs mt-0.5" style={{ color: 'var(--text-2)' }}>{r.issue}</p>
             </div>
           ))}
         </div>
