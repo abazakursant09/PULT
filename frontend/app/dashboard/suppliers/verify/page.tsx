@@ -14,14 +14,14 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/textarea'
 
-const A   = '#3B82F6'
-const ABG = 'rgba(26,115,232,0.08)'
-const ABR = 'rgba(26,115,232,0.18)'
+const A   = 'var(--violet)'
+const ABG = 'color-mix(in srgb, var(--violet) 8%, transparent)'
+const ABR = 'color-mix(in srgb, var(--violet) 18%, transparent)'
 
 const STATUS_CONFIG = {
-  verified: { label: 'Верифицирован', icon: <ShieldCheck size={15} />, variant: 'outline' as const, color: '#1A73E8', borderColor: 'rgba(26,115,232,0.22)', bg: 'rgba(26,115,232,0.08)' },
+  verified: { label: 'Верифицирован', icon: <ShieldCheck size={15} />, variant: 'outline' as const, color: 'var(--violet-text)', borderColor: 'color-mix(in srgb, var(--violet) 22%, transparent)', bg: 'color-mix(in srgb, var(--violet) 8%, transparent)' },
   pending:  { label: 'На проверке',  icon: <Clock size={15} />,       variant: 'warning' as const,  color: 'var(--warning)', borderColor: 'rgba(245,158,11,0.2)',  bg: 'rgba(245,158,11,0.08)' },
-  rejected: { label: 'Отклонена',    icon: <ShieldX size={15} />,     variant: 'destructive' as const, color: '#DC2626', borderColor: 'rgba(220,38,38,0.2)', bg: 'rgba(220,38,38,0.08)' },
+  rejected: { label: 'Отклонена',    icon: <ShieldX size={15} />,     variant: 'destructive' as const, color: 'var(--danger)', borderColor: 'rgba(220,38,38,0.2)', bg: 'rgba(220,38,38,0.08)' },
 } as const
 
 function StatusBadge({ status }: { status: string }) {
@@ -39,7 +39,7 @@ function StatusBadge({ status }: { status: string }) {
 
 function VerifiedBadge() {
   return (
-    <Badge variant="outline" className="gap-1.5" style={{ background: 'rgba(26,115,232,0.1)', color: '#1A73E8', borderColor: 'rgba(26,115,232,0.25)' }}>
+    <Badge variant="outline" className="gap-1.5" style={{ background: 'color-mix(in srgb, var(--violet) 10%, transparent)', color: 'var(--violet-text)', borderColor: 'color-mix(in srgb, var(--violet) 25%, transparent)' }}>
       <ShieldCheck size={13} />
       Проверенный производитель
     </Badge>
@@ -92,11 +92,11 @@ function ApplicationCard({ sv, onRevoke }: { sv: SupplierVerification; onRevoke:
       <div className="flex items-start justify-between gap-4 flex-wrap mb-4">
         <div>
           <div className="flex items-center gap-3 flex-wrap mb-1">
-            <h2 className="font-bold text-lg" style={{ color: '#202124' }}>{sv.company_name}</h2>
+            <h2 className="font-bold text-lg" style={{ color: 'var(--text)' }}>{sv.company_name}</h2>
             <StatusBadge status={sv.status} />
             {sv.status === 'verified' && <VerifiedBadge />}
           </div>
-          <p className="text-xs" style={{ color: 'rgba(0,0,0,0.38)' }}>
+          <p className="text-xs" style={{ color: 'var(--text-2)' }}>
             Подана {fmt(sv.created_at)}
             {sv.verified_at && ` · Верифицирована ${fmt(sv.verified_at)}`}
           </p>
@@ -108,7 +108,7 @@ function ApplicationCard({ sv, onRevoke }: { sv: SupplierVerification; onRevoke:
           </Button>
           {sv.status !== 'verified' && (
             <Button variant="ghost" size="sm" onClick={handleRevoke} loading={revoking}
-                    style={{ color: '#DC2626' }}>
+                    style={{ color: 'var(--danger)' }}>
               {!revoking && <><Trash2 size={13} /> Отозвать</>}
             </Button>
           )}
@@ -118,13 +118,13 @@ function ApplicationCard({ sv, onRevoke }: { sv: SupplierVerification; onRevoke:
       {sv.status === 'rejected' && sv.rejection_reason && (
         <div className="flex items-start gap-2 px-4 py-3 rounded-xl mb-4 text-sm"
              style={{ background: 'rgba(220,38,38,0.05)', border: '1px solid rgba(220,38,38,0.15)' }}>
-          <AlertTriangle size={14} className="shrink-0 mt-0.5" style={{ color: '#DC2626' }} />
-          <span style={{ color: '#DC2626' }}>{REJECTION_LABEL[sv.rejection_reason] ?? sv.rejection_reason}</span>
+          <AlertTriangle size={14} className="shrink-0 mt-0.5" style={{ color: 'var(--danger)' }} />
+          <span style={{ color: 'var(--danger)' }}>{REJECTION_LABEL[sv.rejection_reason] ?? sv.rejection_reason}</span>
         </div>
       )}
 
       {expanded && (
-        <div className="space-y-2 pt-2 animate-fade-in" style={{ borderTop: '1px solid rgba(26,115,232,0.1)' }}>
+        <div className="space-y-2 pt-2 animate-fade-in" style={{ borderTop: '1px solid color-mix(in srgb, var(--violet) 10%, transparent)' }}>
           {sv.inn           && <Row icon={<Hash size={12} />}      label="ИНН"             val={sv.inn} />}
           {sv.ogrn          && <Row icon={<Hash size={12} />}      label="ОГРН"            val={sv.ogrn} />}
           {sv.legal_address && <Row icon={<Building2 size={12} />} label="Адрес"           val={sv.legal_address} />}
@@ -145,10 +145,10 @@ function ApplicationCard({ sv, onRevoke }: { sv: SupplierVerification; onRevoke:
 
 function Row({ icon, label, val }: { icon: React.ReactNode; label: string; val: string }) {
   return (
-    <div className="flex items-start gap-3 py-2" style={{ borderBottom: '1px solid rgba(0,0,0,0.04)' }}>
-      <span className="shrink-0 mt-0.5" style={{ color: 'rgba(0,0,0,0.38)' }}>{icon}</span>
-      <span className="text-xs font-medium shrink-0 w-28" style={{ color: 'rgba(0,0,0,0.38)' }}>{label}</span>
-      <span className="text-xs" style={{ color: '#202124', wordBreak: 'break-word' }}>{val}</span>
+    <div className="flex items-start gap-3 py-2" style={{ borderBottom: '1px solid color-mix(in srgb, var(--text) 4%, transparent)' }}>
+      <span className="shrink-0 mt-0.5" style={{ color: 'var(--text-2)' }}>{icon}</span>
+      <span className="text-xs font-medium shrink-0 w-28" style={{ color: 'var(--text-2)' }}>{label}</span>
+      <span className="text-xs" style={{ color: 'var(--text)', wordBreak: 'break-word' }}>{val}</span>
     </div>
   )
 }
@@ -216,17 +216,17 @@ export default function SupplierVerifyPage() {
             <ShieldCheck size={20} style={{ color: A }} />
           </div>
           <div>
-            <h1 className="font-bold" style={{ fontSize: '1.375rem', color: '#202124' }}>
+            <h1 className="font-bold" style={{ fontSize: '1.375rem', color: 'var(--text)' }}>
               Верификация производителей
             </h1>
-            <p className="text-sm mt-0.5" style={{ color: 'rgba(0,0,0,0.38)' }}>
+            <p className="text-sm mt-0.5" style={{ color: 'var(--text-2)' }}>
               Подтвердите легальность компании через ФНС, 2ГИС или USCC
             </p>
           </div>
         </div>
-        <p style={{ fontSize: '0.9375rem', color: '#5F6368', lineHeight: 1.7 }}>
+        <p style={{ fontSize: '0.9375rem', color: 'var(--text-2)', lineHeight: 1.7 }}>
           Верифицированные производители получают значок
-          {' '}<strong style={{ color: '#1A73E8' }}>«Проверенный производитель»</strong>,
+          {' '}<strong style={{ color: 'var(--violet-text)' }}>«Проверенный производитель»</strong>,
           который отображается в карточке компании и повышает доверие покупателей.
         </p>
       </Card>
@@ -239,7 +239,7 @@ export default function SupplierVerifyPage() {
         <>
           {myApps.length > 0 && (
             <div className="space-y-4">
-              <h2 className="font-semibold text-sm" style={{ color: '#5F6368' }}>
+              <h2 className="font-semibold text-sm" style={{ color: 'var(--text-2)' }}>
                 Мои заявки ({myApps.length})
               </h2>
               {myApps.map(sv => (
@@ -256,7 +256,7 @@ export default function SupplierVerifyPage() {
                 </Button>
               ) : (
                 <Card className="p-6 sm:p-8 animate-fade-in">
-                  <h2 className="font-semibold mb-6" style={{ fontSize: '1.0625rem', color: '#202124' }}>
+                  <h2 className="font-semibold mb-6" style={{ fontSize: '1.0625rem', color: 'var(--text)' }}>
                     Новая заявка
                   </h2>
 
@@ -270,9 +270,9 @@ export default function SupplierVerifyPage() {
                           onClick={() => switchCountry(c)}
                           className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all duration-150"
                           style={{
-                            background: country === c ? A : 'rgba(0,0,0,0.04)',
-                            color:      country === c ? '#F8F9FA' : '#8A8986',
-                            border:     `1px solid ${country === c ? A : 'rgba(26,115,232,0.12)'}`,
+                            background: country === c ? A : 'color-mix(in srgb, var(--text) 4%, transparent)',
+                            color:      country === c ? 'hsl(var(--primary-foreground))' : 'var(--text-2)',
+                            border:     `1px solid ${country === c ? A : 'color-mix(in srgb, var(--violet) 12%, transparent)'}`,
                           }}
                         >
                           {c === 'russia' ? '🇷🇺 Россия' : '🇨🇳 Китай'}
@@ -283,7 +283,7 @@ export default function SupplierVerifyPage() {
 
                   {error && (
                     <div className="mb-5 px-4 py-3 rounded-xl text-sm"
-                         style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)', color: '#DC2626' }}>
+                         style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)', color: 'var(--danger)' }}>
                       {error}
                     </div>
                   )}
@@ -305,7 +305,7 @@ export default function SupplierVerifyPage() {
                             <Input id="inn" required placeholder="7700000000"
                               value={form.inn ?? ''}
                               onChange={e => setF('inn', e.target.value)} />
-                            <p className="text-xs" style={{ color: 'rgba(0,0,0,0.38)' }}>10 цифр (юрлицо) или 12 (ИП)</p>
+                            <p className="text-xs" style={{ color: 'var(--text-2)' }}>10 цифр (юрлицо) или 12 (ИП)</p>
                           </div>
                           <div className="space-y-2">
                             <Label htmlFor="ogrn">ОГРН</Label>
@@ -336,7 +336,7 @@ export default function SupplierVerifyPage() {
                           </div>
                         </div>
                         <div className="px-4 py-3 rounded-xl text-xs"
-                             style={{ background: ABG, border: `1px solid ${ABR}`, color: '#5F6368' }}>
+                             style={{ background: ABG, border: `1px solid ${ABR}`, color: 'var(--text-2)' }}>
                           Проверка выполняется по базе <strong style={{ color: A }}>ФНС</strong> (ИНН) и{' '}
                           <strong style={{ color: A }}>2ГИС</strong> (адрес). Результат — мгновенно.
                         </div>
@@ -349,7 +349,7 @@ export default function SupplierVerifyPage() {
                             maxLength={18} className="font-mono"
                             value={form.uscc ?? ''}
                             onChange={e => setF('uscc', e.target.value.toUpperCase())} />
-                          <p className="text-xs" style={{ color: 'rgba(0,0,0,0.38)' }}>
+                          <p className="text-xs" style={{ color: 'var(--text-2)' }}>
                             18 символов, латиница и цифры (без I, O, S, V, Z)
                           </p>
                         </div>
@@ -359,7 +359,7 @@ export default function SupplierVerifyPage() {
                             placeholder="Manufacturing and sales of electronic products..."
                             value={form.business_scope ?? ''}
                             onChange={e => setF('business_scope', e.target.value)} />
-                          <p className="text-xs" style={{ color: 'rgba(0,0,0,0.38)' }}>
+                          <p className="text-xs" style={{ color: 'var(--text-2)' }}>
                             Должно содержать «manufacturing» или «production»
                           </p>
                         </div>
@@ -369,7 +369,7 @@ export default function SupplierVerifyPage() {
                             placeholder={String(new Date().getFullYear() - 3)}
                             value={form.founded_year ?? ''}
                             onChange={e => setF('founded_year', e.target.value ? Number(e.target.value) : undefined)} />
-                          <p className="text-xs" style={{ color: 'rgba(0,0,0,0.38)' }}>
+                          <p className="text-xs" style={{ color: 'var(--text-2)' }}>
                             Компания должна существовать не менее 1 года
                           </p>
                         </div>
@@ -388,7 +388,7 @@ export default function SupplierVerifyPage() {
                           </div>
                         </div>
                         <div className="px-4 py-3 rounded-xl text-xs"
-                             style={{ background: ABG, border: `1px solid ${ABR}`, color: '#5F6368' }}>
+                             style={{ background: ABG, border: `1px solid ${ABR}`, color: 'var(--text-2)' }}>
                           Проверка выполняется по коду <strong style={{ color: A }}>USCC</strong>,
                           сфере деятельности и сроку существования компании.
                         </div>
@@ -412,7 +412,7 @@ export default function SupplierVerifyPage() {
 
           {hasActive && !showForm && (
             <div className="px-4 py-3 rounded-xl text-sm"
-                 style={{ background: ABG, border: `1px solid ${ABR}`, color: '#5F6368' }}>
+                 style={{ background: ABG, border: `1px solid ${ABR}`, color: 'var(--text-2)' }}>
               У вас уже есть активная заявка. Отзовите её, чтобы подать повторно.
             </div>
           )}
@@ -437,7 +437,7 @@ function VerifiedList() {
 
   return (
     <Card className="p-6 sm:p-8">
-      <h2 className="font-semibold mb-5" style={{ fontSize: '1.0625rem', color: '#202124' }}>
+      <h2 className="font-semibold mb-5" style={{ fontSize: '1.0625rem', color: 'var(--text)' }}>
         Реестр проверенных производителей
       </h2>
 
@@ -446,7 +446,7 @@ function VerifiedList() {
           <RefreshCw size={20} className="animate-spin text-muted-foreground" />
         </div>
       ) : list.length === 0 ? (
-        <p className="text-sm text-center py-6" style={{ color: 'rgba(0,0,0,0.38)' }}>
+        <p className="text-sm text-center py-6" style={{ color: 'var(--text-2)' }}>
           Верифицированных производителей пока нет
         </p>
       ) : (
@@ -455,15 +455,15 @@ function VerifiedList() {
             <div
               key={sv.id}
               className="flex items-center justify-between gap-4 px-4 py-3.5 rounded-xl"
-              style={{ background: 'rgba(26,115,232,0.05)', border: '1px solid rgba(26,115,232,0.15)' }}
+              style={{ background: 'color-mix(in srgb, var(--violet) 5%, transparent)', border: '1px solid color-mix(in srgb, var(--violet) 15%, transparent)' }}
             >
               <div className="flex items-center gap-3 min-w-0">
-                <ShieldCheck size={16} style={{ color: '#1A73E8', flexShrink: 0 }} />
+                <ShieldCheck size={16} style={{ color: 'var(--violet-text)', flexShrink: 0 }} />
                 <div className="min-w-0">
-                  <p className="font-semibold text-sm truncate" style={{ color: '#202124' }}>
+                  <p className="font-semibold text-sm truncate" style={{ color: 'var(--text)' }}>
                     {sv.company_name}
                   </p>
-                  <p className="text-xs" style={{ color: 'rgba(0,0,0,0.38)' }}>
+                  <p className="text-xs" style={{ color: 'var(--text-2)' }}>
                     {sv.country === 'china' ? '🇨🇳 Китай' : '🇷🇺 Россия'}
                     {sv.inn && ` · ИНН ${sv.inn}`}
                     {sv.uscc && ` · USCC ${sv.uscc.slice(0, 8)}…`}

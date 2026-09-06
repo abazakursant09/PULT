@@ -66,7 +66,7 @@ function DarkCard({ children, className = '' }: { children: React.ReactNode; cla
 function SectionIcon({ icon: Icon, gold }: { icon: React.ElementType; gold?: boolean }) {
   return (
     <div className="w-9 h-9 rounded-[8px] flex items-center justify-center shrink-0"
-         style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.18)' }}>
+         style={{ background: 'color-mix(in srgb, var(--violet) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--violet) 18%, transparent)' }}>
       <Icon size={16} style={{ color: 'var(--violet-text)' }} />
     </div>
   )
@@ -95,7 +95,7 @@ function ProfileTab() {
         <div className="flex items-center gap-4 mb-6">
           <div
             className="w-14 h-14 rounded-[8px] flex items-center justify-center text-[22px] font-bold shrink-0"
-            style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.18)', color: 'var(--violet-text)' }}
+            style={{ background: 'color-mix(in srgb, var(--violet) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--violet) 18%, transparent)', color: 'var(--violet-text)' }}
           >
             {user?.name.charAt(0).toUpperCase() ?? '?'}
           </div>
@@ -205,7 +205,7 @@ function SecurityTab() {
     <div className="space-y-4">
       {success && (
         <div className="px-4 py-3 rounded-[8px] flex items-center gap-3 text-[13px]"
-             style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.22)', color: 'var(--violet-text)' }}>
+             style={{ background: 'color-mix(in srgb, var(--violet) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--violet) 22%, transparent)', color: 'var(--violet-text)' }}>
           <Check size={14} /> {success}
         </div>
       )}
@@ -220,7 +220,7 @@ function SecurityTab() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-5">
           <div className="flex items-center gap-4">
             <div className="w-10 h-10 rounded-[8px] flex items-center justify-center shrink-0"
-                 style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.18)' }}>
+                 style={{ background: 'color-mix(in srgb, var(--violet) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--violet) 18%, transparent)' }}>
               {mfaEnabled
                 ? <ShieldCheck size={18} style={{ color: 'var(--violet-text)' }} />
                 : <Shield size={18} style={{ color: 'var(--violet-text)' }} />
@@ -703,7 +703,7 @@ function AccountContent() {
         <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-3)] mb-2">АККАУНТ</p>
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-[8px] flex items-center justify-center shrink-0"
-               style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.18)' }}>
+               style={{ background: 'color-mix(in srgb, var(--violet) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--violet) 18%, transparent)' }}>
             <User size={18} style={{ color: 'var(--violet-text)' }} />
           </div>
           <div>
@@ -729,7 +729,7 @@ function AccountContent() {
                   onClick={() => setTab(id)}
                   className="flex items-center gap-2.5 px-3 py-2.5 rounded-[8px] text-[13px] font-medium transition-all duration-200 whitespace-nowrap w-full"
                   style={isActive
-                    ? { background: isDanger ? 'rgba(239,68,68,0.08)' : 'rgba(124,58,237,0.06)', color: isDanger ? 'var(--danger)' : 'var(--violet-text)' }
+                    ? { background: isDanger ? 'rgba(239,68,68,0.08)' : 'color-mix(in srgb, var(--violet) 6%, transparent)', color: isDanger ? 'var(--danger)' : 'var(--violet-text)' }
                     : { color: isDanger ? 'var(--danger)' : 'var(--text-2)', background: 'transparent' }
                   }
                   onMouseEnter={e => { if (!isActive) e.currentTarget.style.color = isDanger ? 'var(--danger)' : 'var(--text)' }}

@@ -89,8 +89,9 @@ describe('1.4.5I — scoped green nav on store routes', () => {
     expect(CSS.match(/\.s-nav\.on\{[^}]*\}/)?.[0] ?? '').toMatch(/var\(--violet/)
     // … and the store-route override is a distinct green rule, never repainting other sections.
     const green = CSS.match(/\.s-nav\.on\.s-nav--ledger\{[^}]*\}/)?.[0] ?? ''
-    expect(green).toMatch(/46,94,78|2E5E4E/)
-    expect(CSS).toMatch(/\.s-nav\.on\.s-nav--ledger \.s-nav-ic\{[^}]*(6FBF9B|2E5E4E)/)
+    expect(green).toContain('var(--success-dim)')
+    expect(green).toContain('color:var(--text)')
+    expect(CSS).toMatch(/\.s-nav\.on\.s-nav--ledger \.s-nav-ic\{[^}]*var\(--success\)/)
   })
 })
 
