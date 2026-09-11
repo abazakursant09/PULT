@@ -96,6 +96,18 @@ describe('1.4.5I — scoped green nav on store routes', () => {
 })
 
 describe('P5 — drawer open / close', () => {
+  it('provides a working fallback navigation control for pages without SellerBar', () => {
+    const { container } = render(<NavProvider><ShellFrame><Rail /><main>Данные</main></ShellFrame></NavProvider>)
+    const trigger = screen.getByRole('button', { name: 'Открыть навигацию' })
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(trigger)
+    expect(container.querySelector('.s-app')).toHaveClass('nav-open')
+    expect(trigger).toHaveAttribute('aria-expanded', 'true')
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
+    expect(CSS).toContain('.s-mobile-nav{display:none}')
+    expect(CSS).toContain('.s-app:not(:has(.s-bar)) > .s-mobile-nav')
+  })
   it('hamburger exists and toggles the drawer open', () => {
     const { container } = renderShell()
     expect(container.querySelector('.s-app')?.className).not.toContain('nav-open')

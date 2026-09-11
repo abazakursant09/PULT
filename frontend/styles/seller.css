@@ -65,7 +65,10 @@
    Desktop keeps the 258px sticky rail untouched. Below the breakpoint the grid collapses to a
    single column and the rail becomes a fixed drawer that slides in over a backdrop. Motion is
    scoped to transform/opacity with the iOS drawer curve; reduced-motion drops the slide. */
+.s-mobile-nav{display:none}
 @media (max-width:1024px){
+  .s-app:not(:has(.s-bar)){grid-template-rows:auto 1fr}
+  .s-app:not(:has(.s-bar)) > .s-mobile-nav{display:flex;align-items:center;gap:12px;padding:8px 20px;min-height:56px;background:var(--surface);color:var(--text);border-bottom:1px solid var(--line)}
   .s-app{grid-template-columns:1fr}
   .s-rail{position:fixed;left:0;top:0;height:100dvh;width:min(84vw,300px);z-index:60;
     background:var(--surface);

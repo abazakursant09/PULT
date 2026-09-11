@@ -27,6 +27,19 @@ function contrast(a: number[], b: number[]) {
 }
 
 describe('theme primary action contrast', () => {
+  for (const page of ['register', 'forgot-password', 'reset-password', 'verify-email']) {
+    it(`${page} does not mix light-only page colors with shared dark cards`, () => {
+      const source = read(`app/${page}/page.tsx`)
+      expect(source).not.toMatch(/#(?:F6F9FC|F8F9FA|0A2540|202124|425466|8A8986)\b/i)
+      expect(source).toContain('var(--bg)')
+    })
+  }
+  it('settings connection notice inherits an existing theme surface without a light fallback', () => {
+    const source = read('components/connections/ConnectionsSection.tsx')
+    expect(source).toContain("background: 'var(--surface-h)'")
+    expect(source).not.toContain('var(--surface-2')
+    expect(source).not.toMatch(/#[a-f\d]{3,8}\b/i)
+  })
   const blocks = [...css.matchAll(/\[data-seller-theme="([^"]+)"\] \.s-app\s*\{([^}]+)\}/g)]
   it('checks all palettes including both system variants', () => {
     expect(blocks.map(m => m[1])).toEqual(['champagne', 'obsidian', 'system', 'pearl', 'system'])
