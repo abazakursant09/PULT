@@ -60,19 +60,19 @@ function ResetPasswordContent() {
 
   if (done) {
     return (
-      <div className="min-h-screen flex items-center justify-center px-5" style={{ background: '#F8F9FA' }}>
+      <div className="min-h-screen flex items-center justify-center px-5" style={{ background: 'var(--bg)' }}>
         <Card className="p-10 text-center w-full max-w-[400px]">
           <div className="flex justify-center mb-5">
             <div
               className="w-14 h-14 rounded-full flex items-center justify-center"
               style={{ background: 'rgba(26,115,232,0.1)', border: '2px solid rgba(26,115,232,0.3)' }}
             >
-              <CheckCircle2 size={28} style={{ color: '#1A73E8' }} />
+              <CheckCircle2 size={28} style={{ color: 'var(--violet-text)' }} />
             </div>
           </div>
-          <h2 className="font-semibold mb-2" style={{ fontSize: '1.25rem', color: '#202124' }}>Пароль изменён!</h2>
-          <p style={{ color: '#8A8986', fontSize: '0.9375rem' }}>Переходим на страницу входа...</p>
-          <Loader2 size={18} className="animate-spin mx-auto mt-4" style={{ color: '#1A73E8' }} />
+          <h2 className="font-semibold mb-2" style={{ fontSize: '1.25rem', color: 'var(--text)' }}>Пароль изменён!</h2>
+          <p style={{ color: 'var(--text-2)', fontSize: '0.9375rem' }}>Переходим на страницу входа...</p>
+          <Loader2 size={18} className="animate-spin mx-auto mt-4" style={{ color: 'var(--violet-text)' }} />
         </Card>
       </div>
     )
@@ -81,7 +81,7 @@ function ResetPasswordContent() {
   return (
     <div
       className="min-h-screen flex items-center justify-center px-5 py-16 relative overflow-hidden"
-      style={{ background: '#F8F9FA' }}
+      style={{ background: 'var(--bg)' }}
     >
       <div
         className="absolute inset-0 pointer-events-none"
@@ -92,8 +92,8 @@ function ResetPasswordContent() {
       <div className="w-full max-w-[440px] animate-fade-in relative" style={{ zIndex: 2 }}>
         <div className="text-center mb-10">
           <Link href="/" className="inline-flex items-center gap-3">
-            <PultMark width={30} height={35} style={{ color: '#383180' }} />
-            <span className="font-bold tracking-tight" style={{ fontSize: '2.25rem', color: '#202124' }}>Бизнес‑</span>
+            <PultMark width={30} height={35} style={{ color: 'var(--violet-text)' }} />
+            <span className="font-bold tracking-tight" style={{ fontSize: '2.25rem', color: 'var(--text)' }}>Бизнес‑</span>
             <span className="font-bold tracking-tight text-gradient-gold" style={{ fontSize: '2.25rem' }}>Пульт</span>
           </Link>
         </div>
@@ -104,20 +104,20 @@ function ResetPasswordContent() {
               className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
               style={{ background: 'rgba(26,115,232,0.08)', border: '1px solid rgba(26,115,232,0.16)' }}
             >
-              <KeyRound size={18} style={{ color: '#1A73E8' }} />
+              <KeyRound size={18} style={{ color: 'var(--violet-text)' }} />
             </div>
             <div>
-              <h2 className="font-semibold" style={{ fontSize: '1.5rem', color: '#202124', lineHeight: 1.2 }}>
+              <h2 className="font-semibold" style={{ fontSize: '1.5rem', color: 'var(--text)', lineHeight: 1.2 }}>
                 Новый пароль
               </h2>
-              <p style={{ fontSize: '0.875rem', color: 'rgba(0,0,0,0.38)', marginTop: 2 }}>Придумайте надёжный пароль</p>
+              <p style={{ fontSize: '0.875rem', color: 'var(--text-2)', marginTop: 2 }}>Придумайте надёжный пароль</p>
             </div>
           </div>
 
           {ready && !token && !done && (
             <div
               className="mb-6 px-4 py-3 rounded-xl"
-              style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)', color: '#DC2626', fontSize: '0.875rem' }}
+              style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)', color: 'var(--danger)', fontSize: '0.875rem' }}
             >
               Недействительная ссылка сброса. Запросите новую на странице восстановления.
             </div>
@@ -126,7 +126,7 @@ function ResetPasswordContent() {
           {error && (
             <div
               className="mb-6 px-4 py-3 rounded-xl"
-              style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)', color: '#DC2626', fontSize: '0.875rem' }}
+              style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)', color: 'var(--danger)', fontSize: '0.875rem' }}
             >
               {error}
             </div>
@@ -170,8 +170,8 @@ function ResetPasswordContent() {
           </form>
 
           <Separator className="my-8" />
-          <p className="text-center" style={{ fontSize: '0.9375rem', color: '#8A8986' }}>
-            <Link href="/forgot-password" className="font-medium hover:opacity-80 transition-opacity" style={{ color: '#1A73E8' }}>
+          <p className="text-center" style={{ fontSize: '0.9375rem', color: 'var(--text-2)' }}>
+            <Link href="/forgot-password" className="font-medium hover:opacity-80 transition-opacity" style={{ color: 'var(--violet-text)' }}>
               Запросить новую ссылку
             </Link>
           </p>
@@ -184,8 +184,8 @@ function ResetPasswordContent() {
 export default function ResetPasswordPage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center" style={{ background: '#F8F9FA' }}>
-        <Loader2 size={32} style={{ color: '#1A73E8' }} className="animate-spin" />
+      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg)' }}>
+        <Loader2 size={32} style={{ color: 'var(--violet-text)' }} className="animate-spin" />
       </div>
     }>
       <ResetPasswordContent />

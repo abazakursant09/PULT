@@ -40,11 +40,17 @@ export function NavProvider({ children }: { children: React.ReactNode }) {
 // The .s-app frame owns the open-state class (drives the drawer + scrim in CSS) and renders the
 // backdrop. Kept as its own client component so app/dashboard/layout.tsx stays a thin server file.
 export function ShellFrame({ children }: { children: React.ReactNode }) {
-  const { open, close } = useContext(NavContext)
+  const { open, close, toggle } = useContext(NavContext)
   return (
     <ThemeProvider>
       <script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP_SCRIPT }} />
       <div className={`s-app${open ? ' nav-open' : ''}`}>
+        <div className="s-mobile-nav">
+          <button type="button" className="s-burger" aria-label="Открыть навигацию" aria-expanded={open} onClick={toggle}>
+            <Menu size={20} aria-hidden="true" />
+          </button>
+          <span>Пульт</span>
+        </div>
         {children}
         <button type="button" className="s-scrim" aria-hidden={!open} tabIndex={-1} onClick={close} />
       </div>

@@ -12,11 +12,11 @@ import { BlurFade } from '@/components/ui/blur-fade'
 import { Skeleton } from '@/components/ui/skeleton'
 
 const DOT_COLOR: Record<string, string> = {
-  new_review:    '#1A73E8',
+  new_review:    'var(--violet-text)',
   offer_change:  'var(--warning)',
   trial_end:     'var(--danger)',
-  limit_reached: '#1A73E8',
-  referral_paid: '#22c55e',
+  limit_reached: 'var(--violet-text)',
+  referral_paid: 'var(--success)',
 }
 
 const TYPE_LABEL: Record<string, string> = {
@@ -78,19 +78,19 @@ export default function NotificationsPage() {
   const filteredItems = tab === 'unread' ? items.filter(n => !n.is_read) : items
 
   return (
-    <div className="min-h-screen" style={{ background: '#F6F9FC' }}>
+    <div className="min-h-screen" style={{ background: 'var(--bg)' }}>
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-10">
 
         {/* Header */}
         <BlurFade inView>
           <div className="flex items-center justify-between mb-8 flex-wrap gap-3">
             <div className="flex items-center gap-3">
-              <div className="w-11 h-11 rounded-2xl flex items-center justify-center shadow-stripe" style={{ background: '#1A73E8' }}>
-                <Bell size={20} style={{ color: 'white' }} />
+              <div className="w-11 h-11 rounded-2xl flex items-center justify-center shadow-stripe" style={{ background: 'var(--violet-dim)' }}>
+                <Bell size={20} style={{ color: 'var(--violet-text)' }} />
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <h1 className="text-xl font-bold" style={{ color: '#0A2540', letterSpacing: '-0.02em' }}>Уведомления</h1>
+                  <h1 className="text-xl font-bold" style={{ color: 'var(--text)', letterSpacing: '-0.02em' }}>Уведомления</h1>
                   {unread > 0 && <Badge variant="default" className="text-xs">{unread}</Badge>}
                 </div>
                 {unread > 0 && <p className="text-xs text-muted-foreground">{unread} непрочитанных</p>}
@@ -122,10 +122,10 @@ export default function NotificationsPage() {
               ) : filteredItems.length === 0 ? (
                 <Card className="shadow-stripe">
                   <CardContent className="flex flex-col items-center py-16 text-center">
-                    <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4" style={{ background: 'rgba(26,115,232,0.08)' }}>
-                      <Bell size={24} style={{ color: '#1A73E8' }} />
+                    <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4" style={{ background: 'color-mix(in srgb, var(--violet) 8%, transparent)' }}>
+                      <Bell size={24} style={{ color: 'var(--violet-text)' }} />
                     </div>
-                    <p className="font-semibold mb-2" style={{ color: '#0A2540' }}>Уведомлений пока нет</p>
+                    <p className="font-semibold mb-2" style={{ color: 'var(--text)' }}>Уведомлений пока нет</p>
                     <p className="text-sm text-muted-foreground">Здесь появятся события по вашему бизнесу</p>
                   </CardContent>
                 </Card>
@@ -134,13 +134,13 @@ export default function NotificationsPage() {
                   {filteredItems.map((n, idx) => (
                     <BlurFade key={n.id} delay={idx * 0.04} inView>
                       <Card className={`shadow-stripe border-border/60 transition-all ${!n.is_read ? 'border-l-4' : ''}`}
-                            style={!n.is_read ? { borderLeftColor: DOT_COLOR[n.type] ?? '#1A73E8' } : {}}>
+                            style={!n.is_read ? { borderLeftColor: DOT_COLOR[n.type] ?? 'var(--violet-text)' } : {}}>
                         <CardContent className="p-4 flex gap-3 items-start">
-                          <div className="w-2 h-2 rounded-full mt-2 shrink-0" style={{ background: n.is_read ? 'hsl(var(--border))' : (DOT_COLOR[n.type] ?? '#1A73E8') }} />
+                          <div className="w-2 h-2 rounded-full mt-2 shrink-0" style={{ background: n.is_read ? 'hsl(var(--border))' : (DOT_COLOR[n.type] ?? 'var(--violet-text)') }} />
                           <div className="flex-1 min-w-0">
                             <div className="flex items-start justify-between gap-3 flex-wrap">
                               <div className="min-w-0">
-                                <p className="font-medium text-sm" style={{ color: n.is_read ? '#8898AA' : '#0A2540' }}>{n.title}</p>
+                                <p className="font-medium text-sm" style={{ color: n.is_read ? 'var(--text-2)' : 'var(--text)' }}>{n.title}</p>
                                 <p className="text-sm text-muted-foreground mt-0.5 leading-relaxed">{n.message}</p>
                               </div>
                               {!n.is_read && (
@@ -150,7 +150,7 @@ export default function NotificationsPage() {
                               )}
                             </div>
                             <div className="flex items-center gap-2 mt-2.5">
-                              <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium" style={{ background: `${DOT_COLOR[n.type] ?? '#1A73E8'}14`, color: DOT_COLOR[n.type] ?? '#1A73E8' }}>
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium" style={{ background: `color-mix(in srgb, ${DOT_COLOR[n.type] ?? 'var(--violet-text)'} 8%, transparent)`, color: DOT_COLOR[n.type] ?? 'var(--violet-text)' }}>
                                 {TYPE_LABEL[n.type] ?? n.type}
                               </span>
                               <span className="text-xs text-muted-foreground">{fmt(n.created_at)}</span>
