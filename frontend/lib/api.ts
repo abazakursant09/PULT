@@ -1252,7 +1252,26 @@ export interface AutomationRuleOut {
   consent_revoked_at: string | null
 }
 
+export interface MarkingProductStatus {
+  product_id: string
+  product_name: string
+  category: string | null
+  requires_marking: boolean
+  regulation: string | null
+}
+
+export interface MarkingCheckResult {
+  category: string
+  requires_marking: boolean
+  regulation: string | null
+  warning: string | null
+}
+
 export const api = {
+  marking: {
+    scan: () => req<MarkingProductStatus[]>('/api/marking/scan'),
+    check: (category: string) => req<MarkingCheckResult>(`/api/marking/check?category=${encodeURIComponent(category)}`),
+  },
   auth: {
     login: (email: string, password: string) =>
       req<LoginResponse>('/api/auth/login', {
