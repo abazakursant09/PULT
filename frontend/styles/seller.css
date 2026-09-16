@@ -38,8 +38,8 @@
 .s-rail-theme .theme-menu__popover{left:0;width:100%;max-height:min(360px,65vh);overflow-y:auto}
 /* Executive Ledger store routes only (PULT-LAUNCH-1.4.5I): green active accent, other sections keep
    the default. Scoped by the s-nav--ledger modifier the Shell adds on /dashboard/stores*. */
-.s-nav.on.s-nav--ledger{background:rgba(46,94,78,.18);color:#fff}
-.s-nav.on.s-nav--ledger .s-nav-ic{color:#6FBF9B}
+.s-nav.on.s-nav--ledger{background:var(--success-dim);color:var(--text)}
+.s-nav.on.s-nav--ledger .s-nav-ic{color:var(--success)}
 .s-nav--ledger:focus-visible{outline:none;box-shadow:0 0 0 1px #2E5E4E}
 .s-foot{margin-top:8px;display:flex;align-items:center;gap:9px;padding:12px 8px 4px;border-top:1px solid var(--hair)}
 .s-foot .av{width:30px;height:30px;border-radius:50%;background:var(--panel-2);border:1px solid var(--hair-2);display:grid;place-items:center;font-size:12px;font-weight:600;color:var(--tx-2)}
@@ -65,7 +65,10 @@
    Desktop keeps the 258px sticky rail untouched. Below the breakpoint the grid collapses to a
    single column and the rail becomes a fixed drawer that slides in over a backdrop. Motion is
    scoped to transform/opacity with the iOS drawer curve; reduced-motion drops the slide. */
+.s-mobile-nav{display:none}
 @media (max-width:1024px){
+  .s-app:not(:has(.s-bar)){grid-template-rows:auto 1fr}
+  .s-app:not(:has(.s-bar)) > .s-mobile-nav{display:flex;align-items:center;gap:12px;padding:8px 20px;min-height:56px;background:var(--surface);color:var(--text);border-bottom:1px solid var(--line)}
   .s-app{grid-template-columns:1fr}
   .s-rail{position:fixed;left:0;top:0;height:100dvh;width:min(84vw,300px);z-index:60;
     background:var(--surface);

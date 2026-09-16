@@ -18,9 +18,9 @@ function isAuthError(msg: string) {
 }
 
 const SEV_META = {
-  critical:  { label: 'Критические',  Icon: AlertTriangle, color: '#dc2626', bg: 'rgba(220,38,38,0.08)'  },
-  important: { label: 'Важные',       Icon: Zap,           color: '#d97706', bg: 'rgba(217,119,6,0.08)'  },
-  info:      { label: 'Информация',   Icon: Info,          color: '#1A73E8', bg: 'rgba(26,115,232,0.08)' },
+  critical:  { label: 'Критические',  Icon: AlertTriangle, color: 'var(--danger)', bg: 'rgba(220,38,38,0.08)'  },
+  important: { label: 'Важные',       Icon: Zap,           color: 'var(--warning)', bg: 'rgba(217,119,6,0.08)'  },
+  info:      { label: 'Информация',   Icon: Info,          color: 'var(--violet-text)', bg: 'color-mix(in srgb, var(--violet) 8%, transparent)' },
 } as const
 
 export default function MonitorPage() {
@@ -70,7 +70,7 @@ export default function MonitorPage() {
     .filter(g => g.items.length > 0)
 
   return (
-    <div className="min-h-screen" style={{ background: '#F6F9FC' }}>
+    <div className="min-h-screen" style={{ background: 'var(--bg)' }}>
       <div className="max-w-6xl mx-auto px-5 sm:px-8 py-8">
 
         {/* Back */}
@@ -82,11 +82,11 @@ export default function MonitorPage() {
         <BlurFade inView>
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
             <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-2xl flex items-center justify-center shadow-stripe" style={{ background: '#1A73E8' }}>
-                <Bell size={22} style={{ color: 'white' }} />
+              <div className="w-12 h-12 rounded-2xl flex items-center justify-center shadow-stripe" style={{ background: 'var(--violet-dim)' }}>
+                <Bell size={22} style={{ color: 'var(--violet-text)' }} />
               </div>
               <div>
-                <h1 className="text-2xl font-bold" style={{ color: '#0A2540', letterSpacing: '-0.02em' }}>Пульт-Монитор</h1>
+                <h1 className="text-2xl font-bold" style={{ color: 'var(--text)', letterSpacing: '-0.02em' }}>Пульт-Монитор</h1>
                 <p className="text-sm text-muted-foreground">Система раннего оповещения об изменениях на маркетплейсах</p>
               </div>
             </div>
@@ -101,10 +101,10 @@ export default function MonitorPage() {
         <BlurFade inView delay={0.05}>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
             {[
-              { label: 'Всего', count: events.length,       color: '#0A2540', bg: 'white' },
-              { label: 'Критических', count: countBySev('critical'), color: '#dc2626', bg: 'rgba(220,38,38,0.06)' },
-              { label: 'Важных',      count: countBySev('important'), color: '#d97706', bg: 'rgba(217,119,6,0.06)' },
-              { label: 'Инфо',        count: countBySev('info'),      color: '#1A73E8', bg: 'rgba(26,115,232,0.06)' },
+              { label: 'Всего', count: events.length,       color: 'var(--text)', bg: 'var(--surface)' },
+              { label: 'Критических', count: countBySev('critical'), color: 'var(--danger)', bg: 'rgba(220,38,38,0.06)' },
+              { label: 'Важных',      count: countBySev('important'), color: 'var(--warning)', bg: 'rgba(217,119,6,0.06)' },
+              { label: 'Инфо',        count: countBySev('info'),      color: 'var(--violet-text)', bg: 'color-mix(in srgb, var(--violet) 6%, transparent)' },
             ].map(({ label, count, color, bg }) => (
               <Card key={label} className="shadow-stripe border-border/60">
                 <CardContent className="p-4">
@@ -118,7 +118,7 @@ export default function MonitorPage() {
 
         {/* Error */}
         {error && (
-          <div className="flex items-start justify-between gap-3 px-4 py-3 rounded-xl mb-6 text-sm" style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)', color: '#b91c1c' }}>
+          <div className="flex items-start justify-between gap-3 px-4 py-3 rounded-xl mb-6 text-sm" style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)', color: 'var(--danger)' }}>
             <span>{error}</span>
             <button onClick={() => setError('')} className="shrink-0 opacity-60 hover:opacity-100">✕</button>
           </div>
@@ -142,10 +142,10 @@ export default function MonitorPage() {
               ) : filteredEvents.length === 0 && !error ? (
                 <Card className="shadow-stripe">
                   <CardContent className="flex flex-col items-center justify-center py-20 text-center">
-                    <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-5" style={{ background: 'rgba(26,115,232,0.08)', border: '1px solid rgba(26,115,232,0.15)' }}>
-                      <ShieldAlert size={28} style={{ color: '#1A73E8' }} />
+                    <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-5" style={{ background: 'color-mix(in srgb, var(--violet) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--violet) 15%, transparent)' }}>
+                      <ShieldAlert size={28} style={{ color: 'var(--violet-text)' }} />
                     </div>
-                    <h3 className="font-semibold text-lg mb-2" style={{ color: '#0A2540' }}>Нет активных оповещений</h3>
+                    <h3 className="font-semibold text-lg mb-2" style={{ color: 'var(--text)' }}>Нет активных оповещений</h3>
                     <p className="text-sm text-muted-foreground mb-6 max-w-xs">
                       Нажмите «Проверить обновления», чтобы получить актуальные события с маркетплейсов
                     </p>
