@@ -17,8 +17,11 @@ interface Props {
 }
 
 export function MathCaptcha({ onValid }: Props) {
-  const [q, setQ] = useState<Question>(gen)
+  const [q, setQ] = useState<Question | null>(null)
   const [val, setVal] = useState('')
+
+  // SSR and the first client render must match; random challenges start after hydration.
+  useEffect(() => { setQ(gen()) }, [])
 
   const refresh = useCallback(() => {
     setQ(gen())
@@ -28,7 +31,7 @@ export function MathCaptcha({ onValid }: Props) {
 
   useEffect(() => {
     const n = parseInt(val, 10)
-    onValid(!isNaN(n) && n === q.answer && val.trim() !== '')
+    onValid(q !== null && !isNaN(n) && n === q.answer && val.trim() !== '')
   }, [val, q, onValid])
 
   return (
@@ -37,7 +40,7 @@ export function MathCaptcha({ onValid }: Props) {
         <label className="label mb-2" style={{ display: 'block' }}>
           Антибот: сколько будет&nbsp;
           <span style={{ color: '#2563EB', fontFamily: 'monospace', fontSize: '0.85rem', fontWeight: 700 }}>
-            {q.text} =&nbsp;?
+            {q ? `${q.text} = ?` : 'Загрузка…'}
           </span>
         </label>
         <input
@@ -48,11 +51,13 @@ export function MathCaptcha({ onValid }: Props) {
           className="input"
           style={{ MozAppearance: 'textfield' }}
           required
+          disabled={q === null}
         />
       </div>
       <button
         type="button"
         onClick={refresh}
+        disabled={q === null}
         title="Новый пример"
         style={{
           marginTop: 22,
