@@ -1,7 +1,7 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { createContext, useContext, useEffect, useState, useCallback } from 'react'
+import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react'
 import { Home, Store, Upload, MessageSquare, Settings, User, Menu, X } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { PultMark } from '@/components/brand/PultMark'
@@ -15,13 +15,17 @@ import { THEME_BOOTSTRAP_SCRIPT } from '@/lib/theme'
 // and the drawer (Rail) live in different parts of the tree, so a small context is the seam that
 // joins them. A default no-op value means SellerBar renders fine without a provider (e.g. in unit
 // tests that mount a single page).
-interface NavCtx { open: boolean; toggle: () => void; close: () => void }
+interface NavCtx { open: boolean; toggle: (trigger?: HTMLElement) => void; close: () => void }
 const NavContext = createContext<NavCtx>({ open: false, toggle: () => {}, close: () => {} })
 
 export function NavProvider({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false)
+  const opener = useRef<HTMLElement | null>(null)
   const close = useCallback(() => setOpen(false), [])
-  const toggle = useCallback(() => setOpen(o => !o), [])
+  const toggle = useCallback((trigger?: HTMLElement) => {
+    if (trigger) opener.current = trigger
+    setOpen(o => !o)
+  }, [])
 
   // Body scroll-lock + Escape-to-close while the drawer is open. Both are cleaned up on close so
   // desktop (where the drawer never opens) is never affected.
@@ -29,7 +33,12 @@ export function NavProvider({ children }: { children: React.ReactNode }) {
     if (!open) return
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setOpen(false)
+        if (opener.current?.isConnected) opener.current.focus()
+      }
+    }
     window.addEventListener('keydown', onKey)
     return () => { document.body.style.overflow = prev; window.removeEventListener('keydown', onKey) }
   }, [open])
@@ -46,7 +55,7 @@ export function ShellFrame({ children }: { children: React.ReactNode }) {
       <script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP_SCRIPT }} />
       <div className={`s-app${open ? ' nav-open' : ''}`}>
         <div className="s-mobile-nav">
-          <button type="button" className="s-burger" aria-label="Открыть навигацию" aria-expanded={open} onClick={toggle}>
+          <button type="button" className="s-burger" aria-label="Открыть навигацию" aria-expanded={open} onClick={e => toggle(e.currentTarget)}>
             <Menu size={20} aria-hidden="true" />
           </button>
           <span>Пульт</span>
@@ -136,7 +145,7 @@ export function SellerBar({ title, sub, right }: { title: string; sub?: string; 
   return (
     <div className="s-bar">
       {/* hamburger — mobile only (hidden ≥1024 via CSS) */}
-      <button type="button" className="s-burger" aria-label="Открыть меню" onClick={toggle}>
+      <button type="button" className="s-burger" aria-label="Открыть меню" onClick={e => toggle(e.currentTarget)}>
         <Menu size={18} />
       </button>
       <div><div className="ttl">{title}</div>{sub && <div className="sub">{sub}</div>}</div>

@@ -96,6 +96,15 @@ describe('1.4.5I — scoped green nav on store routes', () => {
 })
 
 describe('P5 — drawer open / close', () => {
+  it.each(['Открыть меню', 'Открыть навигацию'])('Escape restores focus to %s', name => {
+    const { container } = renderShell()
+    const trigger = screen.getByRole('button', { name })
+    fireEvent.click(trigger)
+    screen.getByRole('link', { name: /Отзывы/ }).focus()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(container.querySelector('.s-app')).not.toHaveClass('nav-open')
+    expect(trigger).toHaveFocus()
+  })
   it('provides a working fallback navigation control for pages without SellerBar', () => {
     const { container } = render(<NavProvider><ShellFrame><Rail /><main>Данные</main></ShellFrame></NavProvider>)
     const trigger = screen.getByRole('button', { name: 'Открыть навигацию' })
