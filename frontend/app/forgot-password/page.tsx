@@ -47,7 +47,6 @@ export default function ForgotPasswordPage() {
         <div className="text-center mb-10">
           <Link href="/" className="inline-flex items-center gap-3">
             <PultMark width={30} height={35} style={{ color: 'var(--violet-text)' }} />
-            <span className="font-bold tracking-tight" style={{ fontSize: '2.25rem', color: 'var(--text)' }}>Бизнес‑</span>
             <span className="font-bold tracking-tight text-gradient-gold" style={{ fontSize: '2.25rem' }}>Пульт</span>
           </Link>
         </div>
