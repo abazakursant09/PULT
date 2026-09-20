@@ -34,7 +34,7 @@ function ResendVerification() {
   }
 
   if (state === 'done') {
-    return <p style={{ color: '#5F6368', fontSize: '0.875rem', marginBottom: 12 }}>{note}</p>
+    return <p style={{ color: 'var(--text-2)', fontSize: '0.875rem', marginBottom: 12 }}>{note}</p>
   }
   return (
     <form onSubmit={submit} className="w-full mb-2">
@@ -101,7 +101,7 @@ function VerifyEmailContent() {
               <h2 className="font-semibold mb-2" style={{ fontSize: '1.25rem', color: 'var(--text)' }}>
                 Подтверждаем email...
               </h2>
-              <p style={{ color: '#5F6368', fontSize: '0.9375rem' }}>Пожалуйста, подождите</p>
+              <p style={{ color: 'var(--text-2)', fontSize: '0.9375rem' }}>Пожалуйста, подождите</p>
             </>
           )}
 
@@ -118,7 +118,7 @@ function VerifyEmailContent() {
               <h2 className="font-semibold mb-2" style={{ fontSize: '1.25rem', color: 'var(--text)' }}>
                 Email подтверждён!
               </h2>
-              <p style={{ color: '#5F6368', fontSize: '0.9375rem', marginBottom: 16 }}>
+              <p style={{ color: 'var(--text-2)', fontSize: '0.9375rem', marginBottom: 16 }}>
                 Переходим в панель управления...
               </p>
               <Loader2 size={18} className="animate-spin mx-auto" style={{ color: 'var(--violet-text)' }} />
@@ -138,7 +138,7 @@ function VerifyEmailContent() {
               <h2 className="font-semibold mb-2" style={{ fontSize: '1.25rem', color: 'var(--text)' }}>
                 Не удалось подтвердить
               </h2>
-              <p style={{ color: '#5F6368', fontSize: '0.9375rem', marginBottom: 20 }}>
+              <p style={{ color: 'var(--text-2)', fontSize: '0.9375rem', marginBottom: 20 }}>
                 {message} Ссылка могла устареть или уже быть использована — если вы уже
                 подтвердили email, просто войдите.
               </p>
