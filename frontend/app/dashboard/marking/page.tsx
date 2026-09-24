@@ -1,7 +1,7 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
 import { Stamp, AlertTriangle, CheckCircle2, RefreshCw, Search, Info } from 'lucide-react'
-import { api } from '@/lib/api'
+import { api, type MarkingProductStatus as ProductStatus, type MarkingCheckResult as CheckResult } from '@/lib/api'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -10,24 +10,11 @@ import { Badge } from '@/components/ui/badge'
 const A   = '#1A73E8'
 const ABG = 'rgba(26,115,232,0.08)'
 
-interface ProductStatus {
-  product_id: string
-  product_name: string
-  category: string | null
-  requires_marking: boolean
-  regulation: string | null
-}
-
-interface CheckResult {
-  category: string
-  requires_marking: boolean
-  regulation: string | null
-  warning: string | null
-}
-
 export default function MarkingPage() {
   const [products,     setProducts]     = useState<ProductStatus[]>([])
-  const [loading,      setLoading]      = useState(false)
+  const [loading,      setLoading]      = useState(true)
+  const [scanError, setScanError] = useState(false)
+  const [checkError, setCheckError] = useState(false)
   const [lastScan,     setLastScan]     = useState<Date | null>(null)
   const [checkCat,     setCheckCat]     = useState('')
   const [checkResult,  setCheckResult]  = useState<CheckResult | null>(null)
@@ -35,16 +22,15 @@ export default function MarkingPage() {
 
   const scan = useCallback(async () => {
     setLoading(true)
+    setScanError(false)
+    setProducts([])
+    setLastScan(null)
     try {
-      const r = await fetch('/api/marking/scan', {
-        credentials: 'include',    // SECURITY-2B-2 — HttpOnly cookie, no Bearer
-      })
-      if (!r.ok) throw new Error()
-      const data: ProductStatus[] = await r.json()
+      const data = await api.marking.scan()
       setProducts(data)
       setLastScan(new Date())
     } catch {
-      setProducts([])
+      setScanError(true)
     } finally {
       setLoading(false)
     }
@@ -55,14 +41,13 @@ export default function MarkingPage() {
   async function checkCategory() {
     if (!checkCat.trim()) return
     setChecking(true)
+    setCheckError(false)
+    setCheckResult(null)
     try {
-      const r = await fetch(`/api/marking/check?category=${encodeURIComponent(checkCat)}`, {
-        credentials: 'include',    // SECURITY-2B-2 — HttpOnly cookie, no Bearer
-      })
-      const data: CheckResult = await r.json()
+      const data = await api.marking.check(checkCat.trim())
       setCheckResult(data)
     } catch {
-      setCheckResult(null)
+      setCheckError(true)
     } finally {
       setChecking(false)
     }
@@ -110,7 +95,8 @@ export default function MarkingPage() {
               className="flex-1"
               placeholder="Введите категорию, напр. «Обувь», «Парфюмерия», «Молочная продукция»..."
               value={checkCat}
-              onChange={e => { setCheckCat(e.target.value); setCheckResult(null) }}
+              onChange={e => { setCheckCat(e.target.value); setCheckResult(null); setCheckError(false) }}
+              disabled={checking}
               onKeyDown={e => e.key === 'Enter' && checkCategory()}
             />
             <Button onClick={checkCategory} disabled={!checkCat.trim()} loading={checking}>
@@ -118,6 +104,7 @@ export default function MarkingPage() {
             </Button>
           </div>
 
+          {checkError && <p role="alert" className="mt-4" style={{ color: 'var(--danger)' }}>Не удалось проверить категорию. Повторите попытку.</p>}
           {checkResult && (
             <div
               className="mt-4 p-4 rounded-xl flex items-start gap-3"
@@ -150,6 +137,8 @@ export default function MarkingPage() {
           )}
         </Card>
 
+        {scanError && <p role="alert" className="mb-6" style={{ color: 'var(--danger)' }}>Не удалось загрузить товары. Нажмите «Проверить все товары», чтобы повторить попытку.</p>}
+        {loading && <p role="status" className="mb-6">Проверяем товары…</p>}
         {products.length > 0 ? (
           <>
             <div className="grid grid-cols-3 gap-4 mb-6">
@@ -230,7 +219,7 @@ export default function MarkingPage() {
               </Card>
             )}
           </>
-        ) : !loading && (
+        ) : !loading && !scanError && (
           <Card className="p-12 text-center">
             <Stamp size={40} style={{ color: 'rgba(26,115,232,0.25)', margin: '0 auto 12px' }} />
             <p style={{ fontSize: '0.9375rem', color: 'rgba(0,0,0,0.38)' }}>
