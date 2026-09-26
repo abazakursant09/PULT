@@ -230,7 +230,7 @@ export default function RegisterPage() {
             <PultMark width={32} height={37} style={{ color: 'var(--violet-text)' }} />
             <span className="font-bold text-xl tracking-tight" style={{ color: 'var(--text)' }}>ПУЛЬТ</span>
           </Link>
-          <p className="mt-2 text-sm text-muted-foreground">{t('common.marketplace')}</p>
+          <p className="mt-2 text-sm text-muted-foreground">{t('register.positioning')}</p>
         </div>
 
         {/* Progress indicator */}
