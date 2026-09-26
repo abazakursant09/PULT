@@ -89,12 +89,34 @@ describe('1.4.5I — scoped green nav on store routes', () => {
     expect(CSS.match(/\.s-nav\.on\{[^}]*\}/)?.[0] ?? '').toMatch(/var\(--violet/)
     // … and the store-route override is a distinct green rule, never repainting other sections.
     const green = CSS.match(/\.s-nav\.on\.s-nav--ledger\{[^}]*\}/)?.[0] ?? ''
-    expect(green).toMatch(/46,94,78|2E5E4E/)
-    expect(CSS).toMatch(/\.s-nav\.on\.s-nav--ledger \.s-nav-ic\{[^}]*(6FBF9B|2E5E4E)/)
+    expect(green).toContain('var(--success-dim)')
+    expect(green).toContain('color:var(--text)')
+    expect(CSS).toMatch(/\.s-nav\.on\.s-nav--ledger \.s-nav-ic\{[^}]*var\(--success\)/)
   })
 })
 
 describe('P5 — drawer open / close', () => {
+  it.each(['Открыть меню', 'Открыть навигацию'])('Escape restores focus to %s', name => {
+    const { container } = renderShell()
+    const trigger = screen.getByRole('button', { name })
+    fireEvent.click(trigger)
+    screen.getByRole('link', { name: /Отзывы/ }).focus()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(container.querySelector('.s-app')).not.toHaveClass('nav-open')
+    expect(trigger).toHaveFocus()
+  })
+  it('provides a working fallback navigation control for pages without SellerBar', () => {
+    const { container } = render(<NavProvider><ShellFrame><Rail /><main>Данные</main></ShellFrame></NavProvider>)
+    const trigger = screen.getByRole('button', { name: 'Открыть навигацию' })
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(trigger)
+    expect(container.querySelector('.s-app')).toHaveClass('nav-open')
+    expect(trigger).toHaveAttribute('aria-expanded', 'true')
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
+    expect(CSS).toContain('.s-mobile-nav{display:none}')
+    expect(CSS).toContain('.s-app:not(:has(.s-bar)) > .s-mobile-nav')
+  })
   it('hamburger exists and toggles the drawer open', () => {
     const { container } = renderShell()
     expect(container.querySelector('.s-app')?.className).not.toContain('nav-open')

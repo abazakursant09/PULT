@@ -34,7 +34,7 @@ function ResendVerification() {
   }
 
   if (state === 'done') {
-    return <p style={{ color: '#5F6368', fontSize: '0.875rem', marginBottom: 12 }}>{note}</p>
+    return <p style={{ color: 'var(--text-2)', fontSize: '0.875rem', marginBottom: 12 }}>{note}</p>
   }
   return (
     <form onSubmit={submit} className="w-full mb-2">
@@ -79,15 +79,15 @@ function VerifyEmailContent() {
   return (
     <div
       className="min-h-screen flex items-center justify-center px-5"
-      style={{ background: '#F8F9FA', position: 'relative', overflow: 'hidden' }}
+      style={{ background: 'var(--bg)', position: 'relative', overflow: 'hidden' }}
     >
       <div aria-hidden style={{ position: 'fixed', top: '5%', right: '-8%', width: 380, height: 380, background: 'radial-gradient(circle, rgba(26,115,232,0.06) 0%, transparent 65%)', animation: 'orbDrift 18s ease-in-out infinite', filter: 'blur(44px)', pointerEvents: 'none', zIndex: 0 }} />
       <div aria-hidden style={{ position: 'fixed', bottom: '10%', left: '-6%', width: 300, height: 300, background: 'radial-gradient(circle, rgba(26,115,232,0.04) 0%, transparent 65%)', animation: 'orbDrift2 22s ease-in-out infinite', filter: 'blur(38px)', pointerEvents: 'none', zIndex: 0 }} />
       <div className="w-full max-w-[420px]">
         <div className="text-center mb-10">
           <Link href="/" className="inline-flex items-center gap-3">
-            <PultMark width={28} height={32} style={{ color: '#383180' }} />
-            <span className="font-bold tracking-tight" style={{ fontSize: '2rem', color: '#202124' }}>Бизнес‑</span>
+            <PultMark width={28} height={32} style={{ color: 'var(--violet-text)' }} />
+            <span className="font-bold tracking-tight" style={{ fontSize: '2rem', color: 'var(--text)' }}>Бизнес‑</span>
             <span className="font-bold tracking-tight text-gradient-gold" style={{ fontSize: '2rem' }}>Пульт</span>
           </Link>
         </div>
@@ -96,12 +96,12 @@ function VerifyEmailContent() {
           {status === 'loading' && (
             <>
               <div className="flex justify-center mb-5">
-                <Loader2 size={36} style={{ color: '#1A73E8' }} className="animate-spin" />
+                <Loader2 size={36} style={{ color: 'var(--violet-text)' }} className="animate-spin" />
               </div>
-              <h2 className="font-semibold mb-2" style={{ fontSize: '1.25rem', color: '#202124' }}>
+              <h2 className="font-semibold mb-2" style={{ fontSize: '1.25rem', color: 'var(--text)' }}>
                 Подтверждаем email...
               </h2>
-              <p style={{ color: '#5F6368', fontSize: '0.9375rem' }}>Пожалуйста, подождите</p>
+              <p style={{ color: 'var(--text-2)', fontSize: '0.9375rem' }}>Пожалуйста, подождите</p>
             </>
           )}
 
@@ -112,16 +112,16 @@ function VerifyEmailContent() {
                   className="w-14 h-14 rounded-full flex items-center justify-center"
                   style={{ background: 'rgba(26,115,232,0.1)', border: '2px solid rgba(26,115,232,0.3)' }}
                 >
-                  <CheckCircle2 size={28} style={{ color: '#1A73E8' }} />
+                  <CheckCircle2 size={28} style={{ color: 'var(--violet-text)' }} />
                 </div>
               </div>
-              <h2 className="font-semibold mb-2" style={{ fontSize: '1.25rem', color: '#202124' }}>
+              <h2 className="font-semibold mb-2" style={{ fontSize: '1.25rem', color: 'var(--text)' }}>
                 Email подтверждён!
               </h2>
-              <p style={{ color: '#5F6368', fontSize: '0.9375rem', marginBottom: 16 }}>
+              <p style={{ color: 'var(--text-2)', fontSize: '0.9375rem', marginBottom: 16 }}>
                 Переходим в панель управления...
               </p>
-              <Loader2 size={18} className="animate-spin mx-auto" style={{ color: '#1A73E8' }} />
+              <Loader2 size={18} className="animate-spin mx-auto" style={{ color: 'var(--violet-text)' }} />
             </>
           )}
 
@@ -132,13 +132,13 @@ function VerifyEmailContent() {
                   className="w-14 h-14 rounded-full flex items-center justify-center"
                   style={{ background: 'rgba(220,38,38,0.08)', border: '2px solid rgba(220,38,38,0.2)' }}
                 >
-                  <XCircle size={28} style={{ color: '#DC2626' }} />
+                  <XCircle size={28} style={{ color: 'var(--danger)' }} />
                 </div>
               </div>
-              <h2 className="font-semibold mb-2" style={{ fontSize: '1.25rem', color: '#202124' }}>
+              <h2 className="font-semibold mb-2" style={{ fontSize: '1.25rem', color: 'var(--text)' }}>
                 Не удалось подтвердить
               </h2>
-              <p style={{ color: '#5F6368', fontSize: '0.9375rem', marginBottom: 20 }}>
+              <p style={{ color: 'var(--text-2)', fontSize: '0.9375rem', marginBottom: 20 }}>
                 {message} Ссылка могла устареть или уже быть использована — если вы уже
                 подтвердили email, просто войдите.
               </p>
@@ -160,8 +160,8 @@ function VerifyEmailContent() {
 export default function VerifyEmailPage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center" style={{ background: '#F8F9FA' }}>
-        <Loader2 size={32} style={{ color: '#1A73E8' }} className="animate-spin" />
+      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg)' }}>
+        <Loader2 size={32} style={{ color: 'var(--violet-text)' }} className="animate-spin" />
       </div>
     }>
       <VerifyEmailContent />

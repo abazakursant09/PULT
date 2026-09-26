@@ -46,12 +46,12 @@ function Consent({ id, checked, onChange, children }: {
       />
       <label
         htmlFor={id}
-        className="flex items-start gap-2.5 cursor-pointer rounded peer-focus-visible:ring-2 peer-focus-visible:ring-[#1A73E8] peer-focus-visible:ring-offset-2"
+        className="flex items-start gap-2.5 cursor-pointer rounded peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--violet-text)] peer-focus-visible:ring-offset-2"
       >
         <span
           aria-hidden="true"
           className="flex items-center justify-center w-4 h-4 rounded shrink-0 transition-all mt-0.5"
-          style={{ background: checked ? '#1A73E8' : 'transparent', border: `1.5px solid ${checked ? '#1A73E8' : 'hsl(var(--border))'}` }}
+          style={{ background: checked ? 'var(--violet-text)' : 'transparent', border: `1.5px solid ${checked ? 'var(--violet-text)' : 'hsl(var(--border))'}` }}
         >
           {checked && <svg width="9" height="7" viewBox="0 0 11 8" fill="none"><path d="M1 4L4 7L10 1" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
         </span>
@@ -147,30 +147,30 @@ export default function RegisterPage() {
 
   if (registered) {
     return (
-      <div className="min-h-screen flex items-center justify-center px-5 py-16" style={{ background: '#F6F9FC' }}>
+      <div className="min-h-screen flex items-center justify-center px-5 py-16" style={{ background: 'var(--bg)' }}>
         <BlurFade className="w-full max-w-[460px]" inView>
           <div className="text-center mb-8">
             <Link href="/" className="inline-flex items-center gap-3">
-              <PultMark width={32} height={37} style={{ color: '#383180' }} />
-              <span className="font-bold text-xl tracking-tight" style={{ color: '#0A2540' }}>ПУЛЬТ</span>
+              <PultMark width={32} height={37} style={{ color: 'var(--violet-text)' }} />
+              <span className="font-bold text-xl tracking-tight" style={{ color: 'var(--text)' }}>ПУЛЬТ</span>
             </Link>
           </div>
           <Card className="shadow-stripe-lg">
             <CardContent className="p-8">
               <div className="flex items-center justify-center mb-6">
                 <div className="w-16 h-16 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(26,115,232,0.1)', border: '1px solid rgba(26,115,232,0.2)' }}>
-                  <MailCheck size={28} style={{ color: '#1A73E8' }} />
+                  <MailCheck size={28} style={{ color: 'var(--violet-text)' }} />
                 </div>
               </div>
               {mailSent ? (
                 <>
                   {/* Only the registration response — an account the caller demonstrably owns —
                       may assert that a letter is on its way. A resend never flips this screen. */}
-                  <h2 className="text-center font-bold text-2xl mb-2" style={{ color: '#0A2540', letterSpacing: '-0.02em' }}>
+                  <h2 className="text-center font-bold text-2xl mb-2" style={{ color: 'var(--text)', letterSpacing: '-0.02em' }}>
                     Проверьте почту
                   </h2>
                   <p className="text-center text-muted-foreground mb-6" style={{ lineHeight: 1.7 }}>
-                    Мы отправили ссылку для подтверждения на <strong style={{ color: '#0A2540' }}>{form.email}</strong>.
+                    Мы отправили ссылку для подтверждения на <strong style={{ color: 'var(--text)' }}>{form.email}</strong>.
                     Перейдите по ней, чтобы завершить регистрацию и войти.
                   </p>
                 </>
@@ -178,14 +178,14 @@ export default function RegisterPage() {
                 <>
                   {/* The account was created — say so, or the seller registers again and hits
                       "Email уже зарегистрирован". What failed is the letter, and only the letter. */}
-                  <h2 className="text-center font-bold text-2xl mb-2" style={{ color: '#0A2540', letterSpacing: '-0.02em' }}>
+                  <h2 className="text-center font-bold text-2xl mb-2" style={{ color: 'var(--text)', letterSpacing: '-0.02em' }}>
                     Аккаунт создан
                   </h2>
-                  <p className="text-center mb-4" style={{ lineHeight: 1.7, color: '#B42318' }}>
+                  <p className="text-center mb-4" style={{ lineHeight: 1.7, color: 'var(--danger)' }}>
                     Не удалось отправить письмо. Проверьте адрес и попробуйте ещё раз.
                   </p>
                   <p className="text-center text-muted-foreground text-sm mb-5" style={{ lineHeight: 1.7 }}>
-                    Адрес: <strong style={{ color: '#0A2540' }}>{form.email}</strong>
+                    Адрес: <strong style={{ color: 'var(--text)' }}>{form.email}</strong>
                   </p>
                   <button type="button" onClick={resendMail} disabled={resend === 'sending'}
                     className="btn btn-primary w-full flex items-center justify-center gap-2 mb-3">
@@ -217,7 +217,7 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-5 py-12" style={{ background: '#F6F9FC' }}>
+    <div className="min-h-screen flex items-center justify-center px-5 py-12" style={{ background: 'var(--bg)' }}>
 
       <div className="absolute top-5 right-5 z-20">
         <LanguageSwitcher />
@@ -227,8 +227,8 @@ export default function RegisterPage() {
 
         <div className="text-center mb-8">
           <Link href="/" className="inline-flex items-center gap-3">
-            <PultMark width={32} height={37} style={{ color: '#383180' }} />
-            <span className="font-bold text-xl tracking-tight" style={{ color: '#0A2540' }}>ПУЛЬТ</span>
+            <PultMark width={32} height={37} style={{ color: 'var(--violet-text)' }} />
+            <span className="font-bold text-xl tracking-tight" style={{ color: 'var(--text)' }}>ПУЛЬТ</span>
           </Link>
           <p className="mt-2 text-sm text-muted-foreground">{t('common.marketplace')}</p>
         </div>
@@ -238,10 +238,10 @@ export default function RegisterPage() {
           {['Личные данные', 'Пароль', 'Согласия'].map((label, i) => (
             <div key={i} className="flex items-center gap-2 flex-1">
               <div className="flex items-center gap-1.5">
-                <div className="w-5 h-5 rounded-full flex items-center justify-center text-xs font-semibold" style={{ background: '#1A73E8', color: 'white' }}>
+                <div className="w-5 h-5 rounded-full flex items-center justify-center text-xs font-semibold" style={{ background: 'var(--violet-text)', color: 'white' }}>
                   {i + 1}
                 </div>
-                <span className="text-xs font-medium hidden sm:block" style={{ color: '#425466' }}>{label}</span>
+                <span className="text-xs font-medium hidden sm:block" style={{ color: 'var(--text-2)' }}>{label}</span>
               </div>
               {i < 2 && <div className="flex-1 h-px" style={{ background: 'hsl(var(--border))' }} />}
             </div>
@@ -250,25 +250,25 @@ export default function RegisterPage() {
 
         <Card className="shadow-stripe-lg border-border/60">
           <CardHeader className="pb-4">
-            <CardTitle className="text-2xl font-bold" style={{ letterSpacing: '-0.02em', color: '#0A2540' }}>
+            <CardTitle className="text-2xl font-bold" style={{ letterSpacing: '-0.02em', color: 'var(--text)' }}>
               {t('register.title')}
             </CardTitle>
-            <CardDescription style={{ color: '#425466' }}>{t('register.subtitle')}</CardDescription>
+            <CardDescription style={{ color: 'var(--text-2)' }}>{t('register.subtitle')}</CardDescription>
           </CardHeader>
 
           <CardContent className="space-y-4">
 
             {refCode && (
               <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm" style={{ background: 'rgba(26,115,232,0.06)', border: '1px solid rgba(26,115,232,0.18)' }}>
-                <CheckCircle2 size={15} style={{ color: '#1A73E8', flexShrink: 0 }} />
-                <span style={{ color: '#425466' }}>
-                  Реферальный код: <strong className="font-mono" style={{ color: '#1A73E8' }}>{refCode}</strong>
+                <CheckCircle2 size={15} style={{ color: 'var(--violet-text)', flexShrink: 0 }} />
+                <span style={{ color: 'var(--text-2)' }}>
+                  Реферальный код: <strong className="font-mono" style={{ color: 'var(--violet-text)' }}>{refCode}</strong>
                 </span>
               </div>
             )}
 
             {error && (
-              <div className="px-4 py-3 rounded-lg text-sm" style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)', color: '#b91c1c' }}>
+              <div className="px-4 py-3 rounded-lg text-sm" style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)', color: 'var(--danger)' }}>
                 {error}
               </div>
             )}
@@ -304,14 +304,14 @@ export default function RegisterPage() {
               <Consent id="consent-privacy" checked={agreed} onChange={setAgreed}>
                 {t('register.privacyText')}{' '}
                 {/* the link must not toggle the consent on its way to the policy page */}
-                <a href="/privacy" target="_blank" rel="noopener noreferrer" className="hover:underline" style={{ color: '#1A73E8' }} onClick={e => e.stopPropagation()}>
+                <a href="/privacy" target="_blank" rel="noopener noreferrer" className="hover:underline" style={{ color: 'var(--violet-text)' }} onClick={e => e.stopPropagation()}>
                   {t('register.privacy')}
                 </a>
               </Consent>
 
               <Consent id="consent-terms" checked={agreedTerms} onChange={setAgreedTerms}>
                 {t('register.termsText')}{' '}
-                <a href="/terms" target="_blank" rel="noopener noreferrer" className="hover:underline" style={{ color: '#1A73E8' }} onClick={e => e.stopPropagation()}>
+                <a href="/terms" target="_blank" rel="noopener noreferrer" className="hover:underline" style={{ color: 'var(--violet-text)' }} onClick={e => e.stopPropagation()}>
                   {t('register.terms')}
                 </a>
               </Consent>
@@ -325,7 +325,7 @@ export default function RegisterPage() {
 
             <p className="text-center text-sm text-muted-foreground">
               {t('register.hasAccount')}{' '}
-              <Link href="/login" className="font-semibold hover:underline" style={{ color: '#1A73E8' }}>
+              <Link href="/login" className="font-semibold hover:underline" style={{ color: 'var(--violet-text)' }}>
                 {t('register.login')}
               </Link>
             </p>

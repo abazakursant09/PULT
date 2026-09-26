@@ -134,7 +134,7 @@ export function ConnectionsSection() {
         </h2>
       </div>
 
-      <div className="mb-3 rounded-[8px] p-3" style={{ background: 'var(--surface-2, #f5f5f4)' }}>
+      <div className="mb-3 rounded-[8px] p-3" style={{ background: 'var(--surface-h)', border: '1px solid var(--line)' }}>
         <p className="text-[12px] mb-2" style={{ color: 'var(--text-2)' }}>
           Подключения к маркетплейсам управляются в разделе «Магазины» — там ключ привязывается к
           нужному кабинету, а не создаётся отдельно.
