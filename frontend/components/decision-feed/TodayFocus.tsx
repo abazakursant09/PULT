@@ -4,6 +4,7 @@ import { api } from '@/lib/api'
 import type { TodayItem } from '@/lib/api'
 import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
+import styles from '@/components/dashboard/cabinet.module.css'
 
 // "Сегодня начни с этого" — the single #1 thing to do today, from the canonical Today
 // source (/api/today → build_today → build_feed). Same source as the Telegram top action and
@@ -60,11 +61,11 @@ export function TodayFocus() {
     // panels below so the eye lands here first.
     <Card
       variant="elevated"
-      className="mb-[18px] p-[18px] relative overflow-hidden"
+      className={styles.focus}
       style={{ borderLeft: '3px solid var(--violet)' }}
     >
       <div className="flex items-center gap-2 mb-1">
-        <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--violet-text)]">
+        <span className="text-[13px] font-bold tracking-wide text-[var(--violet-text)]">
           Сегодня начни с этого
         </span>
       </div>
@@ -78,43 +79,50 @@ export function TodayFocus() {
           </div>
         )}
         {error && !loading && (
-          <div className="text-[12.5px] text-[var(--danger)]">Не удалось загрузить: {error}</div>
+          <div role="alert" className="text-[14px] text-[var(--danger)]">Не удалось загрузить: {error}. Попробуйте обновить страницу.</div>
         )}
 
         {!loading && !error && (
           top === null ? (
-            <div className="text-[13px] text-[var(--text-3)]">Данные получены. PULT анализирует ваш бизнес. Первые рекомендации появятся автоматически.</div>
+            <div role="status" className="text-[14px] text-[var(--text-2)]">Главная рекомендация пока отсутствует.</div>
           ) : (
-            <div className="flex flex-col gap-2">
+            <div className={styles.focusContent}>
+              <div className={styles.focusIdentity}>
               {/* what happened — the diagnosis headline, the biggest text on the panel */}
               {headline && (
                 <div className="text-[18px] font-bold leading-snug text-[var(--text)]">{headline}</div>
               )}
-              {context && <div className="text-[12px] text-[var(--text-3)]">{context}</div>}
+              {context && <div className="text-[13px] text-[var(--text-2)]">{context}</div>}
+              </div>
 
               {/* what to do — the obvious action, rendered as the hero's primary call */}
               {top!.recommended_action && (
-                <div className="mt-1 inline-flex items-start gap-2 rounded-[var(--r-sm)] border border-[var(--violet)] bg-[var(--violet-dim)] px-3 py-2 self-start">
-                  <span className="text-[10px] font-bold uppercase tracking-wide text-[var(--violet-text)] mt-0.5 shrink-0">Что сделать</span>
-                  <span className="text-[13px] font-semibold text-[var(--text)]">{top!.recommended_action}</span>
+                <div className={styles.focusAction}>
+                  <span>Что сделать</span>
+                  <span>{top!.recommended_action}</span>
                 </div>
               )}
 
+              {(top!.why_it_matters || top!.expected_effect || narrative) && (
+              <details className={styles.focusEvidence}>
+                <summary>Почему это важно и что даст решение</summary>
               {top!.why_it_matters && (
-                <div className="text-[12px] text-[var(--text-2)] mt-1">
+                <p>
                   <b>Почему важно:</b> {top!.why_it_matters}
-                </div>
+                </p>
               )}
               {top!.expected_effect && (
-                <div className="text-[12px] text-[var(--text-2)]">
+                <p>
                   <b>Что это даст:</b> {top!.expected_effect}
-                </div>
+                </p>
               )}
               {/* P6 — additive root-cause narrative. Only when the product has a converging one. */}
               {narrative && (
-                <div className="text-[12px] leading-relaxed text-[var(--text-2)] rounded-[7px] px-2.5 py-2 bg-[var(--surface-h)] border-l-2 border-[var(--line)]">
+                <p>
                   {narrative}
-                </div>
+                </p>
+              )}
+              </details>
               )}
             </div>
           )

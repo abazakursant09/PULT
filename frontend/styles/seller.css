@@ -25,6 +25,10 @@
 .s-logo{display:flex;align-items:center;gap:10px;padding:6px 8px 14px}
 .s-logo .mk{width:28px;height:28px;border-radius:8px;background:linear-gradient(140deg,var(--metal-1),var(--metal-2));box-shadow:inset 0 1px 0 rgba(255,255,255,.45),0 2px 6px rgba(0,0,0,.35);display:grid;place-items:center}
 .s-logo b{font-size:15px;font-weight:650;letter-spacing:-.02em}
+.s-logo .s-approved-mark{display:block;flex:0 0 44px;line-height:0;border-radius:7px;overflow:hidden}
+.s-brand-copy{display:flex;flex-direction:column;gap:4px;min-width:0}
+.s-brand-copy b{font-size:22px;letter-spacing:.02em}
+.s-brand-copy small{font-size:11px;line-height:1.4;letter-spacing:.015em;text-transform:uppercase;color:var(--tx-2)}
 .s-glabel{font-size:10.5px;font-weight:650;letter-spacing:.09em;text-transform:uppercase;color:var(--tx-3);padding:15px 9px 6px}
 .s-nav{display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:10px;color:var(--tx-2);font-size:13.5px;font-weight:450;cursor:pointer;
   transition:background-color var(--dur) var(--ease),color var(--dur) var(--ease)}
