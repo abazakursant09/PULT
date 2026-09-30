@@ -5,6 +5,8 @@ import type { TodaySummary } from '@/lib/api'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Boxes, Search, ShoppingCart, Coins } from 'lucide-react'
+import styles from './cabinet.module.css'
 
 // "Состояние бизнеса сегодня" — the business-state strip under the diagnosis hero.
 // Read-only assembly of EXISTING aggregates from GET /api/today/summary. No charts, no BI,
@@ -73,10 +75,17 @@ export function BusinessToday() {
   }, [])
 
   return (
-    <Card variant="surface" className="mb-[18px] p-[18px]">
-      <div className="flex items-baseline gap-2 mb-3">
-        <h2 className="text-[16px] font-bold text-[var(--text)] m-0">Состояние бизнеса сегодня</h2>
-        {s?.is_demo && <Badge variant="neutral" className="text-[9px] tracking-[0.08em] uppercase">ДЕМО</Badge>}
+    <div className={styles.overview}>
+    <Card variant="surface" className={styles.contour}>
+      <div className={styles.sectionHead}>
+        <div>
+          <span className={styles.caption}>Состояние бизнеса сегодня</span>
+          <h2>Операционный контур</h2>
+        </div>
+        <div className={styles.period}>
+          <span>Сегодня · выручка к вчера</span>
+          {s?.is_demo && <Badge variant="neutral">ДЕМО</Badge>}
+        </div>
       </div>
 
       {loading && (
@@ -95,18 +104,57 @@ export function BusinessToday() {
         !s.has_data ? (
           <div className="text-[13px] text-[var(--text-3)]">Недостаточно данных за сегодня</div>
         ) : (
-          <div className="flex flex-wrap items-end gap-x-8 gap-y-4">
+          <div>
+            <div className={styles.flow}>
+              <article className={styles.node}>
+                <h3><Search size={24} aria-hidden="true" />Спрос</h3>
+                <span className={styles.caption}>Сигналы роста</span>
+                <strong>{s.growth_opportunities_count}</strong>
+                <span className={styles.nodeNote}>По доступным данным</span>
+              </article>
+              <article className={styles.node}>
+                <h3><ShoppingCart size={24} aria-hidden="true" />Продажи</h3>
+                <span className={styles.caption}>Выручка</span>
+                <strong>{_rub(s.revenue_today)}</strong>
+                <span className={styles.nodeNote}>За сегодня</span>
+              </article>
+              <article className={styles.node}>
+                <h3><Coins size={24} aria-hidden="true" />Маржа</h3>
+                <span className={styles.caption}>Маржинальность</span>
+                <strong>{s.margin_pct === null ? '—' : `${s.margin_pct}%`}</strong>
+                <span className={styles.nodeNote}>За сегодня</span>
+              </article>
+              <article className={styles.node}>
+                <h3><Boxes size={24} aria-hidden="true" />Остатки</h3>
+                <span className={styles.caption}>Товаров с низким остатком</span>
+                <strong>{s.low_stock_count}</strong>
+                <span className={styles.nodeNote}>По доступным данным</span>
+              </article>
+            </div>
+            <div className={styles.facts}>
             <HeroMetric label="Прибыль сегодня" value={_rub(s.profit_today)} tone={s.profit_today < 0 ? 'neg' : 'pos'} />
-            <Metric label="Выручка" value={_rub(s.revenue_today)} />
-            <Metric label="Маржа" value={s.margin_pct === null ? '—' : `${s.margin_pct}%`} />
             <Metric label="Изменение к вчера" value={_delta(s.delta_revenue_pct)}
               tone={s.delta_revenue_pct === null ? 'muted' : s.delta_revenue_pct < 0 ? 'neg' : 'pos'} />
             <Metric label="Товаров с убытком" value={String(s.loss_products_count)}
               tone={s.loss_products_count > 0 ? 'neg' : 'muted'} />
+            </div>
           </div>
         )
       )}
     </Card>
+    {!loading && !error && s?.has_data && (
+      <aside className={styles.signals} aria-label="Сигналы по данным">
+        <h2>Сигналы</h2>
+        <p className={styles.caption}>По доступным данным{s.is_demo ? ' · демо' : ''}</p>
+        <dl>
+          <div><dt>Критические решения</dt><dd>{s.critical_count}</dd></div>
+          <div><dt>Товары с низким остатком</dt><dd>{s.low_stock_count}</dd></div>
+          <div><dt>Сигналы роста</dt><dd>{s.growth_opportunities_count}</dd></div>
+        </dl>
+        <p className={styles.caption}>Подробности и доступные действия — в разделе решений.</p>
+      </aside>
+    )}
+    </div>
   )
 }
 

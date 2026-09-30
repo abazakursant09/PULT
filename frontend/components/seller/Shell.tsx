@@ -110,8 +110,8 @@ export function Rail() {
     <aside className="s-rail">
       <div className="s-rail-top">
         <Link href="/dashboard" className="s-logo" onClick={close}>
-          <span className="mk"><PultMark width={20} height={23} style={{ color: 'var(--tx-2)' }} /></span>
-          <b>ПУЛЬТ</b>
+          <span className="s-approved-mark"><PultMark approvedReference width={44} height={50} /></span>
+          <span className="s-brand-copy"><b>ПУЛЬТ</b><small>Операционная система селлера</small></span>
         </Link>
         <DrawerClose />
       </div>

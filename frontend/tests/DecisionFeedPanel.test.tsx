@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import DecisionFeedPanel from '@/components/decision-feed/DecisionFeedPanel'
@@ -12,6 +12,19 @@ import { diagnosisCard } from './fixtures'
 
 describe('DecisionFeedPanel (presentation cards)', () => {
   beforeEach(() => { vi.restoreAllMocks() })
+
+  it('keeps every decision mounted inside a native, initially closed disclosure', async () => {
+    vi.spyOn(api.presentation, 'getCards').mockResolvedValue({ cards: [diagnosisCard] })
+    const mark = vi.spyOn(api.decisionFeed, 'markSeen')
+    const { container } = render(<DecisionFeedPanel />)
+    await screen.findByText(/Реклама съедает маржу/)
+    const details = container.querySelector('details')!
+    expect(details).not.toHaveAttribute('open')
+    expect(details.querySelector('summary')).toHaveTextContent('Разобрать')
+    expect(details).toHaveTextContent('Отложить')
+    fireEvent.click(details.querySelector('summary')!)
+    expect(mark).not.toHaveBeenCalled()
+  })
 
   it('renders a diagnosis card from the API', async () => {
     vi.spyOn(api.presentation, 'getCards').mockResolvedValue({ cards: [diagnosisCard] })

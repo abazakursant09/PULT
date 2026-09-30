@@ -43,6 +43,25 @@ describe('BusinessToday', () => {
     expect(await screen.findByText('ДЕМО')).toBeInTheDocument()
   })
 
+  it('shows the four operational stages without invented charts or forecasts', async () => {
+    vi.spyOn(api.today, 'getSummary').mockResolvedValue(todayWithData)
+    const { container } = render(<BusinessToday />)
+    await screen.findByText('Продажи')
+    expect(screen.getAllByRole('heading', { level: 3 }).map(n => n.textContent))
+      .toEqual(['Спрос', 'Продажи', 'Маржа', 'Остатки'])
+    expect(screen.getByText('Сегодня · выручка к вчера')).toBeInTheDocument()
+    expect(screen.queryByText('ДЕМО')).not.toBeInTheDocument()
+    expect(screen.queryByText(/55.940|7 дней|Оценка эффекта/)).not.toBeInTheDocument()
+    expect(container.querySelectorAll('article')).toHaveLength(4)
+  })
+
+  it('does not label missing margin as zero', async () => {
+    vi.spyOn(api.today, 'getSummary').mockResolvedValue({ ...todayWithData, margin_pct: null })
+    render(<BusinessToday />)
+    expect(await screen.findByText('—')).toBeInTheDocument()
+    expect(screen.queryByText('0%')).not.toBeInTheDocument()
+  })
+
   it('surfaces a load failure instead of showing zeroes as if they were real', async () => {
     vi.spyOn(api.today, 'getSummary').mockRejectedValue(new Error('boom'))
 

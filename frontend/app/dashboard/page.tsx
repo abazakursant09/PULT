@@ -10,6 +10,7 @@ import BusinessToday from '@/components/dashboard/BusinessToday'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Button } from '@/components/ui/button'
 import { api, type FirstRunState } from '@/lib/api'
+import styles from '@/components/dashboard/cabinet.module.css'
 
 const _WEEKDAYS = ['Воскресенье', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота']
 const _MONTHS = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля',
@@ -150,7 +151,11 @@ export default function Home() {
   return (
     <>
       <SellerBar title="Главная" sub={sub} />
-      <div className="s-canvas">
+      <div className={`s-canvas ${styles.workspace}`}>
+        <header className={styles.heading}>
+          <h1>Сегодня в бизнесе</h1>
+          <p>Спрос, продажи, маржа и остатки — от состояния бизнеса к следующему решению.</p>
+        </header>
         <BusinessToday />
 
         {/* a diagnosis exists (or the seller has recent data) → the normal dashboard */}

@@ -10,10 +10,20 @@ import { useId, type SVGProps } from 'react'
  * into the right leg. Consumers may change only the surrounding size and the
  * frame contrast through `color`; the brand geometry remains here.
  */
-export function PultMark(props: SVGProps<SVGSVGElement>) {
+export function PultMark({ approvedReference = false, ...props }: SVGProps<SVGSVGElement> & { approvedReference?: boolean }) {
   const gradientId = useId().replace(/:/g, '')
   const bodyGradient = `${gradientId}-body`
   const facetGradient = `${gradientId}-facet`
+
+  // Lossless extraction of the original #42 viewport: identical visible pixels,
+  // without downloading the surrounding reference board. Original PNG retained.
+  if (approvedReference) {
+    return (
+      <svg {...props} viewBox="0 0 340 382" fill="none" aria-hidden="true" overflow="hidden">
+        <image href="/logos/pult-approved-42.webp" x="0" y="0" width="340" height="382" />
+      </svg>
+    )
+  }
 
   return (
     <svg viewBox="0 0 28 32" fill="none" aria-hidden="true" {...props}>

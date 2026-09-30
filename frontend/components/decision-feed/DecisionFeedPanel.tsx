@@ -11,6 +11,7 @@ import { severityLabel, severityBadgeVariant } from '@/lib/severity'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import styles from '@/components/dashboard/cabinet.module.css'
 
 // "Что требует внимания сегодня" — главный видимый слой PULT. Список решений из
 // всех контуров, не отчёт и не BI. Без рейтинга, без numeric priority, без прогноза.
@@ -62,10 +63,10 @@ export function DecisionFeedPanel({ skipTopAction: skip = false }: { skipTopActi
   const shown = skip && contour === null ? skipTopAction(cards) : cards
 
   return (
-    <Card variant="surface" className="mb-[18px] p-[18px]">
+    <Card variant="surface" className={styles.decisions}>
       <div className="mb-1">
         <h2 className="text-[16px] font-bold text-[var(--text)] m-0">Что требует внимания сегодня</h2>
-        <div className="text-[12px] text-[var(--text-3)] mt-1">
+        <div className="text-[14px] text-[var(--text-2)] mt-2 leading-relaxed">
           Собрано из SEO, рекламы, отзывов, роста, юридических рисков и доказанных эффектов решений.
         </div>
       </div>
@@ -125,26 +126,27 @@ function PresentationCardView(
   if (!card.sku) return <div>{body}</div>
 
   return (
-    <Card variant="bordered" className="rounded-[14px] p-3 flex flex-col gap-2.5">
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-[13.5px] font-bold text-[var(--text)] leading-tight [font-variant-numeric:tabular-nums]">{card.sku}</span>
-        <span className="text-[12px] text-[var(--text-3)]">· {marketplaceLabel(card.marketplace)}</span>
+    <details className={styles.decisionRow}>
+      <summary className={styles.decisionSummary}>
+        <span className={styles.decisionIdentity}>
+        <span className="text-[16px] font-bold text-[var(--text)] leading-tight [font-variant-numeric:tabular-nums]">{card.sku}</span>
+        <span className="text-[14px] text-[var(--text-2)]">· {marketplaceLabel(card.marketplace)}</span>
+        </span>
+        <span className={styles.decisionHeadline}>{card.root_cause_narrative || card.items[0]?.what_happened || card.items[0]?.title || 'Решения по товару'}</span>
+        <span className={styles.decisionMeta}>
         {sev && (
           <Badge variant={severityBadgeVariant(card.highest_severity)} className="text-[10px] uppercase tracking-[0.2px] rounded-[5px]">
             {sev}
           </Badge>
         )}
-        <span className="text-[11.5px] text-[var(--text-3)] ml-auto">
+        <span className="text-[13px] text-[var(--text-2)] ml-auto">
           {recommendationsLabel(card.items.length)}
         </span>
-      </div>
-      {card.root_cause_narrative && (
-        <div className="text-[12px] leading-relaxed text-[var(--text-2)] px-2.5 py-2 rounded-[7px] bg-[var(--surface-h)] border-l-2 border-[var(--line)]">
-          {card.root_cause_narrative}
-        </div>
-      )}
-      {body}
-    </Card>
+        </span>
+        <span className={styles.disclosureLabel}><span className={styles.closedLabel}>Разобрать</span><span className={styles.openLabel}>Свернуть</span><span aria-hidden="true">⌄</span></span>
+      </summary>
+      <div className={styles.decisionBody}>{body}</div>
+    </details>
   )
 }
 

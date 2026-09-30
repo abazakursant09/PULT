@@ -29,21 +29,21 @@ describe('L1.1 — import copy drops the fixed-minute promise', () => {
   })
 })
 
-describe('L1.1 — TodayFocus analysing state', () => {
+describe('L1.1 — TodayFocus absent recommendation state', () => {
   beforeEach(() => { vi.restoreAllMocks() })
 
   it('no longer implies data is missing', () => {
     expect(read('components', 'decision-feed', 'TodayFocus.tsx')).not.toMatch(/когда PULT получит данные/)
   })
 
-  it('renders the "received, analysing" copy when there is no top action yet', async () => {
-    // top_action null (no diagnosis signal yet) — but TodayFocus only renders once data exists,
-    // so the honest state is "получены / анализирует", not "no data".
+  it('does not infer active analysis or missing data from a null top action', async () => {
+    // A null recommendation does not establish whether any analysis job is running.
     vi.spyOn(api.today, 'get').mockResolvedValue({ top_action: null } as never)
     vi.spyOn(api.presentation, 'getCards').mockResolvedValue({ cards: [] } as never)
 
     render(<TodayFocus />)
-    expect(await screen.findByText(/Данные получены\. PULT анализирует ваш бизнес/)).toBeInTheDocument()
+    expect(await screen.findByRole('status')).toHaveTextContent('Главная рекомендация пока отсутствует')
+    expect(screen.queryByText(/анализирует ваш бизнес|появятся автоматически/)).not.toBeInTheDocument()
     // must not fall back to the old "waiting for data" wording
     expect(screen.queryByText(/когда PULT получит данные/)).not.toBeInTheDocument()
   })
