@@ -55,6 +55,17 @@ describe('BusinessToday', () => {
     expect(container.querySelectorAll('article')).toHaveLength(4)
   })
 
+  it('labels the operations feed count as signals, not unique low-stock products', async () => {
+    vi.spyOn(api.today, 'getSummary').mockResolvedValue({ ...todayWithData, low_stock_count: 17 })
+    const { container } = render(<BusinessToday />)
+    expect(await screen.findAllByText('Операционные сигналы')).toHaveLength(2)
+    const stockCard = screen.getByRole('heading', { name: 'Остатки' }).closest('article')!
+    expect(stockCard.querySelector('strong')).toHaveTextContent('17')
+    const signalLabel = screen.getByText('Операционные сигналы', { selector: 'dt' })
+    expect(signalLabel.nextElementSibling).toHaveTextContent('17')
+    expect(container).not.toHaveTextContent(/Товар(?:ов|ы) с низким остатком/)
+  })
+
   it('does not label missing margin as zero', async () => {
     vi.spyOn(api.today, 'getSummary').mockResolvedValue({ ...todayWithData, margin_pct: null })
     render(<BusinessToday />)

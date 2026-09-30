@@ -126,7 +126,7 @@ export function BusinessToday() {
               </article>
               <article className={styles.node}>
                 <h3><Boxes size={24} aria-hidden="true" />Остатки</h3>
-                <span className={styles.caption}>Товаров с низким остатком</span>
+                <span className={styles.caption}>Операционные сигналы</span>
                 <strong>{s.low_stock_count}</strong>
                 <span className={styles.nodeNote}>По доступным данным</span>
               </article>
@@ -148,7 +148,7 @@ export function BusinessToday() {
         <p className={styles.caption}>По доступным данным{s.is_demo ? ' · демо' : ''}</p>
         <dl>
           <div><dt>Критические решения</dt><dd>{s.critical_count}</dd></div>
-          <div><dt>Товары с низким остатком</dt><dd>{s.low_stock_count}</dd></div>
+          <div><dt>Операционные сигналы</dt><dd>{s.low_stock_count}</dd></div>
           <div><dt>Сигналы роста</dt><dd>{s.growth_opportunities_count}</dd></div>
         </dl>
         <p className={styles.caption}>Подробности и доступные действия — в разделе решений.</p>
