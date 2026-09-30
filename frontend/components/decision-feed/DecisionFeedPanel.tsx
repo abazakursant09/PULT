@@ -85,7 +85,7 @@ export function DecisionFeedPanel({ skipTopAction: skip = false }: { skipTopActi
             ))}
           </div>
         )}
-        {error && <div className="text-[12.5px] text-[var(--danger)]">Не удалось загрузить: {error}</div>}
+        {error && <div role="alert" className="text-[12.5px] text-[var(--danger)]">Не удалось загрузить: {error}. Попробуйте обновить страницу.</div>}
 
         {!loading && !error && (
           shown.length === 0 ? (

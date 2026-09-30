@@ -97,7 +97,7 @@ export function BusinessToday() {
         </div>
       )}
       {error && !loading && (
-        <div className="text-[12.5px] text-[var(--danger)]">Не удалось загрузить: {error}</div>
+        <div role="alert" className="text-[12.5px] text-[var(--danger)]">Не удалось загрузить: {error}. Попробуйте обновить страницу.</div>
       )}
 
       {!loading && !error && s && (
