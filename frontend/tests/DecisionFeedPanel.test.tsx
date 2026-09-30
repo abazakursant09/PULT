@@ -58,12 +58,14 @@ describe('DecisionFeedPanel (presentation cards)', () => {
     expect(screen.queryByText(/ART-1001/)).not.toBeInTheDocument()
   })
 
-  it('does not crash when the feed fails to load', async () => {
+  it('announces a feed failure with a recovery instruction', async () => {
     vi.spyOn(api.presentation, 'getCards').mockRejectedValue(new Error('boom'))
 
     render(<DecisionFeedPanel />)
 
-    await waitFor(() =>
-      expect(screen.queryByText(/Реклама съедает маржу/)).not.toBeInTheDocument())
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Не удалось загрузить: boom')
+    expect(alert).toHaveTextContent('Попробуйте обновить страницу')
+    expect(screen.queryByText(/Реклама съедает маржу/)).not.toBeInTheDocument()
   })
 })

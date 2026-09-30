@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import BusinessToday from '@/components/dashboard/BusinessToday'
@@ -78,8 +78,9 @@ describe('BusinessToday', () => {
 
     render(<BusinessToday />)
 
-    await waitFor(() =>
-      expect(screen.getByText(/Не удалось загрузить/)).toBeInTheDocument())
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Не удалось загрузить: boom')
+    expect(alert).toHaveTextContent('Попробуйте обновить страницу')
     expect(screen.queryByText('Выручка')).not.toBeInTheDocument()
   })
 })
