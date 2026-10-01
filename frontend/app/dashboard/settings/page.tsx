@@ -46,6 +46,8 @@ export default function SettingsPage() {
   const [settingsLoad, setSettingsLoad] = useState(true)
   const [saving,       setSaving]       = useState(false)
   const [saved,        setSaved]        = useState(false)
+  const [loadError,    setLoadError]    = useState(false)
+  const [saveError,    setSaveError]    = useState(false)
 
   const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [deleting,      setDeleting]      = useState(false)
@@ -58,7 +60,7 @@ export default function SettingsPage() {
         setChatId(cid.telegram_chat_id ?? '')
         setSettings(s)
       })
-      .catch(() => {})
+      .catch(() => setLoadError(true))
       .finally(() => setSettingsLoad(false))
   }, [])
 
@@ -108,13 +110,13 @@ export default function SettingsPage() {
 
   async function saveSettings() {
     if (!settings) return
-    setSaving(true); setSaved(false)
+    setSaving(true); setSaved(false); setSaveError(false)
     try {
       const updated = await api.telegram.updateSettings(settings)
       setSettings(updated)
       setSaved(true)
       setTimeout(() => setSaved(false), 2500)
-    } catch {}
+    } catch { setSaveError(true) }
     finally { setSaving(false) }
   }
 
@@ -136,6 +138,7 @@ export default function SettingsPage() {
         </p>
       </div>
 
+      {loadError && <p role="alert" className="text-sm" style={{ color: 'var(--danger)' }}>Не удалось загрузить настройки Telegram. Попробуйте обновить страницу.</p>}
       <Card className="p-6 sm:p-8">
         <div className="flex items-center gap-3 mb-5">
           <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: ABG, border: `1px solid ${ABR}` }}>
@@ -157,6 +160,7 @@ export default function SettingsPage() {
 
         <div className="flex gap-3 flex-wrap">
           <Input
+            aria-label="Telegram Chat ID"
             className="flex-1 min-w-0 font-mono"
             placeholder="123456789"
             value={chatId}
@@ -204,7 +208,7 @@ export default function SettingsPage() {
                   <p className="text-sm font-medium" style={{ color: 'var(--text)' }}>Ежедневный отчёт</p>
                   <p className="text-xs mt-0.5" style={{ color: 'var(--text-3)' }}>Краткая сводка по товарам, отзывам и ценам</p>
                 </div>
-                <Switch checked={settings.daily_report} onCheckedChange={v => setField('daily_report', v)} />
+                <Switch aria-label="Ежедневный отчёт" checked={settings.daily_report} onCheckedChange={v => setField('daily_report', v)} />
               </div>
               {settings.daily_report && (
                 <div className="flex items-center gap-2 mt-2">
@@ -212,6 +216,7 @@ export default function SettingsPage() {
                   <span className="text-xs" style={{ color: 'var(--text-2)' }}>Время отправки:</span>
                   <Input
                     type="time"
+                    aria-label="Время ежедневного отчёта"
                     value={settings.daily_report_time}
                     onChange={e => setField('daily_report_time', e.target.value)}
                     className="h-8 text-sm" style={{ width: 110 }}
@@ -226,7 +231,7 @@ export default function SettingsPage() {
                   <p className="text-sm font-medium" style={{ color: 'var(--text)' }}>Еженедельная сводка</p>
                   <p className="text-xs mt-0.5" style={{ color: 'var(--text-3)' }}>Детальный отчёт за неделю: динамика, топ товары</p>
                 </div>
-                <Switch checked={settings.weekly_summary} onCheckedChange={v => setField('weekly_summary', v)} />
+                <Switch aria-label="Еженедельная сводка" checked={settings.weekly_summary} onCheckedChange={v => setField('weekly_summary', v)} />
               </div>
               {settings.weekly_summary && (
                 <div className="space-y-2 mt-2">
@@ -255,6 +260,7 @@ export default function SettingsPage() {
                     <span className="text-xs" style={{ color: 'var(--text-2)' }}>Время:</span>
                     <Input
                       type="time"
+                      aria-label="Время еженедельной сводки"
                       value={settings.weekly_summary_time}
                       onChange={e => setField('weekly_summary_time', e.target.value)}
                       className="h-8 text-sm" style={{ width: 110 }}
@@ -267,6 +273,7 @@ export default function SettingsPage() {
         </Card>
       )}
 
+      {saveError && <p role="alert" className="text-sm" style={{ color: 'var(--danger)' }}>Не удалось сохранить настройки. Попробуйте ещё раз.</p>}
       {settings && (
         <div className="flex justify-end">
           <Button onClick={saveSettings} loading={saving}>
