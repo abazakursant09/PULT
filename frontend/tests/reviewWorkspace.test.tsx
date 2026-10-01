@@ -30,6 +30,20 @@ beforeEach(() => {
 })
 
 describe('review workspace', () => {
+  it('names the reply editor and keeps editing local until an explicit action', async () => {
+    vi.spyOn(api.reviews, 'queue').mockResolvedValue({ items: [review()], total: 1, limit: 50, offset: 0 })
+    const update = vi.spyOn(api.reviews, 'update')
+    const publish = vi.spyOn(api.reviews, 'publish')
+    render(<ReviewsPage />)
+    fireEvent.click(await screen.findByText('отличный товар'))
+    const editor = screen.getByRole('textbox', { name: 'Ответ на отзыв' })
+    expect(screen.getByLabelText('Ответ на отзыв')).toBe(editor)
+    fireEvent.change(editor, { target: { value: 'Спасибо за отзыв' } })
+    expect(editor).toHaveValue('Спасибо за отзыв')
+    expect(update).not.toHaveBeenCalled()
+    expect(publish).not.toHaveBeenCalled()
+  })
+
   it('shows an honest empty state, not demo data', async () => {
     vi.spyOn(api.reviews, 'queue').mockResolvedValue({ items: [], total: 0, limit: 50, offset: 0 } as never)
     render(<ReviewsPage />)
