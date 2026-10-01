@@ -173,7 +173,7 @@ export default function ReviewsPage() {
 
         {items === null ? (
           // Loading — skeleton queue, no raw text, no layout shift
-          <div className="grid gap-4" style={{ gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.1fr)' }}>
+          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] gap-4">
             <div className="flex flex-col gap-2" aria-label="Загрузка">
               {[0, 1, 2].map(i => (
                 <Card key={i} variant="surface" className="p-3.5 flex flex-col gap-2">
@@ -191,9 +191,9 @@ export default function ReviewsPage() {
             description="Здесь появятся реальные отзывы после синхронизации с подключённым кабинетом маркетплейса. Демо-данные не показываются."
           />
         ) : (
-          <div className="grid gap-4" style={{ gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.1fr)' }}>
+          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] gap-4">
             {/* Queue */}
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-2 min-w-0">
               {items.map(r => {
                 const active = sel?.id === r.id
                 return (
@@ -218,7 +218,7 @@ export default function ReviewsPage() {
             </div>
 
             {/* Detail */}
-            <Card variant="surface" className="p-4 sticky top-4 self-start">
+            <Card variant="surface" className="p-4 lg:sticky lg:top-4 self-start min-w-0 break-words">
               {!sel ? (
                 <p className="text-[13px] text-[var(--text-3)]">Выберите отзыв слева.</p>
               ) : (
@@ -247,10 +247,10 @@ export default function ReviewsPage() {
                     {_fate(sel)}
                   </div>
 
-                  <label className="block text-[11px] font-semibold uppercase tracking-wide text-[var(--text-3)] mb-1.5">
+                  <label htmlFor="review-reply" className="block text-[11px] font-semibold uppercase tracking-wide text-[var(--text-3)] mb-1.5">
                     Ответ на отзыв
                   </label>
-                  <textarea value={editText} onChange={e => setEditText(e.target.value)}
+                  <textarea id="review-reply" value={editText} onChange={e => setEditText(e.target.value)}
                     placeholder="Текст ответа" rows={4}
                     disabled={sel.state === 'Published'}
                     className="w-full mb-3 rounded-[var(--r-sm)] border border-[var(--line)] bg-[var(--bg)] text-[var(--text)] placeholder:text-[var(--text-3)] text-[14px] px-3 py-2.5 transition-[border-color] duration-[var(--dur)] focus-visible:outline-none focus-visible:border-[var(--violet-text)] disabled:opacity-40 disabled:cursor-not-allowed" />
