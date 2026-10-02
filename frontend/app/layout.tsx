@@ -1,23 +1,25 @@
 import type { Metadata } from 'next'
-import { Inter, JetBrains_Mono } from 'next/font/google'
+import localFont from 'next/font/local'
 import '../styles/globals.css'
 import '../styles/seller.css'
 import { LangProvider } from '@/lib/lang-context'
 import { RippleProvider } from '@/components/RippleProvider'
 import { CookieBanner } from '@/components/CookieBanner'
 
-const inter = Inter({
-  subsets: ['latin', 'cyrillic'],
+const inter = localFont({
+  src: '../fonts/inter/Inter[opsz,wght].woff2',
   variable: '--font-inter',
   display: 'swap',
-  weight: ['400', '500', '600', '700', '800'],
+  weight: '400 800',
+  style: 'normal',
 })
 
-const mono = JetBrains_Mono({
-  subsets: ['latin'],
+const mono = localFont({
+  src: '../fonts/jetbrainsmono/JetBrainsMono[wght].woff2',
   variable: '--font-mono',
   display: 'swap',
-  weight: ['400', '500', '600'],
+  weight: '400 600',
+  style: 'normal',
 })
 
 export const metadata: Metadata = {
