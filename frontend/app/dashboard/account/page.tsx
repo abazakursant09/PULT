@@ -360,11 +360,13 @@ function NotificationsTab() {
   const [sLoad,       setSLoad]       = useState(true)
   const [saving,      setSaving]      = useState(false)
   const [saved,       setSaved]       = useState(false)
+  const [loadError,   setLoadError]   = useState(false)
+  const [saveError,   setSaveError]   = useState(false)
 
   useEffect(() => {
     Promise.all([api.telegram.getChatId(), api.telegram.getSettings()])
       .then(([cid, s]) => { setSavedChatId(cid.telegram_chat_id); setChatId(cid.telegram_chat_id ?? ''); setSettings(s) })
-      .catch(() => {})
+      .catch(() => setLoadError(true))
       .finally(() => setSLoad(false))
   }, [])
 
@@ -400,14 +402,23 @@ function NotificationsTab() {
 
   async function saveSettings() {
     if (!settings) return
-    setSaving(true); setSaved(false)
+    setSaving(true); setSaved(false); setSaveError(false)
     try {
       const u = await api.telegram.updateSettings(settings)
       setSettings(u); setSaved(true)
       setTimeout(() => setSaved(false), 2500)
-    } catch {}
+    } catch { setSaveError(true) }
     finally { setSaving(false) }
   }
+
+  if (sLoad) return <p role="status">Загрузка настроек Telegram…</p>
+  if (loadError) return (
+    <DarkCard>
+      <p role="alert" style={{ color: 'var(--danger)' }}>
+        Не удалось загрузить настройки Telegram. Обновите страницу и попробуйте снова.
+      </p>
+    </DarkCard>
+  )
 
   return (
     <div className="space-y-4">
@@ -426,6 +437,7 @@ function NotificationsTab() {
         </div>
         <div className="flex gap-3 flex-wrap">
           <Input
+            aria-label="Telegram Chat ID"
             className="flex-1 min-w-0 font-mono"
             placeholder="123456789"
             value={chatId}
@@ -435,7 +447,8 @@ function NotificationsTab() {
             {!chatSaving && (chatSaved ? <><Check size={13} /> Сохранено</> : 'Сохранить')}
           </Button>
         </div>
-        {chatError && <p className="mt-2 text-[13px]" style={{ color: 'var(--danger)' }}>{chatError}</p>}
+        {chatError && <p role="alert" className="mt-2 text-[13px]" style={{ color: 'var(--danger)' }}>{chatError}</p>}
+        {chatSaved && <p role="status" className="sr-only">Chat ID сохранён</p>}
         {savedChatId && (
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <span className="text-[13px]" style={{ color: 'var(--text-2)' }}>
@@ -479,6 +492,7 @@ function NotificationsTab() {
                   <p className="text-[12px] mt-0.5" style={{ color: 'var(--text-3)' }}>{desc}</p>
                 </div>
                 <Switch
+                  aria-label={label}
                   checked={settings[key] as boolean}
                   onCheckedChange={v => setField(key, v as TelegramSettings[typeof key])}
                 />
@@ -516,13 +530,14 @@ function NotificationsTab() {
                   <p className="text-[13px] font-medium" style={{ color: 'var(--text)' }}>Ежедневный отчёт</p>
                   <p className="text-[12px] mt-0.5" style={{ color: 'var(--text-3)' }}>Сводка по товарам, отзывам и ценам</p>
                 </div>
-                <Switch checked={settings.daily_report} onCheckedChange={v => setField('daily_report', v)} />
+                <Switch aria-label="Ежедневный отчёт" checked={settings.daily_report} onCheckedChange={v => setField('daily_report', v)} />
               </div>
               {settings.daily_report && (
                 <div className="flex items-center gap-2 mt-3">
                   <Clock size={13} style={{ color: 'var(--text-3)' }} />
                   <span className="text-[12px]" style={{ color: 'var(--text-2)' }}>Время:</span>
                   <Input
+                    aria-label="Время ежедневного отчёта"
                     type="time"
                     value={settings.daily_report_time}
                     onChange={e => setField('daily_report_time', e.target.value)}
@@ -539,7 +554,7 @@ function NotificationsTab() {
                   <p className="text-[13px] font-medium" style={{ color: 'var(--text)' }}>Еженедельная сводка</p>
                   <p className="text-[12px] mt-0.5" style={{ color: 'var(--text-3)' }}>Детальный отчёт: динамика, топ товары</p>
                 </div>
-                <Switch checked={settings.weekly_summary} onCheckedChange={v => setField('weekly_summary', v)} />
+                <Switch aria-label="Еженедельная сводка" checked={settings.weekly_summary} onCheckedChange={v => setField('weekly_summary', v)} />
               </div>
               {settings.weekly_summary && (
                 <div className="space-y-2 mt-3">
@@ -551,6 +566,7 @@ function NotificationsTab() {
                         <button
                           key={d.value}
                           type="button"
+                          aria-pressed={isActive}
                           onClick={() => setField('weekly_summary_day', d.value)}
                           className="w-9 h-9 rounded-[8px] text-[12px] font-semibold transition-all duration-200"
                           style={{
@@ -569,6 +585,7 @@ function NotificationsTab() {
                     <Clock size={13} style={{ color: 'var(--text-3)' }} />
                     <span className="text-[12px]" style={{ color: 'var(--text-2)' }}>Время:</span>
                     <Input
+                      aria-label="Время еженедельной сводки"
                       type="time"
                       value={settings.weekly_summary_time}
                       onChange={e => setField('weekly_summary_time', e.target.value)}
@@ -584,6 +601,8 @@ function NotificationsTab() {
           <Button onClick={saveSettings} loading={saving} className="mt-5">
             {!saving && (saved ? <><Check size={14} /> Сохранено</> : 'Сохранить настройки')}
           </Button>
+          {saveError && <p role="alert" className="mt-2 text-[13px]" style={{ color: 'var(--danger)' }}>Не удалось сохранить настройки. Попробуйте ещё раз.</p>}
+          {saved && <p role="status" className="sr-only">Настройки сохранены</p>}
         </DarkCard>
       )}
     </div>
