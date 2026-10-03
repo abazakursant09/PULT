@@ -275,12 +275,16 @@ def test_enable_then_login_same_code_is_replay(monkeypatch):
     assert r.status_code == 401                                        # same step already consumed
 
 
-def test_disable_with_already_spent_code_rejected(monkeypatch):
+@pytest.mark.parametrize("assertion_offset", [0, 1])
+def test_disable_with_already_spent_code_rejected(monkeypatch, assertion_offset):
     # A code whose step is <= the last spent step cannot turn MFA off; MFA stays enabled.
+    now = _NOW0 + 29
+    monkeypatch.setattr(time, "time", lambda: now)
+    seeded_step = now // 30 + 5
     async def go():
         db = await _new_db()
         # seed as if the current step was already used
-        uid, secret = await _seed_mfa(db, enabled=True, last_step=int(time.time()) // 30 + 5)
+        uid, secret = await _seed_mfa(db, enabled=True, last_step=seeded_step)
         user = (await db.execute(select(User).where(User.id == uid))).scalar_one()
         return db, uid, secret, user
     db, uid, secret, user = _run(go())
@@ -288,8 +292,10 @@ def test_disable_with_already_spent_code_rejected(monkeypatch):
     mc = _mfa_client(db, user)
     r = mc.request("DELETE", "/api/mfa/disable", json={"code": _totp(secret, int(time.time()))})
     assert r.status_code == 400
+    # Exercise the boundary that previously changed the expected value after the request.
+    monkeypatch.setattr(time, "time", lambda: now + assertion_offset)
     still = _run(_step_of(db, uid))
-    assert still == int(time.time()) // 30 + 5                          # unchanged
+    assert still == seeded_step                                      # unchanged
 
     async def _check():
         rec = (await db.execute(select(MFASecret).where(MFASecret.user_id == uid))).scalar_one()
