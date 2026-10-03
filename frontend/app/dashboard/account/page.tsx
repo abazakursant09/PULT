@@ -150,11 +150,12 @@ function SecurityTab() {
   const [error,      setError]      = useState('')
   const [success,    setSuccess]    = useState('')
   const [copied,     setCopied]     = useState(false)
+  const [statusError, setStatusError] = useState(false)
 
   useEffect(() => {
     api.mfa.status()
       .then(s => setMfaEnabled(s.enabled))
-      .catch(() => {})
+      .catch(() => setStatusError(true))
       .finally(() => setLoading(false))
   }, [])
 
@@ -201,16 +202,24 @@ function SecurityTab() {
     </div>
   )
 
+  if (statusError) return (
+    <DarkCard>
+      <p role="alert" style={{ color: 'var(--danger)' }}>
+        Не удалось проверить состояние 2FA. Обновите страницу и попробуйте снова.
+      </p>
+    </DarkCard>
+  )
+
   return (
     <div className="space-y-4">
       {success && (
-        <div className="px-4 py-3 rounded-[8px] flex items-center gap-3 text-[13px]"
+        <div role="status" className="px-4 py-3 rounded-[8px] flex items-center gap-3 text-[13px]"
              style={{ background: 'color-mix(in srgb, var(--violet) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--violet) 22%, transparent)', color: 'var(--violet-text)' }}>
           <Check size={14} /> {success}
         </div>
       )}
       {error && (
-        <div className="px-4 py-3 rounded-[8px] flex items-center gap-3 text-[13px]"
+        <div role="alert" className="px-4 py-3 rounded-[8px] flex items-center gap-3 text-[13px]"
              style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: 'var(--danger)' }}>
           <AlertTriangle size={14} /> {error}
         </div>
@@ -290,6 +299,7 @@ function SecurityTab() {
                 </code>
                 <button
                   onClick={copySecret}
+                  aria-label="Скопировать ключ 2FA"
                   style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: '4px 8px' }}
                   onMouseEnter={e => { e.currentTarget.style.color = 'var(--violet-text)' }}
                   onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-3)' }}
@@ -302,6 +312,7 @@ function SecurityTab() {
               <p className="text-[13px] font-medium mb-2" style={{ color: 'var(--text)' }}>2. Введите 6-значный код из приложения</p>
               <div className="flex gap-3">
                 <Input
+                  aria-label="Код подтверждения 2FA"
                   type="text" inputMode="numeric" pattern="[0-9]{6}" maxLength={6}
                   value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ''))}
                   placeholder="000000" className="font-mono text-center"
@@ -327,6 +338,7 @@ function SecurityTab() {
               <p className="text-[13px] font-medium mb-2" style={{ color: 'var(--text)' }}>Введите код из приложения для подтверждения</p>
               <div className="flex gap-3">
                 <Input
+                  aria-label="Код для отключения 2FA"
                   type="text" inputMode="numeric" pattern="[0-9]{6}" maxLength={6}
                   value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ''))}
                   placeholder="000000" className="font-mono text-center"
