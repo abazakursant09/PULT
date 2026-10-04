@@ -14,6 +14,10 @@ this change does not broaden that exception or disable pgBackRest TLS verificati
 
 Acceptance requires both synthetic and extended PITR workflows, not just a build.
 Official binary availability remains an external dependency; checksum mismatch or
-missing download fails closed. This does not fix other workflows using the old image.
+missing download fails closed. Backup Restore Synthetic and Canary Offline's
+`minio-compat` job also build this fixture. The canary `offline` job stays unchanged;
+its compatibility job extracts mc from `/usr/local/bin/mc` and uses loopback HTTP
+as before (not a real Selectel connection). These consumers require their own CI
+proof, in addition to the PITR workflows. Their path filters cover this fixture.
 Rollback is a revert of this slice (restoring the old, currently unavailable fixture);
 there is no data migration and no production change. Based on OpenSSL fix PR #331.
