@@ -39,7 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      MINIO_IMAGE: "minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e"
+      MINIO_IMAGE: "pult-minio-test:ci"
       S3_KEY: ciminio
       S3_SECRET: ciminiosecret123
       CIPHER_PASS: cisyntheticcipherpass
@@ -68,6 +68,9 @@ jobs:
         run: |
           set -euo pipefail
           docker buildx build --load -t pult-pitr:ci ops/pitr
+
+      - name: Build checksum-verified MinIO test image
+        run: docker buildx build --load --platform linux/amd64 -t "$MINIO_IMAGE" ops/pitr/minio-test
 
       - name: TLS MinIO + network + S3 config
         run: |
