@@ -151,7 +151,8 @@ def test_workflow_pinned_readonly_no_artifacts():
     w = _r(WORKFLOW)
     assert "permissions:" in w and "contents: read" in w
     assert "persist-credentials: false" in w
-    assert "minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493" in w, "MinIO pinned"
+    assert 'MINIO_IMAGE: "pult-minio-test:ci"' in w, "MinIO built locally from verified inputs"
+    assert 'docker buildx build --load --platform linux/amd64 -t "$MINIO_IMAGE" ops/pitr/minio-test' in w
     bad = [ln for ln in w.splitlines() if re.search(r"uses:\s", ln) and not re.search(r"@[0-9a-f]{40}", ln)]
     assert not bad, f"unpinned actions: {bad}"
     assert "verify-tls=n" not in w, "TLS verify must not be disabled"

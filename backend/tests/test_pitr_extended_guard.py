@@ -59,7 +59,8 @@ def test_unique_resources_not_shared_with_b1():
 
 def test_pinned_and_no_artifacts_no_publish():
     w = _r(EXT)
-    assert "minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493" in w, "MinIO pinned"
+    assert 'MINIO_IMAGE: "pult-minio-test:ci"' in w, "MinIO built locally from verified inputs"
+    assert 'docker buildx build --load --platform linux/amd64 -t "$MINIO_IMAGE" ops/pitr/minio-test' in w
     bad = [ln for ln in w.splitlines() if re.search(r"uses:\s", ln) and not re.search(r"@[0-9a-f]{40}", ln)]
     assert not bad, f"unpinned actions: {bad}"
     assert "upload-artifact" not in w and "actions/cache" not in w, "no artifacts/cache (WAL/repo/keys must never leave CI)"
