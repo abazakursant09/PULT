@@ -24,18 +24,24 @@ REPO = BACKEND.parent
 # Reviewed allowlist of production Dockerfiles (repo-relative, POSIX). A new tracked
 # Dockerfile that is not classified here must fail the guard until it is reviewed.
 ALLOWLISTED_DOCKERFILES = ("backend/Dockerfile", "frontend/Dockerfile", "ops/backup/Dockerfile",
-                           "ops/pitr/Dockerfile")
+                           "ops/pitr/Dockerfile", "ops/pitr/minio-test/Dockerfile")
 
 # Stage counts: single-stage app/backup images; the PITR runner is a 2-stage source build
 # (builder + final), both FROM the same pinned PostgreSQL base.
 EXPECTED_STAGE_COUNT = {"backend/Dockerfile": 1, "frontend/Dockerfile": 1, "ops/backup/Dockerfile": 1,
-                        "ops/pitr/Dockerfile": 2}
+                        "ops/pitr/Dockerfile": 2, "ops/pitr/minio-test/Dockerfile": 1}
 
 # Known-good pinned references (image:tag@sha256:digest), verified against the Docker
 # Registry v2 API and the Docker Hub API on 2026-08-11 (both agree; the python index
 # digest also matches the merged SECURITY-2D-3B docker-build CI log). A digest bump is a
 # deliberate, separately reviewed change — update these constants in that same PR.
 EXPECTED_REFS = {
+    # Synthetic CI fixture only, not a production image. Official Alpine index
+    # verified via Registry v2 on 2026-10-04; same strict pin rules as production.
+    "ops/pitr/minio-test/Dockerfile": (
+        "alpine:3.24@sha256:"
+        "294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6"
+    ),
     "backend/Dockerfile": (
         "python:3.11-slim@sha256:"
         "90744cff8f32887f075c47d747a173ff333e9e98801667af93c357fa9f5e28ff"
