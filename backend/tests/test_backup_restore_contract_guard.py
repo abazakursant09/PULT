@@ -31,7 +31,7 @@ DOCKERIGNORE = BACKEND / ".dockerignore"
 PG_DIGEST = "sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777"
 RCLONE_SHA = "aa2804e08f48250e71009c727124b6341cd0288465804a9a09d14663cabafbaa"
 AGE_SHA = "bdc69c09cbdd6cf8b1f333d372a1f58247b3a33146406333e30c0f26e8f51377"
-MINIO_REF = "minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e"
+MINIO_REF = 'MINIO_IMAGE: "pult-minio-test:ci"'
 
 MARKETPLACE_SECRETS = ("WB_", "OZON_", "YANDEX_", "TELEGRAM_BOT_TOKEN", "SECRET_KEY",
                        "CRED_ENC_KEY", "SENTRY_DSN", "JWT")
@@ -136,7 +136,8 @@ def test_backup_compose_is_hardened_and_not_in_default_up():
 def test_workflow_pins_images_and_actions_and_readonly_perms():
     w = _read(WORKFLOW)
     assert "FROM postgres" not in w  # images come via services/run, not a FROM here
-    assert MINIO_REF in w, "MinIO must be pinned tag@sha256"
+    assert MINIO_REF in w, "MinIO must use the checksum-verified local fixture"
+    assert 'docker buildx build --load --platform linux/amd64 -t "$MINIO_IMAGE" ops/pitr/minio-test' in w
     assert PG_DIGEST in w, "source/target PostgreSQL must use the pinned digest"
     # every `uses:` is SHA-pinned (40 hex)
     bad = [ln for ln in w.splitlines() if re.search(r"uses:\s", ln) and not re.search(r"@[0-9a-f]{40}", ln)]

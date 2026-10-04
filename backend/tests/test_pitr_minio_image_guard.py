@@ -1,6 +1,8 @@
 """The synthetic MinIO image must retain pinned, official inputs and TLS wiring."""
 from pathlib import Path
 
+import yaml
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -24,3 +26,28 @@ def test_both_pitr_workflows_build_before_using_minio():
         assert 'repo1-storage-verify-tls=y' in workflow
         assert 'repo1-storage-verify-tls=n' not in workflow
         assert '"$W/certs":/root/.minio/certs:ro' in workflow
+
+
+def test_remaining_consumers_build_fixture_in_correct_job():
+    build = 'docker buildx build --load --platform linux/amd64 -t "$MINIO_IMAGE" ops/pitr/minio-test'
+    for name, job, use in (
+        ('backup_restore_synthetic.yml', 'synthetic', 'docker run -d --name minio'),
+        ('canary_offline.yml', 'minio-compat', 'docker create --name mcextract'),
+    ):
+        workflow = (ROOT / '.github/workflows' / name).read_text()
+        data = yaml.safe_load(workflow)
+        steps = data['jobs'][job]['steps']
+        commands = '\n'.join(step.get('run', '') for step in steps)
+        assert commands.count(build) == 1
+        assert commands.index(build) < commands.index(use)
+        assert 'MINIO_IMAGE: "pult-minio-test:ci"' in workflow
+        triggers = data.get('on', data.get(True))
+        for event in ('pull_request', 'push'):
+            assert 'ops/pitr/minio-test/**' in triggers[event]['paths']
+            assert 'backend/tests/test_pitr_minio_image_guard.py' in triggers[event]['paths']
+        assert 'minio/minio:RELEASE.' not in workflow
+        if job == 'minio-compat':
+            assert 'docker cp mcextract:/usr/local/bin/mc' in commands
+            assert '127.0.0.1:9000:9000' in commands
+            offline = '\n'.join(s.get('run', '') for s in data['jobs']['offline']['steps'])
+            assert 'docker ' not in offline
