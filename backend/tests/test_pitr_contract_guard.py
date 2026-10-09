@@ -76,6 +76,18 @@ def test_dockerfile_openssl_build_runtime_versions_match():
     assert len({found[0] for found in versions.values()}) == 1, versions
 
 
+def test_compression_build_runtime_versions_match():
+    """Direct and libxml2-transitive compression libs stay aligned in both stages."""
+    stages = _code(_r(DOCKERFILE)).split("FROM ")[1:]
+    assert len(stages) == 2
+    for dev, runtime in (("zlib-dev", "zlib"), ("xz-dev", "xz-libs")):
+        def versions(stage, package):
+            return re.findall(rf"(?<![\w-]){package}=([0-9][0-9A-Za-z.]*-r[0-9]+)\b", stage)
+        pins = [versions(stages[0], dev), versions(stages[0], runtime), versions(stages[1], runtime)]
+        assert all(len(pin) == 1 for pin in pins), pins
+        assert len({pin[0] for pin in pins}) == 1, pins
+
+
 def test_postgresql_conf_valid_and_no_secrets():
     c = _r(PGCONF)
     assert "archive_mode = on" in c
