@@ -1,6 +1,6 @@
 # PITR image retention — proposed design
 
-Status: DRAFT / NOT APPLIED. Decision required before implementation or publication.
+Status: DRAFT / NOT APPLIED. Planning parameters approved; publication requires separate authorization.
 Baseline: `e20ae90b087816c942ab81410af5f1bc9e80997b` (PR #334).
 This document does not enable production PITR, change workflows, grant registry access,
 publish images, or change the launch gate (NOT READY). MEMORY is out of scope.
@@ -26,10 +26,12 @@ of byte-reproducible builds or production readiness.
 | Retain tested OCI image by digest (recommended first) | Reuse exact tested image | Registry availability/deletion; future rebuild still needs inputs |
 | Archive complete build inputs | Rebuild without upstream package retention | Must preserve base, transitive APKs, signatures/keys, source and toolchain; greater maintenance |
 
-Proposed registry: GHCR with private visibility. This is the planning default, not
-authorization to create or publish a package. Namespace, access and retention
-ownership must be approved before activation. No registry/package existence or
-permission is assumed. Private-package access from CI, including fork PRs, needs
+Approved planning parameters (Inal, 2026-10-10): private GHCR package associated
+with repository `abazakursant09/PULT`; artifact owner Inal; retain the current and
+previous approved images without automatic deletion; review updates monthly and
+critical vulnerabilities out of cycle. The exact package path is not yet selected.
+This approval does not authorize creating/publishing a package or granting access.
+No registry/package existence or permission is assumed. Private-package access from CI, including fork PRs, needs
 explicit testing; do not expose credentials to untrusted builds or silently skip
 required recovery tests when access is unavailable.
 Digest references establish content identity, not availability, trusted provenance
@@ -61,14 +63,14 @@ build. Report the two statuses separately.
 ## Retention, rollback and security
 
 - Keep the current tested digest and at least one previous approved digest. This
-  is a proposed minimum, not an applied retention rule or an adequate disaster
+  is the approved planning minimum, not an applied retention rule or an adequate disaster
   recovery guarantee by itself. No automatic cleanup in the first implementation.
 - Before deleting an artifact, inventory all lock consumers and rollback needs;
   deletion requires separate approval. Preserve associated provenance and test evidence.
 - A rollback changes only the synthetic consumer lock in a reviewed PR and reruns
   both suites. Never restore a database or switch production as part of this rollback.
-- Pinning does not make vulnerabilities disappear. Assign an owner and review cadence
-  before activation; rebuild via a reviewed dependency update, test, publish and
+- Pinning does not make vulnerabilities disappear. Inal owns monthly update review
+  and out-of-cycle critical vulnerability review; rebuild via a reviewed dependency update, test, publish and
   promote a new digest. Urgent security updates follow the same evidence gates.
 - Preserve TLS checks, PG16/libpq parity, source checksum verification, synthetic
   marker gates and existing negative recovery cases. No data, WAL, backups, secrets,
@@ -86,7 +88,8 @@ Do not copy artifacts into Git or create storage resources under this proposal.
 
 ## Implementation slices and acceptance
 
-1. Approve registry/visibility, artifact owner, retention and update cadence.
+1. Planning parameters approved as above. Before activation, select the exact package
+   path and verify access/permissions; publication remains separately authorized.
 2. Separate Draft PR: offline lock/provenance validation and negative tests, with
    publication and consumers disabled. Missing digest, mutable tag, wrong platform,
    missing evidence and fallback-to-latest must fail. No invented digest placeholder
