@@ -1,0 +1,20 @@
+name: PITR Source Preflight (no publication)
+
+# Preparatory source checks, NOT proof of one retained/published image.
+# Each called suite still builds independently. No registry or artifact writes.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pitr-source-preflight-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  synthetic:
+    uses: ./.github/workflows/pitr_synthetic.yml
+  extended:
+    needs: synthetic
+    uses: ./.github/workflows/pitr_extended.yml
