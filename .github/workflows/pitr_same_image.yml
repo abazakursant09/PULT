@@ -1,0 +1,59 @@
+name: PITR Same Local Image (no publication)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/pitr_same_image.yml
+      - .github/workflows/pitr_synthetic.yml
+      - .github/workflows/pitr_extended.yml
+      - ops/pitr/**
+      - backend/tests/test_pitr_same_image.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pitr-same-image-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  same-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.13"
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - name: Offline guards
+        working-directory: backend
+        run: |
+          pip install --require-hashes -r requirements-ci.lock
+          python -m pytest tests/test_pitr_same_image.py tests/test_pitr_contract_guard.py tests/test_pitr_extended_guard.py tests/test_base_image_digest_pin_guard.py tests/test_pitr_minio_image_guard.py -q
+      - name: Build once and capture local identity
+        id: candidate
+        run: |
+          set -euo pipefail
+          docker buildx build --load --platform linux/amd64 -t pult-pitr:ci ops/pitr
+          ID="$(docker image inspect pult-pitr:ci --format '{{.Id}}')"
+          [[ "$ID" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "image_id=$ID" >> "$GITHUB_OUTPUT"
+          docker run --rm --entrypoint sh "$ID" -ec 'pgbackrest version; deps=$(ldd /usr/bin/pgbackrest); printf "%s\n" "$deps"; if printf "%s\n" "$deps" | grep -q "not found"; then exit 1; fi; if command -v gcc; then exit 1; fi'
+      - name: Build synthetic MinIO fixture
+        run: docker buildx build --load --platform linux/amd64 -t pult-minio-test:ci ops/pitr/minio-test
+      - name: Synthetic on captured image
+        env:
+          IMAGE_ID: ${{ steps.candidate.outputs.image_id }}
+        run: python ops/pitr/run_same_image_suite.py synthetic --image-id "$IMAGE_ID"
+      - name: Extended on captured image
+        env:
+          IMAGE_ID: ${{ steps.candidate.outputs.image_id }}
+        run: python ops/pitr/run_same_image_suite.py extended --image-id "$IMAGE_ID"
+      # No export, upload, registry login, push, promotion record or production use.
