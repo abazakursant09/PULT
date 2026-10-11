@@ -5,6 +5,7 @@ name: PITR Synthetic
 # keeps repo1-storage-verify-tls=y with a mounted CA — TLS verification is NOT disabled).
 # No real Selectel, no real secrets, no PII, no image publish, no WAL/repo/key artifacts.
 on:
+  workflow_call:
   workflow_dispatch:
   pull_request:
     paths:

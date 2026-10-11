@@ -15,6 +15,7 @@ name: PITR Extended
 # host disk), kill -9 archive worker if not deterministically catchable, multipart interruption,
 # timeline switch, Selectel IAM permutations, Object Lock — none are faked here.
 on:
+  workflow_call:
   workflow_dispatch:
   schedule:
     - cron: "37 3 * * *"
