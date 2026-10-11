@@ -77,9 +77,12 @@ check workflow identity and trust context, and record a reviewed promotion decis
 Run IDs or a self-reported success string are not evidence of success by themselves.
 Neither a registry tag nor a local Docker image ID substitutes for the manifest digest.
 
-Publication remains separately authorized. Private-registry fork access, ownership,
-retention and update cadence remain open decisions. The offline slice must not need
-registry credentials or settle those decisions implicitly.
+Publication remains separately authorized. Inal approved private GHCR associated
+with `abazakursant09/PULT`, Inal as owner, current/previous image retention without
+automatic deletion, monthly update review and out-of-cycle critical vulnerability
+review (2026-10-10). These are planning decisions, not applied registry settings.
+Exact package path and private-registry/fork access still require verification.
+The offline slice must not need registry credentials or create resources implicitly.
 
 ## Implementation acceptance and stop
 
