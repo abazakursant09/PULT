@@ -21,6 +21,12 @@ class Settings(BaseSettings):
     # ── App ──────────────────────────────────────────────────────────────────
     app_env: str = "development"
 
+    @field_validator("app_env", mode="after")
+    @classmethod
+    def _normalize_app_env(cls, value: str) -> str:
+        # All consumers share one spelling; unknown names remain non-development.
+        return value.strip().lower()
+
     # ── Security ─────────────────────────────────────────────────────────────
     secret_key: str = "dev-secret-key-change-in-production"
     algorithm: str = "HS256"
