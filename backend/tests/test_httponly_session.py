@@ -142,7 +142,7 @@ def test_mfa_login_sets_cookie(monkeypatch):
     # SECURITY-2C-4A — the in-memory limit_mfa is gone; the durable mfa_login throttle runs against the
     # create_all auth_rate_limit_buckets table (a single attempt is well under the limit).
     c = _client(db)
-    pending = create_mfa_pending_token(str(u.id))
+    pending = create_mfa_pending_token(str(u.id), u.token_version)
     r = c.post("/api/auth/login/mfa", json={"mfa_token": pending, "code": "123456"},
                headers={"origin": ORIGIN})
     assert r.status_code == 200, r.text

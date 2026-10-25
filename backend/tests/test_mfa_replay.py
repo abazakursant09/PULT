@@ -221,7 +221,7 @@ def test_login_valid_then_same_code_replay_rejected_no_cookie(monkeypatch):
         return db, uid, secret
     db, uid, secret = _run(go())
     c = _auth_client(db)
-    token = create_mfa_pending_token(uid)
+    token = create_mfa_pending_token(uid, 0)
     code = _totp(secret, int(time.time()))
 
     ok = c.post("/api/auth/login/mfa", json={"mfa_token": token, "code": code})
@@ -247,7 +247,7 @@ def test_login_db_error_returns_503_no_cookie(monkeypatch):
     monkeypatch.setattr(auth_router, "claim_totp_step", _boom)
 
     c = _auth_client(db)
-    token = create_mfa_pending_token(uid)
+    token = create_mfa_pending_token(uid, 0)
     r = c.post("/api/auth/login/mfa", json={"mfa_token": token, "code": "123456"})
     assert r.status_code == 503
     assert "set-cookie" not in {k.lower() for k in r.headers}
@@ -268,11 +268,27 @@ def test_enable_then_login_same_code_is_replay(monkeypatch):
     mc = _mfa_client(db, user)
     en = mc.post("/api/mfa/verify", json={"code": code})
     assert en.status_code == 200, en.text
+    # This harness shares one Session across requests; production gets a fresh
+    # Session. Refresh its cached User after enable's atomic version increment.
+    _run(db.refresh(user))
 
+    async def current_version():
+        return (await db.execute(select(User.token_version).where(User.id == uid))).scalar_one()
+
+    claims = []
+    original_claim = auth_router.claim_totp_step
+
+    async def recording_claim(*args, **kwargs):
+        claims.append(kwargs["user_id"])
+        return await original_claim(*args, **kwargs)
+
+    monkeypatch.setattr(auth_router, "claim_totp_step", recording_claim)
     ac = _auth_client(db)
-    token = create_mfa_pending_token(uid)
+    token = create_mfa_pending_token(uid, _run(current_version()))
     r = ac.post("/api/auth/login/mfa", json={"mfa_token": token, "code": code})
     assert r.status_code == 401                                        # same step already consumed
+    assert claims == [uid]                                             # not stale-challenge rejection
+    assert "set-cookie" not in r.headers
 
 
 @pytest.mark.parametrize("assertion_offset", [0, 1])
@@ -312,7 +328,7 @@ def test_secret_code_step_absent_from_logs(monkeypatch, caplog):
         return db, uid, secret
     db, uid, secret = _run(go())
     c = _auth_client(db)
-    token = create_mfa_pending_token(uid)
+    token = create_mfa_pending_token(uid, 0)
     code = _totp(secret, int(time.time()))
     with caplog.at_level(logging.DEBUG):
         c.post("/api/auth/login/mfa", json={"mfa_token": token, "code": code})

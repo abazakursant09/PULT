@@ -69,7 +69,7 @@ def test_repeated_invalid_mfa_codes_are_blocked(monkeypatch):
     db = _run(_new_db())
     uid, _secret = _run(_seed_mfa_user(db))
     c = _client(db)
-    token = create_mfa_pending_token(uid)
+    token = create_mfa_pending_token(uid, 0)
 
     statuses = []
     for _ in range(8):
@@ -87,7 +87,7 @@ def test_valid_code_within_allowance_still_works(monkeypatch):
     db = _run(_new_db())
     uid, secret = _run(_seed_mfa_user(db))
     c = _client(db)
-    token = create_mfa_pending_token(uid)
+    token = create_mfa_pending_token(uid, 0)
 
     # A couple of fat-finger misses (under the cap), then the right code.
     assert c.post("/api/auth/login/mfa", json={"mfa_token": token, "code": "111111"}).status_code == 401
@@ -105,10 +105,10 @@ def test_limiter_is_keyed_per_account(monkeypatch):
     uid_b, secret_b = _run(_seed_mfa_user(db))
     c = _client(db)
 
-    tok_a = create_mfa_pending_token(uid_a)
+    tok_a = create_mfa_pending_token(uid_a, 0)
     for _ in range(8):
         c.post("/api/auth/login/mfa", json={"mfa_token": tok_a, "code": "000000"})
 
-    tok_b = create_mfa_pending_token(uid_b)
+    tok_b = create_mfa_pending_token(uid_b, 0)
     ok = c.post("/api/auth/login/mfa", json={"mfa_token": tok_b, "code": _valid_code(secret_b)})
     assert ok.status_code == 200, "account B was wrongly locked out by an attack on A"
