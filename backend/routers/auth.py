@@ -179,9 +179,12 @@ async def register(
         await db.commit()
         await db.refresh(existing)
         log.info("account_restored: user=%s", existing.id)   # no email/IP in application logs
-        await send_verification_email(existing.email, existing.name, verification_token)
+        sent = await send_verification_email(existing.email, existing.name, verification_token)
         return RegisterResponse(
-            message="Аккаунт восстановлен. Проверьте почту и подтвердите email для входа.",
+            message=("Аккаунт восстановлен. Проверьте почту и подтвердите email для входа."
+                     if sent else
+                     "Аккаунт восстановлен, но письмо отправить не удалось."),
+            verification_email_sent=sent,
         )
 
     # ── New registration ──────────────────────────────────────────────────────
