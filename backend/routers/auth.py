@@ -81,10 +81,10 @@ def create_access_token(user_id: str, token_version: int) -> str:
     return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
 
 
-def create_mfa_pending_token(user_id: str) -> str:
+def create_mfa_pending_token(user_id: str, token_version: int) -> str:
     expire = datetime.utcnow() + timedelta(minutes=5)
     return jwt.encode(
-        {"sub": user_id, "exp": expire, "mfa_pending": True},
+        {"sub": user_id, "exp": expire, "mfa_pending": True, "ver": int(token_version)},
         settings.secret_key,
         algorithm=settings.algorithm,
     )
@@ -326,7 +326,7 @@ async def login(
     mfa_record = mfa_result.scalar_one_or_none()
 
     if mfa_record and mfa_record.enabled:
-        mfa_token = create_mfa_pending_token(str(user.id))
+        mfa_token = create_mfa_pending_token(str(user.id), user.token_version)
         return {"mfa_required": True, "mfa_token": mfa_token}
 
     log.info("login_success: user=%s", user.id)   # no email/IP in application logs
@@ -350,16 +350,21 @@ async def login_mfa(
             data.mfa_token, settings.secret_key, algorithms=[settings.algorithm]
         )
         user_id = payload.get("sub")
-        is_pending = payload.get("mfa_pending", False)
-        if not user_id or not is_pending:
+        is_pending = payload.get("mfa_pending")
+        pending_version = payload.get("ver")
+        # A challenge proves a password check at THIS revocation version only.
+        # Legacy/malformed tokens fail closed rather than inheriting today's version.
+        if (not user_id or is_pending is not True or type(pending_version) is not int
+                or pending_version < 0):
             raise HTTPException(status_code=401, detail="Недействительный MFA-токен")
     except JWTError:
         raise HTTPException(status_code=401, detail="Недействительный или просроченный MFA-токен")
 
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=401, detail="Пользователь не найден")
+    if (not user or user.deleted_at is not None or not user.is_verified
+            or pending_version != user.token_version):
+        raise HTTPException(status_code=401, detail="Недействительный MFA-токен")
 
     mfa_result = await db.execute(
         select(MFASecret).where(MFASecret.user_id == user_id)
@@ -397,7 +402,9 @@ async def login_mfa(
     await _throttle_release(db, "mfa_login", identity=str(user_id), ip=_client_ip(request))
 
     log.info("mfa_verified: user=%s", user_id)   # no IP in application logs
-    set_session_cookie(response, create_access_token(str(user.id), user.token_version))
+    # Never upgrade a password-checked challenge to a newer revocation version.
+    # A concurrent logout/reset makes this old-version session unusable as well.
+    set_session_cookie(response, create_access_token(str(user.id), pending_version))
     return SessionResponse(user=UserResponse.model_validate(user))
 
 
