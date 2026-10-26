@@ -126,6 +126,39 @@ def test_a_failed_send_never_claims_the_mail_was_sent():
     assert body["verification_email_sent"] is False
 
 
+def _restore_deleted_account(sent):
+    db = _run(_new_db())
+    user = _run(_seed(db, verified=True))
+    original_id = user.id
+    user.deleted_at = datetime.utcnow()
+    _run(db.commit())
+    with patch.object(auth_router, "send_verification_email", _sent(sent)):
+        response = _register(_client(db), email=user.email)
+    assert response.status_code == 201
+    _run(db.refresh(user))
+    assert user.id == original_id
+    assert user.deleted_at is None and user.is_restored is True
+    assert user.is_verified is False
+    assert user.verification_token and user.verification_token not in response.text
+    assert "set-cookie" not in response.headers
+    return db, user, response.json()
+
+
+def test_recovery_reports_failed_verification_delivery_without_losing_account():
+    db, user, body = _restore_deleted_account(False)
+    assert body["verification_email_sent"] is False
+    assert "Проверьте почту" not in body["message"]
+    assert "письмо отправить не удалось" in body["message"]
+    login = _client(db).post("/api/auth/login", json={"email": user.email, "password": GOOD_PW})
+    assert login.status_code == 403
+
+
+def test_recovery_reports_successful_verification_delivery_truthfully():
+    _, _, body = _restore_deleted_account(True)
+    assert body["verification_email_sent"] is True
+    assert "Проверьте почту" in body["message"]
+
+
 # ── 4-5. Resending, and the enumeration oracle it must not be ───────────────
 #
 # Resend is unauthenticated and takes an arbitrary address, so an honest delivery flag here is a
