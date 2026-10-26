@@ -6,7 +6,7 @@ import { writeCollapseReport } from './fixture'
 
 // THE Advisory MVP path, in a real browser, against a real backend:
 //
-//   register → verify email → log in → upload a report → confirm → diagnosis card
+//   register (SMTP OFF) → verify own test token → log in → upload → diagnosis
 //
 // Everything upstream — 15 producers, 8 diagnosis contours, the whole ingestion spine —
 // exists so that the last step happens. Nothing proved it end to end: the backend's 3494
@@ -21,7 +21,7 @@ const TMP = path.dirname(DB)
 /** Read the verification token from the disposable test database.
  *
  * Registration deliberately does NOT return the link — P7.1 removed it, because returning it
- * was an account-takeover hole — and no SMTP is configured here, so the mail is only logged.
+ * was an account-takeover hole — and no SMTP is configured here, so no email is sent.
  * Rather than mock the product's auth or add a test-only backdoor to it, we take the token
  * out of our own throwaway database and then open the very link a real seller opens. Python's
  * stdlib sqlite3 does the read, so this needs no extra Node dependency.
@@ -47,6 +47,9 @@ async function solveCaptcha(page: Page) {
 }
 
 test('a seller registers, uploads a report, and sees a real diagnosis', async ({ page }) => {
+  // Cold Next compilation + real cabinet/store onboarding precede the bounded
+  // 180s diagnosis check. Give setup its own allowance; do not retry a failure.
+  test.setTimeout(360_000)
   // Unique per run: reruns never collide, and no real person's data is used.
   const email = `e2e-${Date.now()}-${Math.floor(Math.random() * 1e6)}@example.com`
   const password = 'E2ePassw0rd!'
@@ -56,7 +59,7 @@ test('a seller registers, uploads a report, and sees a real diagnosis', async ({
 
   // The cookie banner is fixed at z-9999 and swallows clicks on the form beneath it. A real
   // seller dismisses it before they can submit anything, so the test does the same.
-  await page.getByRole('button', { name: /Принять все/i }).click()
+  await page.getByRole('button', { name: 'Понятно', exact: true }).click()
 
   await page.getByPlaceholder('Иван Петров').fill('E2E Seller')
   await page.locator('input[type="email"]').first().fill(email)
@@ -84,7 +87,8 @@ test('a seller registers, uploads a report, and sees a real diagnosis', async ({
   await submit.click()
 
   // Registration does not sign you in: the account is created unverified, by design.
-  await expect(page.getByText('Проверьте почту')).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole('heading', { name: 'Аккаунт создан', exact: true })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText('Не удалось отправить письмо. Проверьте адрес и попробуйте ещё раз.')).toBeVisible()
 
   // ── 2. Verify the email by opening the link the seller would be sent ───────
   const token = verificationToken(email)
@@ -107,28 +111,42 @@ test('a seller registers, uploads a report, and sees a real diagnosis', async ({
   await page.getByRole('link', { name: /Загрузить отчёт/i }).click()
   await page.waitForURL(/\/dashboard\/import/)
 
+  // Imports are store-scoped. A fresh seller first creates a CSV-only cabinet;
+  // WB creates its single store atomically. No marketplace key is connected.
+  await expect(page.getByText('Нет ни одного активного магазина.')).toBeVisible()
+  await page.getByRole('link', { name: 'Перейти к магазинам', exact: true }).click()
+  await page.getByRole('button', { name: 'Добавить кабинет', exact: true }).click()
+  const cabinet = page.getByRole('dialog', { name: 'Добавить кабинет', exact: true })
+  await cabinet.getByLabel('Маркетплейс', { exact: true }).selectOption('wildberries')
+  await cabinet.getByLabel('Название кабинета', { exact: true }).fill('E2E CSV cabinet')
+  await cabinet.getByRole('radio', { name: /Работать через CSV/ }).check()
+  await cabinet.getByRole('button', { name: 'Добавить кабинет', exact: true }).click()
+  await expect(cabinet).not.toBeVisible()
+  await page.getByRole('link', { name: 'Импорт данных', exact: true }).click()
+  await page.waitForURL(/\/dashboard\/import$/)
+  await page.getByRole('link', { name: 'Выбрать', exact: true }).click()
+  await page.waitForURL(/\/dashboard\/stores\/[^/]+\/import$/)
+
   // ── 6-7. Choose the report and say what it is ─────────────────────────────
   await page.setInputFiles('input[type="file"]', writeCollapseReport(TMP))
-  await page.locator('select').first().selectOption('wb')
 
   // The seller has imported nothing yet, so the type is not a choice: the Advisory Runtime
   // only sees a seller who has finance rows, and a first upload of "Товары" would import
   // cleanly and diagnose nothing. The page says so, and pins the type to Финансы.
   await expect(page.getByText(/Начните с финансового отчёта/)).toBeVisible()
-  const type = page.locator('select').nth(1)
-  await expect(type).toBeDisabled()
-  await expect(type).toHaveValue('finance')
+  await expect(page.locator('input[name="import-type"][value="finance"]')).toBeChecked()
+  await expect(page.locator('input[name="import-type"][value="products"]')).toBeDisabled()
 
   // ── 8. Upload → the backend really parses the file ────────────────────────
-  await page.getByRole('button', { name: /Загрузить и проверить/i }).click()
-  await expect(page.getByText('КОРРЕКТНЫХ')).toBeVisible({ timeout: 60_000 })
+  await page.getByRole('button', { name: 'Проверить файл', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Проверка файла', exact: true })).toBeVisible({ timeout: 60_000 })
 
   // ── 9. Confirm → the rows are really persisted ────────────────────────────
   await page.getByRole('button', { name: /Импортировать/i }).click()
   await expect(page.getByText('Импорт завершён')).toBeVisible({ timeout: 60_000 })
 
   // ── 10-11. Back to the dashboard ──────────────────────────────────────────
-  await page.getByRole('button', { name: /Перейти в Пульт/i }).click()
+  await page.getByRole('link', { name: 'Главная', exact: true }).click()
   await page.waitForURL(/\/dashboard$/)
 
   // ── 12. The diagnosis itself ──────────────────────────────────────────────

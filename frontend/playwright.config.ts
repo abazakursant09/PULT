@@ -52,8 +52,8 @@ export default defineConfig({
   webServer: [
     {
       // Backend on a disposable SQLite file. APP_ENV=development keeps the production
-      // fail-closed guards off; SMTP is deliberately unset, so send_email() logs the
-      // verification link instead of delivering it and never raises (services/email.py).
+      // fail-closed guards off; SMTP is deliberately unset, so no email is sent.
+      // The test reads only its own verification token from its disposable database.
       command: 'python -m uvicorn main:app --host 127.0.0.1 --port ' + API_PORT,
       cwd: path.join(__dirname, '..', 'backend'),
       port: API_PORT,
