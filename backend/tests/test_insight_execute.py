@@ -30,14 +30,15 @@ async def _engine():
     return sessionmaker(eng, class_=AsyncSession, expire_on_commit=False)()
 
 
-# ── margin_crisis maps to a set_price plan from real product+rule+competitors ──
-def test_margin_crisis_maps_to_set_price():
+# ── Legacy rows are not verified observations: an explicit price is required ──
+def test_margin_crisis_requires_explicit_price_without_verified_source():
     async def go():
         db = await _engine()
         uid = str(uuid.uuid4())
         p = Product(id=str(uuid.uuid4()), user_id=uid, name="X", marketplace="wildberries",
                     sku="999", price=1000.0)
-        db.add(p); await db.flush()
+        db.add(p)
+        await db.flush()
         db.add(PricingRule(product_id=p.id, target_position="equal_top_1",
                            target_percent=0.0, min_price=500, max_price=5000, auto_mode=False))
         db.add(CompetitorAnalysis(product_id=p.id, competitor_name="C1",
@@ -45,11 +46,10 @@ def test_margin_crisis_maps_to_set_price():
                                   significance="primary"))
         await db.commit()
         plan = await insight_mapping.resolve_plan(db, uid, "margin_crisis:wildberries:999")
-        assert plan.ready, plan.needs_input
-        assert plan.action_type == "set_price"
-        assert plan.payload["offer_id"] == "999"
-        assert plan.payload["price"] is not None
-        assert plan.automation_eligible is True
+        assert not plan.ready
+        assert plan.needs_input == ["price"]
+        assert plan.action_type is None and not plan.payload
+        assert plan.automation_eligible is False
     _run(go())
 
 
@@ -102,13 +102,14 @@ def test_unsupported_insight():
 
 
 # ── the plan feeds the SAME executor (margin_crisis end-to-end via executor) ──
-def test_plan_executes_through_shared_executor():
+def test_plan_executes_through_shared_executor(monkeypatch):
     async def go():
         db = await _engine()
         uid = str(uuid.uuid4())
         p = Product(id=str(uuid.uuid4()), user_id=uid, name="X", marketplace="wildberries",
                     sku="42", price=1000.0)
-        db.add(p); await db.flush()
+        db.add(p)
+        await db.flush()
         db.add(PricingRule(product_id=p.id, target_position="equal_top_1",
                            target_percent=0.0, min_price=500, max_price=5000, auto_mode=False))
         db.add(CompetitorAnalysis(product_id=p.id, competitor_name="C1",
@@ -116,7 +117,8 @@ def test_plan_executes_through_shared_executor():
                                   significance="primary"))
         conn = MarketplaceConnection(id=str(uuid.uuid4()), user_id=uid, marketplace="wildberries",
                                      status="connected", scopes=["prices"])
-        db.add(conn); await db.flush()
+        db.add(conn)
+        await db.flush()
         db.add(ApiCredential(id=str(uuid.uuid4()), connection_id=conn.id, scope="prices",
                              secret_enc=credential_vault.encrypt("tok"), meta={}))
         await db.commit()
@@ -124,10 +126,14 @@ def test_plan_executes_through_shared_executor():
         from services.marketplace.wb_client import wb_client
         calls = {"n": 0}
         async def fake(*, token, offer_id, price, discount=None):
-            calls["n"] += 1; return {"requestId": "rq"}
-        wb_client.set_price = fake
+            calls["n"] += 1
+            return {"requestId": "rq"}
+        monkeypatch.setattr(wb_client, "set_price", fake)
 
-        plan = await insight_mapping.resolve_plan(db, uid, "margin_crisis:wildberries:42")
+        plan = await insight_mapping.resolve_plan(
+            db, uid, "margin_crisis:wildberries:42", overrides={"price": 1800.0},
+        )
+        assert plan.ready and plan.payload["price"] == 1800.0
         res = await executor.execute(db=db, user_id=uid, action_type=plan.action_type,
                                      payload=plan.payload, mode="manual_l3",
                                      insight_key="margin_crisis:wildberries:42",
@@ -137,5 +143,5 @@ def test_plan_executes_through_shared_executor():
         # execution log carries the insight_key (traceability requirement)
         from sqlalchemy import select
         logs = (await db.execute(select(ExecutionLog).where(ExecutionLog.user_id == uid))).scalars().all()
-        assert any(l.insight_key == "margin_crisis:wildberries:42" for l in logs)
+        assert any(entry.insight_key == "margin_crisis:wildberries:42" for entry in logs)
     _run(go())
