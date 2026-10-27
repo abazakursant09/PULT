@@ -16,9 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.product import Product
-from models.pricing_rule import PricingRule
-from models.competitor_analysis import CompetitorAnalysis
-from tasks.check_pricing import compute_recommendation
+from tasks.check_pricing import UNVERIFIED_COMPETITOR_REASON
 
 SUPPORTED = {"margin_crisis", "high_ad_spend", "seo_opportunity", "rating_good"}
 
@@ -79,23 +77,11 @@ async def resolve_plan(
         if not product or not product.sku:
             plan.needs_input = ["product"]
             return plan
-        rule = (await db.execute(
-            select(PricingRule).where(PricingRule.product_id == product.id)
-        )).scalars().first()
-        competitors = (await db.execute(
-            select(CompetitorAnalysis).where(CompetitorAnalysis.product_id == product.id)
-        )).scalars().all()
         recommended = overrides.get("price")
         if recommended is None:
-            if not rule:
-                plan.needs_input = ["price"]  # no rule to compute from
-                return plan
-            _, recommended, _reason, _, _ = compute_recommendation(
-                list(competitors), rule, product.price
-            )
-            if recommended is None:
-                plan.needs_input = ["price"]
-                return plan
+            plan.needs_input = ["price"]
+            plan.descriptor = {"reason": UNVERIFIED_COMPETITOR_REASON}
+            return plan
         plan.action_type = "set_price"
         plan.payload = {"marketplace": mp, "offer_id": product.sku,
                         "price": recommended, "old_price": product.price or 0.0}

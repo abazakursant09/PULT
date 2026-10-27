@@ -9,7 +9,6 @@ from database import get_db
 from dependencies import get_current_user
 from models.user import User
 from models.product import Product
-from models.competitor_analysis import CompetitorAnalysis
 from models.pricing_rule import PricingRule, PriceChangeLog
 from schemas.pricing import (
     PricingRuleUpsert, PricingRuleOut, PriceChangeLogOut, PriceCheckResult,
@@ -111,13 +110,8 @@ async def check_price(
     product = await _get_product_or_404(product_id, current_user.id, db)
     rule = await _get_rule_or_404(product_id, db)
 
-    result = await db.execute(
-        select(CompetitorAnalysis).where(CompetitorAnalysis.product_id == product_id)
-    )
-    competitors = list(result.scalars().all())
-
     market_price, recommended, reason, deviation, should_change = compute_recommendation(
-        competitors, rule, product.price
+        [], rule, product.price
     )
 
     if market_price is None:
@@ -188,13 +182,8 @@ async def apply_price(
     product = await _get_product_or_404(product_id, current_user.id, db)
     rule = await _get_rule_or_404(product_id, db)
 
-    result = await db.execute(
-        select(CompetitorAnalysis).where(CompetitorAnalysis.product_id == product_id)
-    )
-    competitors = list(result.scalars().all())
-
     market_price, recommended, reason, _, _ = compute_recommendation(
-        competitors, rule, product.price
+        [], rule, product.price
     )
 
     if market_price is None:
