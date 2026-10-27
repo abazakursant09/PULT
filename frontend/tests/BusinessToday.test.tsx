@@ -1,8 +1,8 @@
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import BusinessToday from '@/components/dashboard/BusinessToday'
-import { api } from '@/lib/api'
+import { api, type TodaySummary } from '@/lib/api'
 import { todayNoData, todayWithData } from './fixtures'
 
 // "Состояние бизнеса сегодня" is the first thing a seller sees. Every number it shows is
@@ -19,11 +19,26 @@ describe('BusinessToday', () => {
 
     expect(await screen.findByText('Состояние бизнеса сегодня')).toBeInTheDocument()
     // ru-RU grouping uses a non-breaking space, so match on the digits rather than the glyph
-    expect(screen.getByText(/128\D?400/)).toBeInTheDocument()   // revenue
+    expect(await screen.findByText(/128\D?400/)).toBeInTheDocument()   // revenue; wait for data, not the static caption
     expect(screen.getByText(/3\D?200/)).toBeInTheDocument()     // profit (negative)
     expect(screen.getByText('-2.5%')).toBeInTheDocument()       // margin
     expect(screen.getByText('-12%')).toBeInTheDocument()        // delta vs yesterday
     expect(screen.getByText('3')).toBeInTheDocument()           // loss-making products
+  })
+
+  it('keeps the caption while loading and renders only the returned figures after a delayed response', async () => {
+    let resolve!: (value: TodaySummary) => void
+    const response = new Promise<TodaySummary>(done => { resolve = done })
+    vi.spyOn(api.today, 'getSummary').mockReturnValue(response)
+    render(<BusinessToday />)
+
+    expect(await screen.findByText('Состояние бизнеса сегодня')).toBeInTheDocument()
+    expect(screen.getByLabelText('Загрузка')).toBeInTheDocument()
+    expect(screen.queryByText(/128\D?400/)).not.toBeInTheDocument()
+    await act(async () => { resolve(todayWithData); await response })
+    expect(await screen.findByText(/128\D?400/)).toBeInTheDocument()
+    expect(screen.getByText(/3\D?200/)).toBeInTheDocument()
+    expect(screen.queryByLabelText('Загрузка')).not.toBeInTheDocument()
   })
 
   it('says so plainly when there is not enough data, and invents no numbers', async () => {
