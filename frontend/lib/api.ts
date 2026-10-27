@@ -100,7 +100,7 @@ async function _parseError(res: Response): Promise<string> {
 }
 
 function _handle401(path: string, status: number): void {
-  if ((status === 401 || status === 403) && !path.startsWith('/api/auth/')) {
+  if (status === 401 && !path.startsWith('/api/auth/')) {
     if (typeof window !== 'undefined') {
       clearSession()
       window.location.href = '/login?reason=session_expired'
