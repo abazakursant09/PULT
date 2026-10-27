@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/badge'
 import { BlurFade } from '@/components/ui/blur-fade'
 import { ShimmerButton } from '@/components/ui/shimmer-button'
 import { MagicCard } from '@/components/ui/magic-card'
+import { FLAGS } from '@/lib/featureFlags'
 
 const CATEGORIES = ['Одежда', 'Электроника', 'Handmade', 'Товары для дома', 'Другое']
 const SEGMENTS   = ['Эконом', 'Средний', 'Премиум']
@@ -192,9 +193,11 @@ export default function StartupPage() {
                         <Button className="flex-1" size="lg" onClick={() => router.push('/checkout?plan=start')}>
                           Оформить «Старт» <ArrowRight size={15} className="ml-1.5" />
                         </Button>
-                        <Button variant="ghost" className="flex-1" size="lg" onClick={() => router.push('/academy')}>
-                          Вернуться к бесплатной версии
-                        </Button>
+                        {FLAGS.growthContour && (
+                          <Button variant="ghost" className="flex-1" size="lg" onClick={() => router.push('/academy')}>
+                            Вернуться к бесплатной версии
+                          </Button>
+                        )}
                       </div>
                     </CardContent>
                   </Card>
