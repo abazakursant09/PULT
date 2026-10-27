@@ -1,6 +1,7 @@
 """Legacy random competitors must neither be generated nor presented as evidence."""
 import asyncio
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime
 from unittest.mock import AsyncMock, Mock
 
@@ -82,17 +83,50 @@ def test_create_product_does_not_schedule_synthetic_collection():
     assert background.tasks == []
 
 
-def test_main_app_mount_keeps_all_three_legacy_routes_closed():
+def test_main_app_mount_keeps_all_three_legacy_routes_closed(monkeypatch):
+    from config import settings
     from main import app
-    expected = {"/api/products/{product_id}/competitors", "/api/products/{product_id}/report",
-                "/api/products/{product_id}/competitors/refresh"}
-    found = set()
-    for route in app.routes:
-        if route.path in expected:
-            found.add(route.path)
-            assert products._competitor_data_unavailable in {
-                dependency.call for dependency in route.dependant.dependencies}
-    assert found == expected
+    routes = [("GET", "competitors"), ("GET", "report"), ("POST", "competitors/refresh")]
+    # Public OpenAPI proves these paths are mounted, not simply absent404s.
+    # FastAPI versions may store include_router lazily; do not inspect private route nodes.
+    paths = app.openapi()["paths"]
+    for method, suffix in routes:
+        assert method.lower() in paths[f"/api/products/{{product_id}}/{suffix}"]
+    touched = []
+
+    async def forbidden_auth():
+        touched.append("auth")
+        raise AssertionError("closed main-app route reached auth")
+
+    async def forbidden_db():
+        touched.append("db")
+        raise AssertionError("closed main-app route reached DB")
+        yield  # pragma: no cover
+
+    @asynccontextmanager
+    async def forbidden_lifespan(_app):
+        raise AssertionError("test must not start DB, seeders or workers")
+        yield  # pragma: no cover
+
+    monkeypatch.setitem(app.dependency_overrides, get_current_user, forbidden_auth)
+    monkeypatch.setitem(app.dependency_overrides, get_db, forbidden_db)
+    monkeypatch.setattr(app.router, "lifespan_context", forbidden_lifespan)
+    # Deliberately no TestClient context-manager: no startup/lifespan side effects.
+    client = TestClient(app, raise_server_exceptions=False)
+    try:
+        for identifier in ["00000000-0000-4000-8000-000000000001", "invalid-id"]:
+            for method, suffix in routes:
+                response = client.request(method, f"/api/products/{identifier}/{suffix}",
+                                          headers={"Origin": settings.frontend_url})
+                assert response.status_code == 404
+                assert response.json() == {"detail": "Not found"}
+        # The router fence does not weaken the outer CSRF guard for unsafe origins.
+        denied = client.post("/api/products/00000000-0000-4000-8000-000000000001/competitors/refresh",
+                             headers={"Origin": "https://untrusted.invalid"})
+        assert denied.status_code == 403
+        assert touched == []
+    finally:
+        client.close()
 
 
 def test_product_http_contract_remains_201_without_a_background_collector(monkeypatch):
