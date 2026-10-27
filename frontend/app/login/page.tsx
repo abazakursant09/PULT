@@ -105,7 +105,7 @@ export default function LoginPage() {
 
         {/* Session expired info */}
         {info && (
-          <div className="mb-4 px-4 py-3 rounded-[8px] text-[13px]"
+          <div role="status" className="mb-4 px-4 py-3 rounded-[8px] text-[13px]"
                style={{ background: 'rgba(110,106,252,0.08)', border: '1px solid rgba(110,106,252,0.2)', color: '#A78BFA' }}>
             {info}
           </div>
@@ -113,7 +113,7 @@ export default function LoginPage() {
 
         {/* Error */}
         {error && (
-          <div className="mb-5 px-4 py-3 rounded-[8px] text-[13px]"
+          <div role="alert" className="mb-5 px-4 py-3 rounded-[8px] text-[13px]"
                style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: '#FCA5A5' }}>
             {error}
             {/* Login is blocked until email is verified. Rather than dead-end the seller, offer
@@ -142,10 +142,12 @@ export default function LoginPage() {
         {step === 'credentials' && (
           <>
 
-            <form onSubmit={submitCredentials} className="space-y-4">
+            <form method="post" onSubmit={submitCredentials} className="space-y-4">
               <div>
-                <label className="label mb-2">EMAIL</label>
+                <label htmlFor="login-email" className="label mb-2">EMAIL</label>
                 <input
+                  id="login-email"
+                  name="email"
                   className="input"
                   type="email"
                   placeholder="you@example.com"
@@ -154,12 +156,13 @@ export default function LoginPage() {
                   required
                   autoFocus
                   autoComplete="email"
+                  spellCheck={false}
                   style={{ width: '100%' }}
                 />
               </div>
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <label className="label" style={{ marginBottom: 0 }}>ПАРОЛЬ</label>
+                  <label htmlFor="login-password" className="label" style={{ marginBottom: 0 }}>ПАРОЛЬ</label>
                   <Link
                     href="/forgot-password"
                     className="text-[11px] transition-colors duration-200"
@@ -171,6 +174,8 @@ export default function LoginPage() {
                   </Link>
                 </div>
                 <input
+                  id="login-password"
+                  name="password"
                   className="input"
                   type="password"
                   placeholder="••••••••"
@@ -183,9 +188,17 @@ export default function LoginPage() {
               </div>
 
               <label className="flex items-center gap-2.5 cursor-pointer select-none" style={{ marginTop: 4 }}>
+                <input
+                  id="login-remember-email"
+                  name="remember-email"
+                  type="checkbox"
+                  className="peer sr-only"
+                  checked={remember}
+                  onChange={e => setRemember(e.target.checked)}
+                />
                 <div
-                  onClick={() => setRemember(v => !v)}
-                  className="flex items-center justify-center w-4 h-4 rounded-[4px] transition-all cursor-pointer shrink-0"
+                  aria-hidden="true"
+                  className="flex items-center justify-center w-4 h-4 rounded-[4px] cursor-pointer shrink-0 peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--violet-text)]"
                   style={{
                     background: remember ? '#A78BFA' : 'transparent',
                     border: `1.5px solid ${remember ? '#A78BFA' : 'rgba(255,255,255,0.15)'}`,
@@ -200,7 +213,6 @@ export default function LoginPage() {
                 <span
                   className="text-[13px]"
                   style={{ color: '#71717A' }}
-                  onClick={() => setRemember(v => !v)}
                 >
                   Запомнить меня
                 </span>
@@ -234,7 +246,7 @@ export default function LoginPage() {
         )}
 
         {step === 'mfa' && (
-          <form onSubmit={submitMfa} className="space-y-4">
+          <form method="post" onSubmit={submitMfa} className="space-y-4">
             <div
               className="flex items-center gap-3 mb-2 p-4 rounded-[8px]"
               style={{ background: '#111113', border: '1px solid rgba(255,255,255,0.08)' }}
@@ -252,8 +264,12 @@ export default function LoginPage() {
             </div>
 
             <div>
-              <label className="label mb-2">{t('mfa.code')}</label>
+              <label htmlFor="login-mfa-code" className="label mb-2">{t('mfa.code')}</label>
               <input
+                id="login-mfa-code"
+                name="mfa-code"
+                autoComplete="one-time-code"
+                spellCheck={false}
                 className="input mono text-center"
                 type="text"
                 inputMode="numeric"
