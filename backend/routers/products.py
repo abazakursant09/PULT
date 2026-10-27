@@ -1,6 +1,5 @@
 import uuid
-from datetime import datetime
-from typing import List
+from typing import List, NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,12 +9,15 @@ from database import get_db
 from dependencies import get_current_user
 from models.user import User
 from models.product import Product
-from models.competitor_analysis import CompetitorAnalysis
 from schemas.product import ProductCreate, ProductResponse
 from schemas.competitor import CompetitorResponse, CompetitorReport
-from tasks.collect_competitors import collect_competitors
 
 router = APIRouter()
+
+
+def _competitor_data_unavailable() -> NoReturn:
+    """No trustworthy provenance exists for the legacy competitor surface."""
+    raise HTTPException(status_code=404, detail="Not found")
 
 
 @router.get("", response_model=List[ProductResponse])
@@ -40,75 +42,36 @@ async def create_product(
     db.add(product)
     await db.commit()
     await db.refresh(product)
-    background_tasks.add_task(collect_competitors, str(product.id), product.marketplace)
     return product
 
 
-@router.get("/{product_id}/competitors", response_model=List[CompetitorResponse])
+@router.get("/{product_id}/competitors", response_model=List[CompetitorResponse],
+            dependencies=[Depends(_competitor_data_unavailable)])
 async def get_competitors(
     product_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    product_id_str = str(product_id)
-    result = await db.execute(
-        select(Product).where(Product.id == product_id_str, Product.user_id == current_user.id)
-    )
-    if not result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Товар не найден")
-
-    result = await db.execute(
-        select(CompetitorAnalysis)
-        .where(CompetitorAnalysis.product_id == product_id_str)
-        .order_by(CompetitorAnalysis.rank)
-    )
-    return result.scalars().all()
+    # Also refuse direct internal calls that do not execute FastAPI dependencies.
+    _competitor_data_unavailable()
 
 
-@router.post("/{product_id}/competitors/refresh", status_code=202)
+@router.post("/{product_id}/competitors/refresh", status_code=202,
+             dependencies=[Depends(_competitor_data_unavailable)])
 async def refresh_competitors(
     product_id: uuid.UUID,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    product_id_str = str(product_id)
-    result = await db.execute(
-        select(Product).where(Product.id == product_id_str, Product.user_id == current_user.id)
-    )
-    product = result.scalar_one_or_none()
-    if not product:
-        raise HTTPException(status_code=404, detail="Товар не найден")
-
-    background_tasks.add_task(collect_competitors, product_id_str, product.marketplace)
-    return {"message": "Сбор данных запущен", "product_id": product_id_str}
+    _competitor_data_unavailable()
 
 
-@router.get("/{product_id}/report", response_model=CompetitorReport)
+@router.get("/{product_id}/report", response_model=CompetitorReport,
+            dependencies=[Depends(_competitor_data_unavailable)])
 async def get_report(
     product_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    product_id_str = str(product_id)
-    result = await db.execute(
-        select(Product).where(Product.id == product_id_str, Product.user_id == current_user.id)
-    )
-    if not result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Товар не найден")
-
-    result = await db.execute(
-        select(CompetitorAnalysis)
-        .where(CompetitorAnalysis.product_id == product_id_str)
-        .order_by(CompetitorAnalysis.rank)
-    )
-    all_competitors = result.scalars().all()
-
-    return CompetitorReport(
-        product_id=product_id,
-        total_competitors=len(all_competitors),
-        direct=[c for c in all_competitors if c.significance == "direct"],
-        significant=[c for c in all_competitors if c.significance == "significant"],
-        minor=[c for c in all_competitors if c.significance == "minor"],
-        generated_at=datetime.utcnow(),
-    )
+    _competitor_data_unavailable()
