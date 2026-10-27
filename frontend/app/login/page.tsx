@@ -33,7 +33,16 @@ export default function LoginPage() {
       setInfo('Сессия истекла. Войдите снова.')
     }
     const from = params.get('from')
-    if (from && from.startsWith('/')) setRedirectTo(from)
+    // Accept root-relative application paths only. Backslashes/control characters
+    // and dot-segment normalization can turn a seemingly local path into //host.
+    if (from && from.startsWith('/') && !/[\\\u0000-\u0020\u007f]/.test(from)) {
+      try {
+        const target = new URL(from, window.location.origin)
+        if (target.origin === window.location.origin && !target.pathname.startsWith('//')) {
+          setRedirectTo(target.pathname + target.search + target.hash)
+        }
+      } catch { /* Invalid return paths retain the dashboard default. */ }
+    }
   }, [])
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
