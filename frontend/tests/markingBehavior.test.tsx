@@ -35,15 +35,15 @@ describe('marking transport and visible outcomes', () => {
     expect(screen.queryByText(scanError)).not.toBeInTheDocument()
   })
 
-  it.each([401, 403])('clears local session and shows an error for HTTP %s', async status => {
+  it.each([401, 403])('shows HTTP %s as an error and expires the profile only for 401', async status => {
     localStorage.setItem('user', JSON.stringify({ id: 'synthetic' }))
     const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => response({}, status))
     render(<MarkingPage />)
     await screen.findByText(scanError)
-    expect(localStorage.getItem('user')).toBeNull()
+    expect(localStorage.getItem('user')).toBe(status === 401 ? null : JSON.stringify({ id: 'synthetic' }))
     expect(screen.queryByText(empty)).not.toBeInTheDocument()
     expect(fetch).toHaveBeenCalledTimes(1)
-    // JSDOM cannot follow window.location navigation; cookie/redirect semantics are unchanged.
+    // A permission denial is not session expiry. The HttpOnly cookie remains server-owned.
   })
 
   it('encodes categories, clears stale results, and never displays failed checks as success', async () => {
