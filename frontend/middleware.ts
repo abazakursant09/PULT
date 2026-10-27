@@ -42,7 +42,8 @@ export function middleware(request: NextRequest): NextResponse {
 
 export const config = {
   matcher: [
-    // Run on all paths except Next.js internals and static files
-    '/((?!_next/static|_next/image|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|css|js|woff2?|ttf|eot)$).*)',
+    // A dynamic application segment may look like an asset (e.g. /startup/1.js).
+    // Skip framework internals only; ordinary public assets pass through the guard.
+    '/((?!_next/static|_next/image|favicon\\.ico$).*)',
   ],
 }
