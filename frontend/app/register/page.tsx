@@ -268,23 +268,23 @@ export default function RegisterPage() {
             )}
 
             {error && (
-              <div className="px-4 py-3 rounded-lg text-sm" style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)', color: 'var(--danger)' }}>
+              <div role="alert" className="px-4 py-3 rounded-lg text-sm" style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)', color: 'var(--danger)' }}>
                 {error}
               </div>
             )}
 
-            <form onSubmit={submit} className="space-y-4">
+            <form method="post" onSubmit={submit} className="space-y-4">
               <div className="space-y-1.5">
-                <Label>{t('register.name')}</Label>
-                <Input type="text" value={form.name} onChange={set('name')} placeholder="Иван Петров" required autoFocus />
+                <Label htmlFor="register-name">{t('register.name')}</Label>
+                <Input id="register-name" name="name" autoComplete="name" type="text" value={form.name} onChange={set('name')} placeholder="Иван Петров" required autoFocus />
               </div>
               <div className="space-y-1.5">
-                <Label>{t('register.email')}</Label>
-                <Input type="email" value={form.email} onChange={set('email')} placeholder="you@example.com" required />
+                <Label htmlFor="register-email">{t('register.email')}</Label>
+                <Input id="register-email" name="email" autoComplete="email" spellCheck={false} type="email" value={form.email} onChange={set('email')} placeholder="you@example.com" required />
               </div>
               <div className="space-y-1.5">
-                <Label>{t('register.password')}</Label>
-                <Input type="password" value={form.password} onChange={set('password')} placeholder={t('register.passHint')} required />
+                <Label htmlFor="register-password">{t('register.password')}</Label>
+                <Input id="register-password" name="password" autoComplete="new-password" type="password" value={form.password} onChange={set('password')} placeholder={t('register.passHint')} required />
                 {form.password && (
                   <div className="space-y-1">
                     <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'hsl(var(--border))' }}>
@@ -295,8 +295,8 @@ export default function RegisterPage() {
                 )}
               </div>
               <div className="space-y-1.5">
-                <Label>{t('register.confirm')}</Label>
-                <Input type="password" value={form.confirm} onChange={set('confirm')} placeholder="••••••••" required />
+                <Label htmlFor="register-confirm">{t('register.confirm')}</Label>
+                <Input id="register-confirm" name="confirm" autoComplete="new-password" type="password" value={form.confirm} onChange={set('confirm')} placeholder="••••••••" required />
               </div>
 
               <MathCaptcha onValid={setCaptchaOk} />
