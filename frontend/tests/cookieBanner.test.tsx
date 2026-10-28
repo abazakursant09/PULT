@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { CookieBanner } from '@/components/CookieBanner'
 
@@ -43,5 +43,36 @@ describe('CookieBanner (cookie truth)', () => {
     localStorage.setItem('cookie_consent', JSON.stringify({ acknowledged: true, timestamp: 1 }))
     const { container } = render(<CookieBanner />)
     expect(container.textContent).toBe('')
+  })
+
+  it('offers a named non-modal notice and keeps the full privacy text and link', () => {
+    render(<CookieBanner />)
+    expect(screen.getByRole('region', { name: 'Файлы cookie и локальное хранилище' })).toBeTruthy()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.getByRole('link', { name: 'Политика конфиденциальности' })).toHaveAttribute('href', '/privacy')
+    expect(screen.getByText(/Настройки интерфейса хранятся локально в вашем браузере/)).toBeVisible()
+  })
+
+  it('dismisses with the close button using the same acknowledgement without setting cookies', async () => {
+    render(<CookieBanner />)
+    await userEvent.click(screen.getByRole('button', { name: 'Закрыть' }))
+    expect(screen.queryByRole('region')).toBeNull()
+    expect(JSON.parse(localStorage.getItem('cookie_consent') as string).acknowledged).toBe(true)
+    expect(document.cookie).toBe('')
+  })
+
+  it('reserves scroll space for the notice and restores existing page padding on dismissal', async () => {
+    const original = document.body.style.paddingBottom
+    document.body.style.paddingBottom = '12px'
+    const measure = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ height: 200 } as DOMRect)
+    try {
+      render(<CookieBanner />)
+      expect(document.body.style.paddingBottom).toBe('212px')
+      await userEvent.click(screen.getByRole('button', { name: 'Понятно' }))
+      expect(document.body.style.paddingBottom).toBe('12px')
+    } finally {
+      measure.mockRestore()
+      document.body.style.paddingBottom = original
+    }
   })
 })
