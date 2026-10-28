@@ -104,10 +104,30 @@ const ICON: Record<string, React.ReactNode> = {
 
 export function Rail() {
   const path = usePathname()
-  const { close } = useContext(NavContext)
+  const { open, close } = useContext(NavContext)
+  const railRef = useRef<HTMLElement | null>(null)
+
+  useEffect(() => {
+    const rail = railRef.current
+    if (!rail || typeof window.matchMedia !== 'function') return
+    const mobile = window.matchMedia('(max-width:1024px)')
+    const syncVisibility = () => {
+      if (mobile.matches && !open) {
+        rail.setAttribute('inert', '')
+        rail.setAttribute('aria-hidden', 'true')
+      } else {
+        rail.removeAttribute('inert')
+        rail.removeAttribute('aria-hidden')
+      }
+    }
+    syncVisibility()
+    mobile.addEventListener('change', syncVisibility)
+    return () => mobile.removeEventListener('change', syncVisibility)
+  }, [open])
+
   const active = (h: string) => h === '/dashboard' ? path === '/dashboard' : path?.startsWith(h)
   return (
-    <aside className="s-rail">
+    <aside className="s-rail" ref={railRef}>
       <div className="s-rail-top">
         <Link href="/dashboard" className="s-logo" onClick={close}>
           <span className="s-approved-mark"><PultMark approvedReference width={44} height={50} /></span>
