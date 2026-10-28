@@ -4,181 +4,117 @@ import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
-  ArrowRight, ChevronDown, Plus, Minus,
-  Upload, Search, MousePointerClick,
-  ShieldCheck, FileText, Megaphone, Calculator, Eye, Zap, MessageSquare,
-  Settings, LogOut, Home,
+  ArrowRight, BarChart3, Boxes, ChevronDown, Eye, FileText, GaugeCircle,
+  Home, Layers3, LogOut, Megaphone, MessageSquare, Package, Search, Settings,
+  ShieldCheck, ShoppingCart, Sparkles, TrendingUp, Upload, Zap,
 } from 'lucide-react'
-import { NotificationBell } from '@/components/NotificationBell'
 import { PultMark } from '@/components/brand/PultMark'
+import { NotificationBell } from '@/components/NotificationBell'
 import { api, type User } from '@/lib/api'
 import { clearSession } from '@/lib/session'
-import { LANDING_PROOF } from '@/config/landing-proof'
+import styles from './landing.module.css'
 
-/* ─── Design tokens — single accent (violet), no gold ─────────────────────── */
-// Tokens — single source of truth: styles/globals.css :root (no raw hex)
-const R = {
-  bg:     'var(--bg)',
-  surf:   'var(--surface)',
-  surfH:  'var(--surface-h)',
-  text:   'var(--text)',
-  text2:  'var(--text-2)',
-  text3:  'var(--text-3)',
-  line:   'var(--line)',
-  accent: 'var(--violet)',       // action / the system's voice
-  accentH:'var(--violet-h)',
-  accentT:'var(--violet-text)',  // accent text on dark
-  accentDim: 'var(--violet-dim)',
-  gain:   'var(--success)',
-  loss:   'var(--danger)',
-  watch:  'var(--warning)',
-}
+const MARKETPLACES = [
+  { src: '/logos/wildberries.svg', alt: 'Wildberries', width: 132 },
+  { src: '/logos/ozon.svg', alt: 'Ozon', width: 92 },
+  { src: '/logos/yandex-market.svg', alt: 'Яндекс Маркет', width: 146 },
+]
 
-function rub(n: number): string { return `${Math.round(n).toLocaleString('ru-RU')} ₽` }
+const CONTOUR_STAGES = [
+  { icon: Search, label: 'Спрос', value: '2 843', meta: 'заказа', delta: '+18%' },
+  { icon: ShoppingCart, label: 'Продажи', value: '1 247 290 ₽', meta: 'выручка', delta: '+21%' },
+  { icon: TrendingUp, label: 'Маржа', value: '23,7%', meta: 'маржинальность', delta: '+2,1 п. п.' },
+  { icon: Package, label: 'Остатки', value: '31 день', meta: 'оборачиваемость', delta: '+4 дня' },
+]
 
-/* ─── Real product mock — L1 decision card (the screenshot) ─────────────────── */
-function L1Mock({
-  large = false,
-  signalTitle = 'Реклама съедает «Кронштейн X»',
-  signalLoss = 86_000,
-  actionLabel = 'Снизить ставку',
-}: {
-  large?: boolean
-  signalTitle?: string
-  signalLoss?: number
-  actionLabel?: string
-}) {
+const CAPABILITIES = [
+  { icon: BarChart3, index: '01', title: 'Экономика', text: 'Продажи, комиссии, логистика и реклама сходятся в финансовой картине товара.' },
+  { icon: Eye, index: '02', title: 'Рынок', text: 'Изменения спроса, предложения и цены становятся видимыми в одном контексте.' },
+  { icon: Megaphone, index: '03', title: 'Реклама', text: 'Расходы рассматриваются вместе с маржой и продажами, а не в отдельном кабинете.' },
+  { icon: Boxes, index: '04', title: 'Остатки', text: 'Пульт связывает запас со скоростью продаж и показывает зоны внимания.' },
+  { icon: MessageSquare, index: '05', title: 'Отзывы', text: 'Рейтинг, динамика и вопросы покупателей собираются в рабочую очередь.' },
+  { icon: FileText, index: '06', title: 'Карточки', text: 'Контент товара получает понятные подсказки на основе доступных сигналов.' },
+]
+
+function Brand({ compact = false }: { compact?: boolean }) {
   return (
-    <div style={{
-      background: R.surf, border: `1px solid ${R.line}`, borderRadius: 16,
-      padding: large ? 26 : 22, width: '100%', maxWidth: large ? 560 : 460,
-      boxShadow: '0 24px 60px rgba(0,0,0,0.45)',
-    }}>
-      {/* money strip */}
-      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 18 }}>
-        <div>
-          <div style={{ fontSize: 11, color: R.text3, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 6 }}>
-            Чистая прибыль · июнь
-          </div>
-          <div className="mono" style={{ fontSize: large ? 30 : 26, fontWeight: 800, color: R.gain, lineHeight: 1 }}>
-            {rub(1_240_000)}
-          </div>
-        </div>
-        <div className="mono" style={{ fontSize: 13, fontWeight: 700, color: R.gain }}>▲ +6%</div>
-      </div>
-
-      {/* signal card — the decision */}
-      <div style={{
-        background: R.bg, border: `1px solid ${R.line}`, borderLeft: `4px solid ${R.loss}`,
-        borderRadius: 12, padding: large ? 22 : 18,
-      }}>
-        <div style={{ fontSize: 10.5, color: R.text3, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 10 }}>
-          Главное сейчас
-        </div>
-        <div style={{ fontSize: large ? 17 : 15, fontWeight: 700, color: R.text, marginBottom: 6 }}>
-          {signalTitle}
-        </div>
-        <div className="mono" style={{ fontSize: large ? 26 : 22, fontWeight: 800, color: R.loss, marginBottom: 16 }}>
-          −{rub(signalLoss)} / мес
-        </div>
-        <span style={{
-          display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 13.5, fontWeight: 600,
-          padding: '10px 18px', borderRadius: 9, background: R.accent, color: '#FFFFFF',
-        }}>
-          {actionLabel} <ArrowRight size={15} />
-        </span>
-      </div>
-    </div>
+    <span className={styles.brand}>
+      <span className={styles.brandMark}><PultMark approvedReference /></span>
+      <span className={styles.brandCopy}>
+        <strong>ПУЛЬТ</strong>
+        {!compact && <small>ОПЕРАЦИОННАЯ СИСТЕМА СЕЛЛЕРА</small>}
+      </span>
+    </span>
   )
 }
 
-/* ─── Nav ─────────────────────────────────────────────────────────────────── */
 function LandingNav({ user }: { user: User | null }) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [scrolled, setScrolled] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    function onScroll() { setScrolled(window.scrollY > 8) }
+    const onScroll = () => setScrolled(window.scrollY > 10)
     window.addEventListener('scroll', onScroll, { passive: true })
     return () => window.removeEventListener('scroll', onScroll)
   }, [])
 
   useEffect(() => {
     if (!open) return
-    function handler(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    const onPointer = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) setOpen(false)
     }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onPointer)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onPointer)
+      window.removeEventListener('keydown', onKey)
+    }
   }, [open])
 
-  function logout() { api.auth.logout().catch(() => {}).finally(() => { clearSession(); router.push('/login') }) }
+  function logout() {
+    api.auth.logout().catch(() => {}).finally(() => {
+      clearSession()
+      router.push('/login')
+    })
+  }
 
   return (
-    <nav className="fixed top-0 inset-x-0 z-50" style={{
-      height: 64,
-      background: scrolled ? 'rgba(9,9,11,0.92)' : R.bg,
-      borderBottom: `1px solid ${R.line}`,
-      backdropFilter: scrolled ? 'blur(16px)' : 'none',
-      WebkitBackdropFilter: scrolled ? 'blur(16px)' : 'none',
-      transition: 'background 0.2s',
-    }}>
-      <div className="max-w-[1200px] mx-auto px-6 h-full flex items-center justify-between">
-        <Link href="/" className="flex items-center gap-2.5 shrink-0" style={{ textDecoration: 'none' }}>
-          <div className="flex items-center justify-center" style={{
-            width: 30, height: 30, borderRadius: 8, background: R.surf, border: `1px solid ${R.line}`,
-          }}>
-            <PultMark width={18} height={21} style={{ color: '#D5D0F7' }} />
-          </div>
-          <span style={{ fontSize: '1.0625rem', fontWeight: 700, letterSpacing: '-0.02em', color: R.text }}>ПУЛЬТ</span>
-        </Link>
-
-        <div className="hidden md:flex items-center gap-1">
-          {([['#features', 'Возможности'], ['#pricing', 'Тарифы']] as [string, string][]).map(([href, label]) => (
-            <a key={href} href={href}
-              style={{ fontSize: '0.875rem', color: R.text2, padding: '6px 14px', borderRadius: 6, textDecoration: 'none', transition: 'color 0.15s' }}
-              onMouseEnter={e => (e.currentTarget.style.color = R.text)}
-              onMouseLeave={e => (e.currentTarget.style.color = R.text2)}>
-              {label}
-            </a>
-          ))}
+    <nav className={`${styles.nav} ${scrolled ? styles.navScrolled : ''}`} aria-label="Основная навигация">
+      <div className={styles.navInner}>
+        <Link href="/" className={styles.logoLink} aria-label="ПУЛЬТ — на главную"><Brand /></Link>
+        <div className={styles.navLinks}>
+          <a href="#product">Как работает</a>
+          <a href="#possibilities">Возможности</a>
+          <a href="#access">Доступ</a>
         </div>
-
-        <div className="flex items-center gap-2">
+        <div className={styles.navActions}>
           {user ? (
             <>
               <NotificationBell dropdownSide="down" />
-              <div className="relative" ref={ref}>
-                <button onClick={() => setOpen(v => !v)} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-sm"
-                  style={{ color: R.text2, border: `1px solid ${open ? 'rgba(255,255,255,0.14)' : R.line}`, background: open ? R.surfH : 'transparent', cursor: 'pointer' }}>
-                  <div className="flex items-center justify-center text-xs font-bold"
-                    style={{ width: 24, height: 24, borderRadius: 7, background: R.surf, border: `1px solid ${R.line}`, color: R.accentT }}>
-                    {user.name.charAt(0).toUpperCase()}
-                  </div>
-                  <span className="hidden lg:block" style={{ color: R.text, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user.name}</span>
-                  <ChevronDown size={12} style={{ color: R.text2 }} />
+              <div className={styles.accountWrap} ref={menuRef}>
+                <button type="button" className={styles.accountButton} aria-label={`Меню пользователя ${user.name}`}
+                  aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+                  <span className={styles.avatar}>{user.name.charAt(0).toUpperCase()}</span>
+                  <span className={styles.accountName}>{user.name}</span><ChevronDown size={14} aria-hidden="true" />
                 </button>
                 {open && (
-                  <div className="absolute right-0 top-full mt-1.5 w-44 rounded-[10px] overflow-hidden z-50" style={{ background: R.surf, border: `1px solid ${R.line}` }}>
-                    <Link href="/dashboard" onClick={() => setOpen(false)} className="flex items-center gap-2.5 px-4 py-2.5 text-sm" style={{ color: R.text2, textDecoration: 'none' }}>
-                      <Home size={14} /> Пульт
-                    </Link>
-                    <Link href="/dashboard/account" onClick={() => setOpen(false)} className="flex items-center gap-2.5 px-4 py-2.5 text-sm" style={{ color: R.text2, textDecoration: 'none' }}>
-                      <Settings size={14} /> Настройки
-                    </Link>
-                    <button onClick={logout} className="flex items-center gap-2.5 px-4 py-2.5 text-sm w-full" style={{ color: R.text2, background: 'transparent', border: 'none', cursor: 'pointer' }}>
-                      <LogOut size={14} /> Выйти
-                    </button>
+                  <div className={styles.accountMenu} role="menu">
+                    <Link href="/dashboard" role="menuitem" onClick={() => setOpen(false)}><Home size={15} aria-hidden="true" /> Пульт</Link>
+                    <Link href="/dashboard/account" role="menuitem" onClick={() => setOpen(false)}><Settings size={15} aria-hidden="true" /> Настройки</Link>
+                    <button type="button" role="menuitem" onClick={logout}><LogOut size={15} aria-hidden="true" /> Выйти</button>
                   </div>
                 )}
               </div>
             </>
           ) : (
             <>
-              <Link href="/login" className="btn btn-ghost" style={{ height: 38, padding: '0 16px', fontSize: '0.875rem', borderRadius: 6 }}>Войти</Link>
-              <Link href="/register" className="btn btn-primary" style={{ height: 38, padding: '0 18px', fontSize: '0.875rem', borderRadius: 6 }}>Начать бесплатно</Link>
+              <Link href="/login" className={styles.ghostButton}>Войти</Link>
+              <Link href="/register" className={styles.navCta}>Создать аккаунт <ArrowRight size={15} aria-hidden="true" /></Link>
             </>
           )}
         </div>
@@ -187,362 +123,198 @@ function LandingNav({ user }: { user: User | null }) {
   )
 }
 
-/* ─── Section primitives ────────────────────────────────────────────────────── */
-function Eyebrow({ children }: { children: React.ReactNode }) {
-  return <p style={{ fontSize: '0.75rem', fontWeight: 600, letterSpacing: '0.10em', textTransform: 'uppercase', color: R.accentT, marginBottom: 14 }}>{children}</p>
-}
-function H2({ children }: { children: React.ReactNode }) {
-  return <h2 style={{ fontSize: 'clamp(1.75rem, 3.5vw, 2.25rem)', fontWeight: 700, color: R.text, lineHeight: 1.15, letterSpacing: '-0.03em' }}>{children}</h2>
-}
-
-/* ─── FAQ item ──────────────────────────────────────────────────────────────── */
-function FaqItem({ q, a }: { q: string; a: string }) {
-  const [open, setOpen] = useState(false)
+function OperationalDemo() {
   return (
-    <div style={{ background: R.surf, border: `1px solid ${R.line}`, borderRadius: 10, overflow: 'hidden' }}>
-      <button onClick={() => setOpen(v => !v)} className="w-full flex items-center justify-between text-left"
-        style={{ padding: '18px 22px', background: 'transparent', border: 'none', cursor: 'pointer' }}>
-        <span style={{ fontSize: '0.9375rem', fontWeight: 600, color: R.text }}>{q}</span>
-        {open ? <Minus size={16} style={{ color: R.text3, flexShrink: 0 }} /> : <Plus size={16} style={{ color: R.text3, flexShrink: 0 }} />}
-      </button>
-      {open && <p style={{ padding: '0 22px 18px', fontSize: '0.875rem', color: R.text2, lineHeight: 1.65 }}>{a}</p>}
+    <div className={styles.demoShell} aria-label="Демонстрация операционного контура Пульта">
+      <div className={styles.demoPrism} aria-hidden="true" />
+      <div className={styles.demoTopbar}>
+        <div><span className={styles.demoEyebrow}>ДЕМО-СЦЕНАРИЙ</span><strong>Сегодня в бизнесе</strong></div>
+        <span className={styles.liveBadge}><i /> Контур собран</span>
+      </div>
+      <div className={styles.contourHeader}>
+        <span>Операционный контур</span>
+        <small>Состояние бизнеса в одной линии</small>
+      </div>
+      <div className={styles.contour}>
+        <div className={styles.contourTrack} aria-hidden="true"><i /></div>
+        {CONTOUR_STAGES.map(({ icon: Icon, label, value, meta, delta }) => (
+          <article className={styles.stage} key={label}>
+            <div className={styles.stageHead}><Icon size={16} aria-hidden="true" /><span>{label}</span></div>
+            <strong>{value}</strong>
+            <div className={styles.stageMeta}><span>{meta}</span><b>{delta}</b></div>
+          </article>
+        ))}
+      </div>
+      <div className={styles.decision}>
+        <span className={styles.decisionIcon}><Sparkles size={18} aria-hidden="true" /></span>
+        <div className={styles.decisionCopy}><small>ГЛАВНОЕ РЕШЕНИЕ</small><strong>Пополнить остатки крема</strong><span>23 шт. · дефицит через 3 дня</span></div>
+        <span className={styles.decisionImpact}><small>ОЦЕНКА ЭФФЕКТА</small><strong>38 400 ₽</strong></span>
+        <span className={styles.decisionAction}>Открыть <ArrowRight size={15} aria-hidden="true" /></span>
+      </div>
     </div>
   )
 }
 
-/* ─── Page ────────────────────────────────────────────────────────────────── */
+function SectionTitle({ eyebrow, children, lead }: { eyebrow: string; children: React.ReactNode; lead?: string }) {
+  return <header className={styles.sectionTitle}><p>{eyebrow}</p><h2>{children}</h2>{lead && <span>{lead}</span>}</header>
+}
+
+function FaqItem({ question, children }: { question: string; children: React.ReactNode }) {
+  return <details className={styles.faqItem}><summary>{question}<span aria-hidden="true">+</span></summary><div>{children}</div></details>
+}
+
 export default function LandingPage() {
   const [user, setUser] = useState<User | null>(null)
-
   useEffect(() => {
-    const s = localStorage.getItem('user')
-    if (s) try { setUser(JSON.parse(s)) } catch {}
+    const stored = localStorage.getItem('user')
+    if (!stored) return
+    try { setUser(JSON.parse(stored)) } catch {}
   }, [])
-
   const startHref = user ? '/dashboard' : '/register'
 
-  // Proof / case visibility — never render literal placeholders
-  const hasProofMetrics = !!(LANDING_PROOF.sellersCount || LANDING_PROOF.lossesFound)
-  const hasCase = !!(LANDING_PROOF.caseAmount && LANDING_PROOF.caseQuote && LANDING_PROOF.caseAuthor)
-
   return (
-    <div style={{ background: R.bg, minHeight: '100vh', color: R.text }}>
+    <div className={styles.page}>
+      <a className={styles.skipLink} href="#main">Перейти к содержанию</a>
       <LandingNav user={user} />
-
-      {/* ══ 1. HERO ══════════════════════════════════════════════════════════ */}
-      <section style={{ paddingTop: 132, paddingBottom: 96 }}>
-        <div className="max-w-[1200px] mx-auto px-8">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
-            {/* Left */}
-            <div>
-              <p style={{ fontSize: '0.8125rem', fontWeight: 600, color: R.accentT, letterSpacing: '0.02em', marginBottom: 20 }}>
-                Для селлеров Wildberries, Ozon и Яндекс Маркета
-              </p>
-              <h1 style={{ fontSize: 'clamp(2.25rem, 4.5vw, 3.25rem)', fontWeight: 800, lineHeight: 1.08, letterSpacing: '-0.035em', color: R.text, marginBottom: 24 }}>
-                Вы теряете прибыль каждый день.<br />
-                <span style={{ color: R.accentT }}>Пульт покажет где.</span>
-              </h1>
-              <p style={{ fontSize: '1.125rem', lineHeight: 1.65, color: R.text2, maxWidth: 480, marginBottom: 36 }}>
-                Загрузите выгрузку Wildberries или Ozon — за 2 минуты увидите, сколько рублей утекает на рекламу, комиссии и убыточные товары. И что сделать сегодня.
-              </p>
-              <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3 mb-4">
-                <Link href={startHref} className="btn btn-primary w-full sm:w-auto"
-                  style={{ height: 52, padding: '0 28px', fontSize: '1rem', fontWeight: 600, borderRadius: 8, gap: 8 }}>
-                  Найти мои потери <ArrowRight size={16} />
-                </Link>
-                <a href="#how"
-                  className="inline-flex items-center justify-center gap-1.5 self-center sm:self-auto"
-                  style={{ fontSize: '0.9375rem', fontWeight: 500, color: R.accentT, textDecoration: 'none', padding: '8px 4px' }}>
-                  Посмотреть, как это работает ↓
-                </a>
-              </div>
-              <p style={{ fontSize: '0.8125rem', color: R.text3 }}>Без карты. 2 минуты до первого результата.</p>
-            </div>
-            {/* Right — real product (L1) */}
-            <div className="flex justify-center lg:justify-end">
-              <L1Mock />
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ══ 2. PROOF STRIP ═══════════════════════════════════════════════════ */}
-      <section data-section="proof" style={{ padding: '36px 0', background: R.surf, borderTop: `1px solid ${R.line}`, borderBottom: `1px solid ${R.line}` }}>
-        <div className="max-w-[1200px] mx-auto px-8 flex flex-col items-center gap-6">
-          <div className="flex flex-wrap items-center justify-center gap-10" style={{ opacity: 0.85 }}>
-            <img src="/logos/wildberries.svg" alt="Wildberries" style={{ height: 30, objectFit: 'contain' }} />
-            <img src="/logos/ozon.svg" alt="Ozon" style={{ height: 30, objectFit: 'contain' }} />
-            <img src="/logos/yandex-market.svg" alt="Яндекс Маркет" style={{ height: 30, objectFit: 'contain' }} />
-          </div>
-          {hasProofMetrics && (
-            <div className="flex flex-wrap items-center justify-center gap-x-10 gap-y-2" style={{ fontSize: '0.9375rem', color: R.text2 }}>
-              {LANDING_PROOF.sellersCount && (
-                <span><span className="mono" style={{ color: R.text, fontWeight: 700 }}>{LANDING_PROOF.sellersCount}</span> селлеров</span>
-              )}
-              {LANDING_PROOF.lossesFound && (
-                <span><span className="mono" style={{ color: R.text, fontWeight: 700 }}>{LANDING_PROOF.lossesFound}</span> найденных потерь</span>
-              )}
-            </div>
-          )}
-        </div>
-      </section>
-
-      {/* ══ 3. PROBLEM ═══════════════════════════════════════════════════════ */}
-      <section style={{ padding: '96px 0' }}>
-        <div className="max-w-[1200px] mx-auto px-8">
-          <div style={{ textAlign: 'center', marginBottom: 48 }}>
-            <H2>Оборот растёт. А прибыль стоит. Знаете почему?</H2>
-            <p style={{ fontSize: '1.0625rem', color: R.text2, marginTop: 14 }}>
-              Деньги утекают там, где не видно в кабинете маркетплейса.
-            </p>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-[840px] mx-auto">
-            {[
-              'Реклама съедает маржу — а вы видите только общий ДРР.',
-              'Один убыточный товар тянет вниз весь отчёт.',
-              'Комиссия и логистика незаметно съедают прибыль.',
-              'Автоакции списывают деньги раньше, чем вы реагируете.',
-            ].map((t, i) => (
-              <div key={i} style={{ background: R.surf, border: `1px solid ${R.line}`, borderLeft: `3px solid ${R.loss}`, borderRadius: 10, padding: '20px 22px' }}>
-                <p style={{ fontSize: '0.9375rem', color: R.text, lineHeight: 1.55 }}>{t}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ══ 4. THE MOMENT ════════════════════════════════════════════════════ */}
-      <section data-section="the_moment" style={{ padding: '96px 0', background: R.surf, borderTop: `1px solid ${R.line}`, borderBottom: `1px solid ${R.line}` }}>
-        <div className="max-w-[1200px] mx-auto px-8">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
-            <div>
-              <Eyebrow>Вот что вы увидите</Eyebrow>
-              <H2>Не отчёт. Одно найденное действие.</H2>
-              <p style={{ fontSize: '1.0625rem', color: R.text2, lineHeight: 1.65, margin: '18px 0 32px', maxWidth: 460 }}>
-                Пульт сам находит утечку, показывает сумму в рублях и говорит, что нажать. Вы не изучаете графики — вы делаете одно действие.
-              </p>
-              <Link href={startHref} className="btn btn-primary"
-                style={{ height: 50, padding: '0 26px', fontSize: '0.9375rem', fontWeight: 600, borderRadius: 8, gap: 8 }}>
-                Найти такие потери у себя <ArrowRight size={16} />
-              </Link>
-            </div>
-            <div className="flex justify-center lg:justify-end">
-              <L1Mock large signalTitle="Товар убыточен: «Чехол Y»" signalLoss={34_000} actionLabel="Поднять цену" />
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ══ 5. HOW IT WORKS ══════════════════════════════════════════════════ */}
-      <section id="how" style={{ padding: '96px 0' }}>
-        <div className="max-w-[1200px] mx-auto px-8">
-          <div style={{ textAlign: 'center', marginBottom: 56 }}>
-            <Eyebrow>Как это работает</Eyebrow>
-            <H2>Три шага. Две минуты.</H2>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {[
-              { icon: Upload, num: '01', title: 'Загрузите выгрузку', desc: 'WB, Ozon, Яндекс Маркет. Только публичные данные.', badge: '2 минуты' },
-              { icon: Search, num: '02', title: 'Пульт находит потери', desc: 'Считает реальную прибыль по каждому товару — в рублях.' },
-              { icon: MousePointerClick, num: '03', title: 'Сделайте одно действие', desc: 'Снизить ставку, поднять цену, убрать товар.' },
-            ].map(({ icon: Icon, num, title, desc, badge }, i) => (
-              <div key={i} style={{ background: R.surf, border: `1px solid ${R.line}`, borderRadius: 10, padding: '32px' }}>
-                <div className="flex items-center gap-3" style={{ marginBottom: 20 }}>
-                  <div className="flex items-center justify-center" style={{ width: 40, height: 40, borderRadius: 10, background: R.accentDim }}>
-                    <Icon size={18} style={{ color: R.accentT }} />
-                  </div>
-                  <span style={{ fontSize: '0.6875rem', fontWeight: 700, color: R.accentT, letterSpacing: '0.08em' }}>{num}</span>
-                  {badge && (
-                    <span style={{ marginLeft: 'auto', fontSize: '0.6875rem', fontWeight: 600, color: R.gain, background: 'rgba(52,211,153,0.10)', border: '1px solid rgba(52,211,153,0.25)', borderRadius: 6, padding: '3px 8px' }}>
-                      {badge}
-                    </span>
-                  )}
+      <main id="main">
+        <section className={styles.hero}>
+          <div className={styles.heroAtmosphere} aria-hidden="true"><i /><i /><i /></div>
+          <div className={styles.container}>
+            <div className={styles.heroGrid}>
+              <div className={styles.heroCopy}>
+                <p className={styles.kicker}><span>ПУЛЬТ</span> / Операционная система селлера</p>
+                <h1>Не смотреть на бизнес.<br /><em>Управлять им.</em></h1>
+                <p className={styles.heroLead}>Пульт связывает спрос, продажи, маржу и остатки — чтобы вместо разрозненных отчётов вы видели главное действие на сегодня.</p>
+                <div className={styles.heroActions}>
+                  <a href="#product" className={styles.primaryButton}>Посмотреть, как работает <ArrowRight size={17} aria-hidden="true" /></a>
+                  <Link href={startHref} className={styles.secondaryButton}>{user ? 'Открыть Пульт' : 'Создать аккаунт'}</Link>
                 </div>
-                <h3 style={{ fontSize: '1.0625rem', fontWeight: 700, color: R.text, marginBottom: 10 }}>{title}</h3>
-                <p style={{ fontSize: '0.9375rem', color: R.text2, lineHeight: 1.65 }}>{desc}</p>
+                <div className={styles.heroNote}><span>01</span><p>Продукт готовится к коммерческому запуску. Демо ниже показывает принцип работы интерфейса.</p></div>
               </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ══ 6. CASE STUDY ════════════════════════════════════════════════════ */}
-      {hasCase && (
-        <section style={{ padding: '96px 0', background: R.surf, borderTop: `1px solid ${R.line}`, borderBottom: `1px solid ${R.line}` }}>
-          <div className="max-w-[760px] mx-auto px-8 text-center">
-            <div className="mono" style={{ fontSize: 'clamp(2rem, 4vw, 2.75rem)', fontWeight: 800, color: R.gain, letterSpacing: '-0.02em', marginBottom: 8 }}>
-              {LANDING_PROOF.caseAmount}
+              <div className={styles.heroProduct}>
+                <div className={styles.productHalo} aria-hidden="true" />
+                <OperationalDemo />
+                <span className={`${styles.floatTag} ${styles.floatTagTop}`}><Zap size={14} aria-hidden="true" /> Решение, не отчёт</span>
+                <span className={`${styles.floatTag} ${styles.floatTagBottom}`}><GaugeCircle size={14} aria-hidden="true" /> Весь контур</span>
+              </div>
             </div>
-            <p style={{ fontSize: '0.8125rem', color: R.text3, letterSpacing: '0.04em', textTransform: 'uppercase', marginBottom: 28 }}>за две недели</p>
-            <p style={{ fontSize: '1.25rem', lineHeight: 1.6, color: R.text, marginBottom: 20 }}>
-              {LANDING_PROOF.caseQuote}
-            </p>
-            <p style={{ fontSize: '0.875rem', color: R.text2 }}>— {LANDING_PROOF.caseAuthor}</p>
           </div>
         </section>
-      )}
 
-      {/* ══ 7. SECURITY ══════════════════════════════════════════════════════ */}
-      <section style={{ padding: '80px 0' }}>
-        <div className="max-w-[1000px] mx-auto px-8">
-          <div style={{ background: R.surf, border: `1px solid ${R.line}`, borderRadius: 14, padding: '36px 40px' }}>
-            <div className="flex items-start gap-4">
-              <div className="flex items-center justify-center shrink-0" style={{ width: 44, height: 44, borderRadius: 10, background: R.accentDim }}>
-                <ShieldCheck size={22} style={{ color: R.accentT }} />
-              </div>
-              <div>
-                <h3 style={{ fontSize: '1.125rem', fontWeight: 700, color: R.text, marginBottom: 14 }}>Ваши данные остаются вашими</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-10 gap-y-3">
-                  {['Только публичные данные', 'API-ключи не нужны', 'Соответствие 152-ФЗ', 'Данные не передаются третьим лицам'].map((t, i) => (
-                    <div key={i} className="flex items-center gap-2.5" style={{ fontSize: '0.9375rem', color: R.text2 }}>
-                      <span style={{ width: 5, height: 5, borderRadius: '50%', background: R.gain, flexShrink: 0 }} />
-                      {t}
-                    </div>
-                  ))}
+        <section className={styles.marketStrip} aria-label="Маркетплейсы в продуктовом контуре">
+          <div className={styles.marketInner}>
+            <span>ЕДИНЫЙ РАБОЧИЙ КОНТУР ДЛЯ</span>
+            {MARKETPLACES.map((market) => <img key={market.alt} src={market.src} alt={market.alt} width={market.width} height={30} />)}
+          </div>
+        </section>
+
+        <section className={styles.productStory} id="product">
+          <div className={styles.container}>
+            <SectionTitle eyebrow="СМЫСЛ ПУЛЬТА" lead="Система не просит вас собирать картину вручную. Она показывает связь между показателями и точку следующего действия.">Один экран между данными и решением.</SectionTitle>
+            <div className={styles.storyGrid}>
+              <article className={styles.noisePanel}>
+                <p>До Пульта</p><h3>Каждый показатель живёт отдельно.</h3>
+                <div className={styles.noiseStack} aria-hidden="true">
+                  <span>Продажи <b>1 247 290 ₽</b></span>
+                  <span>Реклама <b>ДРР 18,4%</b></span>
+                  <span>Склад <b>23 шт.</b></span>
+                  <span>Отзывы <b>3,6 ★</b></span>
                 </div>
+              </article>
+              <div className={styles.storyCore} aria-label="Пульт связывает сигналы в единый приоритет">
+                <span className={styles.coreMark}><PultMark approvedReference /></span>
+                <p>ПУЛЬТ СВЯЗЫВАЕТ</p><strong>Сигналы становятся контекстом</strong>
+                <i aria-hidden="true" />
               </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ── CTA after Security (close the gap to Pricing) ── */}
-      <section style={{ padding: '0 32px 56px', textAlign: 'center' }}>
-        <Link href={startHref} className="btn btn-primary"
-          style={{ display: 'inline-flex', height: 52, padding: '0 28px', fontSize: '1rem', fontWeight: 600, borderRadius: 8, gap: 8 }}>
-          Найти мои потери <ArrowRight size={16} />
-        </Link>
-      </section>
-
-      {/* ══ 8. FEATURES ══════════════════════════════════════════════════════ */}
-      <section id="features" style={{ padding: '80px 0' }}>
-        <div className="max-w-[1200px] mx-auto px-8">
-          <div style={{ textAlign: 'center', marginBottom: 40 }}>
-            <H2>И ещё 6 инструментов внутри</H2>
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 max-w-[920px] mx-auto">
-            {[
-              { icon: FileText, title: 'SEO-карточки' },
-              { icon: MessageSquare, title: 'Автоответы' },
-              { icon: Megaphone, title: 'Реклама' },
-              { icon: Calculator, title: 'Калькулятор прибыли' },
-              { icon: Eye, title: 'Разведка конкурентов' },
-              { icon: Zap, title: 'Автоакции' },
-            ].map(({ icon: Icon, title }, i) => (
-              <div key={i} style={{ background: R.surf, border: `1px solid ${R.line}`, borderRadius: 10, padding: '20px 22px', display: 'flex', alignItems: 'center', gap: 14 }}>
-                <div className="flex items-center justify-center shrink-0" style={{ width: 36, height: 36, borderRadius: 9, background: R.accentDim }}>
-                  <Icon size={17} style={{ color: R.accentT }} />
+              <article className={styles.focusPanel}>
+                <p>В Пульте</p><h3>Один приоритет получает контекст.</h3>
+                <div className={styles.focusDecision}>
+                  <span><Sparkles size={17} aria-hidden="true" /> СЕГОДНЯ</span>
+                  <strong>Пополнить остатки</strong>
+                  <p>До дефицита 3 дня</p>
+                  <b>Оценка эффекта · 38 400 ₽</b>
                 </div>
-                <p style={{ fontSize: '0.9375rem', fontWeight: 600, color: R.text }}>{title}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ══ 9. PRICING ═══════════════════════════════════════════════════════ */}
-      <section id="pricing" data-section="pricing" style={{ padding: '96px 0', background: R.surf, borderTop: `1px solid ${R.line}`, borderBottom: `1px solid ${R.line}` }}>
-        <div className="max-w-[1200px] mx-auto px-8">
-          <div style={{ textAlign: 'center', marginBottom: 12 }}>
-            <H2>Окупается первой найденной утечкой</H2>
-            <p style={{ fontSize: '1.0625rem', color: R.text2, marginTop: 14, marginBottom: 40 }}>14 дней бесплатно. Без карты.</p>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 max-w-[780px] mx-auto">
-            {/* Базовый */}
-            <div style={{ padding: '36px 32px', borderRadius: 12, background: R.bg, border: `1px solid ${R.line}`, display: 'flex', flexDirection: 'column' }}>
-              <h3 style={{ fontSize: '1.375rem', fontWeight: 800, color: R.text, letterSpacing: '-0.02em', marginBottom: 8 }}>Базовый</h3>
-              <div style={{ marginBottom: 20 }}>
-                <span className="mono" style={{ fontSize: '2.25rem', fontWeight: 800, color: R.text, letterSpacing: '-0.03em' }}>1 990 ₽</span>
-                <span style={{ fontSize: '0.9375rem', color: R.text2 }}>/мес</span>
-              </div>
-              <p style={{ fontSize: '0.875rem', color: R.text2, marginBottom: 28, lineHeight: 1.6 }}>
-                1 маркетплейс. Поиск потерь, решение дня, калькулятор прибыли.
-              </p>
-              <div style={{ flex: 1 }} />
-              <Link href="/register" className="btn btn-ghost w-full" style={{ justifyContent: 'center', height: 46, borderRadius: 8 }}>
-                Начать бесплатно
-              </Link>
-            </div>
-            {/* Профи */}
-            <div style={{ padding: '36px 32px', borderRadius: 12, background: R.bg, border: `1px solid rgba(124,58,237,0.40)`, display: 'flex', flexDirection: 'column' }}>
-              <div className="inline-flex self-start items-center px-3 py-1 rounded-full mb-5" style={{ background: R.accent, color: '#fff', fontSize: '0.6875rem', fontWeight: 700, letterSpacing: '0.04em' }}>
-                Популярный
-              </div>
-              <h3 style={{ fontSize: '1.375rem', fontWeight: 800, color: R.text, letterSpacing: '-0.02em', marginBottom: 8 }}>Профи</h3>
-              <div style={{ marginBottom: 20 }}>
-                <span className="mono" style={{ fontSize: '2.25rem', fontWeight: 800, color: R.text, letterSpacing: '-0.03em' }}>4 990 ₽</span>
-                <span style={{ fontSize: '0.9375rem', color: R.text2 }}>/мес</span>
-              </div>
-              <p style={{ fontSize: '0.875rem', color: R.text2, marginBottom: 28, lineHeight: 1.6 }}>
-                3 маркетплейса. Всё из Базового + разведка конкурентов, автоакции, SEO, ИИ-агенты.
-              </p>
-              <div style={{ flex: 1 }} />
-              <Link href="/register" className="btn btn-primary w-full" style={{ justifyContent: 'center', height: 46, borderRadius: 8 }}>
-                Начать бесплатно
-              </Link>
+              </article>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      {/* ══ 10. FAQ ══════════════════════════════════════════════════════════ */}
-      <section data-section="faq" style={{ padding: '96px 0' }}>
-        <div className="max-w-[760px] mx-auto px-8">
-          <div style={{ textAlign: 'center', marginBottom: 48 }}>
-            <H2>Коротко о главном</H2>
-          </div>
-          <div className="flex flex-col gap-3">
-            <FaqItem q="Безопасны ли мои данные?" a="Да. Пульт работает только с публичными данными, соответствует 152-ФЗ и не передаёт данные третьим лицам." />
-            <FaqItem q="Нужны ли API-ключи?" a="Нет. Достаточно загрузить выгрузку из кабинета маркетплейса — ключи не требуются." />
-            <FaqItem q="Чем отличается от аналитики?" a="Аналитика показывает цифры и графики. Пульт говорит, где вы теряете деньги и что сделать сегодня — одно конкретное действие." />
-            <FaqItem q="Что после 14 дней?" a="Выбираете тариф или останавливаете — без автоматических списаний." />
-            <FaqItem q="Нужна ли карта?" a="Нет. Регистрация и пробный период — без карты." />
-          </div>
-        </div>
-      </section>
-
-      {/* ══ 11. FINAL CTA ════════════════════════════════════════════════════ */}
-      <section style={{ padding: '112px 32px', textAlign: 'center' }}>
-        <div className="max-w-[600px] mx-auto">
-          <h2 style={{ fontSize: 'clamp(1.875rem, 4vw, 2.5rem)', fontWeight: 800, color: R.text, letterSpacing: '-0.035em', lineHeight: 1.15, marginBottom: 16 }}>
-            Сколько вы теряете прямо сейчас?
-          </h2>
-          <p style={{ fontSize: '1.125rem', color: R.text2, marginBottom: 36 }}>Узнайте за 2 минуты. Без карты.</p>
-          <Link href={startHref} className="btn btn-primary"
-            style={{ height: 56, padding: '0 40px', fontSize: '1.0625rem', fontWeight: 700, borderRadius: 10, gap: 10 }}>
-            Найти мои потери <ArrowRight size={18} />
-          </Link>
-        </div>
-      </section>
-
-      {/* ══ FOOTER ═══════════════════════════════════════════════════════════ */}
-      <footer style={{ background: R.surf, padding: '56px 32px 40px', borderTop: `1px solid ${R.line}` }}>
-        <div className="max-w-[1200px] mx-auto">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-8 mb-10">
-            <div>
-              <div className="flex items-center gap-2.5 mb-3">
-                <PultMark width={18} height={21} style={{ color: '#D5D0F7' }} />
-                <span style={{ fontSize: '1rem', fontWeight: 700, letterSpacing: '-0.02em', color: R.text }}>ПУЛЬТ</span>
-              </div>
-              <p style={{ fontSize: '0.875rem', color: R.text3, maxWidth: 320, lineHeight: 1.6 }}>
-                Находит, где вы теряете прибыль на Wildberries, Ozon и Яндекс Маркете.
-              </p>
+        <section className={styles.systemSection}>
+          <div className={styles.container}>
+            <div className={styles.systemHeader}>
+              <span className={styles.systemIndex}>02 / СИСТЕМА</span>
+              <h2>Спрос → продажи → маржа → остатки</h2>
+              <p>Не четыре отчёта. Один операционный цикл, в котором видно, как решение в одной части бизнеса влияет на остальные.</p>
             </div>
-            <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-              {([['#features', 'Возможности'], ['#pricing', 'Тарифы'], ['/login', 'Войти']] as [string, string][]).map(([href, label]) => (
-                <a key={href} href={href} style={{ fontSize: '0.875rem', color: R.text2, textDecoration: 'none' }}>{label}</a>
+            <div className={styles.systemLine}>
+              {CONTOUR_STAGES.map(({ icon: Icon, label }, index) => (
+                <article key={label}><span>{String(index + 1).padStart(2, '0')}</span><Icon aria-hidden="true" /><strong>{label}</strong></article>
               ))}
             </div>
           </div>
-          <div style={{ height: 1, background: R.line, marginBottom: 24 }} />
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-            <p style={{ fontSize: '0.75rem', color: R.text3 }}>© 2026 ПУЛЬТ</p>
-            <div className="flex items-center gap-6">
-              {([['/privacy', 'Политика'], ['/offer', 'Оферта'], ['/support', 'Контакты']] as [string, string][]).map(([href, label]) => (
-                <Link key={href} href={href} style={{ fontSize: '0.75rem', color: R.text3, textDecoration: 'none' }}>{label}</Link>
+        </section>
+
+        <section className={styles.capabilities} id="possibilities">
+          <div className={styles.container}>
+            <SectionTitle eyebrow="РАБОЧЕЕ ПОЛЕ" lead="Каждый модуль отвечает на понятный вопрос селлера и остаётся частью общей картины.">Весь бизнес — в одной логике управления.</SectionTitle>
+            <div className={styles.capabilityGrid}>
+              {CAPABILITIES.map(({ icon: Icon, index, title, text }) => (
+                <article className={styles.capabilityCard} key={title}>
+                  <div><span>{index}</span><Icon size={21} aria-hidden="true" /></div>
+                  <h3>{title}</h3><p>{text}</p><i aria-hidden="true" />
+                </article>
               ))}
             </div>
           </div>
+        </section>
+
+        <section className={styles.workflow} id="how">
+          <div className={styles.container}>
+            <div className={styles.workflowIntro}>
+              <span>03 / ПУТЬ К РЕШЕНИЮ</span>
+              <h2>Данные входят.<br />Решение выходит.</h2>
+              <p>Пульт последовательно проверяет данные, связывает показатели и формирует рабочую очередь. Вы сохраняете контроль над действием.</p>
+            </div>
+            <ol className={styles.workflowSteps}>
+              <li><span>01</span><div><Upload size={20} aria-hidden="true" /><h3>Передать данные</h3><p>Выбрать доступный способ и источник.</p></div></li>
+              <li><span>02</span><div><Layers3 size={20} aria-hidden="true" /><h3>Собрать контекст</h3><p>Связать показатели в единую модель.</p></div></li>
+              <li><span>03</span><div><Sparkles size={20} aria-hidden="true" /><h3>Увидеть приоритет</h3><p>Получить действие и объяснение его важности.</p></div></li>
+              <li><span>04</span><div><ShieldCheck size={20} aria-hidden="true" /><h3>Принять решение</h3><p>Проверить контекст и действовать осознанно.</p></div></li>
+            </ol>
+          </div>
+        </section>
+
+        <section className={styles.access} id="access">
+          <div className={styles.container}>
+            <div className={styles.accessPanel}>
+              <div className={styles.accessGlow} aria-hidden="true" />
+              <span className={styles.accessMark}><PultMark approvedReference /></span>
+              <p className={styles.accessEyebrow}>РАННИЙ ДОСТУП</p>
+              <h2>Пульт готовится к запуску.</h2>
+              <p className={styles.accessLead}>Финальные тарифы, условия доступа и правила обработки данных будут закреплены в оферте и публичных документах до коммерческого запуска.</p>
+              <Link href={startHref} className={styles.lightButton}>{user ? 'Открыть Пульт' : 'Создать аккаунт'} <ArrowRight size={17} aria-hidden="true" /></Link>
+            </div>
+          </div>
+        </section>
+
+        <section className={styles.faq}>
+          <div className={styles.containerNarrow}>
+            <SectionTitle eyebrow="КОРОТКО О ГЛАВНОМ">Что важно знать сейчас.</SectionTitle>
+            <div className={styles.faqList}>
+              <FaqItem question="Что такое Пульт?">Операционная система селлера: единое рабочее пространство для показателей, сигналов и управленческих решений.</FaqItem>
+              <FaqItem question="Что Пульт показывает первым?">Приоритетную зону внимания, связанный с ней контекст и следующий шаг. Показанный на лендинге сценарий помечен как демо.</FaqItem>
+              <FaqItem question="Это ещё одна система аналитики?">Аналитика остаётся частью продукта, но структура Пульта строится вокруг решений и связей между показателями.</FaqItem>
+              <FaqItem question="Где посмотреть условия?">Финальные условия будут опубликованы до коммерческого запуска. Сейчас продукт и документы находятся на этапе подготовки.</FaqItem>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer className={styles.footer}>
+        <div className={styles.footerInner}>
+          <div className={styles.footerBrand}><Brand /><p>Операционная система селлера.</p></div>
+          <nav aria-label="Навигация в подвале"><a href="#product">Как работает</a><a href="#possibilities">Возможности</a><a href="#access">Доступ</a><Link href="/support">Контакты</Link></nav>
+          <div className={styles.footerBottom}><span>© 2026 ПУЛЬТ</span><span><Link href="/privacy">Политика</Link><Link href="/offer">Оферта</Link></span></div>
         </div>
       </footer>
     </div>
