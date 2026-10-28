@@ -52,7 +52,7 @@ export default function StoreImportPage() {
   const { storeId } = useParams<{ storeId: string }>()
 
   const [store, setStore]   = useState<StoreRef | null>(null)
-  const [head, setHead]     = useState<'loading' | 'ready' | 'blocked'>('loading')
+  const [head, setHead]     = useState<'loading' | 'ready' | 'blocked' | 'failed'>('loading')
   const [stage, setStage]   = useState<Stage>('pick')
   const [chosenType, setChosenType] = useState('products')
   const [file, setFile]     = useState<File | null>(null)
@@ -81,12 +81,14 @@ export default function StoreImportPage() {
   useEffect(() => { if (financeFirst) setChosenType('finance') }, [financeFirst])
 
   const loadHead = useCallback(async () => {
+    setHead('loading')
+    setError('')
     try {
       const page = await api.marketplaceStores.imports(storeId, { page: 1, page_size: 1 })
       setStore(page.store)
       setHead(page.store.status === 'active' ? 'ready' : 'blocked')
     } catch {
-      setHead('blocked')
+      setHead('failed')
       setError('Не удалось открыть магазин. Повторите попытку.')
     }
   }, [storeId])
@@ -132,19 +134,22 @@ export default function StoreImportPage() {
   if (head === 'loading') {
     return (
       <LedgerShell crumbs={crumbs} title="Загрузить CSV">
-        <p className="l-dim" style={{ padding: '24px 0' }}>Загружаем магазин…</p>
+        <p className="l-dim" role="status" style={{ padding: '24px 0' }}>Загружаем магазин…</p>
       </LedgerShell>
     )
   }
 
-  if (head === 'blocked') {
+  if (head === 'blocked' || head === 'failed') {
     return (
       <LedgerShell crumbs={crumbs} title="Загрузить CSV">
         <hr className="l-rule" />
-        <p style={{ padding: '26px 0 0', fontSize: 16, maxWidth: '52ch' }}>
+        <p role={head === 'failed' ? 'alert' : undefined} style={{ padding: '26px 0 0', fontSize: 16, maxWidth: '52ch' }}>
           {error || 'Магазин в архиве. Новые файлы не принимаются, пока магазин не восстановлен.'}
         </p>
-        <div style={{ display: 'flex', gap: 12, paddingTop: 18 }}>
+        <div style={{ display: 'flex', gap: 12, paddingTop: 18, flexWrap: 'wrap' }}>
+          {head === 'failed' && (
+            <button type="button" className="l-btn" onClick={() => void loadHead()}>Повторить</button>
+          )}
           <Link href={`/dashboard/stores/${storeId}`} className="l-btn" style={{ textDecoration: 'none' }}>
             Открыть магазин
           </Link>

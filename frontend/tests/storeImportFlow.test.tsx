@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -168,6 +168,65 @@ describe('store-scoped CSV flow', () => {
     expect(screen.queryByText('Импорт завершён')).toBeNull()
     expect(confirm).toHaveBeenCalledExactlyOnceWith('imp-1', mode)
     expect(screen.getByRole('radio', { name: mode === 'new' ? /Добавить данные/ : /Заменить данные/ })).toBeChecked()
+  })
+
+  it('retries only the store read and keeps the form hidden while waiting', async () => {
+    let resolveRead!: (value: never) => void
+    const read = vi.spyOn(api.marketplaceStores, 'imports')
+      .mockRejectedValueOnce(new Error('private upstream detail'))
+      .mockImplementationOnce(() => new Promise(resolve => { resolveRead = resolve }))
+    const upload = vi.spyOn(api.csvImport, 'upload')
+    const confirm = vi.spyOn(api.csvImport, 'confirm')
+    const user = userEvent.setup()
+    const { container } = render(<StoreImportPage params={{ storeId: 'st-1' }} />)
+    const retry = await screen.findByRole('button', { name: 'Повторить', exact: true })
+    expect(screen.getByRole('alert')).toHaveTextContent(/Не удалось открыть магазин/)
+    expect(container.textContent).not.toContain('private upstream detail')
+    await user.click(retry)
+
+    expect(screen.getByRole('status')).toHaveTextContent('Загружаем магазин…')
+    expect(screen.queryByRole('button', { name: 'Повторить', exact: true })).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(container.querySelector('input[type="file"]')).toBeNull()
+    expect(read).toHaveBeenCalledTimes(2)
+    await act(async () => resolveRead(importsPage))
+    expect(await screen.findByRole('radio', { name: /Товары/ })).toBeInTheDocument()
+    expect(container.querySelector('input[type="file"]')).toBeTruthy()
+    expect(read).toHaveBeenNthCalledWith(2, 'st-1', { page: 1, page_size: 1 })
+    expect(api.csvImport.history).toHaveBeenCalledTimes(1)
+    expect(upload).not.toHaveBeenCalled()
+    expect(confirm).not.toHaveBeenCalled()
+  })
+
+  it('keeps a repeated read failure actionable and still blocks an archived store after recovery', async () => {
+    const read = vi.spyOn(api.marketplaceStores, 'imports')
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockRejectedValueOnce(new Error('still offline'))
+      .mockResolvedValueOnce({ ...importsPage, store: { ...STORE, status: 'archived' } } as never)
+    const user = userEvent.setup()
+    const { container } = render(<StoreImportPage params={{ storeId: 'st-1' }} />)
+    await user.click(await screen.findByRole('button', { name: 'Повторить', exact: true }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(/Не удалось открыть магазин/)
+    expect(container.querySelector('input[type="file"]')).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Повторить', exact: true }))
+    expect(await screen.findByText(/Магазин в архиве/)).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Повторить', exact: true })).toBeNull()
+    expect(container.querySelector('input[type="file"]')).toBeNull()
+    expect(read).toHaveBeenCalledTimes(3)
+  })
+
+  it('preserves finance-first guidance after a successful store-read retry', async () => {
+    vi.spyOn(api.csvImport, 'history').mockResolvedValue([])
+    vi.spyOn(api.marketplaceStores, 'imports')
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce(importsPage)
+    const user = userEvent.setup()
+    render(<StoreImportPage params={{ storeId: 'st-1' }} />)
+    await user.click(await screen.findByRole('button', { name: 'Повторить', exact: true }))
+    expect(await screen.findByRole('radio', { name: /Финансы/ })).toBeChecked()
+    expect(screen.getByRole('radio', { name: /Товары/ })).toBeDisabled()
+    expect(screen.getByRole('radio', { name: /Возвраты/ })).toBeDisabled()
   })
 
   it('refuses to start on an archived store', async () => {
