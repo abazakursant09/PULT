@@ -6,7 +6,7 @@ const ROOT = join(__dirname, '..')
 const read = (path: string) => readFileSync(join(ROOT, path), 'utf8')
 
 const SURFACES: Record<string, number> = {
-  'app/page.tsx': 2,
+  'app/page.tsx': 3, // Shared header/footer Brand plus the story and access marks.
   'app/login/page.tsx': 1,
   'app/register/page.tsx': 2,
   'app/forgot-password/page.tsx': 1,
