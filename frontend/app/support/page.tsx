@@ -1,26 +1,10 @@
 'use client'
 
-import { useState } from 'react'
 import Link from 'next/link'
-import { Headphones, Send, Check, Mail } from 'lucide-react'
-import { MathCaptcha } from '@/components/MathCaptcha'
+import { Headphones, Mail } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
-import { Select, SelectOption } from '@/components/ui/select'
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion'
 import { BlurFade } from '@/components/ui/blur-fade'
-import { Badge } from '@/components/ui/badge'
-
-const SUBJECTS = [
-  { value: 'billing',   label: 'Оплата и подписка' },
-  { value: 'technical', label: 'Техническая проблема' },
-  { value: 'account',   label: 'Аккаунт и доступ' },
-  { value: 'feature',   label: 'Предложение по функционалу' },
-  { value: 'other',     label: 'Другое' },
-]
 
 const FAQ = [
   {
@@ -37,7 +21,7 @@ const FAQ = [
   },
   {
     q: 'Что если ИИ даст неверную рекомендацию?',
-    a: 'Рекомендации ИИ носят информационный характер и не являются финансовым советом. Принимайте решения самостоятельно. Если вы заметили явную ошибку — сообщите нам через форму выше, это поможет улучшить систему.',
+    a: 'Рекомендации ИИ носят информационный характер и не являются финансовым советом. Принимайте решения самостоятельно. Если вы заметили явную ошибку — сообщите в поддержку, это поможет улучшить систему.',
   },
   {
     q: 'Как работает пробный период?',
@@ -53,32 +37,6 @@ const STATUS_ITEMS = [
 ]
 
 export default function SupportPage() {
-  const [form,      setForm]      = useState({ name: '', email: '', subject: '', message: '' })
-  const [sent,      setSent]      = useState(false)
-  const [captchaOk, setCaptchaOk] = useState(false)
-
-  const set = (k: keyof typeof form) =>
-    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
-      setForm(f => ({ ...f, [k]: e.target.value }))
-
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    if (!captchaOk) return
-    try {
-      const raw     = localStorage.getItem('bp_support_tickets')
-      const tickets = raw ? JSON.parse(raw) : []
-      tickets.unshift({ ...form, id: Date.now(), date: new Date().toISOString() })
-      localStorage.setItem('bp_support_tickets', JSON.stringify(tickets.slice(0, 50)))
-    } catch {}
-    setSent(true)
-  }
-
-  function handleReset() {
-    setSent(false)
-    setForm({ name: '', email: '', subject: '', message: '' })
-    setCaptchaOk(false)
-  }
-
   return (
     <div className="min-h-screen" style={{ background: '#F6F9FC' }}>
 
@@ -132,51 +90,18 @@ export default function SupportPage() {
             <BlurFade inView delay={0.1}>
               <Card className="shadow-stripe">
                 <CardHeader>
-                  <CardTitle className="text-lg" style={{ color: '#0A2540' }}>Написать в поддержку</CardTitle>
+                  <CardTitle className="text-lg">Написать в поддержку</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  {sent ? (
-                    <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
-                      <div className="w-16 h-16 rounded-2xl flex items-center justify-center" style={{ background: '#1A73E8' }}>
-                        <Check size={28} style={{ color: 'white' }} />
-                      </div>
-                      <p className="font-semibold text-lg" style={{ color: '#0A2540' }}>Сообщение отправлено!</p>
-                      <p className="text-muted-foreground max-w-sm leading-relaxed">
-                        Спасибо, мы свяжемся с вами в ближайшее время по адресу <strong>{form.email}</strong>.
-                      </p>
-                      <Button variant="ghost" onClick={handleReset} className="mt-2">
-                        Отправить ещё одно сообщение
-                      </Button>
-                    </div>
-                  ) : (
-                    <form onSubmit={handleSubmit} className="space-y-4">
-                      <div className="grid sm:grid-cols-2 gap-4">
-                        <div className="space-y-1.5">
-                          <Label>Имя</Label>
-                          <Input required placeholder="Иван Петров" value={form.name} onChange={set('name')} />
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label>Email</Label>
-                          <Input type="email" required placeholder="you@example.com" value={form.email} onChange={set('email')} />
-                        </div>
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label>Тема</Label>
-                        <Select required value={form.subject} onChange={set('subject')}>
-                          <SelectOption value="">Выберите тему...</SelectOption>
-                          {SUBJECTS.map(s => <SelectOption key={s.value} value={s.value}>{s.label}</SelectOption>)}
-                        </Select>
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label>Сообщение</Label>
-                        <Textarea required rows={5} placeholder="Опишите проблему подробнее..." value={form.message} onChange={set('message')} />
-                      </div>
-                      <MathCaptcha onValid={setCaptchaOk} />
-                      <Button type="submit" disabled={!captchaOk} className="flex items-center gap-2">
-                        <Send size={14} /> Отправить
-                      </Button>
-                    </form>
-                  )}
+                  <div role="note" aria-label="Отправка через сайт недоступна" className="space-y-3 py-4">
+                    <p className="font-semibold">Отправка через сайт пока недоступна</p>
+                    <p className="text-sm leading-relaxed text-muted-foreground">
+                      Сообщения через эту страницу не отправляются. Форма появится после подключения доставки обращений.
+                    </p>
+                    <p className="text-sm leading-relaxed text-muted-foreground">
+                      Адрес электронной почты указан в разделе «Email-поддержка». Переход по почтовой ссылке сам по себе не отправляет письмо.
+                    </p>
+                  </div>
                 </CardContent>
               </Card>
             </BlurFade>
