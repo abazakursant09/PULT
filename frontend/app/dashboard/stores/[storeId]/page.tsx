@@ -24,6 +24,7 @@ export default function StorePage() {
   const [store, setStore] = useState<StoreRef | null>(null)
   const [state, setState] = useState<'loading' | 'ready' | 'missing' | 'failed'>('loading')
   const [restoring, setRestoring] = useState(false)
+  const [restoreError, setRestoreError] = useState('')
 
   const load = useCallback(async () => {
     setState('loading')
@@ -39,10 +40,13 @@ export default function StorePage() {
   useEffect(() => { void load() }, [load])
 
   const restore = async () => {
+    setRestoreError('')
     setRestoring(true)
     try {
       await api.marketplaceAccounts.setStoreStatus(storeId, 'active')
       await load()
+    } catch {
+      setRestoreError('Не удалось подтвердить восстановление магазина. Обновите страницу или повторите попытку.')
     } finally {
       setRestoring(false)
     }
@@ -104,6 +108,8 @@ export default function StorePage() {
           </button>
         </div>
       )}
+
+      {restoreError && <p className="l-oxide" role="alert" style={{ paddingTop: 16 }}>{restoreError}</p>}
 
       {store?.marketplace === 'yandex' && (
         <div style={{ borderLeft: '2px solid var(--ledger-oxide)', padding: '10px 0 10px 14px', margin: '18px 0 0', maxWidth: '60ch' }}>

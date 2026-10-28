@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -139,6 +139,73 @@ describe('store page', () => {
     expect(screen.getByText('Кофе зерновой')).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Загрузить CSV' })).toBeNull()
     expect(screen.getByRole('button', { name: 'Восстановить' })).toBeInTheDocument()
+  })
+
+  it('shows a restoration error and allows a successful retry without optimistic activation', async () => {
+    let currentStore = { ...STORE, status: 'archived' }
+    vi.spyOn(api.marketplaceStores, 'imports').mockImplementation(async () => imports({ store: currentStore }))
+    vi.spyOn(api.marketplaceStores, 'products').mockResolvedValue(products())
+    const restore = vi.spyOn(api.marketplaceAccounts, 'setStoreStatus')
+      .mockRejectedValueOnce(new Error('private upstream detail'))
+      .mockImplementationOnce(async () => {
+        currentStore = STORE
+        return {} as never
+      })
+    const user = userEvent.setup()
+    render(<StorePage params={{ storeId: 'st-1' }} />)
+    await user.click(await screen.findByRole('button', { name: 'Восстановить' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/Не удалось подтвердить восстановление магазина/)
+    expect(screen.getByText(/Магазин в архиве/)).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Загрузить CSV' })).toBeNull()
+    expect(screen.queryByText(/private upstream detail/)).toBeNull()
+    expect(screen.getByRole('button', { name: 'Восстановить' })).toBeEnabled()
+
+    await user.click(screen.getByRole('button', { name: 'Восстановить' }))
+    expect(await screen.findByRole('link', { name: 'Загрузить CSV' })).toHaveAttribute('href', '/dashboard/stores/st-1/import')
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(restore).toHaveBeenNthCalledWith(1, 'st-1', 'active')
+    expect(restore).toHaveBeenNthCalledWith(2, 'st-1', 'active')
+  })
+
+  it('keeps restoration pending until confirmed and reloads the authoritative store', async () => {
+    let currentStore = { ...STORE, status: 'archived' }
+    const list = vi.spyOn(api.marketplaceStores, 'imports').mockImplementation(async () => imports({ store: currentStore }))
+    vi.spyOn(api.marketplaceStores, 'products').mockResolvedValue(products())
+    let finish!: () => void
+    const restore = vi.spyOn(api.marketplaceAccounts, 'setStoreStatus').mockImplementation(() => new Promise(resolve => {
+      finish = () => { currentStore = STORE; resolve({} as never) }
+    }))
+    const user = userEvent.setup()
+    render(<StorePage params={{ storeId: 'st-1' }} />)
+    await user.click(await screen.findByRole('button', { name: 'Восстановить' }))
+    expect(screen.getByRole('button', { name: 'Восстанавливаем…' })).toBeDisabled()
+    expect(screen.queryByRole('link', { name: 'Загрузить CSV' })).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Восстанавливаем…' }))
+    expect(restore).toHaveBeenCalledTimes(1)
+    const readsBefore = list.mock.calls.length
+    await act(async () => finish())
+    expect(await screen.findByRole('link', { name: 'Загрузить CSV' })).toBeInTheDocument()
+    expect(list.mock.calls.length).toBeGreaterThan(readsBefore)
+  })
+
+  it('does not invent success when the post-restoration store reload fails', async () => {
+    let reloadFails = false
+    vi.spyOn(api.marketplaceStores, 'imports').mockImplementation(async () => {
+      if (reloadFails) throw new Error('read failed')
+      return imports({ store: { ...STORE, status: 'archived' } })
+    })
+    vi.spyOn(api.marketplaceStores, 'products').mockResolvedValue(products())
+    vi.spyOn(api.marketplaceAccounts, 'setStoreStatus').mockImplementation(async () => {
+      reloadFails = true
+      return {} as never
+    })
+    const user = userEvent.setup()
+    render(<StorePage params={{ storeId: 'st-1' }} />)
+    await user.click(await screen.findByRole('button', { name: 'Восстановить' }))
+    expect(await screen.findByText(/Не удалось открыть магазин/)).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Загрузить CSV' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Повторить' })).toBeEnabled()
   })
 
   it('says the store is missing instead of showing an empty page', async () => {
