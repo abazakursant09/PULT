@@ -153,6 +153,23 @@ describe('store-scoped CSV flow', () => {
     expect(link.getAttribute('href')).toBe('/dashboard/imports/imp-1/conflicts')
   })
 
+  it.each(['new', 'overwrite'] as const)('does not claim rollback after a lost %s confirmation response', async mode => {
+    vi.spyOn(api.csvImport, 'upload').mockResolvedValue(preview())
+    const confirm = vi.spyOn(api.csvImport, 'confirm').mockRejectedValue(new TypeError('Failed to fetch'))
+    const user = userEvent.setup()
+    const { container } = render(<StoreImportPage params={{ storeId: 'st-1' }} />)
+    await reachPreview(user, container)
+    if (mode === 'overwrite') await user.click(await screen.findByRole('radio', { name: /Заменить данные/ }))
+    await user.click(await screen.findByRole('button', { name: /Импортировать 100 строк/i }))
+
+    expect(await screen.findByText(/Не удалось получить результат импорта/)).toHaveAttribute('role', 'alert')
+    expect(screen.getByText(/Перед повторной попыткой проверьте историю импортов в магазине/)).toBeInTheDocument()
+    expect(container.textContent).not.toMatch(/Импорт не выполнен|Данные магазина не изменились/)
+    expect(screen.queryByText('Импорт завершён')).toBeNull()
+    expect(confirm).toHaveBeenCalledExactlyOnceWith('imp-1', mode)
+    expect(screen.getByRole('radio', { name: mode === 'new' ? /Добавить данные/ : /Заменить данные/ })).toBeChecked()
+  })
+
   it('refuses to start on an archived store', async () => {
     vi.spyOn(api.marketplaceStores, 'imports').mockResolvedValue(
       { ...importsPage, store: { ...STORE, status: 'archived' } } as never)

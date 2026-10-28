@@ -98,7 +98,7 @@ describe('CSV upload flow (the only way data enters PULT)', () => {
     expect(screen.queryByText('Импорт завершён')).toBeNull()
   })
 
-  it('reports a failed import at the confirm step', async () => {
+  it('reports an unconfirmed outcome at the confirm step', async () => {
     vi.spyOn(api.csvImport, 'upload').mockResolvedValue(preview)
     vi.spyOn(api.csvImport, 'confirm').mockRejectedValue(new Error('HTTP 500'))
     const user = userEvent.setup()
@@ -109,7 +109,8 @@ describe('CSV upload flow (the only way data enters PULT)', () => {
     await user.click(screen.getByRole('button', { name: /Проверить файл/i }))
     await user.click(await screen.findByRole('button', { name: /Импортировать 120 строк/i }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(/Импорт не выполнен/)
+    expect(await screen.findByRole('alert')).toHaveTextContent(/Не удалось получить результат импорта/)
+    expect(screen.getByRole('alert')).not.toHaveTextContent(/Данные магазина не изменились/)
     expect(screen.queryByText('Импорт завершён')).toBeNull()
   })
 })
