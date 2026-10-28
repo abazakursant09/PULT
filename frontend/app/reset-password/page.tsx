@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useState } from 'react'
 import Link from 'next/link'
+import authStyles from '../auth.module.css'
 import { useRouter } from 'next/navigation'
 import { KeyRound, ArrowRight, CheckCircle2, Loader2 } from 'lucide-react'
 import { PultMark } from '@/components/brand/PultMark'
@@ -60,8 +61,8 @@ function ResetPasswordContent() {
 
   if (done) {
     return (
-      <div className="min-h-screen flex items-center justify-center px-5" style={{ background: 'var(--bg)' }}>
-        <Card className="p-10 text-center w-full max-w-[400px]">
+      <div className={`${authStyles.surface} min-h-screen flex items-center justify-center px-5`} >
+        <Card className={`${authStyles.width} p-10 text-center w-full max-w-[400px]`}>
           <div className="flex justify-center mb-5">
             <div
               className="w-14 h-14 rounded-full flex items-center justify-center"
@@ -70,7 +71,7 @@ function ResetPasswordContent() {
               <CheckCircle2 size={28} style={{ color: 'var(--violet-text)' }} />
             </div>
           </div>
-          <h2 className="font-semibold mb-2" style={{ fontSize: '1.25rem', color: 'var(--text)' }}>Пароль изменён!</h2>
+          <h1 className="font-semibold mb-2" style={{ fontSize: '1.25rem', color: 'var(--text)' }}>Пароль изменён!</h1>
           <p style={{ color: 'var(--text-2)', fontSize: '0.9375rem' }}>Переходим на страницу входа...</p>
           <Loader2 size={18} className="animate-spin mx-auto mt-4" style={{ color: 'var(--violet-text)' }} />
         </Card>
@@ -80,24 +81,22 @@ function ResetPasswordContent() {
 
   return (
     <div
-      className="min-h-screen flex items-center justify-center px-5 py-16 relative overflow-hidden"
-      style={{ background: 'var(--bg)' }}
+      className={`${authStyles.surface} min-h-screen flex items-center justify-center px-5 py-16 relative overflow-hidden`}
+
     >
       <div
         className="absolute inset-0 pointer-events-none"
         style={{ background: 'radial-gradient(ellipse 80% 55% at 50% -5%, rgba(26,115,232,0.12) 0%, transparent 65%)' }}
       />
-      <div aria-hidden style={{ position: 'fixed', top: '10%', right: '-8%', width: 360, height: 360, background: 'radial-gradient(circle, rgba(26,115,232,0.055) 0%, transparent 65%)', animation: 'orbDrift 18s ease-in-out infinite', filter: 'blur(44px)', pointerEvents: 'none', zIndex: 0 }} />
-
-      <div className="w-full max-w-[440px] animate-fade-in relative" style={{ zIndex: 2 }}>
+      <div className={`${authStyles.width} w-full max-w-[440px] animate-fade-in relative`} style={{ zIndex: 2 }}>
         <div className="text-center mb-10">
-          <Link href="/" className="inline-flex items-center gap-3">
-            <PultMark width={30} height={35} style={{ color: 'var(--violet-text)' }} />
+          <Link href="/" className={authStyles.brand}>
+            <PultMark approvedReference width={30} height={35} style={{ color: 'var(--violet-text)' }} />
             <span className="font-bold tracking-tight text-gradient-gold" style={{ fontSize: '2.25rem' }}>Пульт</span>
           </Link>
         </div>
 
-        <Card className="p-9 sm:p-11">
+        <Card className={`${authStyles.panel} p-9 sm:p-11`}>
           <div className="flex items-center gap-3 mb-8">
             <div
               className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
@@ -106,9 +105,9 @@ function ResetPasswordContent() {
               <KeyRound size={18} style={{ color: 'var(--violet-text)' }} />
             </div>
             <div>
-              <h2 className="font-semibold" style={{ fontSize: '1.5rem', color: 'var(--text)', lineHeight: 1.2 }}>
+              <h1 className="font-semibold" style={{ fontSize: '1.5rem', color: 'var(--text)', lineHeight: 1.2 }}>
                 Новый пароль
-              </h2>
+              </h1>
               <p style={{ fontSize: '0.875rem', color: 'var(--text-2)', marginTop: 2 }}>Придумайте надёжный пароль</p>
             </div>
           </div>
@@ -183,7 +182,7 @@ function ResetPasswordContent() {
 export default function ResetPasswordPage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg)' }}>
+      <div className={`${authStyles.surface} min-h-screen flex items-center justify-center`} >
         <Loader2 size={32} style={{ color: 'var(--violet-text)' }} className="animate-spin" />
       </div>
     }>

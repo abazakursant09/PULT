@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
+import authStyles from '../auth.module.css'
 import { useRouter } from 'next/navigation'
 import { ArrowRight, Shield } from 'lucide-react'
 import { PultMark } from '@/components/brand/PultMark'
@@ -77,36 +78,22 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-6" style={{ background: '#09090B' }}>
-      {/* Subtle grid */}
-      <div className="fixed inset-0 hero-grid pointer-events-none" style={{ opacity: 0.6 }} />
+    <div className={`${authStyles.surface} min-h-screen flex items-center justify-center p-6`} >
 
-      <div className="w-full max-w-[380px] animate-fade-in" style={{ position: 'relative' }}>
+      <div className={`${authStyles.width} w-full max-w-[380px] animate-fade-in`} style={{ position: 'relative' }}>
 
-        {/* Logo mark */}
-        <div className="flex flex-col items-center mb-9">
-          <div style={{
-            width: 52, height: 52, borderRadius: 14,
-            background: '#111113',
-            border: '1px solid #232329',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            marginBottom: 18,
-            boxShadow: '0 0 0 1px rgba(124,58,237,0.15), 0 8px 24px rgba(0,0,0,0.5)',
-          }}>
-            <PultMark width={29} height={32} style={{ color: '#E9E6FF' }} />
-          </div>
-          <h1 style={{ fontSize: 24, fontWeight: 700, color: '#FFFFFF', letterSpacing: '-0.03em', lineHeight: 1, marginBottom: 6 }}>
-            ПУЛЬТ
-          </h1>
-          <p style={{ fontSize: 12.5, color: '#52525B', letterSpacing: '0.03em', textAlign: 'center' }}>
-            Операционная система селлера
-          </p>
+        <div className={authStyles.brand}>
+          <PultMark approvedReference width={29} height={33} />
+          <span className={authStyles.brandName}>ПУЛЬТ</span>
         </div>
+        <div className={authStyles.panel}>
+          <h1 className={authStyles.heading}>{step === 'mfa' ? 'Подтвердите вход' : 'Войти в Пульт'}</h1>
+          <p className={authStyles.lead}>Операционная система селлера</p>
 
         {/* Session expired info */}
         {info && (
           <div role="status" className="mb-4 px-4 py-3 rounded-[8px] text-[13px]"
-               style={{ background: 'rgba(110,106,252,0.08)', border: '1px solid rgba(110,106,252,0.2)', color: '#A78BFA' }}>
+               style={{ background: 'rgba(110,106,252,0.08)', border: '1px solid rgba(110,106,252,0.2)', color: 'var(--violet-text)' }}>
             {info}
           </div>
         )}
@@ -114,7 +101,7 @@ export default function LoginPage() {
         {/* Error */}
         {error && (
           <div role="alert" className="mb-5 px-4 py-3 rounded-[8px] text-[13px]"
-               style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: '#FCA5A5' }}>
+               style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: 'var(--danger)' }}>
             {error}
             {/* Login is blocked until email is verified. Rather than dead-end the seller, offer
                 a resend right here, using the email they just typed. */}
@@ -131,7 +118,7 @@ export default function LoginPage() {
                         + 'Проверьте папку «Спам» или попробуйте позже.')
                 }}
                 className="block mt-2 underline"
-                style={{ color: '#FCA5A5', fontSize: '12.5px' }}
+                style={{ color: 'var(--danger)', fontSize: '12.5px' }}
               >
                 Отправить письмо для подтверждения ещё раз
               </button>
@@ -166,9 +153,9 @@ export default function LoginPage() {
                   <Link
                     href="/forgot-password"
                     className="text-[11px] transition-colors duration-200"
-                    style={{ color: '#71717A', textDecoration: 'none' }}
+                    style={{ color: 'var(--text-2)', textDecoration: 'none' }}
                     onMouseEnter={e => { e.currentTarget.style.color = '#7C3AED' }}
-                    onMouseLeave={e => { e.currentTarget.style.color = '#71717A' }}
+                    onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-2)' }}
                   >
                     Забыли пароль?
                   </Link>
@@ -200,8 +187,8 @@ export default function LoginPage() {
                   aria-hidden="true"
                   className="flex items-center justify-center w-4 h-4 rounded-[4px] cursor-pointer shrink-0 peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--violet-text)]"
                   style={{
-                    background: remember ? '#A78BFA' : 'transparent',
-                    border: `1.5px solid ${remember ? '#A78BFA' : 'rgba(255,255,255,0.15)'}`,
+                    background: remember ? 'var(--violet-text)' : 'transparent',
+                    border: `1.5px solid ${remember ? 'var(--violet-text)' : 'var(--line)'}`,
                   }}
                 >
                   {remember && (
@@ -212,7 +199,7 @@ export default function LoginPage() {
                 </div>
                 <span
                   className="text-[13px]"
-                  style={{ color: '#71717A' }}
+                  style={{ color: 'var(--text-2)' }}
                 >
                   Запомнить меня
                 </span>
@@ -231,11 +218,11 @@ export default function LoginPage() {
               </button>
             </form>
 
-            <p className="text-center mt-6 text-[13px]" style={{ color: '#71717A' }}>
+            <p className="text-center mt-6 text-[13px]" style={{ color: 'var(--text-2)' }}>
               Нет аккаунта?{' '}
               <Link
                 href="/register"
-                style={{ color: '#A78BFA', textDecoration: 'none' }}
+                style={{ color: 'var(--violet-text)', textDecoration: 'none' }}
                 onMouseEnter={e => { e.currentTarget.style.opacity = '0.8' }}
                 onMouseLeave={e => { e.currentTarget.style.opacity = '1' }}
               >
@@ -249,17 +236,17 @@ export default function LoginPage() {
           <form method="post" onSubmit={submitMfa} className="space-y-4">
             <div
               className="flex items-center gap-3 mb-2 p-4 rounded-[8px]"
-              style={{ background: '#111113', border: '1px solid rgba(255,255,255,0.08)' }}
+              style={{ background: 'var(--surface)', border: '1px solid rgba(255,255,255,0.08)' }}
             >
               <div
                 className="w-9 h-9 rounded-[8px] flex items-center justify-center shrink-0"
                 style={{ background: 'rgba(110,106,252,0.10)', border: '1px solid rgba(110,106,252,0.20)' }}
               >
-                <Shield size={16} style={{ color: '#A78BFA' }} />
+                <Shield size={16} style={{ color: 'var(--violet-text)' }} />
               </div>
               <div>
-                <p className="text-[14px] font-semibold" style={{ color: '#FFFFFF' }}>{t('mfa.title')}</p>
-                <p className="text-[12px]" style={{ color: '#71717A' }}>{t('mfa.subtitle')}</p>
+                <p className="text-[14px] font-semibold" style={{ color: 'var(--text)' }}>{t('mfa.title')}</p>
+                <p className="text-[12px]" style={{ color: 'var(--text-2)' }}>{t('mfa.subtitle')}</p>
               </div>
             </div>
 
@@ -282,7 +269,7 @@ export default function LoginPage() {
                 autoFocus
                 style={{ width: '100%', fontSize: 28, letterSpacing: '0.4em', height: 56 }}
               />
-              <p className="text-[11px] mt-1.5 text-center" style={{ color: '#71717A' }}>{t('mfa.hint')}</p>
+              <p className="text-[11px] mt-1.5 text-center" style={{ color: 'var(--text-2)' }}>{t('mfa.hint')}</p>
             </div>
 
             <button
@@ -307,6 +294,7 @@ export default function LoginPage() {
             </button>
           </form>
         )}
+        </div>
       </div>
     </div>
   )

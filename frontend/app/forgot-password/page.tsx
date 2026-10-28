@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import authStyles from '../auth.module.css'
 import { Send, ArrowLeft, KeyRound } from 'lucide-react'
 import { PultMark } from '@/components/brand/PultMark'
 import { api } from '@/lib/api'
@@ -33,25 +34,22 @@ export default function ForgotPasswordPage() {
 
   return (
     <div
-      className="min-h-screen flex items-center justify-center px-5 py-16 relative overflow-hidden"
-      style={{ background: 'var(--bg)' }}
+      className={`${authStyles.surface} min-h-screen flex items-center justify-center px-5 py-16 relative overflow-hidden`}
+
     >
       <div
         className="absolute inset-0 pointer-events-none"
         style={{ background: 'radial-gradient(ellipse 80% 55% at 50% -5%, rgba(26,115,232,0.12) 0%, transparent 65%)' }}
       />
-      <div aria-hidden style={{ position: 'fixed', top: '10%', right: '-8%', width: 360, height: 360, background: 'radial-gradient(circle, rgba(26,115,232,0.055) 0%, transparent 65%)', animation: 'orbDrift 18s ease-in-out infinite', filter: 'blur(44px)', pointerEvents: 'none', zIndex: 0 }} />
-      <div aria-hidden style={{ position: 'fixed', bottom: '15%', left: '-6%', width: 280, height: 280, background: 'radial-gradient(circle, rgba(26,115,232,0.04) 0%, transparent 65%)', animation: 'orbDrift2 22s ease-in-out infinite', filter: 'blur(38px)', pointerEvents: 'none', zIndex: 0 }} />
-
-      <div className="w-full max-w-[440px] animate-fade-in relative" style={{ zIndex: 2 }}>
+      <div className={`${authStyles.width} w-full max-w-[440px] animate-fade-in relative`} style={{ zIndex: 2 }}>
         <div className="text-center mb-10">
-          <Link href="/" className="inline-flex items-center gap-3">
-            <PultMark width={30} height={35} style={{ color: 'var(--violet-text)' }} />
+          <Link href="/" className={authStyles.brand}>
+            <PultMark approvedReference width={30} height={35} style={{ color: 'var(--violet-text)' }} />
             <span className="font-bold tracking-tight text-gradient-gold" style={{ fontSize: '2.25rem' }}>Пульт</span>
           </Link>
         </div>
 
-        <Card className="p-9 sm:p-11">
+        <Card className={`${authStyles.panel} p-9 sm:p-11`}>
           <div className="flex items-center gap-3 mb-8">
             <div
               className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
@@ -60,9 +58,9 @@ export default function ForgotPasswordPage() {
               <KeyRound size={18} style={{ color: 'var(--violet-text)' }} />
             </div>
             <div>
-              <h2 className="font-semibold" style={{ fontSize: '1.5rem', color: 'var(--text)', lineHeight: 1.2 }}>
+              <h1 className="font-semibold" style={{ fontSize: '1.5rem', color: 'var(--text)', lineHeight: 1.2 }}>
                 Восстановление пароля
-              </h2>
+              </h1>
               <p style={{ fontSize: '0.875rem', color: 'var(--text-2)', marginTop: 2 }}>Введите email от аккаунта</p>
             </div>
           </div>
