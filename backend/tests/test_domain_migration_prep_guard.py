@@ -60,6 +60,7 @@ def test_old_domain_inventory_is_complete_and_classified():
         "frontend/app/rules/page.tsx",
         "frontend/app/support/page.tsx",
         "frontend/app/terms/page.tsx",
+        "frontend/tests/supportDeliveryHonesty.test.tsx",
     }
     actual = {
         path.relative_to(REPO).as_posix()
@@ -75,6 +76,8 @@ def test_old_domain_inventory_is_complete_and_classified():
     migration = _r(MIG)
     assert "docs/legal/attorney-review-request-23.md" in migration
     assert "immutable historical snapshot" in migration
+    assert "frontend/tests/supportDeliveryHonesty.test.tsx" in migration
+    assert "test-only assertion that existing contact links stay unchanged" in migration
     assert "frontend/tests/{legalConsistency,notificationHonesty}.test.tsx" not in migration
 
 

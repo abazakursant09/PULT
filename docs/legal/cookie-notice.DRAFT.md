@@ -16,10 +16,14 @@
 - `bp_remember_email` — email для «запомнить меня», только по выбору пользователя (`frontend/app/login/page.tsx:48`);
 - `lang` — язык интерфейса; `pult_theme` — тема; `pult_cabinet_mode` — режим кабинета; `pult_onboarded` — флаг пройденного онбординга;
 - `cookie_consent` — отметка, что уведомление о cookie показано на этом устройстве `{acknowledged, timestamp}`; баннер сам не устанавливает никакую JS-cookie (`frontend/components/CookieBanner.tsx`);
-- локальные черновики и истории отдельных функций: `bp_support_tickets` (обращения поддержки), `bp_success_stories`, `bp_voted_ideas`, `bp_referral_stats_v2`/`bp_referral_invitees_v2` (демо), `startup_step1`/`startup_step2`/`startPlan` (мастер), `ae_active_count`, `chist_<productKey>` (история скоринга креативов);
+- локальные черновики и истории отдельных функций: `bp_success_stories`, `bp_voted_ideas`, `bp_referral_stats_v2`/`bp_referral_invitees_v2` (демо), `startup_step1`/`startup_step2`/`startPlan` (мастер), `ae_active_count`, `chist_<productKey>` (история скоринга креативов);
 - `sessionStorage.copilot_dismissed` — скрытый элемент подсказки.
 
 Легаси-ключ `token` только удаляется (одноразовая очистка), не читается и не отправляется (`frontend/lib/session.ts:12,47`). Эти данные не должны использоваться для межсайтового профилирования.
+
+## Историческое локальное хранилище поддержки
+
+Ключ `bp_support_tickets` мог остаться на устройстве после использования прежней формы поддержки. Страница `frontend/app/support/page.tsx` больше не читает и не записывает этот ключ; существующие записи автоматически не удаляются. Такие записи не подтверждают отправку обращения: прежняя форма сохраняла данные только в браузере, без доставки в поддержку. Текущая страница сообщает, что отправка через сайт недоступна, и не собирает новые сообщения.
 
 ## Аналитика — фактически НЕ работает
 

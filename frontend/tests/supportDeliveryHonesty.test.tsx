@@ -52,4 +52,17 @@ describe('support delivery honesty while no delivery endpoint exists', () => {
     const source = readFileSync(join(__dirname, '../app/support/page.tsx'), 'utf8')
     expect(source).not.toMatch(/bp_support_tickets|localStorage|sessionStorage|setSent|fetch\s*\(|axios|api\./)
   })
+
+  it('documents the old ticket key as historical, not current storage', () => {
+    const notice = readFileSync(join(__dirname, '../../docs/legal/cookie-notice.DRAFT.md'), 'utf8')
+    const current = notice.match(/## Локальное хранилище[\s\S]*?(?=\n## )/)?.[0]
+    expect(current).toBeTruthy()
+    expect(current).not.toContain('bp_support_tickets')
+    const historical = notice.match(/## Историческое локальное хранилище поддержки[\s\S]*?(?=\n## )/)?.[0]
+    expect(historical).toContain('bp_support_tickets')
+    expect(historical).toContain('больше не читает и не записывает')
+    expect(historical).toContain('существующие записи автоматически не удаляются')
+    expect(notice).toContain('DRAFT — НЕ ПУБЛИКОВАТЬ')
+    expect(notice).toContain('REQUIRES RUSSIAN COUNSEL REVIEW')
+  })
 })
