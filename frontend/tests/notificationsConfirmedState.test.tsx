@@ -30,6 +30,18 @@ it('shows empty only after a successful empty response', async () => {
   expect(screen.queryByRole('alert')).not.toBeInTheDocument()
 })
 
+it('describes an empty unread filter as page-local, not an empty inbox', async () => {
+  const response = data()
+  response.items[0].is_read = true
+  vi.mocked(api.notifications.list).mockResolvedValue(response)
+  render(<NotificationsPage />)
+  await screen.findByText('Тестовое уведомление')
+  fireEvent.click(screen.getByRole('button', { name: /^Непрочитанные/ }))
+  expect(screen.getByText('На этой странице нет непрочитанных уведомлений')).toBeInTheDocument()
+  expect(screen.queryByText('Уведомлений пока нет')).not.toBeInTheDocument()
+  expect(screen.getByText('2 непрочитанных')).toBeInTheDocument()
+})
+
 it('preserves unread items and counters after a rejected single read', async () => {
   vi.mocked(api.notifications.markRead).mockRejectedValue(new Error('offline'))
   render(<NotificationsPage />)

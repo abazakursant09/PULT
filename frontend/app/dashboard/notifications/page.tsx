@@ -169,8 +169,8 @@ export default function NotificationsPage() {
                     <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4" style={{ background: 'color-mix(in srgb, var(--violet) 8%, transparent)' }}>
                       <Bell size={24} style={{ color: 'var(--violet-text)' }} />
                     </div>
-                    <p className="font-semibold mb-2" style={{ color: 'var(--text)' }}>Уведомлений пока нет</p>
-                    <p className="text-sm text-muted-foreground">Здесь появятся события по вашему бизнесу</p>
+                    <p className="font-semibold mb-2" style={{ color: 'var(--text)' }}>{tab === 'unread' ? 'На этой странице нет непрочитанных уведомлений' : 'Уведомлений пока нет'}</p>
+                    <p className="text-sm text-muted-foreground">{tab === 'unread' ? 'Можно проверить другие страницы или открыть вкладку «Все».' : 'Здесь появятся события по вашему бизнесу'}</p>
                   </CardContent>
                 </Card>
               ) : (
