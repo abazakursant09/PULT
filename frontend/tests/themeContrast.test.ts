@@ -4,6 +4,20 @@ import { describe, expect, it } from 'vitest'
 
 const read = (path: string) => readFileSync(join(__dirname, '..', path), 'utf8')
 const css = read('styles/globals.css')
+const authCss = read('app/auth.module.css')
+
+function authSurfaceDefects(source: string, stylesheet: string) {
+  const defects: string[] = []
+  if (!source.includes("import authStyles from '../auth.module.css'")) defects.push('missing-shared-surface')
+  if (!source.includes('authStyles.surface')) defects.push('missing-scoped-root')
+  if (/background:\s*['"]#[a-f\d]{3,8}\b/i.test(source)) defects.push('page-background-island')
+  const root = stylesheet.match(/\.surface\s*\{([^}]+)\}/)?.[1] ?? ''
+  for (const token of ['bg', 'surface', 'text', 'text-2', 'line', 'violet', 'primary-foreground']) {
+    if (!new RegExp(`--${token}:`).test(root)) defects.push(`missing-${token}`)
+  }
+  if (/:root|\[data-seller-theme|:global\((?:body|html)\)/.test(stylesheet)) defects.push('theme-leak')
+  return defects
+}
 
 function luminance(rgb: number[]) {
   const linear = rgb.map(v => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)
@@ -27,13 +41,30 @@ function contrast(a: number[], b: number[]) {
 }
 
 describe('theme primary action contrast', () => {
-  for (const page of ['register', 'forgot-password', 'reset-password', 'verify-email']) {
+  for (const page of ['login', 'register', 'forgot-password', 'reset-password', 'verify-email']) {
     it(`${page} does not mix light-only page colors with shared dark cards`, () => {
       const source = read(`app/${page}/page.tsx`)
       expect(source).not.toMatch(/#(?:F6F9FC|F8F9FA|0A2540|202124|425466|8A8986)\b/i)
-      expect(source).toContain('var(--bg)')
+      expect(authSurfaceDefects(source, authCss)).toEqual([])
     })
   }
+  it('auth text and primary actions remain readable on the owned light surface', () => {
+    const root = authCss.match(/\.surface\s*\{([^}]+)\}/)![1]
+    const token = (name: string) => hexRgb(root.match(new RegExp(`--${name}:\\s*(#[a-f\\d]{6})`, 'i'))![1])
+    for (const name of ['text', 'text-2', 'text-3']) expect(contrast(token(name), token('bg'))).toBeGreaterThanOrEqual(4.5)
+    for (const name of ['violet', 'violet-h']) expect(contrast([1, 1, 1], token(name))).toBeGreaterThanOrEqual(4.5)
+  })
+  it.each([
+    ['surface token removed', (s: string) => s.replace('--surface:', '--retired-surface:')],
+    ['scope leaks into seller themes', (s: string) => s + '\n[data-seller-theme="champagne"] { color: red; }'],
+  ])('auth guard rejects %s', (_label, mutate) => {
+    expect(authSurfaceDefects(read('app/register/page.tsx'), mutate(authCss))).not.toEqual([])
+  })
+  it('auth guard rejects a missing wrapper or a hardcoded page background', () => {
+    const source = read('app/register/page.tsx')
+    expect(authSurfaceDefects(source.replaceAll('authStyles.surface', 'retiredSurface'), authCss)).not.toEqual([])
+    expect(authSurfaceDefects(source + "\nconst style = { background: '#09090B' }", authCss)).not.toEqual([])
+  })
   it('settings connection notice inherits an existing theme surface without a light fallback', () => {
     const source = read('components/connections/ConnectionsSection.tsx')
     expect(source).toContain("background: 'var(--surface-h)'")

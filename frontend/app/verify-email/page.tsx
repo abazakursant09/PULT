@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
+import authStyles from '../auth.module.css'
 import { CheckCircle2, XCircle, Loader2 } from 'lucide-react'
 import { PultMark } from '@/components/brand/PultMark'
 import { api } from '@/lib/api'
@@ -78,28 +79,25 @@ function VerifyEmailContent() {
 
   return (
     <div
-      className="min-h-screen flex items-center justify-center px-5"
-      style={{ background: 'var(--bg)', position: 'relative', overflow: 'hidden' }}
-    >
-      <div aria-hidden style={{ position: 'fixed', top: '5%', right: '-8%', width: 380, height: 380, background: 'radial-gradient(circle, rgba(26,115,232,0.06) 0%, transparent 65%)', animation: 'orbDrift 18s ease-in-out infinite', filter: 'blur(44px)', pointerEvents: 'none', zIndex: 0 }} />
-      <div aria-hidden style={{ position: 'fixed', bottom: '10%', left: '-6%', width: 300, height: 300, background: 'radial-gradient(circle, rgba(26,115,232,0.04) 0%, transparent 65%)', animation: 'orbDrift2 22s ease-in-out infinite', filter: 'blur(38px)', pointerEvents: 'none', zIndex: 0 }} />
-      <div className="w-full max-w-[420px]">
+      className={`${authStyles.surface} min-h-screen flex items-center justify-center px-5`}
+      style={{ position: 'relative', overflow: 'hidden' }}
+    >      <div className={`${authStyles.width} w-full max-w-[420px]`}>
         <div className="text-center mb-10">
-          <Link href="/" className="inline-flex items-center gap-3">
-            <PultMark width={28} height={32} style={{ color: 'var(--violet-text)' }} />
-            <span className="font-bold tracking-tight text-gradient-gold" style={{ fontSize: '2rem' }}>Пульт</span>
+          <Link href="/" className={authStyles.brand}>
+            <PultMark approvedReference width={28} height={32} style={{ color: 'var(--violet-text)' }} />
+            <span className="font-bold tracking-tight text-gradient-gold" style={{ fontSize: '1.1rem' }}>Пульт</span>
           </Link>
         </div>
 
-        <Card className="p-9 text-center">
+        <Card className={`${authStyles.panel} p-9 text-center`}>
           {status === 'loading' && (
             <>
               <div className="flex justify-center mb-5">
                 <Loader2 size={36} style={{ color: 'var(--violet-text)' }} className="animate-spin" />
               </div>
-              <h2 className="font-semibold mb-2" style={{ fontSize: '1.25rem', color: 'var(--text)' }}>
+              <h1 className="font-semibold mb-2" style={{ fontSize: '1.25rem', color: 'var(--text)' }}>
                 Подтверждаем email...
-              </h2>
+              </h1>
               <p style={{ color: 'var(--text-2)', fontSize: '0.9375rem' }}>Пожалуйста, подождите</p>
             </>
           )}
@@ -114,9 +112,9 @@ function VerifyEmailContent() {
                   <CheckCircle2 size={28} style={{ color: 'var(--violet-text)' }} />
                 </div>
               </div>
-              <h2 className="font-semibold mb-2" style={{ fontSize: '1.25rem', color: 'var(--text)' }}>
+              <h1 className="font-semibold mb-2" style={{ fontSize: '1.25rem', color: 'var(--text)' }}>
                 Email подтверждён!
-              </h2>
+              </h1>
               <p style={{ color: 'var(--text-2)', fontSize: '0.9375rem', marginBottom: 16 }}>
                 Переходим в панель управления...
               </p>
@@ -134,9 +132,9 @@ function VerifyEmailContent() {
                   <XCircle size={28} style={{ color: 'var(--danger)' }} />
                 </div>
               </div>
-              <h2 className="font-semibold mb-2" style={{ fontSize: '1.25rem', color: 'var(--text)' }}>
+              <h1 className="font-semibold mb-2" style={{ fontSize: '1.25rem', color: 'var(--text)' }}>
                 Не удалось подтвердить
-              </h2>
+              </h1>
               <p style={{ color: 'var(--text-2)', fontSize: '0.9375rem', marginBottom: 20 }}>
                 {message} Ссылка могла устареть или уже быть использована — если вы уже
                 подтвердили email, просто войдите.
@@ -159,7 +157,7 @@ function VerifyEmailContent() {
 export default function VerifyEmailPage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg)' }}>
+      <div className={`${authStyles.surface} min-h-screen flex items-center justify-center`}>
         <Loader2 size={32} style={{ color: 'var(--violet-text)' }} className="animate-spin" />
       </div>
     }>

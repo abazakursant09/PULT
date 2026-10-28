@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
+import authStyles from '../auth.module.css'
 import { useRouter } from 'next/navigation'
 import { ArrowRight, MailCheck, CheckCircle2 } from 'lucide-react'
 import { api } from '@/lib/api'
@@ -9,7 +10,7 @@ import { useLang } from '@/lib/lang-context'
 import { LanguageSwitcher } from '@/components/LanguageSwitcher'
 import { MathCaptcha } from '@/components/MathCaptcha'
 import { PultMark } from '@/components/brand/PultMark'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardDescription } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
@@ -147,15 +148,15 @@ export default function RegisterPage() {
 
   if (registered) {
     return (
-      <div className="min-h-screen flex items-center justify-center px-5 py-16" style={{ background: 'var(--bg)' }}>
-        <BlurFade className="w-full max-w-[460px]" inView>
+      <div className={`${authStyles.surface} min-h-screen flex items-center justify-center px-5 py-16`} >
+        <BlurFade className={`${authStyles.width} w-full max-w-[460px]`} inView>
           <div className="text-center mb-8">
-            <Link href="/" className="inline-flex items-center gap-3">
-              <PultMark width={32} height={37} style={{ color: 'var(--violet-text)' }} />
+            <Link href="/" className={authStyles.brand}>
+              <PultMark approvedReference width={32} height={37} style={{ color: 'var(--violet-text)' }} />
               <span className="font-bold text-xl tracking-tight" style={{ color: 'var(--text)' }}>ПУЛЬТ</span>
             </Link>
           </div>
-          <Card className="shadow-stripe-lg">
+          <Card className={`${authStyles.panel} ${authStyles.registerPanel} shadow-stripe-lg`}>
             <CardContent className="p-8">
               <div className="flex items-center justify-center mb-6">
                 <div className="w-16 h-16 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(26,115,232,0.1)', border: '1px solid rgba(26,115,232,0.2)' }}>
@@ -217,17 +218,17 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-5 py-12" style={{ background: 'var(--bg)' }}>
+    <div className={`${authStyles.surface} min-h-screen flex items-center justify-center px-5 py-12`} >
 
       <div className="absolute top-5 right-5 z-20">
         <LanguageSwitcher />
       </div>
 
-      <BlurFade className="w-full max-w-[460px]" inView delay={0.05}>
+      <BlurFade className={`${authStyles.width} w-full max-w-[460px]`} inView delay={0.05}>
 
         <div className="text-center mb-8">
-          <Link href="/" className="inline-flex items-center gap-3">
-            <PultMark width={32} height={37} style={{ color: 'var(--violet-text)' }} />
+          <Link href="/" className={authStyles.brand}>
+            <PultMark approvedReference width={32} height={37} style={{ color: 'var(--violet-text)' }} />
             <span className="font-bold text-xl tracking-tight" style={{ color: 'var(--text)' }}>ПУЛЬТ</span>
           </Link>
           <p className="mt-2 text-sm text-muted-foreground">{t('register.positioning')}</p>
@@ -248,11 +249,11 @@ export default function RegisterPage() {
           ))}
         </div>
 
-        <Card className="shadow-stripe-lg border-border/60">
+        <Card className={`${authStyles.panel} ${authStyles.registerPanel} shadow-stripe-lg border-border/60`}>
           <CardHeader className="pb-4">
-            <CardTitle className="text-2xl font-bold" style={{ letterSpacing: '-0.02em', color: 'var(--text)' }}>
+            <h1 className="text-2xl font-bold" style={{ letterSpacing: '-0.02em', color: 'var(--text)' }}>
               {t('register.title')}
-            </CardTitle>
+            </h1>
             <CardDescription style={{ color: 'var(--text-2)' }}>{t('register.subtitle')}</CardDescription>
           </CardHeader>
 
@@ -290,7 +291,7 @@ export default function RegisterPage() {
                     <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'hsl(var(--border))' }}>
                       <div className="h-full rounded-full transition-all duration-300" style={{ width: `${passwordStrength}%`, background: strengthColor }} />
                     </div>
-                    <p className="text-xs" style={{ color: strengthColor }}>{strengthLabel}</p>
+                    <p className="text-xs" style={{ color: 'var(--text-2)' }}>{strengthLabel}</p>
                   </div>
                 )}
               </div>

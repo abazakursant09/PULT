@@ -1,0 +1,32 @@
+.surface {
+  --bg: #e7e9f0; --surface: rgba(255,255,255,.68); --surface-h: #edf0f5; --elevated: #f7f8fb;
+  --text: #151827; --text-2: #565c6e; --text-3: #5d6575; --line: rgba(21,24,39,.16);
+  --violet: #151827; --violet-h: #25293a; --violet-text: #4337a8; --violet-dim: rgba(104,87,219,.1);
+  --danger: #a12832; --success: #167a62; --warning: #815a13;
+  --background: 227 23% 92%; --foreground: 230 30% 12%; --card: 230 30% 98%; --card-foreground: 230 30% 12%;
+  --muted-foreground: 225 12% 38%; --border: 226 17% 79%; --input: 230 30% 98%; --primary-foreground: 0 0% 100%;
+  --r-sm: 10px;
+  position: relative; isolation: isolate; color: var(--text); color-scheme: light;
+  background: radial-gradient(ellipse at 85% 5%,rgba(150,119,237,.17),transparent 60%),linear-gradient(140deg,#f7f8fb,#e7e9f0);
+}
+.surface .width { width: 100%; max-width: 380px; position: relative; z-index: 1; }
+.surface .panel { border: 1px solid rgba(255,255,255,.85); border-radius: 20px; background: var(--surface); padding: 24px; box-shadow: 0 16px 40px rgba(48,52,72,.07); }
+.surface .registerPanel { padding: 0; text-align: left; }
+.surface .brand { display: flex; flex-direction: row; align-items: center; justify-content: center; gap: 10px; margin-bottom: 24px; color: var(--text); }
+.surface .brandName { font-size: 18px; font-weight: 800; letter-spacing: .1em; line-height: 1.2; }
+.surface .heading { margin: 0 0 10px; color: var(--text); font-size: 26px; font-weight: 700; line-height: 1.15; letter-spacing: -.03em; }
+.surface .lead { margin: 0 0 24px; color: var(--text-2); font-size: 15px; line-height: 1.5; }
+.surface input:not([type='checkbox']) { color: var(--text); background: rgba(255,255,255,.75); border-color: var(--line); font-size: 16px; min-height: 44px; }
+.surface input::placeholder { color: var(--text-3); opacity: 1; }
+.surface label { color: var(--text); font-size: 14px; line-height: 1.5; }
+.surface :global(.btn-primary) { background: var(--violet); color: #fff; }
+.surface :global(.btn-secondary), .surface :global(.btn-ghost) { color: var(--text); }
+.surface :global(.text-gradient-gold) { background: none; color: var(--text); -webkit-text-fill-color: currentColor; }
+.surface :is(a,button,input):focus-visible { outline: 2px solid #6857db; outline-offset: 3px; }
+@media (max-width: 480px) {
+  .surface { padding-inline: 16px; }
+  .surface .panel:not(.registerPanel) { padding: 24px 20px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .surface *, .surface *::before, .surface *::after { animation: none !important; transition: none !important; }
+}
