@@ -1,0 +1,149 @@
+.page {--ink:#151827;--muted:#565c6e;--quiet:#5d6575;--violet:#4337a8;--line:rgba(21,24,39,.12);--glass:rgba(255,255,255,.72);--base:#e7e9f0;color-scheme:light}
+.page *{box-sizing:border-box}
+.page{margin:0;font-family:var(--font-inter),Inter,'Segoe UI',sans-serif;color:var(--ink);background:radial-gradient(ellipse at 92% 2%,rgba(150,119,237,.17),transparent 52%),linear-gradient(140deg,#f7f8fb,var(--base));min-height:100vh;-webkit-font-smoothing:antialiased}
+.page a{color:inherit;text-decoration:none}
+.page summary{font:inherit}
+.page a:focus-visible,.page summary:focus-visible{outline:2px solid #6857db;outline-offset:5px;border-radius:6px}
+
+.top{border-bottom:1px solid rgba(21,24,39,.08);background:rgba(255,255,255,.28)}
+
+.topInner{width:min(1200px,calc(100% - 96px));height:96px;margin:auto;display:flex;align-items:center;justify-content:space-between;gap:24px}
+
+.brand{display:flex;align-items:center;gap:12px;flex-shrink:0}
+.brandTile{width:48px;height:54px;display:grid;place-items:center;border:1px solid rgba(255,255,255,.9);border-radius:12px;background:rgba(255,255,255,.5);box-shadow:0 5px 20px rgba(77,63,139,.08)}
+
+.mark{width:36px;height:auto;display:block}
+.brandName{font-size:23px;line-height:1.05;font-weight:800;letter-spacing:.09em}
+.brandCaption{display:block;font-size:11px;color:var(--muted);margin-top:7px;letter-spacing:.075em}
+
+.nav{display:flex;align-items:center;gap:30px;font-size:14px;font-weight:600}
+.home{display:flex;gap:8px;align-items:center;min-height:44px}
+.home svg{width:16px;height:16px}
+.login{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:0 23px;border:1px solid rgba(21,24,39,.12);border-radius:11px;background:rgba(255,255,255,.48)}
+.main{width:min(1160px,calc(100% - 96px));margin:auto;padding:64px 0 0}
+
+.eyebrow{font-size:13px;font-weight:650;letter-spacing:.15em;color:var(--violet);display:flex;gap:12px;align-items:center;margin-bottom:18px}
+.eyebrow:before{content:'';width:24px;height:1px;background:rgba(67,55,168,.55)}
+.page h1{font-size:51px;line-height:1.08;font-weight:750;letter-spacing:-.045em;margin:0;max-width:800px}
+.intro{font-size:18px;line-height:1.65;color:var(--muted);max-width:660px;margin:20px 0 0}
+.intro a{color:var(--violet);text-decoration:underline;text-underline-offset:4px;text-decoration-color:rgba(67,55,168,.35)}
+.contact{scroll-margin-top:24px}
+
+.workspace{display:grid;grid-template-columns:minmax(0,1.83fr) minmax(0,1fr);gap:24px;align-items:start;margin-top:42px}
+
+.panel{background:var(--glass);border:1px solid rgba(255,255,255,.95);border-radius:24px;box-shadow:0 18px 48px rgba(48,52,72,.055);backdrop-filter:blur(20px)}
+
+.faq{padding:28px 32px 8px}
+.panelTitle{font-size:23px;font-weight:680;letter-spacing:-.025em;margin:0}
+.panelSub{font-size:14px;color:var(--muted);line-height:1.6;margin:9px 0 21px}
+.page details{border-top:1px solid var(--line)}
+.page summary{list-style:none;cursor:pointer;min-height:76px;display:flex;align-items:center;justify-content:space-between;gap:20px;font-size:17px;font-weight:600;line-height:1.4;padding:18px 0}
+.page summary::-webkit-details-marker{display:none}
+.page summary svg{width:20px;height:20px;flex-shrink:0;color:var(--quiet);transition:transform .18s ease}
+.page details[open] summary{padding-bottom:12px;color:var(--violet)}
+.page details[open] summary svg{transform:rotate(180deg);color:var(--violet)}
+
+.answer{font-size:16px;line-height:1.75;color:var(--muted);padding:0 28px 22px 0}
+.answer p{margin:0 0 14px}
+.answer a{display:inline-flex;align-items:center;gap:9px;color:var(--violet);font-weight:600;font-size:14px;min-height:36px}
+.answer a svg{width:17px;height:17px}
+
+.contact{padding:28px}
+.mailIcon{width:44px;height:44px;display:grid;place-items:center;border:1px solid rgba(104,87,219,.12);background:rgba(104,87,219,.07);border-radius:13px;color:var(--violet);margin-bottom:23px}
+.mailIcon svg{width:22px;height:22px}
+
+.contact .panelTitle{font-size:22px}
+.contactLead{font-size:15px;color:var(--muted);line-height:1.65;margin:12px 0 16px}
+.email{font-size:20px;font-weight:600;letter-spacing:-.035em;display:inline-block;max-width:100%;overflow-wrap:anywhere;line-height:1.5;color:var(--violet);margin-bottom:21px}
+
+.primary{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:50px;border-radius:11px;padding:13px 16px;background:var(--ink);box-shadow:0 7px 15px rgba(21,24,39,.1);color:white;font-size:14px;font-weight:600;line-height:1.5}
+.primary svg{width:19px;height:19px;flex-shrink:0}
+
+.mailExplain{font-size:14px;line-height:1.65;color:var(--quiet);margin:15px 0 24px}
+.delivery{border-top:1px solid var(--line);padding-top:20px}
+.deliveryTitle{font-size:14px;line-height:1.5;font-weight:650;margin:0 0 8px;display:flex;gap:9px;align-items:flex-start}
+.deliveryTitle svg{width:17px;height:17px;flex-shrink:0;margin-top:2px;color:var(--quiet)}
+.delivery p:last-child{font-size:14px;line-height:1.65;color:var(--muted);margin:0}
+
+.status{display:flex;gap:18px;align-items:center;padding:22px 27px;margin-top:24px;border-radius:17px;border:1px solid rgba(255,255,255,.85);background:rgba(255,255,255,.36)}
+.statusIcon{width:37px;height:37px;border-radius:50%;display:grid;place-items:center;flex-shrink:0;background:rgba(255,255,255,.6);border:1px solid rgba(21,24,39,.1);color:var(--quiet)}
+.statusIcon svg{width:18px;height:18px}
+.status h2{font-size:15px;font-weight:650;margin:0 0 5px}
+.status p{font-size:14px;line-height:1.6;margin:0;color:var(--muted)}
+.statusLabel{margin-left:auto;font-size:14px;font-weight:550;color:var(--muted);white-space:nowrap;border-left:1px solid var(--line);padding-left:24px}
+.footer{width:min(1160px,calc(100% - 96px));margin:45px auto 0;border-top:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:24px 0 32px;gap:24px;font-size:13px;color:var(--quiet)}
+.footer strong{font-weight:650;color:var(--muted)}
+.footer a{min-height:36px;display:flex;align-items:center}
+
+@media(min-width:1500px){.main{padding-top:76px}
+}
+
+@media(max-width:900px){.topInner,.main,.footer{width:calc(100% - 48px)}
+.workspace{grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:18px}
+.faq{padding:24px 24px 6px}
+.contact{padding:24px}
+.page h1{font-size:44px}
+.statusLabel{display:none}
+}
+
+@media(max-width:700px){.topInner{height:80px;width:calc(100% - 36px);gap:12px}
+.brand{gap:8px}
+.brandTile{width:38px;height:44px;border-radius:10px}
+.mark{width:29px}
+.brandName{font-size:19px}
+.brandCaption{display:none}
+.nav{gap:14px;font-size:13px}
+.home{font-size:14px}
+.home svg{display:none}
+.login{min-height:44px;padding:0 13px;font-size:14px}
+.workspace{grid-template-columns:1fr;margin-top:30px;gap:20px}
+.main,.footer{width:calc(100% - 36px)}
+.main{padding-top:38px}
+.eyebrow{font-size:12px;margin-bottom:16px}
+.page h1{font-size:37px;line-height:1.12;letter-spacing:-.04em;max-width:480px}
+.intro{font-size:16px;margin-top:17px;line-height:1.65}
+.panel{border-radius:21px}
+.faq{padding:23px 22px 4px}
+.panelTitle{font-size:22px}
+.panelSub{font-size:14px;margin-bottom:18px}
+.contact{padding:24px}
+.contact .panelTitle{font-size:23px}
+.mailIcon{margin-bottom:20px}
+.page summary{font-size:16px;min-height:76px;gap:12px}
+.answer{font-size:15px;padding-right:0}
+.answer a{font-size:14px;min-height:44px}
+.email{font-size:22px}
+.contactLead{font-size:15px}
+.primary{min-height:50px;font-size:14px}
+.mailExplain{font-size:14px}
+.status{padding:20px;gap:13px;align-items:flex-start;margin-top:20px}
+.statusIcon{width:32px;height:32px;margin-top:2px}
+.status h2{line-height:1.5;font-size:15px}
+.status p{font-size:14px}
+.statusLabel{display:none}
+.footer{margin-top:32px;padding:21px 0 26px;font-size:13px;align-items:flex-start}
+.footer span{max-width:210px;line-height:1.6}
+.footer a{white-space:nowrap}
+}
+
+@media(max-width:350px){.topInner,.main,.footer{width:calc(100% - 32px)}
+.nav{gap:10px}
+.brandName{font-size:18px;letter-spacing:.06em}
+.brandTile{width:35px;height:40px}
+.mark{width:27px}
+.home,.login{font-size:14px}
+.login{padding:0 10px}
+.page h1{font-size:34px}
+.faq{padding-inline:19px}
+.contact{padding:22px}
+.email{font-size:20px}
+}
+
+@media(prefers-reduced-motion:reduce){.page *{transition:none!important}
+}
+
+.page .email{color:var(--violet)}
+
+.page .primary{color:white}
+
+.mark{aspect-ratio:340/382}
