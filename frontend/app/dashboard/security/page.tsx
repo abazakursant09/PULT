@@ -1,7 +1,7 @@
 'use client'
 
 import { isAuthenticated } from "@/lib/session"
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Shield, ShieldCheck, ShieldOff, Copy, Check, RefreshCw, AlertTriangle, ArrowLeft,
@@ -18,7 +18,7 @@ type Phase = 'idle' | 'setup' | 'verify' | 'disable'
 export default function SecurityPage() {
   const router = useRouter()
 
-  const [mfaEnabled,  setMfaEnabled]  = useState(false)
+  const [mfaEnabled,  setMfaEnabled]  = useState<boolean | null>(null)
   const [loading,     setLoading]     = useState(true)
   const [phase,       setPhase]       = useState<Phase>('idle')
   const [secret,      setSecret]      = useState('')
@@ -28,16 +28,33 @@ export default function SecurityPage() {
   const [error,       setError]       = useState('')
   const [success,     setSuccess]     = useState('')
   const [copied,      setCopied]      = useState(false)
+  const [statusError, setStatusError] = useState('')
+  const statusRequest = useRef(0)
 
   useEffect(() => {
     if (!isAuthenticated()) { router.push('/login'); return }
-    api.mfa.status()
-      .then(s => setMfaEnabled(s.enabled))
-      .catch(() => {})
-      .finally(() => setLoading(false))
+    void loadStatus()
+    return () => { statusRequest.current += 1 }
   }, [router])
 
+  async function loadStatus() {
+    const current = ++statusRequest.current
+    setLoading(true)
+    setMfaEnabled(null)
+    setStatusError('')
+    try {
+      const status = await api.mfa.status()
+      if (typeof status.enabled !== 'boolean') throw new Error('Unknown MFA status')
+      if (current === statusRequest.current) setMfaEnabled(status.enabled)
+    } catch {
+      if (current === statusRequest.current) setStatusError('Не удалось загрузить статус двухфакторной аутентификации. Повторите загрузку.')
+    } finally {
+      if (current === statusRequest.current) setLoading(false)
+    }
+  }
+
   async function startSetup() {
+    if (loading || mfaEnabled !== false) return
     setError(''); setWorking(true)
     try {
       const data = await api.mfa.setup()
@@ -94,7 +111,7 @@ export default function SecurityPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg)' }}>
+      <div role="status" aria-label="Загрузка статуса двухфакторной аутентификации" className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg)' }}>
         <RefreshCw size={28} className="animate-spin" style={{ color: 'var(--text-3)' }} />
       </div>
     )
@@ -133,6 +150,13 @@ export default function SecurityPage() {
           </div>
         )}
 
+        {mfaEnabled === null ? (
+          <Card className="p-7 sm:p-9 mb-6">
+            <h2 className="font-semibold text-base mb-3" style={{ color: 'var(--text)' }}>Статус защиты не подтверждён</h2>
+            <p role="alert" className="text-sm mb-5" style={{ color: 'var(--danger)' }}>{statusError}</p>
+            <Button variant="secondary" onClick={() => loadStatus()}>Повторить загрузку</Button>
+          </Card>
+        ) : (
         <Card className="p-7 sm:p-9 mb-6">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
             <div className="flex items-center gap-4">
@@ -174,6 +198,7 @@ export default function SecurityPage() {
             </div>
           </div>
         </Card>
+        )}
 
         {phase === 'setup' && (
           <Card className="p-7 sm:p-9 animate-slide-up mb-6">
