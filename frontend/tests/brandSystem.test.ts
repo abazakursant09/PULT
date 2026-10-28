@@ -12,6 +12,7 @@ const SURFACES: Record<string, number> = {
   'app/forgot-password/page.tsx': 1,
   'app/reset-password/page.tsx': 1,
   'app/verify-email/page.tsx': 1,
+  'app/support/page.tsx': 1,
   'components/seller/Shell.tsx': 1,
 }
 

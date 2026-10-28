@@ -10,7 +10,7 @@ const PRODUCT_NAME_SURFACES = {
   'dashboard/security/page.tsx': { token: 'название «Пульт»', count: 1 },
   'startup/[step]/page.tsx': { token: 'Пульт берёт всё на автопилот', count: 1 },
   'startup/calculator/page.tsx': { token: 'Начать с Пультом', count: 2 },
-  'support/page.tsx': { token: 'Пульт', count: 2 },
+  'support/page.tsx': { token: 'Пульт', count: 3 },
 } as const
 
 function productNameDefects(source: string): string[] {
