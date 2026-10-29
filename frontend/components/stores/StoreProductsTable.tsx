@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, type StoreProductsPage } from '@/lib/api'
 import { ErrorState } from '@/components/system/ErrorState'
 
@@ -26,27 +26,41 @@ const PLACEMENT_LABEL: Record<string, string> = {
 }
 
 export function StoreProductsTable({ storeId }: { storeId: string }) {
-  const [data, setData] = useState<StoreProductsPage | null>(null)
+  return <StoreProductsForStore key={storeId} storeId={storeId} />
+}
+
+function StoreProductsForStore({ storeId }: { storeId: string }) {
+  const [result, setResult] = useState<{ page: number; data: StoreProductsPage } | null>(null)
   const [page, setPage] = useState(1)
   const [failed, setFailed] = useState(false)
+  const requestId = useRef(0)
+  const data = result?.page === page ? result.data : null
 
   const load = useCallback(async (p: number) => {
+    const current = ++requestId.current
+    setResult(null)
     setFailed(false)
     try {
-      setData(await api.marketplaceStores.products(storeId, { page: p, page_size: PAGE_SIZE }))
+      const response = await api.marketplaceStores.products(storeId, { page: p, page_size: PAGE_SIZE })
+      if (requestId.current === current) setResult({ page: p, data: response })
     } catch {
-      setData(null)
-      setFailed(true)
+      if (requestId.current === current) {
+        setResult(null)
+        setFailed(true)
+      }
     }
   }, [storeId])
 
-  useEffect(() => { void load(page) }, [load, page])
+  useEffect(() => {
+    void load(page)
+    return () => { requestId.current += 1 }
+  }, [load, page])
 
   if (failed) {
     return <ErrorState message="Не удалось загрузить товары магазина." onRetry={() => void load(page)} />
   }
   if (data === null) {
-    return <p className="l-dim" style={{ padding: '24px 0' }}>Загружаем товары…</p>
+    return <p className="l-dim" role="status" style={{ padding: '24px 0' }}>Загружаем товары…</p>
   }
   if (data.total === 0) {
     return (

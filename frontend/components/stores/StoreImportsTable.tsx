@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, type StoreImportsPage } from '@/lib/api'
 import { ErrorState } from '@/components/system/ErrorState'
 
@@ -35,27 +35,41 @@ function fmtDateTime(iso: string): string {
 }
 
 export function StoreImportsTable({ storeId }: { storeId: string }) {
-  const [data, setData] = useState<StoreImportsPage | null>(null)
+  return <StoreImportsForStore key={storeId} storeId={storeId} />
+}
+
+function StoreImportsForStore({ storeId }: { storeId: string }) {
+  const [result, setResult] = useState<{ page: number; data: StoreImportsPage } | null>(null)
   const [page, setPage] = useState(1)
   const [failed, setFailed] = useState(false)
+  const requestId = useRef(0)
+  const data = result?.page === page ? result.data : null
 
   const load = useCallback(async (p: number) => {
+    const current = ++requestId.current
+    setResult(null)
     setFailed(false)
     try {
-      setData(await api.marketplaceStores.imports(storeId, { page: p, page_size: PAGE_SIZE }))
+      const response = await api.marketplaceStores.imports(storeId, { page: p, page_size: PAGE_SIZE })
+      if (requestId.current === current) setResult({ page: p, data: response })
     } catch {
-      setData(null)
-      setFailed(true)
+      if (requestId.current === current) {
+        setResult(null)
+        setFailed(true)
+      }
     }
   }, [storeId])
 
-  useEffect(() => { void load(page) }, [load, page])
+  useEffect(() => {
+    void load(page)
+    return () => { requestId.current += 1 }
+  }, [load, page])
 
   if (failed) {
     return <ErrorState message="Не удалось загрузить историю загрузок." onRetry={() => void load(page)} />
   }
   if (data === null) {
-    return <p className="l-dim" style={{ padding: '24px 0' }}>Загружаем историю…</p>
+    return <p className="l-dim" role="status" style={{ padding: '24px 0' }}>Загружаем историю…</p>
   }
   if (data.total === 0) {
     return (
