@@ -13,6 +13,7 @@ import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/textarea'
+import { ErrorState } from '@/components/system/ErrorState'
 
 const A   = 'var(--violet)'
 const ABG = 'color-mix(in srgb, var(--violet) 8%, transparent)'
@@ -165,6 +166,7 @@ const EMPTY_CHINA: SupplierVerificationCreate = {
 export default function SupplierVerifyPage() {
   const [myApps,   setMyApps]   = useState<SupplierVerification[]>([])
   const [loading,  setLoading]  = useState(true)
+  const [loadFailed, setLoadFailed] = useState(false)
   const [country,  setCountry]  = useState<'russia' | 'china'>('russia')
   const [form,     setForm]     = useState<SupplierVerificationCreate>(EMPTY_RUSSIA)
   const [submitting, setSubmitting] = useState(false)
@@ -177,7 +179,8 @@ export default function SupplierVerifyPage() {
 
   async function loadMy() {
     setLoading(true)
-    try { setMyApps(await api.suppliers.my()) } catch {}
+    setLoadFailed(false)
+    try { setMyApps(await api.suppliers.my()) } catch { setLoadFailed(true) }
     finally { setLoading(false) }
   }
 
@@ -232,8 +235,13 @@ export default function SupplierVerifyPage() {
       </Card>
 
       {loading ? (
-        <div className="flex justify-center py-10">
-          <RefreshCw size={24} className="animate-spin text-muted-foreground" />
+        <div className="flex justify-center py-10" role="status" aria-label="Загрузка заявок">
+          <RefreshCw size={24} className="animate-spin text-muted-foreground" aria-hidden="true" />
+        </div>
+      ) : loadFailed ? (
+        <div role="alert">
+          <ErrorState message="Не удалось загрузить ваши заявки." onRetry={() => void loadMy()}
+            retryLabel="Повторить загрузку заявок" paddingTop={24} />
         </div>
       ) : (
         <>
@@ -427,13 +435,16 @@ export default function SupplierVerifyPage() {
 function VerifiedList() {
   const [list,    setList]    = useState<SupplierVerification[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadFailed, setLoadFailed] = useState(false)
 
-  useEffect(() => {
-    api.suppliers.listVerified()
-      .then(setList)
-      .catch(() => {})
-      .finally(() => setLoading(false))
-  }, [])
+  async function load() {
+    setLoading(true)
+    setLoadFailed(false)
+    try { setList(await api.suppliers.listVerified()) } catch { setLoadFailed(true) }
+    finally { setLoading(false) }
+  }
+
+  useEffect(() => { void load() }, [])
 
   return (
     <Card className="p-6 sm:p-8">
@@ -442,8 +453,13 @@ function VerifiedList() {
       </h2>
 
       {loading ? (
-        <div className="flex justify-center py-6">
-          <RefreshCw size={20} className="animate-spin text-muted-foreground" />
+        <div className="flex justify-center py-6" role="status" aria-label="Загрузка реестра">
+          <RefreshCw size={20} className="animate-spin text-muted-foreground" aria-hidden="true" />
+        </div>
+      ) : loadFailed ? (
+        <div role="alert">
+          <ErrorState message="Не удалось загрузить реестр производителей." onRetry={() => void load()}
+            retryLabel="Повторить загрузку реестра" paddingTop={24} />
         </div>
       ) : list.length === 0 ? (
         <p className="text-sm text-center py-6" style={{ color: 'var(--text-2)' }}>
