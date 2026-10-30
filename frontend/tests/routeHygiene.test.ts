@@ -31,6 +31,7 @@ describe('route release policy is fail-closed', () => {
       '/community',
       '/dashboard/finance',
       '/dashboard/leaks',
+      '/dashboard/monitor',
       '/dashboard/opportunities',
       '/dashboard/products',
       '/dashboard/risks',
@@ -84,6 +85,22 @@ describe('route release policy is fail-closed', () => {
   it('matches a route boundary, not a lookalike prefix', () => {
     expect(matchesRoutePrefix('/academy/lesson', '/academy')).toBe(true)
     expect(matchesRoutePrefix('/academy-fake', '/academy')).toBe(false)
+  })
+
+  it.each(['/dashboard/monitor', '/dashboard/monitor/events', '/dashboard/monitor/check'])('contains the unverified monitor at %s before auth', route => {
+    for (const authenticated of [false, true]) {
+      const request = new NextRequest(`http://localhost${route}`, authenticated ? { headers: { cookie: 'pult_session_dev=synthetic' } } : undefined)
+      const response = middleware(request)
+      expect(response.status).toBe(404)
+      expect(response.headers.get('location')).toBeNull()
+    }
+    for (const growthContour of [false, true]) for (const billing of [false, true]) {
+      expect(isRouteUnavailable(route, { growthContour, billing })).toBe(true)
+    }
+  })
+
+  it('does not quarantine a monitor lookalike route prefix', () => {
+    expect(isRouteUnavailable('/dashboard/monitoring', { growthContour: true, billing: true })).toBe(false)
   })
 
   it('returns 404 before auth for a disabled route', () => {

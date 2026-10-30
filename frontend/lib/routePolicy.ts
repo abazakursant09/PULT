@@ -11,6 +11,7 @@ export const UNAVAILABLE_ROUTE_PREFIXES = [
   '/community',
   '/dashboard/finance',
   '/dashboard/leaks',
+  '/dashboard/monitor',
   '/dashboard/opportunities',
   '/dashboard/products',
   '/dashboard/risks',
