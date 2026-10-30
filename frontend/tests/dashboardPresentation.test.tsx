@@ -67,7 +67,7 @@ describe('P2 — honest empty state preserved', () => {
   it('BusinessToday still states missing data plainly and invents no numbers', async () => {
     vi.spyOn(api.today, 'getSummary').mockResolvedValue({ ...todayWithData, has_data: false })
     render(<BusinessToday />)
-    expect(await screen.findByText('Недостаточно данных за сегодня')).toBeInTheDocument()
+    expect(await screen.findByText('Недостаточно финансовых данных')).toBeInTheDocument()
     expect(screen.queryByText('Выручка')).not.toBeInTheDocument()
   })
 })

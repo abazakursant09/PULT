@@ -46,7 +46,7 @@ describe('BusinessToday', () => {
 
     render(<BusinessToday />)
 
-    expect(await screen.findByText('Недостаточно данных за сегодня')).toBeInTheDocument()
+    expect(await screen.findByText('Недостаточно финансовых данных')).toBeInTheDocument()
     expect(screen.queryByText('Выручка')).not.toBeInTheDocument()
   })
 
@@ -64,7 +64,7 @@ describe('BusinessToday', () => {
     await screen.findByText('Продажи')
     expect(screen.getAllByRole('heading', { level: 3 }).map(n => n.textContent))
       .toEqual(['Спрос', 'Продажи', 'Маржа', 'Остатки'])
-    expect(screen.getByText('Сегодня · выручка к вчера')).toBeInTheDocument()
+    expect(screen.getByText('29.10.2026')).toBeInTheDocument()
     expect(screen.queryByText('ДЕМО')).not.toBeInTheDocument()
     expect(screen.queryByText(/55.940|7 дней|Оценка эффекта/)).not.toBeInTheDocument()
     expect(container.querySelectorAll('article')).toHaveLength(4)
@@ -95,7 +95,7 @@ describe('BusinessToday', () => {
     render(<BusinessToday />)
     expect(await screen.findAllByText('—')).toHaveLength(3)
     expect(screen.queryByText(/NaN|0 ₽/)).not.toBeInTheDocument()
-    const profit = screen.getByText('Прибыль сегодня').nextElementSibling!
+    const profit = screen.getByText('Прибыль за период').nextElementSibling!
     expect(profit).toHaveTextContent('—')
     expect(profit).toHaveStyle({ color: 'var(--text-3)' })
   })

@@ -2857,6 +2857,11 @@ export interface FirstRunState {
 }
 
 export interface TodaySummary {
+  period_from?:              string | null
+  period_to?:                string | null
+  comparison_from?:          string | null
+  comparison_to?:            string | null
+  is_partial?:               boolean
   revenue_today:              number | null
   profit_today:               number | null
   margin_pct:                 number | null

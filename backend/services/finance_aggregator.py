@@ -98,6 +98,11 @@ class DailySummary:
     top_product:       Optional[str] = None
     active_products:   int = 0
     avg_rating:        Optional[float] = None
+    period_from:       Optional[str] = None
+    period_to:         Optional[str] = None
+    comparison_from:   Optional[str] = None
+    comparison_to:     Optional[str] = None
+    is_partial:        bool = False
 
 
 @dataclass
@@ -342,11 +347,13 @@ async def get_daily_summary(user_id: str) -> DailySummary:
             return DailySummary(has_data=False, is_demo=True, period_label="")
 
         yest_data = await _agg_period(user_id, yest_str, yest_str, db)
+        comparison_range = None
 
         if yest_data.has_data:
             prev_data     = await _agg_period(user_id, prev_str, prev_str, db)
             main          = yest_data
             comp          = prev_data if prev_data.has_data else None
+            comparison_range = (prev_str, prev_str) if comp is not None else None
             period_label  = f"вчера, {yest.strftime('%d.%m.%Y')}"
             top_range     = (yest_str, yest_str)
         else:
@@ -355,6 +362,7 @@ async def get_daily_summary(user_id: str) -> DailySummary:
             if today_data.has_data:
                 main         = today_data
                 comp         = yest_data if yest_data.has_data else None
+                comparison_range = (yest_str, yest_str) if comp is not None else None
                 period_label = f"сегодня, {today.strftime('%d.%m.%Y')}"
                 top_range    = (today_str, today_str)
             else:
@@ -385,6 +393,11 @@ async def get_daily_summary(user_id: str) -> DailySummary:
         top_product=top_name,
         active_products=active_products,
         avg_rating=avg_rating,
+        period_from=top_range[0],
+        period_to=top_range[1],
+        comparison_from=comparison_range[0] if comparison_range else None,
+        comparison_to=comparison_range[1] if comparison_range else None,
+        is_partial=top_range[1] == today_str,
     )
 
 
