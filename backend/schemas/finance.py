@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 
 class RevenueConflictCandidates(BaseModel):
@@ -15,16 +15,28 @@ class StoreFinanceSummaryOut(BaseModel):
     finance_aggregator.store_financial_totals already computes — no new calculation. `source`,
     `completeness`, `conflict` describe the store's REVENUE resolution (API vs CSV); `conflict` is an
     API-vs-CSV revenue disagreement, never a claim about every metric. net_profit is null (not 0)
-    when it cannot be formed (an API-sourced store has no cost of goods)."""
+    when it cannot be formed (an API-sourced store has no cost of goods).
+    no_data describes the selected REVENUE source. unassigned_revenue independently preserves
+    known unmatched CSV-import money, even if the selected API source has no usable data."""
     store_id:           str
-    revenue:            float
+    revenue:            Optional[float]
     net_profit:         Optional[float] = None
     unassigned_revenue: float
-    source:             str                    # api | csv — the source of the store's money total
-    completeness:       str                    # complete | incomplete
+    source:             Optional[str]          # api | csv; None only for explicit no_data
+    completeness:       str                    # complete | incomplete | no_data
     missing_fields:     list[str] = []
     conflict:           bool = False
     conflict_candidates: Optional[RevenueConflictCandidates] = None
+
+    @model_validator(mode="after")
+    def consistent_absence(self):
+        if self.completeness == "no_data":
+            if (self.revenue is not None or self.net_profit is not None or self.source is not None
+                    or self.conflict or self.conflict_candidates is not None):
+                raise ValueError("no_data must not claim resolved money, a source, or a conflict")
+        elif self.revenue is None or self.source is None:
+            raise ValueError("missing revenue/source requires explicit no_data")
+        return self
 
 
 class FinancialSnapshotOut(BaseModel):

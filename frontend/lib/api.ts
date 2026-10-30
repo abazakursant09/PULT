@@ -1228,11 +1228,11 @@ export interface SourcePolicyOut {
 // be formed (an API-sourced store has no cost of goods).
 export interface StoreFinanceSummaryOut {
   store_id:            string
-  revenue:            number
+  revenue:            number | null
   net_profit:         number | null
   unassigned_revenue: number
-  source:             'api' | 'csv'
-  completeness:       'complete' | 'incomplete'
+  source:             'api' | 'csv' | null
+  completeness:       'complete' | 'incomplete' | 'no_data'
   missing_fields:     string[]
   conflict:           boolean
   conflict_candidates: { api: number | null; csv: number | null } | null
