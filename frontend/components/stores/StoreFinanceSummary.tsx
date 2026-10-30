@@ -59,12 +59,12 @@ export function StoreFinanceSummary({ storeId }: { storeId: string }) {
       </div>
 
       <p className="l-dim" style={{ padding: '8px 0 0', fontSize: 13.5 }}>
-        Источник финансового расчёта магазина: {data.source === 'api' ? 'API' : 'CSV'}.
+        Источник финансового расчёта магазина: {data.source === 'api' ? 'API' : data.source === 'csv' ? 'CSV' : 'не определён'}.
       </p>
 
       <CompletenessNote completeness={data.completeness} missingFields={data.missing_fields} />
 
-      {data.conflict && data.conflict_candidates && (
+      {data.source !== null && data.conflict && data.conflict_candidates && (
         <>
           <ConflictBanner
             metricLabel="Выручка"
