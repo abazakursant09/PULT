@@ -88,6 +88,26 @@ describe('BusinessToday', () => {
     expect(screen.queryByText('0%')).not.toBeInTheDocument()
   })
 
+  it('keeps unknown revenue and profit absent instead of showing zero rubles', async () => {
+    vi.spyOn(api.today, 'getSummary').mockResolvedValue({
+      ...todayWithData, revenue_today: null, profit_today: null, margin_pct: null,
+    })
+    render(<BusinessToday />)
+    expect(await screen.findAllByText('—')).toHaveLength(3)
+    expect(screen.queryByText(/NaN|0 ₽/)).not.toBeInTheDocument()
+    const profit = screen.getByText('Прибыль сегодня').nextElementSibling!
+    expect(profit).toHaveTextContent('—')
+    expect(profit).toHaveStyle({ color: 'var(--text-3)' })
+  })
+
+  it('preserves a real zero profit and revenue', async () => {
+    vi.spyOn(api.today, 'getSummary').mockResolvedValue({
+      ...todayWithData, revenue_today: 0, profit_today: 0, margin_pct: null,
+    })
+    render(<BusinessToday />)
+    expect(await screen.findAllByText('0 ₽')).toHaveLength(2)
+  })
+
   it('surfaces a load failure instead of showing zeroes as if they were real', async () => {
     vi.spyOn(api.today, 'getSummary').mockRejectedValue(new Error('boom'))
 

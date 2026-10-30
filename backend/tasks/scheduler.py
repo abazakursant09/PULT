@@ -31,8 +31,10 @@ _SPARK = "▁▂▃▄▅▆▇"
 
 # ── Format helpers ─────────────────────────────────────────────────────────────
 
-def _fk(val: float) -> str:
+def _fk(val: float | None) -> str:
     """Format float as '148k' or '1.2M'."""
+    if val is None:
+        return "—"
     if val >= 1_000_000:
         return f"{val / 1_000_000:.1f}M"
     if val >= 1_000:

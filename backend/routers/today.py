@@ -92,8 +92,8 @@ class TodaySummaryView(BaseModel):
     """'Состояние бизнеса сегодня' — read-only assembly of EXISTING aggregates. No new
     analytics: money comes verbatim from get_daily_summary, loss count from
     get_loss_products, the three feed counts are plain len() over build_feed."""
-    revenue_today: float
-    profit_today: float
+    revenue_today: Optional[float]
+    profit_today: Optional[float]
     margin_pct: Optional[float]
     delta_revenue_pct: Optional[float]
     critical_count: int

@@ -2857,8 +2857,8 @@ export interface FirstRunState {
 }
 
 export interface TodaySummary {
-  revenue_today:              number
-  profit_today:               number
+  revenue_today:              number | null
+  profit_today:               number | null
   margin_pct:                 number | null
   delta_revenue_pct:          number | null
   critical_count:             number
