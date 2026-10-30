@@ -453,6 +453,7 @@ async def store_financial_totals(store_id: str, db: AsyncSession) -> dict:
     # source='csv' only — never blended with API (1.4.5H2).
     row = (await db.execute(
         select(
+            func.count(ImportedFinanceRow.id).label("csv_rows"),
             func.coalesce(func.sum(ImportedFinanceRow.revenue), 0.0).label("revenue"),
             func.coalesce(func.sum(ImportedFinanceRow.net_profit), 0.0).label("net"),
             func.coalesce(func.sum(ImportedFinanceRow.revenue).filter(
@@ -479,8 +480,15 @@ async def store_financial_totals(store_id: str, db: AsyncSession) -> dict:
             res = await _resolve_source(db, store_id=store_id, marketplace=marketplace,
                                         metric_type="revenue", period=None,
                                         api_value=(Decimal(str(api_rev)) if api_rev is not None else None),
-                                        csv_value=Decimal(str(csv_rev)))
-            out["source"] = res.source or "csv"
+                                        csv_value=(Decimal(str(csv_rev)) if row.csv_rows else None))
+            if res.source is None or res.value is None:
+                # No eligible value for the chosen source is not a real zero,
+                # and an explicit API choice must not silently use CSV money.
+                # Independent unmatched-CSV reconciliation remains available.
+                out.update(revenue=None, net_profit=None, source=None, completeness="no_data",
+                           missing_fields=["revenue"])
+                return out
+            out["source"] = res.source
             out["conflict"] = res.conflict
             if res.conflict and res.conflict_candidates:
                 # Reuse the candidates the resolver already computed — never re-summed, never invented.
@@ -490,7 +498,7 @@ async def store_financial_totals(store_id: str, db: AsyncSession) -> dict:
                     "csv": (float(c["csv"]) if c.get("csv") is not None else None),
                 }
             if res.source == "api":
-                out["revenue"] = round(float(res.value), 2) if res.value is not None else 0.0
+                out["revenue"] = round(float(res.value), 2)
                 # net profit follows the revenue source; API has no cost of goods → suppress exact.
                 out["net_profit"] = None
                 out["completeness"] = "incomplete"
