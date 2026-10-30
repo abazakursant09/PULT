@@ -1,7 +1,8 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback } from 'react'
 import { api, type SourcePolicyMetric, type SourcePolicyOut } from '@/lib/api'
+import { useConfirmedStoreRead, useStoreSourceSync } from './StoreSourceSync'
 
 // Источники данных (PULT-LAUNCH-1.4.5I). Per (store, metric) the seller chooses where the numbers
 // come from — API, CSV, or Auto. The backend is the source of truth: this reads the EFFECTIVE policy
@@ -65,27 +66,17 @@ function limitationText(m: SourcePolicyMetric): string | null {
   }
 }
 
-function MetricRow({ storeId, metric, label, onChanged }: {
-  storeId: string
+function MetricRow({ metric, label, busy, onChoose }: {
   metric: SourcePolicyMetric
   label: string
-  onChanged: () => void | Promise<void>
+  busy: boolean
+  onChoose: (metric: string, preference: 'auto' | 'api' | 'csv') => Promise<void>
 }) {
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
   const apiDisabled = !metric.api_supported
 
   const choose = async (pref: 'auto' | 'api' | 'csv') => {
     if (pref === metric.preference || busy) return
-    setBusy(true); setError('')
-    try {
-      await api.sourcePolicy.set(storeId, metric.metric_type, pref)
-      await onChanged()
-    } catch {
-      setError('Не удалось сохранить выбор. Повторите.')
-    } finally {
-      setBusy(false)
-    }
+    await onChoose(metric.metric_type, pref)
   }
 
   return (
@@ -117,32 +108,26 @@ function MetricRow({ storeId, metric, label, onChanged }: {
         })}
       </div>
       {limitationText(metric) && <p className="l-src-note">{limitationText(metric)}</p>}
-      {error && <p className="l-src-note l-src-note--err">{error}</p>}
     </div>
   )
 }
 
 export function SourcePolicySection({ storeId, marketplace }: { storeId: string; marketplace: string }) {
-  const [policy, setPolicy] = useState<SourcePolicyOut | null>(null)
-  const [state, setState] = useState<'loading' | 'ready' | 'failed'>('loading')
+  const { revision, busy, change, outcome: currentOutcome } = useStoreSourceSync(storeId)
+  const request = useCallback(() => api.sourcePolicy.get(storeId), [storeId])
+  const { data: policy, state, reload } = useConfirmedStoreRead<SourcePolicyOut>(storeId, revision, 'policy', request)
 
-  const load = useCallback(async () => {
-    try {
-      setPolicy(await api.sourcePolicy.get(storeId))
-      setState('ready')
-    } catch {
-      setState('failed')
-    }
-  }, [storeId])
-
-  useEffect(() => { void load() }, [load])
-
-  if (state === 'loading') return <p className="l-dim" style={{ padding: '10px 0' }}>Загружаем источники…</p>
+  if (state === 'loading') return <p className="l-dim" role="status" style={{ padding: '10px 0' }}>Загружаем источники…</p>
   if (state === 'failed' || !policy) {
     return (
-      <p className="l-dim" style={{ padding: '10px 0' }}>
-        Не удалось загрузить источники данных. Обновите страницу.
-      </p>
+      <div style={{ padding: '10px 0' }}>
+        <p className="l-dim" role="alert">{currentOutcome === 'confirmed'
+          ? 'Выбор сохранён, но не удалось загрузить источники данных. Повторите загрузку.'
+          : currentOutcome === 'unknown'
+            ? 'Не удалось подтвердить сохранение и загрузить источники данных. Повторите загрузку.'
+            : 'Не удалось загрузить источники данных. Повторите загрузку.'}</p>
+        <button type="button" className="l-btn" onClick={() => void reload()}>Повторить</button>
+      </div>
     )
   }
 
@@ -150,6 +135,9 @@ export function SourcePolicySection({ storeId, marketplace }: { storeId: string;
 
   return (
     <div>
+      {currentOutcome === 'unknown' && <p className="l-src-note l-src-note--err" role="alert">
+        Не удалось подтвердить сохранение по ответу сервера. Показаны перечитанные данные.
+      </p>}
       <p className="l-dim" style={{ padding: '4px 0 14px', maxWidth: '60ch' }}>
         Выберите, откуда PULT берёт каждый показатель. «Автоматически» использует API только при
         полном покрытии данных, иначе — загруженные файлы. Одинаковые показатели не складываются.
@@ -161,7 +149,7 @@ export function SourcePolicySection({ storeId, marketplace }: { storeId: string;
           {group.metrics.map(({ key, label }) => {
             const m = byKey.get(key)
             if (!m) return null
-            return <MetricRow key={key} storeId={storeId} metric={m} label={label} onChanged={load} />
+            return <MetricRow key={key} metric={m} label={label} busy={busy} onChoose={change} />
           })}
         </section>
       ))}

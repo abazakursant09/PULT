@@ -1,8 +1,9 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback } from 'react'
 import { api, type StoreFinanceSummaryOut } from '@/lib/api'
 import { CompletenessNote, ConflictBanner } from './Completeness'
+import { useConfirmedStoreRead, useStoreSourceSync } from './StoreSourceSync'
 
 // Store financial summary (PULT-LAUNCH-1.4.5I-QA2). Shows the ONE resolved money total the backend
 // computes for this store, how it was sourced (API vs CSV), and — only when the backend reports it —
@@ -16,46 +17,33 @@ function money(n: number | null | undefined): string {
 }
 
 export function StoreFinanceSummary({ storeId }: { storeId: string }) {
-  const [data, setData] = useState<StoreFinanceSummaryOut | null>(null)
-  const [state, setState] = useState<'loading' | 'ready' | 'failed'>('loading')
-  const [resolving, setResolving] = useState(false)
-  const [resolveError, setResolveError] = useState('')
-
-  const load = useCallback(async () => {
-    try {
-      setData(await api.marketplaceStores.financeSummary(storeId))
-      setState('ready')
-    } catch {
-      setState('failed')
-    }
-  }, [storeId])
-
-  useEffect(() => { void load() }, [load])
+  const { revision, busy, change, outcome: currentOutcome } = useStoreSourceSync(storeId)
+  const request = useCallback(() => api.marketplaceStores.financeSummary(storeId), [storeId])
+  const { data, state, reload } = useConfirmedStoreRead<StoreFinanceSummaryOut>(storeId, revision, 'finance', request)
 
   // Resolve the revenue conflict by choosing a source. Nothing shows success until the PATCH AND the
   // re-read of the summary both come back — the seller sees the real, resolved number, never a guess.
-  const choose = async (source: 'api' | 'csv') => {
-    setResolving(true); setResolveError('')
-    try {
-      await api.sourcePolicy.set(storeId, 'revenue', source)
-      await load()
-    } catch {
-      // No false success: the conflict stays, the safe value stands, and the seller is told to retry.
-      setResolveError('Не удалось сохранить выбор источника. Повторите.')
-    } finally {
-      setResolving(false)
-    }
-  }
+  const choose = (source: 'api' | 'csv') => change('revenue', source)
 
-  if (state === 'loading') return <p className="l-dim" style={{ padding: '10px 0' }}>Загружаем финансовый итог…</p>
+  if (state === 'loading') return <p className="l-dim" role="status" style={{ padding: '10px 0' }}>Загружаем финансовый итог…</p>
   if (state === 'failed' || !data) {
-    return <p className="l-dim" style={{ padding: '10px 0' }}>Не удалось загрузить финансовый итог. Обновите страницу.</p>
+    return <div style={{ padding: '10px 0' }}>
+      <p className="l-dim" role="alert">{currentOutcome === 'confirmed'
+        ? 'Выбор сохранён, но не удалось загрузить финансовый итог. Повторите загрузку.'
+        : currentOutcome === 'unknown'
+          ? 'Не удалось подтвердить сохранение и загрузить финансовый итог. Повторите загрузку.'
+          : 'Не удалось загрузить финансовый итог. Повторите загрузку.'}</p>
+      <button type="button" className="l-btn" onClick={() => void reload()}>Повторить</button>
+    </div>
   }
 
   const profitKnown = data.net_profit !== null && data.net_profit !== undefined
 
   return (
     <div>
+      {currentOutcome === 'unknown' && <p className="l-src-note l-src-note--err" role="alert">
+        Не удалось подтвердить сохранение по ответу сервера. Показаны перечитанные данные.
+      </p>}
       <div style={{ display: 'flex', gap: 40, flexWrap: 'wrap', alignItems: 'baseline', padding: '4px 0 2px' }}>
         <div>
           <div className="l-caps l-muted" style={{ marginBottom: 4 }}>Выручка</div>
@@ -83,10 +71,9 @@ export function StoreFinanceSummary({ storeId }: { storeId: string }) {
             apiValue={money(data.conflict_candidates.api)}
             csvValue={money(data.conflict_candidates.csv)}
             chosen={data.source}
-            busy={resolving}
+            busy={busy}
             onChoose={choose}
           />
-          {resolveError && <p className="l-src-note l-src-note--err" role="alert">{resolveError}</p>}
         </>
       )}
     </div>
