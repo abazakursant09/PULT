@@ -111,6 +111,7 @@ function _handle401(path: string, status: number): void {
 // ── Core fetch with timeout + retry ──────────────────────────────────────────
 
 async function _fetch<T>(path: string, init: RequestInit | undefined, attempt = 0): Promise<T> {
+  const canRetry = (init?.method ?? 'GET').toUpperCase() === 'GET'
   const url = `${API}${path}`
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), _timeout(path))
@@ -127,7 +128,7 @@ async function _fetch<T>(path: string, init: RequestInit | undefined, attempt = 
 
     if (!res.ok) {
       _handle401(path, res.status)
-      if (res.status >= 500 && !_NO_RETRY.has(res.status) && attempt < 2) {
+      if (canRetry && res.status >= 500 && !_NO_RETRY.has(res.status) && attempt < 2) {
         await _sleep(500 * 2 ** attempt)
         return _fetch<T>(path, init, attempt + 1)
       }
@@ -137,7 +138,7 @@ async function _fetch<T>(path: string, init: RequestInit | undefined, attempt = 
     return res.json() as Promise<T>
   } catch (err) {
     clearTimeout(timer)
-    if (err instanceof Error && err.name !== 'AbortError' && err.name !== 'HttpError' && !(err.message.startsWith('HTTP ')) && attempt < 2) {
+    if (canRetry && err instanceof Error && err.name !== 'AbortError' && err.name !== 'HttpError' && !(err.message.startsWith('HTTP ')) && attempt < 2) {
       await _sleep(500 * 2 ** attempt)
       return _fetch<T>(path, init, attempt + 1)
     }
@@ -145,7 +146,7 @@ async function _fetch<T>(path: string, init: RequestInit | undefined, attempt = 
   }
 }
 
-// ── req: GET cache + dedup, all methods: retry + timeout ─────────────────────
+// ── req: GET cache + dedup + retry, all methods: timeout ─────────────────────
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const isGet = !init?.method || init.method === 'GET'
@@ -178,9 +179,9 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   return promise
 }
 
-// ── reqForm: multipart with timeout + retry ───────────────────────────────────
+// ── reqForm: multipart with timeout, no automatic mutation retries ────────────
 
-async function reqForm<T>(path: string, body: FormData, attempt = 0): Promise<T> {
+async function reqForm<T>(path: string, body: FormData): Promise<T> {
   const url = `${API}${path}`
   // SECURITY-2B-2 — no Authorization header; the HttpOnly session cookie authenticates via credentials.
   const h: Record<string, string> = {}
@@ -195,20 +196,12 @@ async function reqForm<T>(path: string, body: FormData, attempt = 0): Promise<T>
 
     if (!res.ok) {
       _handle401(path, res.status)
-      if (res.status >= 500 && !_NO_RETRY.has(res.status) && attempt < 2) {
-        await _sleep(500 * 2 ** attempt)
-        return reqForm<T>(path, body, attempt + 1)
-      }
       throw new HttpError(await _parseError(res), res.status)
     }
 
     return res.json() as Promise<T>
   } catch (err) {
     clearTimeout(timer)
-    if (err instanceof Error && err.name !== 'AbortError' && err.name !== 'HttpError' && !(err.message.startsWith('HTTP ')) && attempt < 2) {
-      await _sleep(500 * 2 ** attempt)
-      return reqForm<T>(path, body, attempt + 1)
-    }
     throw err
   }
 }
