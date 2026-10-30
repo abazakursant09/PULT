@@ -48,7 +48,7 @@ export function ConflictBanner({ metricLabel, period, apiValue, csvValue, chosen
         Есть расхождение API и CSV{period ? ` · ${period}` : ''}
       </p>
       <p className="l-src-note" style={{ margin: '2px 0 8px' }}>
-        API и CSV содержат разные значения показателя «{metricLabel}». До вашего решения используется CSV.
+        API и CSV содержат разные значения показателя «{metricLabel}». В расчёте используется {chosen === 'api' ? 'API' : 'CSV'}.
       </p>
       <div className="l-conflict-vals">
         <span>API: <b>{apiValue}</b></span>
