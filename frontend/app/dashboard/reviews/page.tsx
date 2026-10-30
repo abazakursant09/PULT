@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { SellerBar } from '@/components/seller/Shell'
 import { api, type ReviewResponse, type ReviewState, type ReviewHistoryEntry } from '@/lib/api'
 import { newOperationKey } from '@/lib/opkey'
@@ -113,23 +113,50 @@ export default function ReviewsPage() {
   const [items, setItems] = useState<ReviewResponse[] | null>(null)
   const [filter, setFilter] = useState<ReviewState | ''>('')
   const [error, setError] = useState('')
+  const [queueError, setQueueError] = useState('')
+  const queueGeneration = useRef(0)
   const [sel, setSel] = useState<ReviewResponse | null>(null)
   const [history, setHistory] = useState<ReviewHistoryEntry[] | null>(null)
+  const [historyError, setHistoryError] = useState('')
+  const historyGeneration = useRef(0)
   const [busy, setBusy] = useState(false)
   const [editText, setEditText] = useState('')
 
   const load = useCallback(() => {
-    setItems(null); setError('')
+    const generation = ++queueGeneration.current
+    setItems(null); setQueueError('')
     api.reviews.queue(filter ? { state: filter } : {})
-      .then(r => setItems(r.items))
-      .catch(e => { setError(e instanceof Error ? e.message : 'Ошибка'); setItems([]) })
+      .then(r => {
+        if (generation === queueGeneration.current) setItems(r.items)
+      })
+      .catch(() => {
+        if (generation === queueGeneration.current) setQueueError('Не удалось загрузить отзывы')
+      })
   }, [filter])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    load()
+    return () => { queueGeneration.current += 1 }
+  }, [load])
+  useEffect(() => () => { historyGeneration.current += 1 }, [])
+
+  function loadHistory(r: ReviewResponse) {
+    const generation = ++historyGeneration.current
+    setHistory(null); setHistoryError('')
+    api.reviews.history(r.product_id, r.id)
+      .then(h => {
+        if (generation === historyGeneration.current) setHistory(h.entries)
+      })
+      .catch(() => {
+        if (generation === historyGeneration.current) {
+          setHistoryError('Не удалось загрузить историю публикаций')
+        }
+      })
+  }
 
   function open(r: ReviewResponse) {
-    setSel(r); setEditText(r.response_text ?? ''); setHistory(null)
-    api.reviews.history(r.product_id, r.id).then(h => setHistory(h.entries)).catch(() => setHistory([]))
+    setSel(r); setEditText(r.response_text ?? '')
+    loadHistory(r)
   }
 
   async function act(fn: () => Promise<ReviewResponse>) {
@@ -171,7 +198,12 @@ export default function ReviewsPage() {
           <Card variant="surface" className="mb-3 p-3.5 text-[13px] text-[var(--danger)]">{error}</Card>
         )}
 
-        {items === null ? (
+        {queueError ? (
+          <Card variant="surface" role="alert" className="mb-3 p-3.5 text-[13px] text-[var(--danger)]">
+            <p className="mb-2">{queueError}</p>
+            <Button variant="secondary" size="sm" onClick={load}>Повторить загрузку отзывов</Button>
+          </Card>
+        ) : items === null ? (
           // Loading — skeleton queue, no raw text, no layout shift
           <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] gap-4">
             <div className="flex flex-col gap-2" aria-label="Загрузка">
@@ -271,8 +303,15 @@ export default function ReviewsPage() {
                     <div className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-3)]">
                       История публикаций
                     </div>
-                    {history === null ? (
-                      <div className="mt-2 flex flex-col gap-1.5" aria-label="Загрузка">
+                    {historyError ? (
+                      <div role="alert" className="mt-2 text-[12px] text-[var(--danger)]">
+                        <p className="mb-2">{historyError}</p>
+                        <Button variant="secondary" size="sm" onClick={() => loadHistory(sel)}>
+                          Повторить загрузку истории
+                        </Button>
+                      </div>
+                    ) : history === null ? (
+                      <div className="mt-2 flex flex-col gap-1.5" aria-label="Загрузка истории публикаций">
                         <Skeleton className="h-3.5 w-3/4" />
                         <Skeleton className="h-3.5 w-1/2" />
                       </div>
