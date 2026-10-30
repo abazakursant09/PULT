@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, useRef } from 'react'
 import Link from 'next/link'
 import { api, type MarketplaceConnectionOut } from '@/lib/api'
 import { Card } from '@/components/ui/card'
@@ -113,15 +113,37 @@ function ConnectionCard({ conn, onChanged }: {
 export function ConnectionsSection() {
   const [conns, setConns] = useState<MarketplaceConnectionOut[] | null>(null)
   const [error, setError] = useState('')
+  const [loading, setLoading] = useState(true)
+  const loadPending = useRef<Promise<void> | null>(null)
+  const loadQueued = useRef(false)
 
-  const load = useCallback(async () => {
-    try {
-      setConns(await api.connections.list())
-      setError('')
-    } catch (e) {
-      setError(requestErrorText(e))
-      setConns([])
+  const load = useCallback(() => {
+    if (loadPending.current) {
+      loadQueued.current = true
+      return loadPending.current
     }
+    setLoading(true)
+    const drain = async () => {
+      try {
+        do {
+          loadQueued.current = false
+          try {
+            const next = await api.connections.list()
+            if (!loadQueued.current) {
+              setConns(next)
+              setError('')
+            }
+          } catch (e) {
+            if (!loadQueued.current) setError(requestErrorText(e))
+          }
+        } while (loadQueued.current)
+      } finally {
+        loadPending.current = null
+        setLoading(false)
+      }
+    }
+    loadPending.current = drain()
+    return loadPending.current
   }, [])
 
   useEffect(() => { load() }, [load])
@@ -144,7 +166,15 @@ export function ConnectionsSection() {
         </Link>
       </div>
 
-      {conns === null ? (
+      {error ? (
+        <div role="alert" className="text-[12px] mt-2" style={{ color: 'var(--danger)' }}>
+          <p className="mb-2">{error}</p>
+          {loading && <p className="mb-2" style={{ color: 'var(--text-3)' }}>Загрузка подключений…</p>}
+          <Button size="sm" variant="outline" disabled={loading} onClick={() => void load()}>
+            Повторить загрузку подключений
+          </Button>
+        </div>
+      ) : conns === null ? (
         <p className="text-[12px]" style={{ color: 'var(--text-3)' }}>Загрузка подключений…</p>
       ) : conns.length === 0 ? (
         <p className="text-[12px]" style={{ color: 'var(--text-3)' }}>
@@ -156,7 +186,6 @@ export function ConnectionsSection() {
         </div>
       )}
 
-      {error && <p className="text-[12px] mt-2" style={{ color: 'var(--danger)' }}>{error}</p>}
     </section>
   )
 }
