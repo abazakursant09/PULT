@@ -16,6 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Optional
+from types import SimpleNamespace
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +24,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config import settings
 from models.imported_finance import ImportedFinanceRow
 from models.marketplace_store import MarketplaceStore
+from models.marketplace_account import MarketplaceAccount
+from models.marketplace_operation import MarketplaceOperation
+from models.workspace import Workspace
 from services.source_policy import derived, money_reader
 from services.source_policy import resolver as rz
 
@@ -40,7 +44,7 @@ _MONEY_CSV_COL = {
 
 @dataclass
 class ResolvedTotals:
-    revenue: float = 0.0
+    revenue: Optional[float] = 0.0
     commission: float = 0.0
     logistics: float = 0.0
     ad_spend: float = 0.0
@@ -52,6 +56,7 @@ class ResolvedTotals:
     missing_fields: list = field(default_factory=list)
     conflict: bool = False
     conflict_fields: list = field(default_factory=list)
+    has_values: bool = False
 
 
 def _canon(mp: Optional[str]) -> str:
@@ -94,12 +99,31 @@ async def resolved_finance_period(db: AsyncSession, user_id: str, date_from: str
             t.net_profit = (t.net_profit or 0.0) + float(r.net_profit); t.orders += int(r.orders)
         return t
 
+    # Include owned API-only stores; never enumerate another workspace's operations.
+    api_stores = (await db.execute(select(MarketplaceStore).join(
+        MarketplaceAccount, MarketplaceStore.marketplace_account_id == MarketplaceAccount.id
+    ).join(Workspace, MarketplaceAccount.workspace_id == Workspace.id).join(
+        MarketplaceOperation, MarketplaceOperation.marketplace_store_id == MarketplaceStore.id
+    ).where(Workspace.owner_user_id == user_id, MarketplaceOperation.source == "api",
+            MarketplaceOperation.marketplace_account_id == MarketplaceAccount.id,
+            *money_reader._period_filter((date_from, date_to))).distinct())).scalars().all()
+    present = {r.store_id for r in csv_rows}
+    buckets = list(csv_rows)
+    for store in api_stores:
+        if store.id not in present:
+            buckets.append(SimpleNamespace(store_id=store.id, mp=store.marketplace,
+                revenue=0, commission=0, logistics=0, ad_spend=0, net_profit=0, orders=0))
+
     # Flag on: resolve each store independently.
     period = (date_from, date_to)
-    t = ResolvedTotals(net_profit=0.0)
+    t = ResolvedTotals(net_profit=0.0, has_values=bool(buckets))
     csv_sources_only = True
-    for r in csv_rows:
+    missing_revenue = False
+    resolved_revenues = 0
+    sources = set()
+    for r in buckets:
         store_id = r.store_id
+        has_csv = store_id in present
         if store_id is None:
             # Legacy no-store CSV bucket — always CSV, never joined to API.
             t.revenue += float(r.revenue); t.commission += float(r.commission)
@@ -107,6 +131,9 @@ async def resolved_finance_period(db: AsyncSession, user_id: str, date_from: str
             if t.net_profit is not None:
                 t.net_profit += float(r.net_profit)
             t.orders += int(r.orders)
+            sources.add("csv")
+            resolved_revenues += 1
+            t.has_values = True
             continue
 
         store = await db.get(MarketplaceStore, store_id)
@@ -121,11 +148,20 @@ async def resolved_finance_period(db: AsyncSession, user_id: str, date_from: str
             res = await rz.resolve_source(
                 db, store_id=store_id, marketplace=marketplace, metric_type=metric, period=period,
                 api_value=(Decimal(str(api_val)) if api_val is not None else None),
-                csv_value=Decimal(str(csv_val)))
+                csv_value=Decimal(str(csv_val)) if has_csv else None)
             chosen = float(res.value) if res.value is not None else 0.0
+            if res.value is None:
+                if metric not in t.missing_fields:
+                    t.missing_fields.append(metric)
+                t.net_profit = None
             if metric == "revenue":
                 t.revenue += chosen
-                t.revenue_source = res.source
+                if res.source is None or res.value is None:
+                    missing_revenue = True
+                else:
+                    sources.add(res.source)
+                    resolved_revenues += 1
+                    t.has_values = True
                 if res.conflict:
                     t.conflict = True
                     if "revenue" not in t.conflict_fields:
@@ -143,8 +179,9 @@ async def resolved_finance_period(db: AsyncSession, user_id: str, date_from: str
             db, store_id=store_id, marketplace=marketplace, metric_type="orders", period=period)
         ores = await rz.resolve_source(
             db, store_id=store_id, marketplace=marketplace, metric_type="orders", period=period,
-            api_value=orders_api, csv_value=int(r.orders))
+            api_value=orders_api, csv_value=int(r.orders) if has_csv else None)
         t.orders += int(ores.value) if ores.value is not None else 0
+        t.has_values = t.has_values or ores.value is not None
 
         # Profit follows the revenue source. A CSV store contributes its imported net_profit; an API
         # store cannot — the API has no cost of goods, and CSV net_profit must NOT be mixed with API
@@ -155,11 +192,21 @@ async def resolved_finance_period(db: AsyncSession, user_id: str, date_from: str
             if t.net_profit is not None:
                 t.net_profit += float(r.net_profit)
 
+    t.revenue_source = next(iter(sources)) if len(sources) == 1 else "mixed" if sources else None
     if not csv_sources_only:
         p = derived.profit(revenue=Decimal(str(t.revenue)),
                            marketplace_fees=Decimal(str(t.commission)),
                            logistics=Decimal(str(t.logistics)), cogs=None, external_ad_spend=None)
         t.net_profit = None
         t.completeness = "incomplete"
-        t.missing_fields = p.missing_fields
+        t.missing_fields = list(dict.fromkeys(t.missing_fields + p.missing_fields))
+    if missing_revenue or not resolved_revenues:
+        t.revenue = None
+        t.net_profit = None
+        t.completeness = "incomplete" if resolved_revenues else "no_data"
+        t.revenue_source = None
+        if "revenue" not in t.missing_fields:
+            t.missing_fields.append("revenue")
+    elif t.missing_fields:
+        t.completeness = "incomplete"
     return t

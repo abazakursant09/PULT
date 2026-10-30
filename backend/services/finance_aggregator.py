@@ -19,6 +19,9 @@ from database import AsyncSessionLocal
 from models.imported_finance import ImportedFinanceRow
 from models.imported_product import ImportedProductRow
 from models.marketplace_store import MarketplaceStore
+from models.marketplace_account import MarketplaceAccount
+from models.marketplace_operation import MarketplaceOperation
+from models.workspace import Workspace
 from models.product import Product
 from services.source_policy.money_reader import api_money as _api_money
 from services.source_policy.product_totals import resolved_products as _resolved_products
@@ -31,8 +34,8 @@ from services.source_policy.store_totals import resolved_finance_period
 
 @dataclass
 class FinancePeriod:
-    revenue:    float = 0.0
-    profit:     float = 0.0   # net_profit from import; computed fallback if 0
+    revenue:    Optional[float] = 0.0
+    profit:     Optional[float] = 0.0   # None is unknown, never a computed fallback
     orders:     int   = 0
     ad_spend:   float = 0.0
     commission: float = 0.0
@@ -40,37 +43,45 @@ class FinancePeriod:
     # Source-policy meta (PULT-LAUNCH-1.4.5H2). Additive/optional: with the flag off every store
     # resolves to CSV, so these carry the default 'csv'/'complete' values and existing callers see
     # exactly the numbers they saw before.
-    source:         str  = "csv"
+    source:         Optional[str] = "csv"
     completeness:   str  = "complete"        # complete | incomplete
     missing_fields: list = field(default_factory=list)
     conflict:       bool = False
+    has_values:     bool = False
+    profit_resolved: bool = False
 
     @property
     def has_data(self) -> bool:
-        return self.revenue > 0 or self.orders > 0
+        return self.has_values or (self.revenue is not None and self.revenue != 0) or self.orders > 0
 
     @property
-    def effective_profit(self) -> float:
+    def effective_profit(self) -> Optional[float]:
         """Use imported net_profit if set; otherwise revenue minus costs."""
+        if self.profit is None or self.revenue is None:
+            return None
+        if self.profit_resolved:
+            return self.profit
         if abs(self.profit) > 0.01:
             return self.profit
         return self.revenue - self.commission - self.logistics - self.ad_spend
 
     @property
     def margin_pct(self) -> Optional[float]:
-        if self.revenue > 0:
+        if self.revenue is not None and self.revenue > 0 and self.effective_profit is not None:
             return round(self.effective_profit / self.revenue * 100, 1)
         return None
 
     @property
     def drr_pct(self) -> Optional[float]:
-        if self.revenue > 0:
+        if "ad_spend" in self.missing_fields:
+            return None
+        if self.revenue is not None and self.revenue > 0:
             return round(self.ad_spend / self.revenue * 100, 1)
         return None
 
     @property
     def ad_efficiency(self) -> Optional[float]:
-        if self.ad_spend > 0:
+        if self.ad_spend > 0 and self.revenue is not None:
             return round(self.revenue / self.ad_spend, 2)
         return None
 
@@ -108,8 +119,8 @@ class WeeklySummary:
 
 # ── Private helpers ────────────────────────────────────────────────────────────
 
-def _delta_pct(current: float, previous: float) -> Optional[float]:
-    if not previous:
+def _delta_pct(current: Optional[float], previous: Optional[float]) -> Optional[float]:
+    if current is None or not previous:
         return None
     return round((current - previous) / previous * 100, 1)
 
@@ -119,7 +130,17 @@ async def _has_any_data(user_id: str, db: AsyncSession) -> bool:
         select(func.count()).select_from(ImportedFinanceRow)
         .where(ImportedFinanceRow.user_id == user_id)
     )
-    return (q.scalar() or 0) > 0
+    if (q.scalar() or 0) > 0:
+        return True
+    if not settings.api_data_sync_enabled:
+        return False
+    count = await db.execute(select(func.count()).select_from(MarketplaceOperation).join(
+        MarketplaceStore, MarketplaceOperation.marketplace_store_id == MarketplaceStore.id
+    ).join(MarketplaceAccount, MarketplaceStore.marketplace_account_id == MarketplaceAccount.id
+    ).join(Workspace, MarketplaceAccount.workspace_id == Workspace.id).where(
+        Workspace.owner_user_id == user_id, MarketplaceOperation.source == "api",
+        MarketplaceOperation.marketplace_account_id == MarketplaceAccount.id))
+    return (count.scalar() or 0) > 0
 
 
 async def _agg_period(
@@ -133,15 +154,17 @@ async def _agg_period(
     t = await resolved_finance_period(db, user_id, date_from, date_to)
     return FinancePeriod(
         revenue=    t.revenue,
-        profit=     (t.net_profit if t.net_profit is not None else 0.0),
+        profit=     t.net_profit,
         orders=     t.orders,
         ad_spend=   t.ad_spend,
         commission= t.commission,
         logistics=  t.logistics,
-        source=     t.revenue_source or "csv",
+        source=     t.revenue_source,
         completeness=t.completeness,
         missing_fields=list(t.missing_fields),
         conflict=   t.conflict,
+        has_values= t.has_values,
+        profit_resolved=settings.api_data_sync_enabled,
     )
 
 

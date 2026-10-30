@@ -16,7 +16,8 @@ import styles from './cabinet.module.css'
 // margin, delta and loss-count are the secondary ring. Figures use the mono stack for aligned
 // tabular digits so the numbers read as a set, not a jumble.
 
-function _rub(n: number): string {
+function _rub(n: number | null): string {
+  if (n === null) return '—'
   return `${Math.round(n).toLocaleString('ru-RU')} ₽`
 }
 function _delta(pct: number | null): string {
@@ -26,13 +27,13 @@ function _delta(pct: number | null): string {
 }
 
 // The hero figure — bigger, mono, coloured by sign.
-function HeroMetric({ label, value, tone }: { label: string; value: string; tone: 'pos' | 'neg' }) {
+function HeroMetric({ label, value, tone }: { label: string; value: string; tone: 'pos' | 'neg' | 'muted' }) {
   return (
     <div className="flex flex-col gap-1 min-w-0">
       <span className="text-[11px] uppercase tracking-wide text-[var(--text-3)]">{label}</span>
       <span
         className="text-[28px] font-bold leading-none [font-variant-numeric:tabular-nums]"
-        style={{ color: tone === 'neg' ? 'var(--danger)' : 'var(--success)', fontFamily: 'var(--font-mono)' }}
+        style={{ color: tone === 'muted' ? 'var(--text-3)' : tone === 'neg' ? 'var(--danger)' : 'var(--success)', fontFamily: 'var(--font-mono)' }}
       >
         {value}
       </span>
@@ -132,7 +133,7 @@ export function BusinessToday() {
               </article>
             </div>
             <div className={styles.facts}>
-            <HeroMetric label="Прибыль сегодня" value={_rub(s.profit_today)} tone={s.profit_today < 0 ? 'neg' : 'pos'} />
+            <HeroMetric label="Прибыль сегодня" value={_rub(s.profit_today)} tone={s.profit_today === null ? 'muted' : s.profit_today < 0 ? 'neg' : 'pos'} />
             <Metric label="Изменение к вчера" value={_delta(s.delta_revenue_pct)}
               tone={s.delta_revenue_pct === null ? 'muted' : s.delta_revenue_pct < 0 ? 'neg' : 'pos'} />
             <Metric label="Товаров с убытком" value={String(s.loss_products_count)}
