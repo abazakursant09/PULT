@@ -15,6 +15,11 @@ export const firstRun = (over: Partial<FirstRunState> = {}): FirstRunState => ({
 })
 
 export const todayWithData: TodaySummary = {
+  period_from: '2026-10-29',
+  period_to: '2026-10-29',
+  comparison_from: '2026-10-28',
+  comparison_to: '2026-10-28',
+  is_partial: false,
   revenue_today: 128_400,
   profit_today: -3_200,
   margin_pct: -2.5,
@@ -29,6 +34,10 @@ export const todayWithData: TodaySummary = {
 
 export const todayNoData: TodaySummary = {
   ...todayWithData,
+  period_from: null,
+  period_to: null,
+  comparison_from: null,
+  comparison_to: null,
   revenue_today: 0,
   profit_today: 0,
   margin_pct: null,

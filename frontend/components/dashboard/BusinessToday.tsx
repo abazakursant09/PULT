@@ -26,6 +26,19 @@ function _delta(pct: number | null): string {
   return `${s}${pct}%`
 }
 
+function _date(value?: string | null): string | null {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null
+  const parsed = new Date(`${value}T00:00:00Z`)
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) return null
+  return `${value.slice(8, 10)}.${value.slice(5, 7)}.${value.slice(0, 4)}`
+}
+
+function _range(from?: string | null, to?: string | null): string | null {
+  const first = _date(from), last = _date(to)
+  if (!first || !last || from! > to!) return null
+  return from === to ? first : `${first} — ${last}`
+}
+
 // The hero figure — bigger, mono, coloured by sign.
 function HeroMetric({ label, value, tone }: { label: string; value: string; tone: 'pos' | 'neg' | 'muted' }) {
   return (
@@ -46,7 +59,7 @@ function Metric({ label, value, tone }: { label: string; value: string; tone?: '
   const color = tone === 'pos' ? 'var(--success)' : tone === 'neg' ? 'var(--danger)' : 'var(--text)'
   return (
     <div className="flex flex-col gap-0.5 min-w-0">
-      <span className="text-[11px] text-[var(--text-3)] whitespace-nowrap">{label}</span>
+      <span className="text-[11px] text-[var(--text-3)]">{label}</span>
       <span className="text-[15px] font-semibold [font-variant-numeric:tabular-nums]" style={{ color, fontFamily: 'var(--font-mono)' }}>
         {value}
       </span>
@@ -58,6 +71,9 @@ export function BusinessToday() {
   const [s, setS] = useState<TodaySummary | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const period = _range(s?.period_from, s?.period_to)
+  const comparison = _range(s?.comparison_from, s?.comparison_to)
+  const delta = period && comparison ? s?.delta_revenue_pct ?? null : null
 
   useEffect(() => {
     let alive = true
@@ -84,7 +100,8 @@ export function BusinessToday() {
           <h2>Операционный контур</h2>
         </div>
         <div className={styles.period}>
-          <span>Сегодня · выручка к вчера</span>
+          <span>{loading ? 'Период загружается' : period ?? 'Период не указан'}</span>
+          {period && s?.is_partial && <Badge variant="neutral">Предварительные</Badge>}
           {s?.is_demo && <Badge variant="neutral">ДЕМО</Badge>}
         </div>
       </div>
@@ -103,7 +120,7 @@ export function BusinessToday() {
 
       {!loading && !error && s && (
         !s.has_data ? (
-          <div className="text-[13px] text-[var(--text-3)]">Недостаточно данных за сегодня</div>
+          <div className="text-[13px] text-[var(--text-3)]">Недостаточно финансовых данных</div>
         ) : (
           <div>
             <div className={styles.flow}>
@@ -117,13 +134,13 @@ export function BusinessToday() {
                 <h3><ShoppingCart size={24} aria-hidden="true" />Продажи</h3>
                 <span className={styles.caption}>Выручка</span>
                 <strong>{_rub(s.revenue_today)}</strong>
-                <span className={styles.nodeNote}>За сегодня</span>
+                <span className={styles.nodeNote}>{period ? `За ${period}` : 'Период не указан'}</span>
               </article>
               <article className={styles.node}>
                 <h3><Coins size={24} aria-hidden="true" />Маржа</h3>
                 <span className={styles.caption}>Маржинальность</span>
                 <strong>{s.margin_pct === null ? '—' : `${s.margin_pct}%`}</strong>
-                <span className={styles.nodeNote}>За сегодня</span>
+                <span className={styles.nodeNote}>{period ? `За ${period}` : 'Период не указан'}</span>
               </article>
               <article className={styles.node}>
                 <h3><Boxes size={24} aria-hidden="true" />Остатки</h3>
@@ -133,9 +150,9 @@ export function BusinessToday() {
               </article>
             </div>
             <div className={styles.facts}>
-            <HeroMetric label="Прибыль сегодня" value={_rub(s.profit_today)} tone={s.profit_today === null ? 'muted' : s.profit_today < 0 ? 'neg' : 'pos'} />
-            <Metric label="Изменение к вчера" value={_delta(s.delta_revenue_pct)}
-              tone={s.delta_revenue_pct === null ? 'muted' : s.delta_revenue_pct < 0 ? 'neg' : 'pos'} />
+            <HeroMetric label="Прибыль за период" value={_rub(s.profit_today)} tone={s.profit_today === null ? 'muted' : s.profit_today < 0 ? 'neg' : 'pos'} />
+            <Metric label={comparison && period ? `Изменение к ${comparison}` : 'Сравнение недоступно'} value={_delta(delta)}
+              tone={delta === null ? 'muted' : delta < 0 ? 'neg' : 'pos'} />
             <Metric label="Товаров с убытком" value={String(s.loss_products_count)}
               tone={s.loss_products_count > 0 ? 'neg' : 'muted'} />
             </div>

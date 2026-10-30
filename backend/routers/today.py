@@ -102,6 +102,11 @@ class TodaySummaryView(BaseModel):
     low_stock_count: int
     is_demo: bool
     has_data: bool
+    period_from: Optional[str] = None
+    period_to: Optional[str] = None
+    comparison_from: Optional[str] = None
+    comparison_to: Optional[str] = None
+    is_partial: bool = False
 
 
 class FirstRunView(BaseModel):
@@ -173,4 +178,9 @@ async def get_today_summary(
         low_stock_count=low_stock,
         is_demo=ds.is_demo,
         has_data=ds.has_data,
+        period_from=ds.period_from,
+        period_to=ds.period_to,
+        comparison_from=ds.comparison_from,
+        comparison_to=ds.comparison_to,
+        is_partial=ds.is_partial,
     )
