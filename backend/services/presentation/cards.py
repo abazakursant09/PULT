@@ -115,7 +115,7 @@ def _root_cause_narrative(group_items: List[FeedItem], contours: List[str],
     ptypes_txt = ", ".join(sorted(set(problem_types))) if problem_types else "—"
     return (f"{n} диагнозов сходятся на одном действии «{recommendation}» — "
             f"контуры: {contours_txt}; типы проблем: {ptypes_txt}. "
-            f"Общая причина — единое действие устраняет их все.")
+            f"Рекомендованное действие совпадает после нормализации текста.")
 
 
 def _recommendation_groups(items: List[FeedItem]) -> List[RecommendationGroup]:

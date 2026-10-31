@@ -90,6 +90,22 @@ def test_narrative_no_forecast_money_causality():
         assert banned not in txt
 
 
+def test_normalized_recommendation_match_does_not_assert_cause_or_elimination():
+    items = [_fi("seo", "SKU1", "wb", rec="Improve listing", problem_type="title_short"),
+             _fi("advertising", "SKU1", "wb", rec="  IMPROVE   LISTING  ", problem_type="ad_bad_listing")]
+    card = _card_for(items)
+    assert len(card.recommendation_groups) == 1
+    group = card.recommendation_groups[0]
+    assert group.items == items
+    assert group.recommendation == "Improve listing"
+    assert card.root_cause_narrative == group.root_cause_narrative
+    text = group.root_cause_narrative
+    assert text.startswith("2 диагнозов сходятся на одном действии «Improve listing» — ")
+    assert "контуры: advertising, seo; типы проблем: ad_bad_listing, title_short." in text
+    for banned in ("общая причина", "единая причина", "устраняет", "устранит", "решает все"):
+        assert banned not in text.lower()
+
+
 # ── 6. two builds produce identical narrative (deterministic) ────────────────
 
 def test_narrative_deterministic():

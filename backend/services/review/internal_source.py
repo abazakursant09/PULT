@@ -50,7 +50,10 @@ async def build_snapshot_from_reviews(
         return ReviewDataUnavailable(marketplace or "unknown", "review_missing")
     text = rr.review_text
     has_text = bool(text and text.strip())
-    answered = bool(rr.response_text) or rr.status == "published"
+    # Draft/approved text is local preparation, not evidence of publication.
+    # Keep the canonical publication status authoritative, including legacy rows
+    # where the published response text is not stored locally.
+    answered = rr.status == "published"
     safety = classify_safety(rr.rating, has_text, text)
 
     availability = {
