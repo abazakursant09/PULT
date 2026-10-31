@@ -158,6 +158,13 @@ export default function Home() {
         </header>
         <BusinessToday />
 
+        {(firstRun?.analysis_error_count ?? 0) > 0 && (
+          <div role="status" className="mb-[18px] rounded-[var(--r-sm)] border p-3.5 text-[13px] leading-relaxed"
+            style={{ color: 'var(--text)', background: 'var(--surface)', borderColor: 'var(--line)' }}>
+            Часть анализа не завершилась. Доступные рекомендации сохранены; результаты могут быть неполными.
+          </div>
+        )}
+
         {/* a diagnosis exists (or the seller has recent data) → the normal dashboard */}
         {showDiagnosis && (
           <>

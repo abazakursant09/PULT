@@ -123,6 +123,8 @@ class FirstRunView(BaseModel):
     has_products: bool
     has_returns: bool
     missing: list[str]
+    # Latest attempt per enabled producer; independent of diagnosis availability.
+    analysis_error_count: int = 0
 
 
 @router.get("/today/first-run", response_model=FirstRunView)
@@ -145,6 +147,7 @@ async def get_first_run_state(
         has_products=st.has_products,
         has_returns=st.has_returns,
         missing=list(st.missing),
+        analysis_error_count=st.analysis_error_count,
     )
 
 
