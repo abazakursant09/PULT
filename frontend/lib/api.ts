@@ -2842,6 +2842,7 @@ export type FirstRunStateName = 'no_data' | 'analyzing' | 'ready' | 'insufficien
 
 export interface FirstRunState {
   state:             FirstRunStateName
+  analysis_error_count?: number
   finance_days:      number
   product_snapshots: number
   has_products:      boolean

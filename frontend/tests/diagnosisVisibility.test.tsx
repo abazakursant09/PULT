@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import Dashboard from '@/app/dashboard/page'
@@ -21,6 +21,7 @@ const noCards = { cards: [] }
 // Two cards: the dashboard passes skipTopAction, so the first is deliberately withheld
 // from the feed (TodayFocus owns it). A lone card would prove nothing.
 const withCards = { cards: [diagnosisCard, secondCard] }
+const partialAnalysisNotice = 'Часть анализа не завершилась. Доступные рекомендации сохранены; результаты могут быть неполными.'
 
 describe('diagnosis visibility', () => {
   beforeEach(() => {
@@ -31,6 +32,54 @@ describe('diagnosis visibility', () => {
     // — the calls simply outlived the test and surfaced later with nothing to attribute them to.
     vi.spyOn(api.today, 'getFirstRun').mockResolvedValue(null as never)
     vi.spyOn(api.today, 'get').mockResolvedValue({ top_action: null } as never)
+  })
+
+  it('shows a non-dismissible partial-analysis notice while retaining available diagnosis', async () => {
+    vi.spyOn(api.today, 'getSummary').mockResolvedValue(todayNoData)
+    vi.spyOn(api.presentation, 'getCards').mockResolvedValue(withCards)
+    vi.mocked(api.today.getFirstRun).mockResolvedValue({
+      state: 'ready', missing: [], analysis_error_count: 7,
+      error: 'RAW_PRODUCER_ERROR',
+    } as never)
+
+    render(<Dashboard />)
+
+    const notice = await screen.findByText(partialAnalysisNotice)
+    expect(notice).toHaveAttribute('role', 'status')
+    expect(notice.textContent).toBe(partialAnalysisNotice)
+    expect(within(notice).queryByRole('button')).not.toBeInTheDocument()
+    expect(await screen.findByText(/Остаток кончится/)).toBeInTheDocument()
+    expect(screen.queryByText('Нет данных для анализа')).not.toBeInTheDocument()
+    expect(screen.queryByText('RAW_PRODUCER_ERROR')).not.toBeInTheDocument()
+    expect(api.today.getFirstRun).toHaveBeenCalledTimes(1)
+  })
+
+  for (const count of [0, undefined]) {
+    it(`does not show the partial-analysis notice for ${count === undefined ? 'missing' : 'zero'} errors`, async () => {
+      vi.spyOn(api.today, 'getSummary').mockResolvedValue(todayNoData)
+      vi.spyOn(api.presentation, 'getCards').mockResolvedValue(withCards)
+      vi.mocked(api.today.getFirstRun).mockResolvedValue({
+        state: 'ready', missing: [], ...(count === undefined ? {} : { analysis_error_count: count }),
+      } as never)
+
+      render(<Dashboard />)
+
+      expect(await screen.findByText(/Остаток кончится/)).toBeInTheDocument()
+      expect(screen.queryByText(partialAnalysisNotice)).not.toBeInTheDocument()
+    })
+  }
+
+  it('shows partial-analysis status outside the diagnosis gate', async () => {
+    vi.spyOn(api.today, 'getSummary').mockResolvedValue(todayNoData)
+    vi.spyOn(api.presentation, 'getCards').mockResolvedValue(noCards)
+    vi.mocked(api.today.getFirstRun).mockResolvedValue({
+      state: 'insufficient', missing: [], analysis_error_count: 1,
+    } as never)
+
+    render(<Dashboard />)
+
+    expect(await screen.findByText(partialAnalysisNotice)).toHaveAttribute('role', 'status')
+    expect(await screen.findByText('Данных пока недостаточно для разбора')).toBeInTheDocument()
   })
 
   it('shows the diagnosis even when today reports no data — the defect', async () => {

@@ -23,8 +23,7 @@ so the seller is told the actual reason, not a generic apology.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass, field, replace
 
 from sqlalchemy import distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -56,6 +55,7 @@ class FirstRunState:
     has_products: bool = False
     has_returns: bool = False
     missing: list[str] = field(default_factory=list)
+    analysis_error_count: int = 0
 
 
 async def _count_distinct_finance_days(db: AsyncSession, user_id: str) -> int:
@@ -121,6 +121,26 @@ def _describe_gaps(finance_days: int, product_snapshots: int,
 
 
 async def compute_first_run_state(db: AsyncSession, user_id: str, *,
+                                  has_diagnosis: bool) -> FirstRunState:
+    """Keep diagnosis availability separate from latest producer-attempt health."""
+    from services.advisory_runtime.registry import ADVISORY_PRODUCERS
+
+    result = await _compute_first_run_state(db, user_id, has_diagnosis=has_diagnosis)
+    enabled = [spec.key for spec in ADVISORY_PRODUCERS if spec.enabled]
+    latest = select(
+        AdvisoryRun.status,
+        func.row_number().over(
+            partition_by=AdvisoryRun.producer_key,
+            order_by=(AdvisoryRun.started_at.desc(), AdvisoryRun.finished_at.desc(), AdvisoryRun.id.desc()),
+        ).label("position"),
+    ).where(AdvisoryRun.user_id == user_id, AdvisoryRun.producer_key.in_(enabled)).subquery()
+    errors = int((await db.execute(select(func.count()).select_from(latest).where(
+        latest.c.position == 1, latest.c.status == "error",
+    ))).scalar() or 0)
+    return replace(result, analysis_error_count=errors)
+
+
+async def _compute_first_run_state(db: AsyncSession, user_id: str, *,
                                   has_diagnosis: bool) -> FirstRunState:
     """Resolve the seller's real state. `has_diagnosis` is the caller's card check.
 
