@@ -37,7 +37,7 @@ async def list_notifications(
     items_q = await db.execute(
         select(Notification)
         .where(Notification.user_id == str(current_user.id))
-        .order_by(Notification.created_at.desc())
+        .order_by(Notification.created_at.desc(), Notification.id.desc())
         .offset(offset).limit(per_page)
     )
     items = items_q.scalars().all()
