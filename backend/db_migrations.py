@@ -70,6 +70,7 @@ def _migrate_sync() -> None:
     log.info("[DB] Alembic head:    %s", head)
 
     if current == head:
+        _validate_legacy_schema(stamped=True)
         log.info("[DB] Schema up-to-date")
         return
 
@@ -91,8 +92,8 @@ def _migrate_sync() -> None:
     log.info("[DB] Migration complete -> %s", head)
 
 
-def _validate_legacy_schema() -> None:
-    """Refuse a legacy stamp on drift; do not expose schema or data in errors."""
+def _validate_legacy_schema(*, stamped: bool = False) -> None:
+    """Refuse drift before stamping or accepting head; never repair schema."""
     import importlib
     import pkgutil
 
@@ -109,6 +110,11 @@ def _validate_legacy_schema() -> None:
             context = MigrationContext.configure(conn, opts={"compare_type": True})
             differences = compare_metadata(context, Base.metadata)
             if differences:
+                if stamped:
+                    raise RuntimeError(
+                        "Database marked at Alembic head has incompatible schema; "
+                        "refusing startup. A reviewed migration/reconciliation is required."
+                    )
                 raise RuntimeError(
                     "Legacy database schema is incompatible; refusing Alembic stamp. "
                     "A reviewed migration/reconciliation is required."
