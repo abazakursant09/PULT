@@ -27,7 +27,7 @@ export RCLONE_CONFIG_BK_ENDPOINT="$BACKUP_S3_ENDPOINT"
 export RCLONE_CONFIG_BK_REGION="${BACKUP_S3_REGION:-}"
 export RCLONE_CONFIG_BK_FORCE_PATH_STYLE=true
 
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d /work/pult-backup.XXXXXX)" || die "cannot allocate private /work directory"
 trap 'rm -rf "$TMP"' EXIT INT TERM
 PLAIN="$TMP/db.dump"
 CIPHER="$TMP/db.dump.age"
