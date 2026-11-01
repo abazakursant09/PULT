@@ -29,6 +29,7 @@ describe('route release policy is fail-closed', () => {
       '/ad-strategy',
       '/auto-promotions',
       '/community',
+      '/dashboard/admin/downtime',
       '/dashboard/finance',
       '/dashboard/leaks',
       '/dashboard/monitor',
@@ -103,6 +104,29 @@ describe('route release policy is fail-closed', () => {
     expect(isRouteUnavailable('/dashboard/monitoring', { growthContour: true, billing: true })).toBe(false)
   })
 
+  it.each([
+    '/dashboard/admin/downtime',
+    '/dashboard/admin/downtime/',
+    '/dashboard/admin/downtime/history',
+    '/dashboard/admin/downtime/status.js?from=bookmark',
+  ])('keeps the retired operator runbook unavailable at %s', route => {
+    for (const cookie of ['', 'pult_session_dev=synthetic', '__Host-pult_session=synthetic']) {
+      const request = new NextRequest(`http://localhost${route}`, cookie ? { headers: { cookie } } : undefined)
+      const response = middleware(request)
+      expect(response.status).toBe(404)
+      expect(response.headers.get('location')).toBeNull()
+    }
+    for (const growthContour of [false, true]) for (const billing of [false, true]) {
+      expect(isRouteUnavailable(new URL(`http://localhost${route}`).pathname, { growthContour, billing })).toBe(true)
+    }
+  })
+
+  it('does not change neighboring admin paths or seller routes', () => {
+    for (const route of ['/dashboard/admin', '/dashboard/admin/other', '/dashboard/admin/downtime-help', '/dashboard']) {
+      expect(isRouteUnavailable(route, { growthContour: true, billing: true })).toBe(false)
+    }
+  })
+
   it('returns 404 before auth for a disabled route', () => {
     const response = middleware(new NextRequest('http://localhost/dashboard/products'))
     expect(response.status).toBe(404)
@@ -122,6 +146,7 @@ describe('dead route residue is absent', () => {
       'components/ComingSoon.tsx',
       'components/Sidebar.tsx',
       'components/DashboardTopBar.tsx',
+      'app/dashboard/admin/downtime/page.tsx',
       'app/ad-strategy/page.tsx',
       'app/auto-promotions/page.tsx',
       'app/community/page.tsx',
@@ -135,6 +160,12 @@ describe('dead route residue is absent', () => {
       'app/dashboard/sklad/page.tsx',
       'app/dashboard/zakazy/page.tsx',
     ]) expect(existsSync(join(ROOT, path)), path).toBe(false)
+  })
+
+  it('retains the operator note outside the shipped frontend', () => {
+    const archive = join(ROOT, '..', 'docs', 'operations', 'downtime-runbook-archive.md')
+    expect(existsSync(archive)).toBe(true)
+    expect(readFileSync(archive, 'utf8')).toContain('NOT A VERIFIED PRODUCTION RUNBOOK')
   })
 
   it('ships no clickable link to an always-unavailable route', () => {

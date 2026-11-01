@@ -9,6 +9,7 @@ export const UNAVAILABLE_ROUTE_PREFIXES = [
   '/ad-strategy',
   '/auto-promotions',
   '/community',
+  '/dashboard/admin/downtime',
   '/dashboard/finance',
   '/dashboard/leaks',
   '/dashboard/monitor',
