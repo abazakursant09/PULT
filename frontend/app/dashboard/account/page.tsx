@@ -686,11 +686,12 @@ function DangerTab() {
                style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}>
             <AlertCircle size={16} style={{ color: 'var(--danger)' }} />
           </div>
-          <p className="text-[15px] font-semibold" style={{ color: 'var(--danger)' }}>Удаление аккаунта</p>
+          <p className="text-[15px] font-semibold" style={{ color: 'var(--danger)' }}>Деактивация аккаунта</p>
         </div>
         <p className="text-[13px] mb-5" style={{ color: 'var(--text-2)', lineHeight: 1.65 }}>
-          После удаления все ваши данные будут деактивированы. Email сохраняется и может быть
-          использован для повторной регистрации с восстановлением реферальной истории.
+          Аккаунт будет деактивирован, а не полностью удалён. Сохранённые данные аккаунта остаются
+          в системе, доступ по текущим сессиям прекращается. Восстановить аккаунт можно через
+          повторную регистрацию с тем же email. Реферальная история сохраняется.
         </p>
         {error && (
           <div className="mb-4 px-4 py-3 rounded-[8px] text-[13px]"
@@ -704,17 +705,17 @@ function DangerTab() {
             onClick={() => setConfirm(true)}
             className="text-[var(--danger)] border border-[var(--danger-dim)] hover:border-[var(--danger)]"
           >
-            <Trash2 size={14} /> Удалить аккаунт
+            <Trash2 size={14} /> Деактивировать аккаунт
           </Button>
         ) : (
           <div className="space-y-3">
             <div className="p-4 rounded-[8px]" style={{ background: 'rgba(239,68,68,0.04)', border: '1px solid rgba(239,68,68,0.15)' }}>
               <p className="text-[13px] font-semibold mb-1" style={{ color: 'var(--danger)' }}>Вы уверены?</p>
-              <p className="text-[13px]" style={{ color: 'var(--text-2)' }}>Это действие нельзя отменить. Аккаунт будет деактивирован немедленно.</p>
+              <p className="text-[13px]" style={{ color: 'var(--text-2)' }}>Аккаунт будет деактивирован, текущие сессии потеряют доступ. Данные не стираются полностью. Для восстановления нужна повторная регистрация с тем же email.</p>
             </div>
             <div className="flex gap-3">
               <Button variant="destructive" onClick={deleteAccount} loading={deleting}>
-                {!deleting && 'Да, удалить'}
+                {!deleting && 'Да, деактивировать'}
               </Button>
               <Button variant="ghost" onClick={() => setConfirm(false)}>Отмена</Button>
             </div>

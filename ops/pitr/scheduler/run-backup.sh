@@ -12,6 +12,10 @@ case "$TYPE" in
 esac
 # Single foreground, bounded, no auto-retry loop. expire (deletion) is NOT done here (Role C only).
 if pitr_bounded pgbackrest --stanza="$STANZA" --type="$TYPE" backup; then
+    if ! pitr_publish_heartbeat; then
+        pitr_log "pitr_backup=failed type=$TYPE reason=heartbeat_publish"
+        exit 1
+    fi
     pitr_log "pitr_backup=ok type=$TYPE"
 else
     pitr_log "pitr_backup=failed type=$TYPE"; exit 1

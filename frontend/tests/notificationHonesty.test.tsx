@@ -88,16 +88,17 @@ describe('the support action reaches a human', () => {
   })
 })
 
-describe('account recovery is described the same way on both pages', () => {
-  it('invents no recovery window, and the two pages agree', () => {
+describe('account recovery copy matches the same server contract on both pages', () => {
+  it('preserves same-email recovery and referral history without inventing a recovery window', () => {
     // routers/referrals.py soft-deletes with no expiry: there is no 30-day window to promise.
-    const account = code(...ACCOUNT)
-    const settings = code(...SETTINGS)
+    const account = code(...ACCOUNT).replace(/\s+/g, ' ')
+    const settings = code(...SETTINGS).replace(/\s+/g, ' ')
 
     for (const src of [account, settings]) {
       expect(src).not.toMatch(/30 дней/)
-      expect(src).toMatch(/Email сохраняется и может быть\s+использован|Email сохраняется и может быть использован/)
-      expect(src).toMatch(/восстановлением реферальной истории/)
     }
+    expect(account).toContain('Восстановить аккаунт можно через повторную регистрацию с тем же email.')
+    expect(account).toContain('Реферальная история сохраняется.')
+    expect(settings).toContain('Email сохраняется и может быть использован для повторной регистрации с восстановлением реферальной истории.')
   })
 })
