@@ -1,5 +1,5 @@
 'use client'
-import { Suspense, useEffect, useState, useCallback } from 'react'
+import { Suspense, useEffect, useState, useCallback, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import {
   User, Shield, ShieldCheck, ShieldOff, Bell, Globe, AlertTriangle,
@@ -374,6 +374,8 @@ function NotificationsTab() {
   const [saved,       setSaved]       = useState(false)
   const [loadError,   setLoadError]   = useState(false)
   const [saveError,   setSaveError]   = useState(false)
+  const settingsEdit = useRef(0)
+  const chatEdit = useRef(0)
 
   useEffect(() => {
     Promise.all([api.telegram.getChatId(), api.telegram.getSettings()])
@@ -383,15 +385,21 @@ function NotificationsTab() {
   }, [])
 
   const setField = useCallback(<K extends keyof TelegramSettings>(key: K, val: TelegramSettings[K]) => {
+    settingsEdit.current += 1
+    setSaved(false)
     setSettings(s => s ? { ...s, [key]: val } : s)
   }, [])
 
   async function saveChatId() {
+    const edit = chatEdit.current
     setChatSaving(true); setChatError(''); setChatSaved(false)
     try {
       const res = await api.telegram.updateChatId(chatId.trim() || null)
-      setSavedChatId(res.telegram_chat_id); setChatSaved(true)
-      setTimeout(() => setChatSaved(false), 2500)
+      setSavedChatId(res.telegram_chat_id)
+      if (edit === chatEdit.current) {
+        setChatSaved(true)
+        setTimeout(() => setChatSaved(false), 2500)
+      }
     } catch (e) { setChatError(e instanceof Error ? e.message : 'Ошибка') }
     finally { setChatSaving(false) }
   }
@@ -414,11 +422,14 @@ function NotificationsTab() {
 
   async function saveSettings() {
     if (!settings) return
+    const edit = settingsEdit.current
     setSaving(true); setSaved(false); setSaveError(false)
     try {
       const u = await api.telegram.updateSettings(settings)
-      setSettings(u); setSaved(true)
-      setTimeout(() => setSaved(false), 2500)
+      if (edit === settingsEdit.current) {
+        setSettings(u); setSaved(true)
+        setTimeout(() => setSaved(false), 2500)
+      }
     } catch { setSaveError(true) }
     finally { setSaving(false) }
   }
@@ -453,7 +464,7 @@ function NotificationsTab() {
             className="flex-1 min-w-0 font-mono"
             placeholder="123456789"
             value={chatId}
-            onChange={e => setChatId(e.target.value)}
+            onChange={e => { chatEdit.current += 1; setChatSaved(false); setChatId(e.target.value) }}
           />
           <Button onClick={saveChatId} loading={chatSaving} className="shrink-0">
             {!chatSaving && (chatSaved ? <><Check size={13} /> Сохранено</> : 'Сохранить')}

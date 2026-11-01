@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { beforeEach, expect, it, vi } from 'vitest'
 import AccountPage from '@/app/dashboard/account/page'
 import { api, type TelegramSettings } from '@/lib/api'
@@ -16,6 +16,69 @@ beforeEach(() => {
   vi.spyOn(api.telegram, 'getSettings').mockResolvedValue(settings)
   vi.spyOn(api.telegram, 'test').mockResolvedValue({} as never)
   vi.spyOn(api.telegram, 'triggerInsights').mockResolvedValue({ notifications_sent: 0 } as never)
+})
+
+it('retains a newer settings draft while an older save resolves, without saved success', async () => {
+  let resolve!: (value: TelegramSettings) => void
+  const save = vi.spyOn(api.telegram, 'updateSettings').mockReturnValueOnce(new Promise(r => { resolve = r }))
+  render(<AccountPage />)
+  const daily = await screen.findByRole('checkbox', { name: 'Ежедневный отчёт' })
+  fireEvent.click(screen.getByRole('button', { name: 'Сохранить настройки' }))
+  fireEvent.click(daily)
+  expect(daily).not.toBeChecked()
+  await act(async () => resolve(settings))
+  expect(daily).not.toBeChecked()
+  expect(screen.queryByText('Настройки сохранены')).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Сохранить настройки' })).toBeEnabled()
+  save.mockResolvedValueOnce({ ...settings, daily_report: false })
+  fireEvent.click(screen.getByRole('button', { name: 'Сохранить настройки' }))
+  expect(await screen.findByText('Настройки сохранены')).toBeInTheDocument()
+  expect(save).toHaveBeenLastCalledWith({ ...settings, daily_report: false })
+  expect(save).toHaveBeenCalledTimes(2)
+  expect(api.telegram.test).not.toHaveBeenCalled()
+  expect(api.telegram.triggerInsights).not.toHaveBeenCalled()
+})
+
+it('does not label a newer Chat ID draft saved when an older request completes', async () => {
+  let resolve!: (value: { ok: boolean; telegram_chat_id: string | null }) => void
+  const save = vi.spyOn(api.telegram, 'updateChatId').mockReturnValueOnce(new Promise(r => { resolve = r }))
+  render(<AccountPage />)
+  const input = await screen.findByRole('textbox', { name: 'Telegram Chat ID' })
+  fireEvent.change(input, { target: { value: '111' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Сохранить', exact: true }))
+  fireEvent.change(input, { target: { value: '222' } })
+  await act(async () => resolve({ ok: true, telegram_chat_id: '111' }))
+  expect(input).toHaveValue('222')
+  expect(screen.queryByText('Chat ID сохранён')).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Сохранить', exact: true })).toBeEnabled()
+  save.mockResolvedValueOnce({ ok: true, telegram_chat_id: '222' })
+  fireEvent.click(screen.getByRole('button', { name: 'Сохранить', exact: true }))
+  expect(await screen.findByText('Chat ID сохранён')).toBeInTheDocument()
+  expect(save).toHaveBeenLastCalledWith('222')
+  expect(save).toHaveBeenCalledTimes(2)
+  expect(api.telegram.test).not.toHaveBeenCalled()
+})
+
+it('clears saved settings notice immediately on a subsequent edit', async () => {
+  vi.spyOn(api.telegram, 'updateSettings').mockResolvedValue(settings)
+  render(<AccountPage />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Сохранить настройки' }))
+  await screen.findByText('Настройки сохранены')
+  fireEvent.change(screen.getByLabelText('Время ежедневного отчёта'), { target: { value: '11:00' } })
+  expect(screen.queryByText('Настройки сохранены')).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Сохранить настройки' })).toBeEnabled()
+})
+
+it('clears saved Chat ID notice immediately on a subsequent edit', async () => {
+  vi.spyOn(api.telegram, 'updateChatId').mockResolvedValue({ ok: true, telegram_chat_id: '111' })
+  render(<AccountPage />)
+  const input = await screen.findByRole('textbox', { name: 'Telegram Chat ID' })
+  fireEvent.change(input, { target: { value: '111' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Сохранить', exact: true }))
+  await screen.findByText('Chat ID сохранён')
+  fireEvent.change(input, { target: { value: '222' } })
+  expect(screen.queryByText('Chat ID сохранён')).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Сохранить', exact: true })).toBeEnabled()
 })
 
 it('announces load failure without offering to overwrite unknown settings', async () => {
