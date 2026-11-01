@@ -74,13 +74,12 @@ def _migrate_sync() -> None:
         return
 
     if current is None and app_tables:
-        # Legacy DB created by the old create_all bootstrap (no alembic_version).
-        # We cannot replay the baseline over existing tables; declare it at head.
-        # One-time transition — log loudly so any residual column drift is visible.
+        # Stamping is safe only when the complete legacy schema matches models.
+        # Comparison is read-only: never repair or replay migrations over data.
+        _validate_legacy_schema()
         log.warning(
-            "[DB] Legacy un-stamped database with %d tables detected — stamping head. "
-            "If a column is missing, reconcile once via Alembic; future migrations "
-            "apply automatically from here.", len(app_tables),
+            "[DB] Compatible legacy database with %d tables — stamping head.",
+            len(app_tables),
         )
         command.stamp(cfg, "head")
         log.info("[DB] Stamped head (%s)", head)
@@ -90,6 +89,32 @@ def _migrate_sync() -> None:
     log.info("[DB] Applying migrations...")
     command.upgrade(cfg, "head")
     log.info("[DB] Migration complete -> %s", head)
+
+
+def _validate_legacy_schema() -> None:
+    """Refuse a legacy stamp on drift; do not expose schema or data in errors."""
+    import importlib
+    import pkgutil
+
+    import models
+    from alembic.autogenerate import compare_metadata
+    from database import Base
+
+    for module in pkgutil.iter_modules(models.__path__):
+        importlib.import_module(f"{models.__name__}.{module.name}")
+
+    engine = sa.create_engine(_sync_url())
+    try:
+        with engine.connect() as conn:
+            context = MigrationContext.configure(conn, opts={"compare_type": True})
+            differences = compare_metadata(context, Base.metadata)
+            if differences:
+                raise RuntimeError(
+                    "Legacy database schema is incompatible; refusing Alembic stamp. "
+                    "A reviewed migration/reconciliation is required."
+                )
+    finally:
+        engine.dispose()
 
 
 async def run_migrations() -> None:
