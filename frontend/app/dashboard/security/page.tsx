@@ -102,11 +102,16 @@ export default function SecurityPage() {
     }
   }
 
-  function copySecret() {
-    navigator.clipboard.writeText(secret).then(() => {
+  async function copySecret() {
+    setCopied(false); setError('')
+    try {
+      await navigator.clipboard.writeText(secret)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
-    })
+    } catch {
+      setCopied(false)
+      setError('Не удалось скопировать ключ. Выделите и скопируйте его вручную.')
+    }
   }
 
   if (loading) {
@@ -144,7 +149,7 @@ export default function SecurityPage() {
           </div>
         )}
         {error && (
-          <div className="mb-6 px-4 py-3 rounded-xl flex items-center gap-3"
+          <div role="alert" className="mb-6 px-4 py-3 rounded-xl flex items-center gap-3"
                style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.22)', color: 'var(--danger)' }}>
             <AlertTriangle size={16} /> {error}
           </div>
