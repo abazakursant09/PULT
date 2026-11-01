@@ -89,6 +89,14 @@ jobs:
       - name: Install dependencies
         run: pip install --require-hashes -r requirements-ci.lock
 
+      - name: Real PG16 startup migrations (isolated databases)
+        env:
+          PULT_TEST_PG_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/pult_explain
+          APP_ENV: test
+        run: |
+          python -c "import os; assert os.environ.get('PULT_TEST_PG_URL'), 'PULT_TEST_PG_URL required'"
+          pytest -p no:cacheprovider -q -rA tests/test_startup_migration_pg.py
+
       - name: Real Alembic migration + EXPLAIN index gate + retention DELETE (real PostgreSQL)
         env:
           PULT_TEST_PG_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/pult_explain
