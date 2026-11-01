@@ -20,6 +20,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from database import Base
+from models.user import User
 import models  # registers tables
 from models.imported_finance import ImportedFinanceRow
 from models.pricing_signal import PricingSignal
@@ -161,6 +162,8 @@ def test_registry_pricing_enabled():
 def test_scheduler_runs_pricing():
     async def go():
         db = await _db(); uid = str(uuid.uuid4())
+        db.add(User(id=uid, email=f"{uid}@example.invalid", name="Synthetic",
+                    hashed_password="synthetic", deleted_at=None))
         await _fin(db, uid, sku="LOSS", revenue=10000.0, net_profit=-500.0)
         await db.commit()
         await AdvisoryRuntime().run_due_producers(db, now=NOW)   # REAL registry

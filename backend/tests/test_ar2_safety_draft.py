@@ -20,6 +20,7 @@ from database import Base, get_db
 from dependencies import get_current_user
 import models  # register tables
 from models.product import Product
+from models.user import User
 from models.marketplace_connection import MarketplaceConnection
 from models.api_credential import ApiCredential
 from models.review_response import ReviewResponse
@@ -43,6 +44,10 @@ async def _new_db():
 
 
 async def _seed(db, uid, marketplace="wildberries"):
+    if await db.get(User, uid) is None:
+        db.add(User(id=uid, name="Synthetic", email=f"{uid}@example.invalid",
+                    hashed_password="synthetic-not-a-login-hash", deleted_at=None))
+        await db.flush()
     prod = Product(id=str(uuid.uuid4()), user_id=uid, name="Кружка", sku="NM-1", marketplace=marketplace)
     db.add(prod)
     conn = MarketplaceConnection(id=str(uuid.uuid4()), user_id=uid, marketplace=marketplace,

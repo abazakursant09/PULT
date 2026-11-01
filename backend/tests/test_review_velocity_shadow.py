@@ -25,6 +25,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from database import Base
+from models.user import User
 import models  # registers tables
 from models.imported_finance import ImportedFinanceRow
 from models.imported_product import ImportedProductRow
@@ -283,6 +284,8 @@ def test_registry_review_velocity_enabled():
 def test_scheduler_runs_review_velocity():
     async def go():
         db = await _db(); uid = str(uuid.uuid4())
+        db.add(User(id=uid, email=f"{uid}@example.invalid", name="Synthetic",
+                    hashed_password="synthetic", deleted_at=None))
         snaps, sales = _scenario(10, 10, 2, 10)
         await _seed(db, uid, snaps, sales); await db.commit()
         # DEFAULT slot_budget (now 20) is enough that review_velocity — the last-registered

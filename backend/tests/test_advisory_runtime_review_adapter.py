@@ -19,6 +19,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from database import Base
+from models.user import User
 import models  # registers tables
 from models.product import Product
 from models.review_response import ReviewResponse
@@ -135,6 +136,8 @@ def test_run_due_producers_runs_legal_and_review_advisory_only():
 
     async def go():
         db = await _db(); uid = str(uuid.uuid4()); pid = str(uuid.uuid4())
+        db.add(User(id=uid, email=f"{uid}@example.invalid", name="Synthetic",
+                    hashed_password="synthetic", deleted_at=None))
         # active user (finance anchor)
         db.add(ImportedFinanceRow(import_id=str(uuid.uuid4()), user_id=uid, marketplace="ozon",
                                   date="2026-06-20", sku="SKU1", revenue=100.0, net_profit=10.0))

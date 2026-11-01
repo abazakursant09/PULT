@@ -23,6 +23,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from database import Base
+from models.user import User
 import models  # registers tables
 from models.imported_finance import ImportedFinanceRow
 from models.product import Product
@@ -96,6 +97,8 @@ def test_registry_all_enabled():
 def test_scheduler_runs_legal_review_growth():
     async def go():
         db = await _db(); uid = str(uuid.uuid4())
+        db.add(User(id=uid, email=f"{uid}@example.invalid", name="Synthetic",
+                    hashed_password="synthetic", deleted_at=None))
         await _seed_all_three(db, uid)
         # DEFAULT slot_budget (20) covers all 15 enabled producers in one tick — proof the
         # runtime-tuning default lift removed the old 10-budget drop of the last producer
@@ -113,6 +116,8 @@ def test_scheduler_runs_legal_review_growth():
 def test_all_three_signals_created():
     async def go():
         db = await _db(); uid = str(uuid.uuid4())
+        db.add(User(id=uid, email=f"{uid}@example.invalid", name="Synthetic",
+                    hashed_password="synthetic", deleted_at=None))
         await _seed_all_three(db, uid)
         await AdvisoryRuntime().run_due_producers(db, now=NOW)
         assert len(await _live(db, uid, GrowthSignal)) >= 1
