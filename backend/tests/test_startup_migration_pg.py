@@ -206,3 +206,19 @@ def test_pg_startup_drift_refused_without_stamp_or_data_change(pg_startup):
         assert "alembic_version" not in _schema(engine)
         assert _schema(engine) == before_schema
         assert _rows(engine) == before_rows
+
+
+def test_pg_head_marker_does_not_hide_missing_column(pg_startup):
+    engine, dbm = pg_startup
+    _boot(dbm)
+    _seed(engine)
+    with engine.begin() as connection:
+        connection.exec_driver_sql("ALTER TABLE users DROP COLUMN telegram_chat_id")
+    before_schema, before_rows = _schema(engine), _rows(engine)
+    revision = _revision(engine)
+    for _ in range(2):
+        with pytest.raises(RuntimeError, match="refusing startup"):
+            _boot(dbm)
+        assert _revision(engine) == revision
+        assert _schema(engine) == before_schema
+        assert _rows(engine) == before_rows
