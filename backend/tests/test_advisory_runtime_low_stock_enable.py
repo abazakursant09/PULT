@@ -24,6 +24,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from database import Base
+from models.user import User
 import models  # registers tables
 from models.imported_finance import ImportedFinanceRow
 from models.imported_product import ImportedProductRow
@@ -83,6 +84,8 @@ def test_registry_all_enabled():
 def test_scheduler_runs_operations():
     async def go():
         db = await _db(); uid = str(uuid.uuid4())
+        db.add(User(id=uid, email=f"{uid}@example.invalid", name="Synthetic",
+                    hashed_password="synthetic", deleted_at=None))
         await _seed(db, uid, stock=5)
         res = await AdvisoryRuntime().run_due_producers(db, now=NOW)   # REAL registry
         assert res.errors == 0
@@ -96,6 +99,10 @@ def test_scheduler_runs_operations():
 def test_stock_5_creates_stock_6_does_not():
     async def go():
         db = await _db(); uid5 = str(uuid.uuid4()); uid6 = str(uuid.uuid4())
+        db.add(User(id=uid5, email=f"{uid5}@example.invalid", name="Synthetic",
+                    hashed_password="synthetic", deleted_at=None))
+        db.add(User(id=uid6, email=f"{uid6}@example.invalid", name="Synthetic",
+                    hashed_password="synthetic", deleted_at=None))
         await _seed(db, uid5, stock=5)
         await _seed(db, uid6, stock=6)
         await AdvisoryRuntime().run_due_producers(db, now=NOW)
@@ -109,6 +116,8 @@ def test_stock_5_creates_stock_6_does_not():
 def test_operations_reaches_feed_and_today():
     async def go():
         db = await _db(); uid = str(uuid.uuid4())
+        db.add(User(id=uid, email=f"{uid}@example.invalid", name="Synthetic",
+                    hashed_password="synthetic", deleted_at=None))
         await _seed(db, uid, stock=5)
         await AdvisoryRuntime().run_due_producers(db, now=NOW)
 
@@ -128,6 +137,8 @@ def test_operations_reaches_feed_and_today():
 def test_advisory_only_no_executable():
     async def go():
         db = await _db(); uid = str(uuid.uuid4())
+        db.add(User(id=uid, email=f"{uid}@example.invalid", name="Synthetic",
+                    hashed_password="synthetic", deleted_at=None))
         await _seed(db, uid, stock=5)
         await AdvisoryRuntime().run_due_producers(db, now=NOW)
         assert len(await _ops_live(db, uid)) >= 1

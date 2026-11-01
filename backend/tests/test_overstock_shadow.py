@@ -22,6 +22,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from database import Base
+from models.user import User
 import models  # registers tables
 from models.imported_finance import ImportedFinanceRow
 from models.imported_product import ImportedProductRow
@@ -251,6 +252,8 @@ def test_registry_overstock_enabled():
 def test_scheduler_runs_overstock():
     async def go():
         db = await _db(); uid = str(uuid.uuid4())
+        db.add(User(id=uid, email=f"{uid}@example.invalid", name="Synthetic",
+                    hashed_password="synthetic", deleted_at=None))
         await _seed(db, uid, 200, _sales(3)); await db.commit()
         # default slot_budget (20) covers all 12 enabled producers for this active user
         await AdvisoryRuntime().run_due_producers(db, now=NOW)   # REAL registry, default budget
