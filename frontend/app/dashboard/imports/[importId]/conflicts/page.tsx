@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, useRef } from 'react'
 import { useParams } from 'next/navigation'
 import { api, type ImportConflictRow } from '@/lib/api'
 import { LedgerShell } from '@/components/stores/LedgerShell'
@@ -23,43 +23,81 @@ export default function ConflictsPage() {
   const [choice, setChoice] = useState<Record<string, string>>({})
   const [error, setError] = useState('')
   const [resolvedAny, setResolvedAny] = useState(false)
+  const [uncertain, setUncertain] = useState('')
+  const decisionPending = useRef(false)
+  const readPending = useRef(false)
+  const routeGeneration = useRef(0)
+  const readGeneration = useRef(0)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (scope = routeGeneration.current) => {
+    if (scope !== routeGeneration.current || readPending.current) return
+    const request = ++readGeneration.current
+    const ownsRead = () => scope === routeGeneration.current && request === readGeneration.current
+    readPending.current = true
     setFailed(false)
+    setRows(null)
     try {
-      setRows(await api.csvImport.conflicts(importId))
+      const next = await api.csvImport.conflicts(importId)
+      if (ownsRead()) setRows(next)
     } catch {
-      setRows(null)
-      setFailed(true)
+      if (ownsRead()) {
+        setRows(null)
+        setFailed(true)
+      }
+    } finally {
+      if (ownsRead()) readPending.current = false
     }
   }, [importId])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    const scope = ++routeGeneration.current
+    decisionPending.current = false
+    readPending.current = false
+    setBusyRow(null); setChoice({}); setError(''); setUncertain(''); setResolvedAny(false)
+    void load(scope)
+    return () => {
+      routeGeneration.current += 1
+      readGeneration.current += 1
+      readPending.current = false
+      decisionPending.current = false
+    }
+  }, [load])
 
   const resolve = async (row: ImportConflictRow, action: Action) => {
+    if (decisionPending.current || readPending.current) return
+    const scope = routeGeneration.current
     if (action === 'link_existing' && !choice[row.row_id]) {
       setError('Выберите товар, с которым связать строку.')
       return
     }
-    setBusyRow(row.row_id); setError('')
+    decisionPending.current = true
+    setBusyRow(row.row_id); setError(''); setUncertain('')
     try {
       await api.csvImport.resolveConflict(importId, {
         row_id: row.row_id,
         action,
         ...(action === 'link_existing' ? { product_id: choice[row.row_id] } : {}),
       })
+      if (scope !== routeGeneration.current) return
       setResolvedAny(true)
-      await load()
+      await load(scope)
     } catch {
-      setError('Не удалось применить решение. Строка осталась без изменений.')
+      if (scope !== routeGeneration.current) return
+      setUncertain('Результат решения не подтверждён. Проверьте сохранённое состояние перед повторным решением.')
+      await load(scope)
     } finally {
-      setBusyRow(null)
+      if (scope === routeGeneration.current) {
+        decisionPending.current = false
+        setBusyRow(null)
+      }
     }
   }
 
   return (
     <LedgerShell crumbs={[{ label: 'Магазины', href: '/dashboard/stores' }]} title="Разбор конфликтов">
       <hr className="l-rule" />
+      {uncertain && <p className="l-oxide" role="alert" style={{ paddingTop: 14 }}>{uncertain}</p>}
+      {error && <p className="l-oxide" role="alert" style={{ paddingTop: 14 }}>{error}</p>}
 
       {failed && <ErrorState message="Не удалось загрузить конфликты этой загрузки." onRetry={() => void load()} />}
 
@@ -82,7 +120,6 @@ export default function ConflictsPage() {
             PULT не смог однозначно сопоставить эти строки с товарами кабинета. Выберите, что сделать.
           </p>
 
-          {error && <p className="l-oxide" role="alert" style={{ paddingTop: 14 }}>{error}</p>}
 
           <section className="l-ledger" style={{ marginTop: 20 }}>
             {rows.map(row => (
@@ -99,6 +136,7 @@ export default function ConflictsPage() {
                     className="l-input"
                     style={{ maxWidth: 360, fontSize: 14 }}
                     value={choice[row.row_id] ?? ''}
+                    disabled={busyRow !== null}
                     onChange={e => { setChoice(c => ({ ...c, [row.row_id]: e.target.value })); setError('') }}
                   >
                     <option value="">Не выбран</option>
@@ -111,15 +149,15 @@ export default function ConflictsPage() {
                 </div>
 
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                  <button type="button" className="l-btn" disabled={busyRow === row.row_id}
+                  <button type="button" className="l-btn" disabled={busyRow !== null}
                           onClick={() => void resolve(row, 'link_existing')}>
                     Связать с товаром
                   </button>
-                  <button type="button" className="l-btn" disabled={busyRow === row.row_id}
+                  <button type="button" className="l-btn" disabled={busyRow !== null}
                           onClick={() => void resolve(row, 'create_new')}>
                     Создать новый товар
                   </button>
-                  <button type="button" className="l-btn" disabled={busyRow === row.row_id}
+                  <button type="button" className="l-btn" disabled={busyRow !== null}
                           onClick={() => void resolve(row, 'leave_unassigned')}>
                     Оставить без товара
                   </button>
