@@ -2,7 +2,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from database import get_db
 from models.supplier import Supplier
 
@@ -24,11 +24,24 @@ class SupplierOut(BaseModel):
     total_reviews: int
     total_deals: int
 
+    @field_validator("is_verified", mode="before")
+    @classmethod
+    def suppress_unverified_badge(cls, value):
+        # Presentation only: historical database values are not rewritten.
+        return False
+
     class Config:
         from_attributes = True
 
 
-@router.get("/catalog/suppliers", response_model=list[SupplierOut])
+def _supplier_verified_filter_unavailable(verified: Optional[bool] = Query(None)) -> None:
+    """A verified-only or unverified-only filter would trust unsupported assertions."""
+    if verified is not None:
+        raise HTTPException(status_code=404, detail="Not found")
+
+
+@router.get("/catalog/suppliers", response_model=list[SupplierOut],
+            dependencies=[Depends(_supplier_verified_filter_unavailable)])
 async def list_suppliers(
     industry:  Optional[str] = Query(None),
     region:    Optional[str] = Query(None),
@@ -38,6 +51,7 @@ async def list_suppliers(
     sort:      str = Query("rating"),  # rating | deals | reviews | name
     db: AsyncSession = Depends(get_db),
 ):
+    _supplier_verified_filter_unavailable(verified)
     q = select(Supplier)
 
     if industry:
@@ -46,8 +60,6 @@ async def list_suppliers(
         q = q.where(Supplier.region.ilike(f"%{region}%"))
     if country:
         q = q.where(Supplier.country == country)
-    if verified is not None:
-        q = q.where(Supplier.is_verified == verified)
     if search:
         term = f"%{search}%"
         q = q.where(or_(

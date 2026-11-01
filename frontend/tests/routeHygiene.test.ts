@@ -38,6 +38,7 @@ describe('route release policy is fail-closed', () => {
       '/dashboard/risks',
       '/dashboard/seo',
       '/dashboard/sklad',
+      '/dashboard/suppliers/verify',
       '/dashboard/zakazy',
     ])
     expect(GROWTH_ROUTE_PREFIXES).toEqual([
@@ -102,6 +103,23 @@ describe('route release policy is fail-closed', () => {
 
   it('does not quarantine a monitor lookalike route prefix', () => {
     expect(isRouteUnavailable('/dashboard/monitoring', { growthContour: true, billing: true })).toBe(false)
+  })
+
+  it.each(['/dashboard/suppliers/verify', '/dashboard/suppliers/verify/', '/dashboard/suppliers/verify/history'])('quarantines pseudo-verification before auth at %s', route => {
+    for (const cookie of ['', 'pult_session_dev=synthetic', '__Host-pult_session=synthetic']) {
+      const response = middleware(new NextRequest(`http://localhost${route}`, cookie ? { headers: { cookie } } : undefined))
+      expect(response.status).toBe(404)
+      expect(response.headers.get('location')).toBeNull()
+    }
+    for (const growthContour of [false, true]) for (const billing of [false, true]) {
+      expect(isRouteUnavailable(route, { growthContour, billing })).toBe(true)
+    }
+  })
+
+  it('keeps the catalogue and supplier lookalike paths outside this quarantine', () => {
+    for (const route of ['/suppliers', '/dashboard/suppliers', '/dashboard/suppliers/verify-help']) {
+      expect(isRouteUnavailable(route, { growthContour: true, billing: true })).toBe(false)
+    }
   })
 
   it.each([

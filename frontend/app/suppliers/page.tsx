@@ -276,11 +276,6 @@ function SupplierCard({ s }: { s: SupplierEntry }) {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <h3 className="font-semibold truncate" style={{ color: '#FFFFFF' }}>{s.company_name}</h3>
-              {s.is_verified && (
-                <Badge variant="outline" className="text-xs px-2 h-5 gap-1" style={{ color: 'var(--violet)', borderColor: 'rgba(110,106,252,0.3)', background: 'rgba(110,106,252,0.06)' }}>
-                  <ShieldCheck size={10} /> Верифицирован
-                </Badge>
-              )}
               <Badge variant="secondary" className="text-xs px-2 h-5">{s.country === 'china' ? 'Китай' : 'Россия'}</Badge>
             </div>
             <div className="flex items-center gap-3 mt-1 flex-wrap">
