@@ -97,6 +97,14 @@ jobs:
           python -c "import os; assert os.environ.get('PULT_TEST_PG_URL'), 'PULT_TEST_PG_URL required'"
           pytest -p no:cacheprovider -q -rA tests/test_startup_migration_pg.py
 
+      - name: Real PG16 import conflict resolution (isolated databases)
+        env:
+          PULT_TEST_PG_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/pult_explain
+          APP_ENV: test
+        run: |
+          python -c "import os; assert os.environ.get('PULT_TEST_PG_URL'), 'PULT_TEST_PG_URL required'"
+          pytest -p no:cacheprovider -q -rA tests/test_import_conflict_resolution_pg.py
+
       - name: Real Alembic migration + EXPLAIN index gate + retention DELETE (real PostgreSQL)
         env:
           PULT_TEST_PG_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/pult_explain
