@@ -15,8 +15,8 @@ services:
     command: ["backup.sh"]
     read_only: true
     tmpfs:
-      - /work:rw,noexec,nosuid,size=2g,mode=1700
-      - /tmp:rw,noexec,nosuid,size=64m,mode=1700
+      - /work:rw,noexec,nosuid,size=2g,mode=1700,uid=10002,gid=10002
+      - /tmp:rw,noexec,nosuid,size=64m,mode=1700,uid=10002,gid=10002
     security_opt:
       - no-new-privileges:true
     cap_drop:
