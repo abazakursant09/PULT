@@ -67,8 +67,8 @@ export default function MarkingPage() {
               Честный ЗНАК
             </h1>
             <p style={{ fontSize: '0.875rem', color: 'var(--text-2)' }}>
-              Проверка товаров на обязательную маркировку
-              {lastScan && <> · последняя проверка {lastScan.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}</>}
+              Сопоставление товаров со встроенным справочником
+              {lastScan && <> · Данные получены локально {lastScan.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}</>}
             </p>
           </div>
           <Button onClick={scan} loading={loading}>
@@ -79,10 +79,10 @@ export default function MarkingPage() {
         <Card className="p-5 mb-6 flex items-start gap-4" style={{ border: '1px solid color-mix(in srgb, var(--violet) 20%, transparent)', background: ABG }}>
           <Info size={18} style={{ color: A, flexShrink: 0, marginTop: 2 }} />
           <div style={{ fontSize: '0.875rem', color: 'var(--text-2)', lineHeight: 1.65 }}>
-            <strong style={{ color: 'var(--text)' }}>Что такое Честный ЗНАК?</strong> — государственная система обязательной
-            маркировки товаров в России (crpt.ru). Продавцы обязаны наносить QR-код на товары из регулируемых категорий.
-            Продажа немаркированного товара грозит штрафом до 300 000 ₽.{' '}
-            Проверка обновляется автоматически раз в неделю и при изменении перечня товаров.
+            <strong style={{ color: 'var(--text)' }}>Как читать результат?</strong> Здесь используется встроенный справочник ключевых слов.
+            Совпадение носит ориентировочный характер и не является официальным подтверждением требований к товару.
+            Отсутствие совпадений не подтверждает отсутствие обязанности маркировки.{' '}
+            Самостоятельно проверяйте действующие требования к вашему товару в официальных источниках.
           </div>
         </Card>
 
@@ -121,15 +121,15 @@ export default function MarkingPage() {
                 {checkResult.requires_marking ? (
                   <>
                     <p className="font-semibold" style={{ fontSize: '0.875rem', color: 'var(--danger)' }}>
-                      Требуется маркировка «Честный ЗНАК»
+                      Совпадение со справочником
                     </p>
                     <p style={{ fontSize: '0.8125rem', color: 'var(--text-2)', marginTop: 4 }}>
-                      {checkResult.warning}
+                      Ориентир из справочника: {checkResult.warning}
                     </p>
                   </>
                 ) : (
                   <p className="font-semibold" style={{ fontSize: '0.875rem', color: 'var(--violet-text)' }}>
-                    Категория «{checkResult.category}» не требует обязательной маркировки
+                    Совпадений не найдено: «{checkResult.category}»
                   </p>
                 )}
               </div>
@@ -144,8 +144,8 @@ export default function MarkingPage() {
             <div className="grid grid-cols-3 gap-4 mb-6">
               {[
                 { label: 'Всего товаров',         value: products.length, color: 'var(--text)' },
-                { label: 'Требуют маркировки',    value: flagged.length,  color: flagged.length > 0 ? 'var(--danger)' : 'var(--violet)' },
-                { label: 'Не требуют маркировки', value: clean.length,    color: 'var(--violet-text)' },
+                { label: 'Совпадение со справочником', value: flagged.length, color: flagged.length > 0 ? 'var(--danger)' : 'var(--violet)' },
+                { label: 'Совпадений не найдено', value: clean.length,    color: 'var(--violet-text)' },
               ].map(s => (
                 <Card key={s.label} className="p-5 text-center">
                   <div className="font-bold" style={{ fontSize: '1.75rem', color: s.color }}>{s.value}</div>
@@ -158,14 +158,14 @@ export default function MarkingPage() {
               <Card className="overflow-hidden mb-6">
                 <div style={{ padding: '16px 24px', borderBottom: '1px solid rgba(220,38,38,0.15)', background: 'rgba(220,38,38,0.03)' }}>
                   <h2 className="font-semibold flex items-center gap-2" style={{ fontSize: '0.9375rem', color: 'var(--danger)' }}>
-                    <AlertTriangle size={15} /> Требуют маркировки ({flagged.length})
+                    <AlertTriangle size={15} /> Совпадение со справочником ({flagged.length})
                   </h2>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full">
                     <thead>
                       <tr style={{ borderBottom: '1px solid color-mix(in srgb, var(--violet) 10%, transparent)' }}>
-                        {['Товар', 'Категория', 'Основание'].map(h => (
+                        {['Товар', 'Категория', 'Ориентир из справочника'].map(h => (
                           <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">{h}</th>
                         ))}
                       </tr>
@@ -190,7 +190,7 @@ export default function MarkingPage() {
               <Card className="overflow-hidden">
                 <div style={{ padding: '16px 24px', borderBottom: '1px solid color-mix(in srgb, var(--violet) 12%, transparent)', background: 'color-mix(in srgb, var(--violet) 4%, transparent)' }}>
                   <h2 className="font-semibold flex items-center gap-2" style={{ fontSize: '0.9375rem', color: 'var(--violet-text)' }}>
-                    <CheckCircle2 size={15} /> Маркировка не требуется ({clean.length})
+                    <CheckCircle2 size={15} /> Совпадений не найдено ({clean.length})
                   </h2>
                 </div>
                 <div className="overflow-x-auto">
@@ -230,7 +230,7 @@ export default function MarkingPage() {
 
         <Card className="mt-8 p-5">
           <h3 className="font-semibold mb-3" style={{ fontSize: '0.875rem', color: 'var(--text)' }}>
-            Категории, требующие маркировки «Честный ЗНАК»
+            Примеры категорий во встроенном справочнике
           </h3>
           <div className="flex flex-wrap gap-2">
             {['Одежда', 'Обувь', 'Парфюмерия / Духи', 'Постельное бельё', 'Шины', 'Фототехника',
@@ -241,7 +241,7 @@ export default function MarkingPage() {
             ))}
           </div>
           <p className="mt-3" style={{ fontSize: '0.75rem', color: 'var(--text-2)' }}>
-            Перечень актуален на дату последнего обновления. Проверяйте изменения на сайте crpt.ru.
+            Время получения данных не подтверждает актуальность требований. Справочник не является полным перечнем.
           </p>
         </Card>
 
