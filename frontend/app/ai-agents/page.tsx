@@ -22,28 +22,21 @@ interface Message {
 }
 
 const AGENTS: Agent[] = [
-  { id: 'pricing',     name: 'Ценообразование', icon: TrendingUp, desc: 'Анализ конкурентов и оптимальная цена',       prompt: 'Привет! Я помогу вам определить оптимальную цену. Какой товар анализируем?' },
-  { id: 'reviews',     name: 'Отзывы',          icon: Star,       desc: 'Умные ответы на негативные отзывы',           prompt: 'Привет! Покажите мне отзыв, на который нужно ответить — подготовлю профессиональный ответ.' },
-  { id: 'legal',       name: 'Юридический',      icon: Scale,      desc: 'Мониторинг оферт и правовых рисков',         prompt: 'Привет! Отслеживаю изменения в офертах маркетплейсов. Какой раздел вас интересует?' },
-  { id: 'products',    name: 'Товары',           icon: Package,    desc: 'Поиск прибыльных ниш и анализ спроса',       prompt: 'Привет! Помогу найти перспективные товары для продажи. В какой категории работаете?' },
-  { id: 'finance',     name: 'Финансы',          icon: BarChart2,  desc: 'Анализ прибыли, маржи и расходов',          prompt: 'Привет! Разберём финансовые показатели вашего магазина. С чего начнём?' },
-  { id: 'advertising', name: 'Реклама',          icon: Zap,        desc: 'Оптимизация ставок и рекламных кампаний',   prompt: 'Привет! Проанализирую ваши рекламные кампании. Какой маркетплейс?' },
+  { id: 'pricing',     name: 'Ценообразование', icon: TrendingUp, desc: 'Демо-сценарий обсуждения цены',       prompt: 'Демо: здесь можно посмотреть пример диалога о цене. Данные товаров и конкурентов не загружаются.' },
+  { id: 'reviews',     name: 'Отзывы',          icon: Star,       desc: 'Демо-сценарий работы с отзывом',      prompt: 'Демо: пример диалога о черновике ответа. Отзывы покупателей не загружаются, ответы не отправляются.' },
+  { id: 'legal',       name: 'Юридический',      icon: Scale,      desc: 'Демо-сценарий вопросов об условиях', prompt: 'Демо: пример вопросов для самостоятельного изучения условий. Мониторинг и правовая проверка не выполняются.' },
+  { id: 'products',    name: 'Товары',           icon: Package,    desc: 'Демо-сценарий обсуждения товара',   prompt: 'Демо: пример обсуждения товара. Каталог магазина и данные о спросе не подключены.' },
+  { id: 'finance',     name: 'Финансы',          icon: BarChart2,  desc: 'Демо-сценарий вопросов о расходах', prompt: 'Демо: пример вопросов о финансовых показателях. Отчёты магазина не загружаются, расчёты не выполняются.' },
+  { id: 'advertising', name: 'Реклама',          icon: Zap,        desc: 'Демо-сценарий обсуждения рекламы', prompt: 'Демо: пример обсуждения рекламных данных. Кампании и ставки не подключены и не изменяются.' },
 ]
 
-const DEMO_RESPONSES: Record<string, string[]> = {
-  pricing: [
-    'Анализирую конкурентов в вашей категории...',
-    'По данным на сегодня, медианная цена в нише — 1 240 ₽. Ваша цена 1 490 ₽ на 20% выше медианы — рекомендую снизить до 1 190 ₽ для увеличения конверсии.',
-    'Оптимальный диапазон: 1 150–1 250 ₽. При такой цене маржа составит около 22% с учётом всех расходов.',
-  ],
-  reviews: [
-    'Анализирую тональность отзыва...',
-    'Рекомендуемый ответ:\n\n«Здравствуйте! Нам очень жаль, что товар не оправдал ваших ожиданий. Мы обязательно разберёмся в ситуации. Пожалуйста, напишите нам в личные сообщения — компенсируем неудобства.»',
-  ],
-  default: [
-    'Обрабатываю запрос...',
-    'Готово! Вот что я нашёл по вашему запросу. Если нужны подробности по какому-то конкретному аспекту — уточните.',
-  ],
+const DEMO_RESPONSES: Record<string, string> = {
+  pricing: 'Демо-сценарий цены: сравните исходные данные и варианты решения. Это пример диалога, а не расчёт цены или рекомендация для вашего магазина.',
+  reviews: 'Демо-сценарий отзыва: сначала уточните вопрос покупателя, затем подготовьте черновик ответа. Текст не отправляется покупателю.',
+  legal: 'Демо-сценарий условий: составьте список вопросов для самостоятельной проверки в первоисточниках. Это пример диалога, не правовой анализ.',
+  products: 'Демо-сценарий товара: перечислите характеристики и вопросы для изучения. Это пример диалога, не анализ спроса или прибыльности.',
+  finance: 'Демо-сценарий расходов: перечислите исходные показатели для будущего расчёта. Это пример диалога, а не анализ финансов магазина.',
+  advertising: 'Демо-сценарий рекламы: составьте список показателей для сравнения. Это пример диалога, не анализ кампаний или изменение ставок.',
 }
 
 function now() {
@@ -57,6 +50,7 @@ export default function AIAgentsPage() {
   const [input,    setInput]      = useState('')
   const [typing,   setTyping]     = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const replyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const agent = AGENTS.find(a => a.id === activeId)!
 
@@ -73,25 +67,41 @@ export default function AIAgentsPage() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, typing])
 
+  useEffect(() => () => {
+    if (replyTimer.current !== null) clearTimeout(replyTimer.current)
+    replyTimer.current = null
+  }, [])
+
+  function selectAgent(id: string) {
+    if (id === activeId) return
+    if (replyTimer.current !== null) clearTimeout(replyTimer.current)
+    replyTimer.current = null
+    setTyping(false)
+    setInput('')
+    setActiveId(id)
+  }
+
   function send() {
     const text = input.trim()
-    if (!text || typing) return
+    if (!text || replyTimer.current !== null) return
     setInput('')
 
     const userMsg: Message = { role: 'user', text, ts: now() }
     setMessages(prev => ({ ...prev, [activeId]: [...(prev[activeId] ?? []), userMsg] }))
 
     setTyping(true)
-    const responses = DEMO_RESPONSES[activeId] ?? DEMO_RESPONSES.default
-    const reply = responses[Math.floor(Math.random() * responses.length)]
+    const reply = DEMO_RESPONSES[activeId]
 
-    setTimeout(() => {
+    const timer = setTimeout(() => {
+      if (replyTimer.current !== timer) return
+      replyTimer.current = null
       setMessages(prev => ({
         ...prev,
         [activeId]: [...(prev[activeId] ?? []), { role: 'agent', text: reply, ts: now() }],
       }))
       setTyping(false)
     }, 1200)
+    replyTimer.current = timer
   }
 
   const msgs = messages[activeId] ?? []
@@ -112,7 +122,7 @@ export default function AIAgentsPage() {
             >
               <ArrowLeft size={12} /> Назад
             </button>
-            <p className="label">ИИ-АГЕНТЫ</p>
+            <p className="label">ИИ-АГЕНТЫ · ДЕМО</p>
           </div>
           <div className="flex-1 overflow-y-auto p-3 space-y-1">
             {AGENTS.map(a => {
@@ -122,7 +132,7 @@ export default function AIAgentsPage() {
               return (
                 <button
                   key={a.id}
-                  onClick={() => setActiveId(a.id)}
+                  onClick={() => selectAgent(a.id)}
                   className="w-full text-left p-4 rounded-[8px] transition-all duration-200"
                   style={{
                     background: isActive ? 'rgba(110,106,252,0.10)' : 'transparent',
@@ -154,6 +164,9 @@ export default function AIAgentsPage() {
             <div>
               <p className="text-[14px] font-semibold" style={{ color: '#FFFFFF' }}>{agent.name}</p>
               <p className="text-[12px]" style={{ color: 'var(--text-2)' }}>{agent.desc}</p>
+              <p role="note" aria-label="Демонстрационный режим" className="text-[12px]" style={{ color: 'var(--text-2)' }}>
+                ДЕМО. Данные магазина, ИИ и внешние сервисы не подключены. Введённый текст остаётся только в памяти этой страницы, не сохраняется и не отправляется.
+              </p>
             </div>
           </div>
 
