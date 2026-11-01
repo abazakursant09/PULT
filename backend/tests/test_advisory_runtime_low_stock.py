@@ -19,6 +19,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from database import Base
+from models.user import User
 import models  # registers tables
 from models.imported_product import ImportedProductRow
 from models.imported_finance import ImportedFinanceRow
@@ -144,6 +145,8 @@ def test_producer_enabled():
 def test_scheduler_runs_low_stock():
     async def go():
         db = await _db(); uid = str(uuid.uuid4())
+        db.add(User(id=uid, email=f"{uid}@example.invalid", name="Synthetic",
+                    hashed_password="synthetic", deleted_at=None))
         await _active(db, uid)                       # active user (finance)
         await _product(db, uid, sku="LOW", stock=1)  # a real low-stock candidate
         await db.commit()

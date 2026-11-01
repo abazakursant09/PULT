@@ -29,6 +29,8 @@ from models.automation_rule import AutomationRule
 from models.execution_log import ExecutionLog
 from models.marketplace_connection import MarketplaceConnection
 from models.product import Product
+from models.user import User
+from services.background_user_guard import is_active_background_user
 from models.review_response import ReviewResponse
 from services.review import ingest as review_ingest
 from services.review.draft import build_draft
@@ -94,7 +96,8 @@ async def _candidate_rules(db: AsyncSession) -> list[AutomationRule]:
     """Enabled review rules with active consent bound to a connection (either mode)."""
     rules = (
         await db.execute(
-            select(AutomationRule).where(
+            select(AutomationRule).join(User, User.id == AutomationRule.user_id).where(
+                User.deleted_at.is_(None),
                 AutomationRule.action_type == _ACTION,
                 AutomationRule.enabled.is_(True),
             )
@@ -105,6 +108,8 @@ async def _candidate_rules(db: AsyncSession) -> list[AutomationRule]:
 
 async def _publishable_connection(db: AsyncSession, rule: AutomationRule):
     """The rule's connection if it is owned + connected + supported + has feedbacks; else None."""
+    if not await is_active_background_user(db, rule.user_id):
+        return None
     conn = (
         await db.execute(
             select(MarketplaceConnection).where(
@@ -175,6 +180,8 @@ async def run_auto_sync_reviews() -> dict:
             advanced_to = conn.review_sync_cursor
             for product in products:
                 try:
+                    if not await is_active_background_user(db, rule.user_id):
+                        break
                     res = await review_ingest.sync_product_reviews(db, product)
                     imported += res["imported"]
                     advanced_to = product.id                 # cursor moves past processed products
@@ -273,9 +280,12 @@ async def run_reconcile_moderation() -> dict:
 
             for review in rows:
                 try:
+                    comment_id = await _comment_id_for(db, review)
+                    if not await is_active_background_user(db, rule.user_id):
+                        break
                     status = await review_answer_status(
                         provider, cred_token, review.external_review_id,
-                        await _comment_id_for(db, review),
+                        comment_id,
                     )
                 except ExecutionError as e:
                     errors += 1
@@ -309,6 +319,8 @@ async def run_reconcile_moderation() -> dict:
 
 async def _connection_credential(db: AsyncSession, conn, provider) -> str:
     """The provider-shaped credential for a connection's feedbacks scope."""
+    if not await is_active_background_user(db, conn.user_id):
+        raise review_ingest.ReviewSyncNoConnection("inactive user")
     cred = (
         await db.execute(
             select(ApiCredential).where(
@@ -319,6 +331,8 @@ async def _connection_credential(db: AsyncSession, conn, provider) -> str:
     ).scalars().first()
     if cred is None:
         raise RuntimeError("no feedbacks credential")
+    if not await is_active_background_user(db, conn.user_id):
+        raise review_ingest.ReviewSyncNoConnection("inactive user")
     token = credential_vault.decrypt(cred.secret_enc)
     account_ref = await review_ingest.ensure_account_ref(db, cred, provider, token)
     return review_credential(conn.marketplace, token,
@@ -367,6 +381,8 @@ async def run_auto_draft_reviews() -> dict:
                 )
             ).all()
             for review, product_name in rows:
+                if not await is_active_background_user(db, rule.user_id):
+                    break
                 if (review.response_text or "").strip():
                     continue
                 draft = build_draft(review.rating, review.review_text, product_name)

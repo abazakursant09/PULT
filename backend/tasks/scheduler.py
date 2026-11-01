@@ -16,6 +16,7 @@ from models.user import User
 from models.telegram_settings import TelegramSettings
 from models.telegram_notification_log import TelegramNotificationLog
 from services.telegram import send_message, send_message_with_keyboard
+from services.background_user_guard import is_active_background_user
 
 _FRONTEND = settings.frontend_url.rstrip("/")
 logger = logging.getLogger(__name__)
@@ -342,12 +343,17 @@ async def _build_weekly_report(user: User) -> tuple[str, list[list[dict]]]:
 
 # ── Schedulers ─────────────────────────────────────────────────────────────────
 
+async def _background_user_active(user_id: str) -> bool:
+    async with AsyncSessionLocal() as db:
+        return await is_active_background_user(db, user_id)
+
+
 async def _send_daily_reports() -> None:
     async with AsyncSessionLocal() as db:
         result = await db.execute(
             select(User, TelegramSettings)
             .join(TelegramSettings, TelegramSettings.user_id == User.id)
-            .where(TelegramSettings.daily_report == True)
+            .where(TelegramSettings.daily_report.is_(True), User.deleted_at.is_(None))
         )
         rows = result.all()
 
@@ -358,7 +364,11 @@ async def _send_daily_reports() -> None:
         if now_time != ts.daily_report_time:
             continue
         try:
+            if not await _background_user_active(str(user.id)):
+                continue
             text = await _build_daily_report(user)
+            if not await _background_user_active(str(user.id)):
+                continue
             ok   = await send_message(user.telegram_chat_id, text)
             if ok:
                 logger.info("Daily report sent to user %s", user.id)
@@ -371,7 +381,7 @@ async def _send_weekly_reports() -> None:
         result = await db.execute(
             select(User, TelegramSettings)
             .join(TelegramSettings, TelegramSettings.user_id == User.id)
-            .where(TelegramSettings.weekly_summary == True)
+            .where(TelegramSettings.weekly_summary.is_(True), User.deleted_at.is_(None))
         )
         rows = result.all()
 
@@ -390,7 +400,11 @@ async def _send_weekly_reports() -> None:
             continue
 
         try:
+            if not await _background_user_active(str(user.id)):
+                continue
             text, keyboard = await _build_weekly_report(user)
+            if not await _background_user_active(str(user.id)):
+                continue
             ok = await send_message_with_keyboard(user.telegram_chat_id, text, keyboard)
             if ok:
                 await _log_weekly_sent(str(user.id))

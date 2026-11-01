@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.product import Product  # noqa: F401  (kept for callers importing product typing)
 from models.review_response import ReviewResponse
+from services.background_user_guard import is_active_background_user
 from models.marketplace_connection import MarketplaceConnection
 from models.api_credential import ApiCredential
 from services.marketplace import credential_vault
@@ -83,6 +84,8 @@ async def sync_product_reviews(db: AsyncSession, product) -> dict:
     Raises ReviewSyncUnsupported / ReviewSyncNoConnection / ReviewSyncNoScope so callers map them
     (the router to HTTP codes, the scheduler to a skipped connection).
     """
+    if not await is_active_background_user(db, product.user_id):
+        raise ReviewSyncNoConnection("inactive user")
     provider = get_review_provider(product.marketplace)
     if provider is None or not provider.supports_reviews():
         raise ReviewSyncUnsupported(product.marketplace)
@@ -101,6 +104,8 @@ async def sync_product_reviews(db: AsyncSession, product) -> dict:
     if cred is None:
         raise ReviewSyncNoScope()
 
+    if not await is_active_background_user(db, product.user_id):
+        raise ReviewSyncNoConnection("inactive user")
     token = credential_vault.decrypt(cred.secret_enc)
     account_ref = await ensure_account_ref(db, cred, provider, token)
     # Shape the token into what this marketplace's provider expects (e.g. Ozon's composite
@@ -109,6 +114,8 @@ async def sync_product_reviews(db: AsyncSession, product) -> dict:
         product.marketplace, token,
         {"ozon_client_id": conn.ozon_client_id, "account_ref": account_ref},
     )
+    if not await is_active_background_user(db, product.user_id):
+        raise ReviewSyncNoConnection("inactive user")
     reviews = await provider.fetch_reviews(cred_token, product.sku)
 
     imported = 0
