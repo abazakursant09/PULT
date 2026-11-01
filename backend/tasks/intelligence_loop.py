@@ -24,6 +24,7 @@ from models.telegram_settings import TelegramSettings
 from models.telegram_notification_log import TelegramNotificationLog
 from models.insight import InsightRecord
 from services.telegram import send_message_with_keyboard
+from services.background_user_guard import is_active_background_user
 from data.marketplace_mechanics import get_mechanic
 from logic.simulation import scenario_context_for_telegram
 from logic.focus_engine import compute_operational_focus, focus_briefing_for_telegram
@@ -1093,6 +1094,17 @@ async def _process_user(
     chat_id = user.telegram_chat_id
     uid     = str(user.id)
 
+    async def still_active() -> bool:
+        # Fresh DB truth, not the detached candidate snapshot. Not in-flight cancellation.
+        try:
+            return await is_active_background_user(db, uid)
+        except Exception:
+            logger.error("intelligence_loop: eligibility query failed; user batch stopped")
+            return False
+
+    if not await still_active():
+        return 0
+
     # Load insight statuses
     s_res = await db.execute(select(InsightRecord).where(InsightRecord.user_id == uid))
     _records = s_res.scalars().all()
@@ -1122,6 +1134,8 @@ async def _process_user(
         for row in nc_res
     }
 
+    if not await still_active():
+        return 0
     try:
         insights = await _compute_insights(uid, db, statuses)
     except Exception:
@@ -1177,6 +1191,8 @@ async def _process_user(
                 {"text": "⚡ Детали", "url": f"{_FE}/dashboard"},
                 {"text": "🏠 Дашборд", "url": f"{_FE}/dashboard"},
             ]]
+            if not await still_active():
+                return sent
             ok = await send_message_with_keyboard(chat_id, briefing_text, keyboard)
             if ok:
                 await _log_sent(db, uid, focus_key)
@@ -1321,6 +1337,8 @@ async def _process_user(
                     {"text": "🔍 Разведка", "url": f"{_FE}/dashboard"},
                     {"text": "🏠 Дашборд",  "url": f"{_FE}/dashboard"},
                 ]]
+                if not await still_active():
+                    return sent
                 ok = await send_message_with_keyboard(chat_id, portfolio_text, keyboard_pp)
                 if ok:
                     await _log_sent(db, uid, portfolio_key)
@@ -1354,6 +1372,8 @@ async def _process_user(
                     {"text": "📊 Дашборд", "url": f"{_FE}/dashboard"},
                     {"text": "⚡ Детали",  "url": f"{_FE}/dashboard"},
                 ]]
+                if not await still_active():
+                    return sent
                 ok = await send_message_with_keyboard(chat_id, digest_text, keyboard_digest)
                 if ok:
                     await _log_sent(db, uid, digest_key)
@@ -1428,6 +1448,8 @@ async def _process_user(
             mp   = fresh[0].marketplace or ""
             text, keyboard = _fmt_digest(name, mp, ins_dicts)
 
+        if not await still_active():
+            return sent
         ok = await send_message_with_keyboard(chat_id, text, keyboard)
         if ok:
             for ins in fresh:
@@ -1445,6 +1467,8 @@ async def _process_user(
             count = len(active)
             if count > 0:
                 text, keyboard = _fmt_retention(user.name, count)
+                if not await still_active():
+                    return sent
                 ok = await send_message_with_keyboard(chat_id, text, keyboard)
                 if ok:
                     await _log_sent(db, uid, ret_key)
