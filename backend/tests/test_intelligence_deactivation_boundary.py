@@ -1,5 +1,6 @@
 """Private SQLite boundary proof; all analysis/Telegram transport is synthetic."""
 import asyncio
+import logging
 import socket
 import threading
 from datetime import datetime
@@ -205,6 +206,9 @@ def test_deactivation_during_preparation_prevents_new_analysis(monkeypatch):
 
 @pytest.mark.parametrize("mode,fail_check", [("insight", 1), ("insight", 3), ("digest", 3)])
 def test_database_error_is_observable_and_stops_batch(monkeypatch, caplog, mode, fail_check):
+    # Alembic fileConfig disables pre-existing loggers in migration-first suites.
+    # Isolate this real logger only; monkeypatch restores its prior state afterwards.
+    monkeypatch.setattr(worker.logger, "disabled", False)
     async def run():
         engine, factory = await database()
         try:
@@ -225,6 +229,12 @@ def test_database_error_is_observable_and_stops_batch(monkeypatch, caplog, mode,
                 sender.assert_not_awaited()
                 assert analysis.await_count == (0 if fail_check == 1 else 1)
                 assert "eligibility" in caplog.text
+                assert any(
+                    record.name == worker.logger.name
+                    and record.levelno == logging.ERROR
+                    and record.getMessage() == "intelligence_loop: eligibility query failed; user batch stopped"
+                    for record in caplog.records
+                )
                 assert not (await execute(select(TelegramNotificationLog))).scalars().all()
         finally:
             await engine.dispose()
