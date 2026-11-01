@@ -23,6 +23,8 @@ from sqlalchemy import select
 
 from database import AsyncSessionLocal
 from models.engine_effect_observation import EngineEffectObservation
+from models.user import User
+from services.background_user_guard import is_active_background_user
 from services.decision_outcome.effect_measurement import close_effect_measurement
 
 logger = logging.getLogger(__name__)
@@ -38,9 +40,13 @@ async def run_measurement_close(now: Optional[datetime] = None) -> int:
         async with AsyncSessionLocal() as db:
             user_ids = (await db.execute(
                 select(EngineEffectObservation.user_id)
+                .join(User, User.id == EngineEffectObservation.user_id)
+                .where(User.deleted_at.is_(None))
                 .where(EngineEffectObservation.measured_at.is_(None))
                 .distinct())).scalars().all()
             for uid in user_ids:
+                if not await is_active_background_user(db, uid):
+                    continue
                 res = await close_effect_measurement(db, user_id=uid, now=now, only_expired=True)
                 closed += res.closed
             if closed:

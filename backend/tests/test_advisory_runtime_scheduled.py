@@ -20,6 +20,7 @@ from database import Base
 import models  # registers tables
 from models.imported_finance import ImportedFinanceRow
 from models.advisory_run import AdvisoryRun
+from models.user import User
 
 from services.advisory_runtime.runtime import (
     AdvisoryRuntime, RuntimeTickResult, RuntimeContext, ProducerResult,
@@ -44,6 +45,8 @@ async def _db():
 
 
 async def _active(db, uid):
+    if await db.get(User, uid) is None:
+        db.add(User(id=uid, email=f"{uid}@example.invalid", name="Synthetic", hashed_password="synthetic"))
     db.add(ImportedFinanceRow(import_id=str(uuid.uuid4()), user_id=uid, marketplace="ozon",
                               date="2026-06-20", sku="SKU1", revenue=100.0, net_profit=10.0))
     await db.commit()

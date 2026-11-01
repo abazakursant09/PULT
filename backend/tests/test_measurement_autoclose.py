@@ -27,6 +27,7 @@ from models.pricing_signal import PricingSignal
 from models.imported_finance import ImportedFinanceRow
 from models.engine_signal_decision_link import EngineSignalDecisionLink
 from models.engine_effect_observation import EngineEffectObservation
+from models.user import User
 
 from services.decision_outcome.promotion import promote_eligible_candidates
 from services.decision_outcome.decision_bridge import bridge_links_to_decisions
@@ -77,6 +78,8 @@ async def _set_profit(db, uid, value, when):
 async def _seed_open_at(db, uid, *, baseline, captured_at):
     """Promote an advertising signal → link/decision, capture a baseline observation
     AT captured_at (controls window expiry)."""
+    db.add(User(id=uid, email=f"{uid}@example.invalid", name="Synthetic",
+                hashed_password="synthetic", deleted_at=None))
     # 2.1A: former vehicle (adv_ad_on_low_stock → stop_auto_promotion) is contained; ride a live
     # net_profit-metric lever instead (pricing_price_below_floor → set_price).
     db.add(PricingSignal(user_id=uid, signal_key="pricing_price_below_floor",

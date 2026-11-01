@@ -21,6 +21,7 @@ import logging
 from typing import Optional
 
 from database import AsyncSessionLocal
+from services.background_user_guard import is_active_background_user
 from .runtime import AdvisoryRuntime
 
 log = logging.getLogger(__name__)
@@ -46,18 +47,21 @@ async def run_producers_for_user(user_id: str, *, logger: Optional[logging.Logge
                 if not spec.enabled:
                     continue
                 try:
+                    if not await is_active_background_user(db, user_id):
+                        lg.info("after-import analysis skipped: inactive user")
+                        break
                     await runtime.run_one(db, user_id=user_id, producer_key=spec.key,
                                           triggered_by=TRIGGER)
                     ran += 1
                 except Exception:
-                    # Error-isolated per producer, exactly as the scheduler tick is. The ledger
-                    # row is already committed by run_one before it re-raises, so the failure
-                    # stays visible in AdvisoryRun rather than only in this log line.
+                    # Error-isolated per producer. run_one failures have a ledger row;
+                    # eligibility-read failures are observable here without starting a run.
                     errors += 1
                     lg.exception("after-import producer %s failed for user %s", spec.key, user_id)
     except Exception:
         # A background task that raises dies silently in the event loop; the seller would be left
         # on "разбор готовится" forever with nothing recorded. Log loudly instead.
+        errors += 1
         lg.exception("after-import analysis could not run for user %s", user_id)
 
     lg.info("after-import analysis: user=%s ran=%s errors=%s", user_id, ran, errors)

@@ -21,6 +21,7 @@ from models.automation_rule import AutomationRule
 from models.review_response import ReviewResponse
 from models.product import Product
 from models.user import User
+from services.background_user_guard import is_active_background_user
 from models.execution_log import ExecutionLog
 from services.marketplace import executor, operation_key
 from services.marketplace.guard import NEGATIVE_RATING_MAX
@@ -183,6 +184,9 @@ async def run_auto_publish_reviews() -> dict:
                     skipped += 1
                     break
 
+                if not await is_active_background_user(db, rule.user_id):
+                    skipped += 1
+                    break
                 res = await executor.execute(
                     db=db, user_id=rule.user_id,
                     action_type="publish_review_response",

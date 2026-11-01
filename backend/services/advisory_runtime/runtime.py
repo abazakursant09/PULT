@@ -36,6 +36,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.advisory_run import AdvisoryRun
 from models.imported_finance import ImportedFinanceRow
+from models.user import User
+from services.background_user_guard import is_active_background_user
 
 
 @dataclass(frozen=True)
@@ -73,7 +75,9 @@ async def _active_user_ids(db: AsyncSession):
     the advisory anchor (mirrors measurement_close enumerating its own table). No new
     active-user mechanism invented."""
     return (await db.execute(
-        select(ImportedFinanceRow.user_id).distinct())).scalars().all()
+        select(ImportedFinanceRow.user_id)
+        .join(User, User.id == ImportedFinanceRow.user_id)
+        .where(User.deleted_at.is_(None)).distinct())).scalars().all()
 
 
 class AdvisoryRuntime:
@@ -174,6 +178,9 @@ class AdvisoryRuntime:
                     skipped += 1
                     continue
                 try:
+                    if not await is_active_background_user(db, uid):
+                        skipped += 1
+                        continue
                     await self.run_one(db, user_id=uid, producer_key=spec.key,
                                        now=ts, triggered_by=triggered_by)
                     ran += 1
