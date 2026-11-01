@@ -1,33 +1,38 @@
-"""
-AI image microservice — generates backgrounds for SEO product cards.
+"""Unreleased legacy SEO image service.
 
-Architecture:
-  POST /api/ai/generate-background  → creates task, returns task_id
-  GET  /api/ai/task/{task_id}       → returns status + image_urls + progress
-  POST /api/ai/generate-single      → single slide background (immediate)
-  POST /api/ai/suggest-text         → deterministic text suggestions
-
-Queue: asyncio background loop (no Redis/Celery).
-Generation: parallel asyncio.gather over all 6 slides (~8-15 s vs 30-90 s sequential).
-Retry: a second gather pass for any failed slides before falling back to mock SVGs.
+The four routes and direct handlers fail closed. The worker returns without
+processing retained tasks. Private generation helpers are not released entry points.
 """
 
 import asyncio
 import base64
 import logging
-import uuid
-from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, NoReturn, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.routing import APIRoute
 from pydantic import BaseModel
 
 from config import settings
 from rate_limit import limit_ai
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+
+
+def _image_service_unavailable() -> NoReturn:
+    raise HTTPException(status_code=404, detail="Not found")
+
+
+class _UnreleasedImageRoute(APIRoute):
+    def get_route_handler(self):
+        # Refuse before FastAPI parses bodies or resolves auth/rate-limit dependencies.
+        async def unavailable(request: Request):
+            _image_service_unavailable()
+        return unavailable
+
+
+router = APIRouter(route_class=_UnreleasedImageRoute)
 
 # ── In-memory task store ──────────────────────────────────────────────────────
 _tasks: Dict[str, Dict[str, Any]] = {}
@@ -240,190 +245,27 @@ async def _call_ai_api_parallel(
 # ── Queue worker (asyncio background task) ────────────────────────────────────
 
 async def queue_worker() -> None:
-    """Runs forever, processing pending tasks every 2 seconds."""
-    logger.info("AI image queue worker started")
-    while True:
-        await asyncio.sleep(2)
-        pending = [tid for tid, t in list(_tasks.items()) if t["status"] == "processing"]
-        for task_id in pending:
-            task = _tasks.get(task_id)
-            if not task:
-                continue
-            logger.info(
-                "Processing task %s (preset=%s, category=%s)",
-                task_id, task["preset"], task["category"],
-            )
-            try:
-                prompts = [
-                    _build_prompt(task["preset"], task["category"], task["product_name"], i)
-                    for i in range(6)
-                ]
-                raw_results = await _call_ai_api_parallel(prompts, task_id)
-
-                # Apply mock fallback for any slides that failed both passes
-                final_urls: List[str] = [
-                    url if url is not None else _MOCK_BACKGROUNDS[i]
-                    for i, url in enumerate(raw_results)
-                ]
-
-                if task_id in _tasks:
-                    _tasks[task_id].update(
-                        status="done",
-                        stage="done",
-                        image_urls=final_urls,
-                        completed_count=6,
-                        slide_statuses=["done"] * 6,
-                    )
-                logger.info("Task %s complete", task_id)
-            except Exception as exc:
-                logger.error("Task %s failed: %s", task_id, exc)
-                if task_id in _tasks:
-                    _tasks[task_id].update(status="error", stage="error", image_urls=None)
+    """Main may still schedule this coroutine; no polling or retained-task processing."""
+    return
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.post("/ai/generate-background", response_model=GenerateResponse)
 async def generate_background(body: GenerateRequest, request: Request, _rl: None = Depends(limit_ai)):
-    preset = body.preset.strip().lower()
-    if preset not in _PRESET_STYLES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown preset '{body.preset}'. Valid: {', '.join(_PRESET_STYLES)}",
-        )
-    task_id = str(uuid.uuid4())
-    _tasks[task_id] = {
-        "status":          "processing",
-        "stage":           "queued",
-        "preset":          preset,
-        "category":        body.category.strip().lower(),
-        "product_name":    body.product_name.strip(),
-        "image_urls":      None,
-        "slide_statuses":  ["pending"] * 6,
-        "completed_count": 0,
-        "created_at":      datetime.utcnow().isoformat(),
-    }
-    logger.info(
-        "Task %s queued: preset=%s category=%s product=%s",
-        task_id, preset, body.category, body.product_name,
-    )
-    return GenerateResponse(task_id=task_id)
+    _image_service_unavailable()
 
 
 @router.get("/ai/task/{task_id}", response_model=TaskStatusResponse)
 async def get_task_status(task_id: str):
-    task = _tasks.get(task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-
-    completed = task.get("completed_count", 0)
-    stage     = task.get("stage", "queued")
-    progress  = min(int(completed / 6 * 90), 90) if stage not in ("done", "error") else (100 if stage == "done" else 0)
-
-    return TaskStatusResponse(
-        status=task["status"],
-        stage=stage,
-        progress=progress,
-        completed_count=completed,
-        slide_statuses=task.get("slide_statuses"),
-        image_urls=task.get("image_urls"),
-    )
+    _image_service_unavailable()
 
 
 @router.post("/ai/generate-single", response_model=GenerateSingleResponse)
 async def generate_single(body: GenerateSingleRequest, request: Request, _rl: None = Depends(limit_ai)):
-    preset = body.preset.strip().lower()
-    if preset not in _PRESET_STYLES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown preset '{body.preset}'. Valid: {', '.join(_PRESET_STYLES)}",
-        )
-    idx = max(0, min(body.slide_idx, 5))
-
-    api_key = getattr(settings, "nano_banana_api_key", "").strip()
-    if not api_key:
-        return GenerateSingleResponse(background_url=_MOCK_BACKGROUNDS[idx])
-
-    prompt = _build_prompt(preset, body.category.strip().lower(), body.product_name.strip(), idx)
-    try:
-        async with httpx.AsyncClient(timeout=60) as client:
-            result = await _call_slide(client, api_key, prompt, idx, task_id="single")
-        if result:
-            return GenerateSingleResponse(background_url=result)
-    except Exception as exc:
-        logger.error("generate-single error: %s", exc)
-
-    return GenerateSingleResponse(background_url=_MOCK_BACKGROUNDS[idx])
+    _image_service_unavailable()
 
 
 @router.post("/ai/suggest-text", response_model=SuggestTextResponse)
 async def suggest_text(body: SuggestTextRequest):
-    name     = body.product_name.strip()
-    category = body.category.strip().lower()
-
-    _benefit_map: Dict[str, List[str]] = {
-        "beauty": [
-            "Натуральный состав",
-            "Бережный уход",
-            "Профессиональный результат",
-            "Без вредных добавок",
-            "Дерматологически протестировано",
-        ],
-        "electronics": [
-            "Высокая производительность",
-            "Надёжная защита",
-            "Энергоэффективность",
-            "Передовые технологии",
-            "Длительный срок службы",
-        ],
-        "home": [
-            "Качественные материалы",
-            "Долгий срок службы",
-            "Удобство в использовании",
-            "Эргономичный дизайн",
-            "Лёгкая установка",
-        ],
-        "sport": [
-            "Для активных тренировок",
-            "Профессиональный уровень",
-            "Максимальная нагрузка",
-            "Износостойкость",
-            "Поддержка суставов",
-        ],
-        "clothes": [
-            "Премиальный материал",
-            "Идеальная посадка",
-            "Дышащая ткань",
-            "Стильный дизайн",
-            "Практичность на каждый день",
-        ],
-        "auto": [
-            "Гарантия качества",
-            "Надёжность",
-            "Проверено временем",
-            "Высокие стандарты",
-            "Оригинальные комплектующие",
-        ],
-    }
-
-    benefits = _benefit_map.get(category, _benefit_map["auto"])
-
-    title_suggestions = [
-        f"{name} — качество, проверенное временем",
-        f"Лучший {name} на рынке",
-        f"{name} по выгодной цене",
-    ]
-
-    cta_suggestions = [
-        "Купить сейчас",
-        "Заказать выгодно",
-        "Лучшая цена",
-        "Доставка сегодня",
-        "Оформить заказ",
-    ]
-
-    return SuggestTextResponse(
-        title_suggestions=title_suggestions,
-        benefit_suggestions=benefits,
-        cta_suggestions=cta_suggestions,
-    )
+    _image_service_unavailable()
