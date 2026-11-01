@@ -24,7 +24,8 @@ export RCLONE_CONFIG_RD_ENDPOINT="$RESTORE_S3_ENDPOINT"
 export RCLONE_CONFIG_RD_REGION="${RESTORE_S3_REGION:-}"
 export RCLONE_CONFIG_RD_FORCE_PATH_STYLE=true
 
-TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT INT TERM
+TMP="$(mktemp -d /work/pult-restore.XXXXXX)" || die "cannot allocate private /work directory"
+trap 'rm -rf "$TMP"' EXIT INT TERM
 CIPHER="$TMP/db.dump.age"; PLAIN="$TMP/db.dump"; MANIFEST="$TMP/manifest.json"
 KEY="$RESTORE_OBJECT_KEY"; MKEY="${KEY}.manifest.json"
 
