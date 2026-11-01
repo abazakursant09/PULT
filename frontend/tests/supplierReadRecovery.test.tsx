@@ -1,96 +1,70 @@
-import { act, render, screen } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
-import { beforeEach, expect, it, vi } from 'vitest'
+import { Component, type ReactNode } from 'react'
+import { render, screen } from '@testing-library/react'
+import { readFileSync } from 'fs'
+import { join } from 'path'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import SupplierVerifyPage from '@/app/dashboard/suppliers/verify/page'
-import { api, type SupplierVerification } from '@/lib/api'
+import { api } from '@/lib/api'
 
-const entry = (status: SupplierVerification['status'] = 'pending'): SupplierVerification => ({
-  id: 'sv-1', user_id: 'synthetic', company_name: 'Synthetic manufacturer', country: 'russia',
-  inn: null, ogrn: null, legal_address: null, phone: null, website: null, uscc: null,
-  business_scope: null, founded_year: null, status, verification_source: null,
-  rejection_reason: null, verified_at: null, created_at: '2026-10-01T00:00:00Z',
+// The old feature/read-recovery acceptance is superseded by intentional quarantine.
+const { sentinel, notFound } = vi.hoisted(() => {
+  const sentinel = new Error('SYNTHETIC_NEXT_NOT_FOUND')
+  return { sentinel, notFound: vi.fn((): never => { throw sentinel }) }
 })
-const ownError = 'Не удалось загрузить ваши заявки.'
-const registryError = 'Не удалось загрузить реестр производителей.'
-const emptyRegistry = 'Верифицированных производителей пока нет'
+vi.mock('next/navigation', () => ({ notFound }))
+
+class NotFoundBoundary extends Component<{ children: ReactNode }, { stopped: boolean }> {
+  state = { stopped: false }
+  static getDerivedStateFromError(error: unknown) {
+    if (error !== sentinel) throw error
+    return { stopped: true }
+  }
+  render() { return this.state.stopped ? null : this.props.children }
+}
 
 beforeEach(() => {
-  vi.restoreAllMocks()
-  vi.spyOn(api.suppliers, 'my').mockResolvedValue([])
-  vi.spyOn(api.suppliers, 'listVerified').mockResolvedValue([])
-  vi.spyOn(api.suppliers, 'submit').mockRejectedValue(new Error('Mutation forbidden in read tests'))
-  vi.spyOn(api.suppliers, 'revoke').mockRejectedValue(new Error('Mutation forbidden in read tests'))
+  notFound.mockClear()
+  vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('No network allowed'))
+  for (const method of Object.keys(api.suppliers) as Array<keyof typeof api.suppliers>) {
+    vi.spyOn(api.suppliers, method).mockResolvedValue([] as never)
+  }
+})
+afterEach(() => vi.restoreAllMocks())
+function expectNoRequests() {
+  expect(globalThis.fetch).not.toHaveBeenCalled()
+  for (const method of Object.values(api.suppliers)) expect(method).not.toHaveBeenCalled()
+}
+
+it('immediately invokes Next notFound before any supplier API or fetch', () => {
+  // Direct invocation proves the synchronous server-page exit, not a client redirect.
+  expect(() => SupplierVerifyPage()).toThrow(sentinel)
+  expect(notFound).toHaveBeenCalledTimes(1)
+  expectNoRequests()
 })
 
-it('does not enable submission when the active application state is unknown', async () => {
-  vi.mocked(api.suppliers.my).mockRejectedValue(new Error('offline'))
-  render(<SupplierVerifyPage />)
-  expect(await screen.findByText(ownError)).toBeInTheDocument()
-  expect(screen.queryByRole('button', { name: 'Подать заявку на верификацию' })).not.toBeInTheDocument()
-  expect(screen.getByText(ownError).closest('[role="alert"]')).not.toBeNull()
-  expect(api.suppliers.submit).not.toHaveBeenCalled()
+it('renders no form, registry, badges or controls before the notFound boundary', () => {
+  // React deliberately reports an error caught by a boundary; silence only this sentinel.
+  const expectedError = (event: ErrorEvent) => { if (event.error === sentinel) event.preventDefault() }
+  const originalError = console.error
+  vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+    if (args.some(arg => arg === sentinel || (typeof arg === 'string' && arg.includes('The above error occurred in the <SupplierVerifyPage>')))) return
+    originalError(...args)
+  })
+  window.addEventListener('error', expectedError)
+  try {
+    const { container } = render(<NotFoundBoundary><SupplierVerifyPage /></NotFoundBoundary>)
+    expect(notFound).toHaveBeenCalled()
+    expect(container).toBeEmptyDOMElement()
+    expect(container.querySelector('form, input, select, button, svg')).toBeNull()
+    expect(screen.queryByText(/Проверенный производитель|Верифицирован|Подать заявку/)).not.toBeInTheDocument()
+    expectNoRequests()
+  } finally {
+    window.removeEventListener('error', expectedError)
+  }
 })
 
-it('does not describe a failed registry read as an empty registry', async () => {
-  vi.mocked(api.suppliers.listVerified).mockRejectedValue(new Error('offline'))
-  render(<SupplierVerifyPage />)
-  expect(await screen.findByText(registryError)).toBeInTheDocument()
-  expect(screen.queryByText(emptyRegistry)).not.toBeInTheDocument()
-  expect(screen.getByRole('button', { name: 'Подать заявку на верификацию' })).toBeInTheDocument()
-})
-
-it('keeps simultaneous read failures independent', async () => {
-  vi.mocked(api.suppliers.my).mockRejectedValue(new Error('offline'))
-  vi.mocked(api.suppliers.listVerified).mockRejectedValue(new Error('offline'))
-  render(<SupplierVerifyPage />)
-  expect(await screen.findByText(ownError)).toBeInTheDocument()
-  expect(await screen.findByText(registryError)).toBeInTheDocument()
-  expect(screen.getAllByRole('alert')).toHaveLength(2)
-})
-
-it('retries only the application read and respects an active application after recovery', async () => {
-  vi.mocked(api.suppliers.my).mockRejectedValueOnce(new Error('offline')).mockResolvedValue([entry()])
-  const user = userEvent.setup()
-  render(<SupplierVerifyPage />)
-  await user.click(await screen.findByRole('button', { name: 'Повторить загрузку заявок' }))
-  expect(await screen.findByText('Мои заявки (1)')).toBeInTheDocument()
-  expect(screen.queryByText(ownError)).not.toBeInTheDocument()
-  expect(screen.queryByRole('button', { name: 'Подать заявку на верификацию' })).not.toBeInTheDocument()
-  expect(api.suppliers.my).toHaveBeenCalledTimes(2)
-  expect(api.suppliers.listVerified).toHaveBeenCalledTimes(1)
-  expect(api.suppliers.revoke).not.toHaveBeenCalled()
-})
-
-it.each([{ result: [] }, { result: [entry('verified')] }])('registry retry renders a genuine result without repeating own reads', async ({ result }) => {
-  vi.mocked(api.suppliers.listVerified).mockRejectedValueOnce(new Error('offline')).mockResolvedValue(result)
-  const user = userEvent.setup()
-  render(<SupplierVerifyPage />)
-  await user.click(await screen.findByRole('button', { name: 'Повторить загрузку реестра' }))
-  expect(await screen.findByText(result.length ? 'Synthetic manufacturer' : emptyRegistry)).toBeInTheDocument()
-  expect(screen.queryByText(registryError)).not.toBeInTheDocument()
-  expect(api.suppliers.my).toHaveBeenCalledTimes(1)
-  expect(api.suppliers.listVerified).toHaveBeenCalledTimes(2)
-})
-
-it('keeps submission hidden while a retry is pending', async () => {
-  let resolve!: (value: SupplierVerification[]) => void
-  const pending = new Promise<SupplierVerification[]>(done => { resolve = done })
-  vi.mocked(api.suppliers.my).mockRejectedValueOnce(new Error('offline')).mockReturnValueOnce(pending)
-  const user = userEvent.setup()
-  render(<SupplierVerifyPage />)
-  await user.click(await screen.findByRole('button', { name: 'Повторить загрузку заявок' }))
-  expect(screen.getByRole('status', { name: 'Загрузка заявок' })).toBeInTheDocument()
-  expect(screen.queryByRole('button', { name: 'Подать заявку на верификацию' })).not.toBeInTheDocument()
-  await act(async () => { resolve([]); await pending })
-  expect(await screen.findByRole('button', { name: 'Подать заявку на верификацию' })).toBeInTheDocument()
-})
-
-it('keeps genuine empty results and local country switching usable without submitting', async () => {
-  const user = userEvent.setup()
-  render(<SupplierVerifyPage />)
-  expect(await screen.findByText(emptyRegistry)).toBeInTheDocument()
-  await user.click(screen.getByRole('button', { name: 'Подать заявку на верификацию' }))
-  await user.click(screen.getByRole('button', { name: /Китай/ }))
-  expect(screen.getByLabelText('USCC — Unified Social Credit Code *')).toBeInTheDocument()
-  expect(api.suppliers.submit).not.toHaveBeenCalled()
+it('keeps quarantine server-only with no API imports, effects or feature UI', () => {
+  const source = readFileSync(join(__dirname, '../app/dashboard/suppliers/verify/page.tsx'), 'utf8')
+  expect(source).toContain("from 'next/navigation'")
+  expect(source).not.toMatch(/use client|@\/lib\/api|useEffect|useState|<form|<Badge|<button/)
 })

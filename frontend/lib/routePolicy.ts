@@ -18,6 +18,8 @@ export const UNAVAILABLE_ROUTE_PREFIXES = [
   '/dashboard/risks',
   '/dashboard/seo',
   '/dashboard/sklad',
+  // Registry verification is not implemented; never expose the former stub UI.
+  '/dashboard/suppliers/verify',
   '/dashboard/zakazy',
 ] as const
 
