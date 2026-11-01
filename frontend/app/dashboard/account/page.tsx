@@ -192,8 +192,15 @@ function SecurityTab() {
     finally { setWorking(false) }
   }
 
-  function copySecret() {
-    navigator.clipboard.writeText(secret).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000) })
+  async function copySecret() {
+    setCopied(false); setError('')
+    try {
+      await navigator.clipboard.writeText(secret)
+      setCopied(true); setTimeout(() => setCopied(false), 2000)
+    } catch {
+      setCopied(false)
+      setError('Не удалось скопировать ключ. Выделите и скопируйте его вручную.')
+    }
   }
 
   if (loading) return (
