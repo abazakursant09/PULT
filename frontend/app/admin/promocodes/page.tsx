@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { api, PromoEntry, PromoStats } from '@/lib/api'
 import { Tag, Plus, ToggleLeft, ToggleRight, TrendingUp, Users, Percent, Clock, Minus, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -212,23 +212,57 @@ export default function AdminPromocodesPage() {
   const [promos,     setPromos]     = useState<PromoEntry[]>([])
   const [stats,      setStats]      = useState<PromoStats | null>(null)
   const [loading,    setLoading]    = useState(true)
+  const [loadError,  setLoadError]  = useState(false)
+  const [actionError, setActionError] = useState('')
+  const [toggling,   setToggling]   = useState(false)
   const [showCreate, setShowCreate] = useState(false)
   const [tab,        setTab]        = useState<'all' | 'active'>('all')
+  const mounted = useRef(false)
+  const readVersion = useRef(0)
+  const togglePending = useRef(false)
+  const ready = !loading && !loadError && stats !== null
 
   const load = useCallback(async () => {
+    if (!mounted.current) return
+    const version = ++readVersion.current
     setLoading(true)
+    setLoadError(false)
+    setPromos([])
+    setStats(null)
+    setShowCreate(false)
     try {
       const [p, s] = await Promise.all([api.promo.adminList(), api.promo.adminStats()])
+      if (!mounted.current || version !== readVersion.current) return
       setPromos(p)
       setStats(s)
-    } finally { setLoading(false) }
+    } catch {
+      if (mounted.current && version === readVersion.current) setLoadError(true)
+    } finally {
+      if (mounted.current && version === readVersion.current) setLoading(false)
+    }
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    mounted.current = true
+    void load()
+    return () => { mounted.current = false; ++readVersion.current }
+  }, [load])
 
   async function toggle(id: string) {
-    await api.promo.adminToggle(id)
-    load()
+    if (!ready || togglePending.current || !mounted.current) return
+    togglePending.current = true
+    setToggling(true)
+    setActionError('')
+    try {
+      await api.promo.adminToggle(id)
+      await load()
+    } catch {
+      if (mounted.current) setActionError('Не удалось подтвердить изменение промокода. Обновите данные перед новой попыткой.')
+      await load()
+    } finally {
+      togglePending.current = false
+      if (mounted.current) setToggling(false)
+    }
   }
 
   const displayed = tab === 'active' ? promos.filter(p => p.is_active) : promos
@@ -243,10 +277,12 @@ export default function AdminPromocodesPage() {
             <h1 className="text-2xl font-bold text-foreground">Управление промокодами</h1>
             <p className="text-sm text-muted-foreground mt-0.5">Создавайте и отслеживайте промокоды и партнёрские коды</p>
           </div>
-          <Button onClick={() => setShowCreate(true)}>
+          <Button disabled={!ready || toggling} onClick={() => setShowCreate(true)}>
             <Plus className="w-4 h-4" /> Создать промокод
           </Button>
         </div>
+
+        {actionError && <p role="alert" className="text-destructive text-sm">{actionError}</p>}
 
         {/* Stats */}
         {stats && (
@@ -301,9 +337,10 @@ export default function AdminPromocodesPage() {
                   key={t}
                   variant={tab === t ? 'default' : 'ghost'}
                   size="sm"
+                  disabled={!ready}
                   onClick={() => setTab(t)}
                 >
-                  {t === 'all' ? `Все (${promos.length})` : `Активные (${promos.filter(p => p.is_active).length})`}
+                  {t === 'all' ? (ready ? `Все (${promos.length})` : 'Все') : (ready ? `Активные (${promos.filter(p => p.is_active).length})` : 'Активные')}
                 </Button>
               ))}
             </div>
@@ -311,6 +348,11 @@ export default function AdminPromocodesPage() {
 
           {loading ? (
             <div className="p-8 text-center text-muted-foreground">Загрузка...</div>
+          ) : loadError ? (
+            <div className="p-8 space-y-3 text-center">
+              <p role="alert" className="text-destructive text-sm">Не удалось загрузить промокоды и статистику. Данные недоступны; доступ к управлению не подтверждён.</p>
+              <Button variant="outline" onClick={() => void load()}>Повторить загрузку</Button>
+            </div>
           ) : (
             <Table>
               <TableHeader>
@@ -364,6 +406,7 @@ export default function AdminPromocodesPage() {
                     </TableCell>
                     <TableCell className="text-center">
                       <button
+                        disabled={!ready || toggling}
                         onClick={() => toggle(p.id)}
                         className={`transition-colors ${p.is_active ? 'text-primary hover:opacity-70' : 'text-muted-foreground hover:text-foreground'}`}
                         title={p.is_active ? 'Деактивировать' : 'Активировать'}
@@ -379,7 +422,7 @@ export default function AdminPromocodesPage() {
             </Table>
           )}
 
-          {!loading && displayed.length === 0 && (
+          {ready && displayed.length === 0 && (
             <div className="py-12 text-center text-muted-foreground">
               <Tag className="w-10 h-10 mx-auto mb-2 opacity-30" />
               <p>Нет промокодов</p>
@@ -388,11 +431,11 @@ export default function AdminPromocodesPage() {
         </Card>
       </div>
 
-      <CreateModal
+      {ready && <CreateModal
         open={showCreate}
         onClose={() => setShowCreate(false)}
         onCreated={load}
-      />
+      />}
     </div>
   )
 }
