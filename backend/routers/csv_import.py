@@ -841,7 +841,7 @@ async def resolve_conflict(
         raise HTTPException(400, "Импорт неизвестного типа")
     row = (await db.execute(
         select(model).where(model.id == body.row_id, model.import_id == import_id,
-                            model.user_id == str(user.id)))).scalar_one_or_none()
+                            model.user_id == str(user.id)).with_for_update())).scalar_one_or_none()
     if row is None:
         raise HTTPException(404, "Строка не найдена")
 
