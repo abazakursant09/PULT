@@ -519,7 +519,8 @@ def _capture(monkeypatch):
     calls = []
 
     async def _fake(method, path, *, token, auth_header="Authorization", extra_headers=None,
-                    json=None, params=None):
+                    json=None, params=None, retry_safe):
+        assert retry_safe is True
         calls.append({"method": method, "path": path, "params": params})
         return {"data": {"promotions": [], "nomenclatures": []}}
     # the calendar sub-client is lazily created; force it, then patch its request
