@@ -240,7 +240,8 @@ def test_ozon_resolve_never_calls_wb_client(monkeypatch):
 def test_ozon_adapter_request_shape_and_normalization(monkeypatch):
     from services.marketplace.ozon_client import ozon_client
     cap = []
-    async def fake_request(method, path, *, token, auth_header):
+    async def fake_request(method, path, *, token, auth_header, retry_safe):
+        assert retry_safe is True
         cap.append((method, path, token, auth_header))
         return {"list": [{"id": 101, "advObjectType": "SKU", "state": "running", "sku": "SKU-1"},
                          {"campaignId": 102, "type": "SEARCH", "status": "stopped"}]}
