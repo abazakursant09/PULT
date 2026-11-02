@@ -30,6 +30,7 @@ class _FakeResponse:
 
     def __init__(self, status_code: int, body: bytes = b""):
         self.status_code = status_code
+        self.headers = httpx.Headers()
         self.content = body
         self.text = body.decode() if body else ""
 
