@@ -20,6 +20,7 @@ from models.marketplace_connection import MarketplaceConnection
 from models.api_credential import ApiCredential
 from services.marketplace import credential_vault
 from services.marketplace.reviews import get_review_provider, review_credential, resolve_account_ref
+from services.marketplace.ym_review_read_hold import bind_review_read_context
 from services.review.draft import classify_review
 
 FEEDBACKS_SCOPE = "feedbacks"
@@ -116,7 +117,8 @@ async def sync_product_reviews(db: AsyncSession, product) -> dict:
     )
     if not await is_active_background_user(db, product.user_id):
         raise ReviewSyncNoConnection("inactive user")
-    reviews = await provider.fetch_reviews(cred_token, product.sku)
+    async with bind_review_read_context(db, conn, account_ref):
+        reviews = await provider.fetch_reviews(cred_token, product.sku)
 
     imported = 0
     skipped = 0

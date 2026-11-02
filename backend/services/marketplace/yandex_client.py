@@ -16,6 +16,7 @@ from __future__ import annotations
 from config import settings
 from .base_client import BaseMarketplaceClient
 from .errors import ExecutionError, MarketplacePaginationIncomplete
+from .ym_review_read_hold import selected_review_read
 
 MARKETPLACE = "yandex"
 
@@ -92,10 +93,11 @@ class YandexClient:
             params: dict = {"limit": page}
             if token_param:
                 params["pageToken"] = token_param
-            data = await self._post(
-                f"/v2/businesses/{business_id}/goods-feedback",
-                token=token, json={"offerIds": [str(offer_id)]}, params=params, retry_safe=True,
-            )
+            with selected_review_read(business_id, "reviews", client=self._api):
+                data = await self._post(
+                    f"/v2/businesses/{business_id}/goods-feedback",
+                    token=token, json={"offerIds": [str(offer_id)]}, params=params, retry_safe=True,
+                )
             rows, token_param = _pagination_page(data, "feedbacks")
             out.extend(rows)
             if token_param is None:
@@ -118,11 +120,12 @@ class YandexClient:
             params: dict = {"limit": MAX_PAGE_SIZE}
             if token_param:
                 params["pageToken"] = token_param
-            data = await self._post(
-                f"/v2/businesses/{business_id}/goods-feedback/comments",
-                token=token, json={"feedbackId": _as_int(feedback_id)},
-                params=params, retry_safe=True,
-            )
+            with selected_review_read(business_id, "comments", client=self._api):
+                data = await self._post(
+                    f"/v2/businesses/{business_id}/goods-feedback/comments",
+                    token=token, json={"feedbackId": _as_int(feedback_id)},
+                    params=params, retry_safe=True,
+                )
             rows, token_param = _pagination_page(data, "comments")
             out.extend(rows)
             if token_param is None:
