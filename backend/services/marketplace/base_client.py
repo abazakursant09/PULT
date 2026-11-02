@@ -8,6 +8,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
+import re
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+from time import monotonic
 
 import httpx
 
@@ -25,6 +30,47 @@ _RETRYABLE_STATUS = {420, 429, 500, 502, 503, 504}
 
 # Statuses that mean "you are being rate limited", whatever number the marketplace picked for it.
 _RATE_LIMIT_STATUS = {420, 429}
+
+# Support IMF-fixdate and asctime only. Obsolete RFC850 dates fail closed: the
+# email parser's fixed two-digit-year pivot is not HTTP's relative-century rule.
+_HTTP_DATE = re.compile(
+    r"(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), [0-9]{2} "
+    r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) [0-9]{4} "
+    r"[0-9]{2}:[0-9]{2}:[0-9]{2} GMT|"
+    r"(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) "
+    r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (?: [0-9]|[0-9]{2}) "
+    r"[0-9]{2}:[0-9]{2}:[0-9]{2} [0-9]{4})"
+)
+
+
+def _throttle_hint(headers: httpx.Headers) -> float | None:
+    """Maximum supported lower bound; invalid/duplicate hints fail closed."""
+    delays = []
+    for name in ("Retry-After", "X-Ratelimit-Retry"):
+        values = headers.get_list(name)
+        if not values:
+            continue
+        if len(values) != 1:
+            raise ExecutionError(ExecutionError.RATE_LIMIT, "rate limited")
+        value = values[0].strip(" \t")
+        if re.fullmatch(r"[0-9]+", value):
+            digits = value.lstrip("0") or "0"
+            # Supported invocation budgets never exceed 1.5 seconds. Avoid huge int parsing.
+            if len(digits) > 1 or digits > "1":
+                raise ExecutionError(ExecutionError.RATE_LIMIT, "rate limited")
+            delay = float(digits)
+        elif name == "Retry-After" and _HTTP_DATE.fullmatch(value):
+            try:
+                deadline = parsedate_to_datetime(value)
+                if deadline.tzinfo is None:  # RFC asctime form is implicitly GMT.
+                    deadline = deadline.replace(tzinfo=timezone.utc)
+                delay = max(0, math.ceil((deadline - datetime.now(timezone.utc)).total_seconds()))
+            except (ValueError, TypeError, OverflowError):
+                raise ExecutionError(ExecutionError.RATE_LIMIT, "rate limited") from None
+        else:
+            raise ExecutionError(ExecutionError.RATE_LIMIT, "rate limited")
+        delays.append(delay)
+    return max(delays) if delays else None
 
 
 class BaseMarketplaceClient:
@@ -62,6 +108,7 @@ class BaseMarketplaceClient:
             headers.update(extra_headers)
 
         attempt = 0
+        throttle_wait = 0.0
         while True:
             attempt += 1
             try:
@@ -82,10 +129,31 @@ class BaseMarketplaceClient:
                     ExecutionError.MARKETPLACE_5XX, "transport error"
                 ) from exc
 
+            if resp.status_code in _RATE_LIMIT_STATUS:
+                # Explicit supported throttle domain; no constructor validation or claim for n>2.
+                n = self._max_retries
+                if type(n) is not int or not 0 <= n <= 2 or attempt > n:
+                    return self._handle_response(resp)
+                budget = (0.0, 0.5, 1.5)[n]
+                hint = _throttle_hint(resp.headers)
+                fallback = 0.5 if attempt == 1 else 1.0
+                delay = max(fallback, hint) if hint is not None else fallback
+                if delay > budget - throttle_wait:
+                    return self._handle_response(resp)
+                throttle_wait += delay  # Requested waits only; scheduler oversleep is not charged.
+                if hint is None:
+                    await self._backoff(attempt)
+                else:
+                    not_before = monotonic() + delay
+                    await asyncio.sleep(delay)
+                    if monotonic() < not_before:
+                        return self._handle_response(resp)
+                continue
+
             if (
                 resp.status_code in _RETRYABLE_STATUS
                 and attempt <= self._max_retries
-                and (retry_safe is True or resp.status_code in _RATE_LIMIT_STATUS)
+                and retry_safe is True
             ):
                 await self._backoff(attempt)
                 continue
