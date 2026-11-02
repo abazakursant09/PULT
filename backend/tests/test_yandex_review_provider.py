@@ -13,6 +13,8 @@ plausible-looking shortcut destroys a safety guarantee:
 Everything else here is mapping.
 """
 import asyncio
+import socket
+import threading
 import logging
 import uuid
 from contextlib import asynccontextmanager, contextmanager
@@ -216,7 +218,8 @@ def _script(monkeypatch, pages):
 
     async def _request(method, path, *, token, retry_safe, auth_header=None, json=None, params=None):
         assert retry_safe is True
-        cursor = (params or {}).get("page_token")
+        assert "page_token" not in (params or {})
+        cursor = (params or {}).get("pageToken")
         seen.append(cursor)
         return pages[cursor]
     monkeypatch.setattr(yc.yandex_client._api, "request", _request)
@@ -257,8 +260,10 @@ def test_a_cursor_that_never_ends_is_bounded(monkeypatch):
         return {"result": {"feedbacks": [], "paging": {"nextPageToken": "same-again"}}}
     monkeypatch.setattr(yc.yandex_client._api, "request", _request)
 
-    _run(yc.yandex_client.list_reviews(token="k", business_id="BIZ1", offer_id="SKU"))
-    assert calls["n"] == yc.MAX_PAGES
+    from services.marketplace.errors import MarketplacePaginationIncomplete
+    with pytest.raises(MarketplacePaginationIncomplete):
+        _run(yc.yandex_client.list_reviews(token="k", business_id="BIZ1", offer_id="SKU"))
+    assert calls["n"] == 2
 
 
 def test_page_size_is_clamped_to_the_documented_maximum(monkeypatch):
@@ -577,3 +582,280 @@ def test_recheck_skips_marketplaces_that_do_not_moderate(monkeypatch):
     """WB and Ozon expose no answer_status, so the sweep must not touch them at all."""
     wb = get_review_provider("wildberries")
     assert getattr(wb, "answer_status", None) is None
+@pytest.fixture
+def pagination_wire(monkeypatch):
+    """Real client/transport, strict synthetic HTTP; deny network and default DB."""
+    import httpx
+    import database
+    from sqlalchemy import event
+
+    attempts = []
+    original_pair, original_connect = socket.socketpair, socket.socket.connect
+    local = threading.local()
+
+    def deny(*args, **kwargs):
+        attempts.append("forbidden-io")
+        raise AssertionError("YM pagination forbids network/default database")
+
+    def pair(*args, **kwargs):
+        previous = getattr(local, "selfpipe", False)
+        local.selfpipe = True
+        try:
+            return original_pair(*args, **kwargs)
+        finally:
+            local.selfpipe = previous
+
+    def connect(sock, address):
+        if (getattr(local, "selfpipe", False) and isinstance(address, tuple)
+                and address[0] in {"127.0.0.1", "::1"}):
+            return original_connect(sock, address)
+        return deny(sock, address)
+
+    monkeypatch.setattr(socket, "socketpair", pair)
+    monkeypatch.setattr(socket.socket, "connect", connect)
+    monkeypatch.setattr(socket.socket, "connect_ex", deny)
+    monkeypatch.setattr(socket, "create_connection", deny)
+    monkeypatch.setattr(socket, "getaddrinfo", deny)
+    event.listen(database.engine.sync_engine, "do_connect", deny)
+
+    def install(pages, *, comments=False, api_key="synthetic-key", offer_id="SKU-1", feedback_id=42):
+        seen = []
+        suffix = "/v2/businesses/BIZ1/goods-feedback" + ("/comments" if comments else "")
+        body = {"feedbackId": feedback_id} if comments else {"offerIds": [offer_id]}
+
+        class FakeClient:
+            def __init__(self, *, timeout):
+                assert timeout is not None
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            async def request(self, method, url, *, headers, json, params):
+                assert method == "POST" and url.endswith(suffix)
+                assert headers["Api-Key"] == api_key
+                assert json == body
+                assert isinstance(params, dict) and params["limit"] == 50
+                assert "page_token" not in params
+                cursor = params.get("pageToken")
+                if not seen:
+                    assert "pageToken" not in params
+                seen.append(cursor)
+                page = pages[cursor]
+                if isinstance(page, Exception):
+                    raise page
+                return httpx.Response(200, json=page)
+
+        monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+        return seen
+
+    try:
+        yield install
+        assert attempts == []
+    finally:
+        event.remove(database.engine.sync_engine, "do_connect", deny)
+
+
+def test_reviews_second_page_uses_documented_pageToken(pagination_wire):
+    seen = pagination_wire({
+        None: {"result": {"feedbacks": [{"feedbackId": 1}], "paging": {"nextPageToken": "P2"}}},
+        "P2": {"result": {"feedbacks": [{"feedbackId": 2}], "paging": {}}},
+    })
+    rows = _run(yc.yandex_client.list_reviews(token="synthetic-key", business_id="BIZ1", offer_id="SKU-1"))
+    assert [row["feedbackId"] for row in rows] == [1, 2]
+    assert seen == [None, "P2"]
+
+
+def test_comments_return_full_two_page_result(pagination_wire):
+    seen = pagination_wire({
+        None: {"result": {"comments": [{"id": 1}], "paging": {"nextPageToken": "P2"}}},
+        "P2": {"result": {"comments": [{"id": 2}], "paging": {}}},
+    }, comments=True)
+    rows = _run(yc.yandex_client.list_comments(token="synthetic-key", business_id="BIZ1", feedback_id="42"))
+    assert [row["id"] for row in rows] == [1, 2]
+    assert seen == [None, "P2"]
+
+
+def _paged_call(comments):
+    if comments:
+        return yc.yandex_client.list_comments(token="synthetic-key", business_id="BIZ1", feedback_id="42")
+    return yc.yandex_client.list_reviews(token="synthetic-key", business_id="BIZ1", offer_id="SKU-1")
+
+
+@pytest.mark.parametrize("comments", [False, True])
+@pytest.mark.parametrize("bad", [None, [], {}, {"result": None}, {"result": []},
+    {"result": {}}, {"status": "ERROR", "result": {}},
+    {"status": "ERROR", "result": {"ROWS": []}},
+    {"status": "PENDING", "result": {"ROWS": []}},
+    {"result": {"ROWS": None}}, {"result": {"ROWS": {}}},
+    {"result": {"ROWS": [], "paging": []}},
+    {"result": {"ROWS": [], "paging": "bad"}},
+    {"result": {"ROWS": [], "paging": {"nextPageToken": 7}}},
+    {"result": {"ROWS": [], "paging": {"nextPageToken": False}}}])
+def test_pagination_rejects_schema_without_partial_success(pagination_wire, comments, bad):
+    from services.marketplace.errors import MarketplacePaginationIncomplete
+    import copy
+    bad = copy.deepcopy(bad)
+    key = "comments" if comments else "feedbacks"
+    if isinstance(bad, dict) and isinstance(bad.get("result"), dict) and "ROWS" in bad["result"]:
+        bad["result"][key] = bad["result"].pop("ROWS")
+    seen = pagination_wire({None: {"result": {key: [{"id": 1}], "paging": {"nextPageToken": "PRIVATE-CURSOR"}}},
+                            "PRIVATE-CURSOR": bad}, comments=comments)
+    with pytest.raises(MarketplacePaginationIncomplete) as caught:
+        _run(_paged_call(comments))
+    error = caught.value
+    assert error.code == "PAGINATION_INCOMPLETE" and error.retryable is False
+    assert not ExecutionError.is_ambiguous_error(error.code)
+    assert "PRIVATE-CURSOR" not in str(error)
+    assert seen == [None, "PRIVATE-CURSOR"]
+
+
+@pytest.mark.parametrize("comments", [False, True])
+@pytest.mark.parametrize("paging", [{}, {"nextPageToken": None}, {"nextPageToken": ""}])
+def test_valid_terminal_paging_and_extra_fields(pagination_wire, comments, paging):
+    key = "comments" if comments else "feedbacks"
+    row = {"id": 1, "future": "preserved"}
+    seen = pagination_wire({None: {"status": "OK", "extra": 7,
+        "result": {key: [row], "paging": paging, "future": 8}}}, comments=comments)
+    assert _run(_paged_call(comments)) == [row]
+    assert seen == [None]
+
+
+@pytest.mark.parametrize("comments", [False, True])
+@pytest.mark.parametrize("cycle", [True, False])
+def test_cycle_or_page_cap_never_returns_partial(pagination_wire, comments, cycle):
+    from services.marketplace.errors import MarketplacePaginationIncomplete
+    key = "comments" if comments else "feedbacks"
+    if cycle:
+        tokens = [None, "A", "B"]
+        following = ["A", "B", "A"]
+    else:
+        tokens = [None] + [str(i) for i in range(1, 20)]
+        following = [str(i) for i in range(1, 21)]
+    pages = {token: {"result": {key: [], "paging": {"nextPageToken": nxt}}}
+             for token, nxt in zip(tokens, following)}
+    seen = pagination_wire(pages, comments=comments)
+    with pytest.raises(MarketplacePaginationIncomplete):
+        _run(_paged_call(comments))
+    assert seen == tokens
+
+
+@pytest.mark.parametrize("comments", [False, True])
+def test_terminal_twentieth_page_including_empty_pages_succeeds(pagination_wire, comments):
+    key = "comments" if comments else "feedbacks"
+    tokens = [None] + [str(i) for i in range(1, 20)]
+    pages = {token: {"result": {key: [], "paging": {"nextPageToken": str(i + 1)}}}
+             for i, token in enumerate(tokens)}
+    pages["19"] = {"result": {key: [{"id": 20}]}}
+    seen = pagination_wire(pages, comments=comments)
+    assert _run(_paged_call(comments)) == [{"id": 20}]
+    assert seen == tokens
+
+
+@pytest.mark.parametrize("comments", [False, True])
+@pytest.mark.parametrize("code", ["AUTH", "RATE_LIMIT", "TIMEOUT", "MARKETPLACE_5XX"])
+def test_later_page_transport_error_propagates_identity(pagination_wire, comments, code):
+    key = "comments" if comments else "feedbacks"
+    error = ExecutionError(code, "synthetic")
+    seen = pagination_wire({None: {"result": {key: [], "paging": {"nextPageToken": "P2"}}},
+                            "P2": error}, comments=comments)
+    # BaseClient maps real HTTP exceptions separately; inject at its semantic boundary here.
+    # The strict HTTP stub raises this exact semantic error without network access.
+    with pytest.raises(ExecutionError) as caught:
+        _run(_paged_call(comments))
+    assert caught.value is error
+    assert seen == [None, "P2"]
+
+
+@pytest.mark.parametrize("limit", [0, -1, "0", "-2", "bad", None, False])
+def test_nonpositive_review_limit_rejected_before_http(pagination_wire, limit):
+    seen = pagination_wire({})
+    with pytest.raises((ValueError, TypeError, ExecutionError)):
+        _run(yc.yandex_client.list_reviews(token="synthetic-key", business_id="BIZ1", offer_id="SKU-1", limit=limit))
+    assert seen == []
+
+
+@pytest.mark.parametrize("limit,expected", [("50", 50), (True, 1), (500, 50)])
+def test_review_limit_preserves_successful_int_coercion(monkeypatch, pagination_wire, limit, expected):
+    seen = []
+    async def request(method, path, *, token, retry_safe, auth_header=None, json=None, params=None):
+        assert retry_safe is True
+        assert "page_token" not in params and "pageToken" not in params
+        seen.append(params["limit"])
+        return {"result": {"feedbacks": []}}
+    monkeypatch.setattr(yc.yandex_client._api, "request", request)
+    assert _run(yc.yandex_client.list_reviews(token="synthetic-key", business_id="BIZ1", offer_id="SKU-1", limit=limit)) == []
+    assert seen == [expected]
+
+
+def test_moderation_incomplete_stops_connection_without_rewrite(monkeypatch, pagination_wire):
+    from services.marketplace.errors import MarketplacePaginationIncomplete
+    async def scenario():
+        db = await _new_db()
+        engine = db.bind
+        try:
+            first = await _seed_awaiting(db)
+            second = ReviewResponse(id=str(uuid.uuid4()), product_id=first.product_id,
+                marketplace="yandex", external_review_id="910", status="awaiting_moderation",
+                response_text="retained", safety_category="SAFE")
+            db.add(second)
+            await db.commit()
+            calls = []
+            async def status(self, token, external_review_id, comment_id=None):
+                calls.append(external_review_id)
+                raise MarketplacePaginationIncomplete("schema")
+            async def forbidden(*args, **kwargs):
+                raise AssertionError("moderation must never resend")
+            monkeypatch.setattr(YandexReviewProvider, "answer_status", status)
+            monkeypatch.setattr(YandexReviewProvider, "publish_answer", forbidden)
+            _bind(monkeypatch, db)
+            before = [(r.id, r.status, r.response_text, r.published_at, r.failure_reason) for r in [first, second]]
+            out = await pipe.run_reconcile_moderation()
+            assert len(calls) == 1
+            assert out["errors"] == 1 and out["resolved"] == 0 and out["rejected"] == 0
+            assert [(r.id, r.status, r.response_text, r.published_at, r.failure_reason) for r in [first, second]] == before
+        finally:
+            await db.close()
+            await engine.dispose()
+    _run(scenario())
+
+@pytest.mark.parametrize("known_id", ["2", None])
+def test_provider_finds_comment_on_second_page(pagination_wire, known_id):
+    seen = pagination_wire({None: {"result": {"comments": [{"id": 1, "author": {"type": "USER"}}],
+        "paging": {"nextPageToken": "P2"}}}, "P2": {"result": {"comments": [
+        {"id": 2, "author": {"type": "BUSINESS"}, "status": "PUBLISHED"}]}}}, comments=True)
+    assert _run(YandexReviewProvider().answer_status("BIZ1:synthetic-key", "42", known_id)) == "PUBLISHED"
+    assert seen == [None, "P2"]
+
+
+def test_provider_early_matching_comment_still_requires_complete_scan(pagination_wire):
+    from services.marketplace.errors import MarketplacePaginationIncomplete
+    pagination_wire({None: {"result": {"comments": [{"id": 1, "status": "PUBLISHED"}],
+        "paging": {"nextPageToken": "P2"}}}, "P2": {"result": {}}}, comments=True)
+    with pytest.raises(MarketplacePaginationIncomplete):
+        _run(YandexReviewProvider().answer_status("BIZ1:synthetic-key", "42", "1"))
+
+
+def test_later_page_failure_inserts_no_partial_reviews(pagination_wire):
+    from services.marketplace.errors import MarketplacePaginationIncomplete
+    async def scenario():
+        db = await _new_db()
+        engine = db.bind
+        try:
+            existing = await _seed_awaiting(db)
+            product = await db.get(Product, existing.product_id)
+            before = (await db.execute(select(ReviewResponse.id))).scalars().all()
+            seen = pagination_wire({None: {"result": {"feedbacks": [_feedback(feedbackId=123)],
+                "paging": {"nextPageToken": "P2"}}}, "P2": {"result": {}}},
+                api_key="tok", offer_id=product.sku)
+            with pytest.raises(MarketplacePaginationIncomplete):
+                await review_ingest.sync_product_reviews(db, product)
+            assert (await db.execute(select(ReviewResponse.id))).scalars().all() == before
+            assert existing.status == "awaiting_moderation"
+            assert seen == [None, "P2"]
+        finally:
+            await db.close()
+            await engine.dispose()
+    _run(scenario())

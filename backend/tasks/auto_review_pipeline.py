@@ -64,6 +64,7 @@ _CONNECTION_FATAL_CODES = frozenset({
     ExecutionError.RATE_LIMIT,                # 429 — after retries
     ExecutionError.TIMEOUT,                   # after retries
     ExecutionError.MARKETPLACE_5XX,           # 5xx + transport errors, after retries
+    ExecutionError.PAGINATION_INCOMPLETE,     # never advance past an unproven read
 })
 
 # Ingestion-level failures that are also about the connection, not the product.
