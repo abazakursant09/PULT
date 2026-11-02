@@ -9,13 +9,13 @@ RATE_LIMIT, which the review-sync loop treats as connection-fatal, so a throttle
 being called instead of being hammered.
 
 Documented limits: reads 5 000/h, WRITES 1 000/h — the write ceiling is the binding one. Feedback
-pages are cursor-based (`page_token`) with a documented maximum page size of 50.
+pages are cursor-based (`pageToken`) with a documented maximum page size of 50.
 """
 from __future__ import annotations
 
 from config import settings
 from .base_client import BaseMarketplaceClient
-from .errors import ExecutionError
+from .errors import ExecutionError, MarketplacePaginationIncomplete
 
 MARKETPLACE = "yandex"
 
@@ -23,8 +23,7 @@ MARKETPLACE = "yandex"
 # ceiling we clamp to rather than a preference.
 MAX_PAGE_SIZE = 50
 
-# A cursor that never terminates would spin forever on a malformed `nextPageToken`. 20 pages at 50
-# per page is 1 000 reviews for one product — far past anything real, and a bounded failure.
+# Local resource bound, not a guarantee of completeness: a continuing cursor at the cap fails.
 MAX_PAGES = 20
 
 
@@ -77,24 +76,34 @@ class YandexClient:
         something the seller did in another window. We read them all and let the DB unique index do
         the deduplication, exactly as WB and Ozon do.
         """
-        page = min(int(limit), MAX_PAGE_SIZE)
+        try:
+            page = min(int(limit), MAX_PAGE_SIZE)
+        except (TypeError, ValueError, OverflowError):
+            raise ExecutionError(ExecutionError.VALIDATION,
+                                 "yandex: review limit is not a positive number") from None
+        if page <= 0:
+            raise ExecutionError(ExecutionError.VALIDATION,
+                                 "yandex: review limit is not a positive number")
         out: list[dict] = []
         token_param: str | None = None
+        seen_tokens: set[str] = set()
 
         for _ in range(MAX_PAGES):
             params: dict = {"limit": page}
             if token_param:
-                params["page_token"] = token_param
+                params["pageToken"] = token_param
             data = await self._post(
                 f"/v2/businesses/{business_id}/goods-feedback",
                 token=token, json={"offerIds": [str(offer_id)]}, params=params, retry_safe=True,
             )
-            result = (data or {}).get("result") or {}
-            out.extend(result.get("feedbacks") or [])
-            token_param = ((result.get("paging") or {}).get("nextPageToken")) or None
-            if not token_param:
-                break
-        return out
+            rows, token_param = _pagination_page(data, "feedbacks")
+            out.extend(rows)
+            if token_param is None:
+                return out
+            if token_param in seen_tokens:
+                raise MarketplacePaginationIncomplete("cycle")
+            seen_tokens.add(token_param)
+        raise MarketplacePaginationIncomplete("page_limit")
 
     async def list_comments(self, *, token: str, business_id: str, feedback_id: str) -> list[dict]:
         """Comments on one feedback — our own replies included.
@@ -102,12 +111,26 @@ class YandexClient:
         This is what makes a safe recovery possible where the API offers no idempotency key: after an
         ambiguous publish we look for the reply instead of sending it again.
         """
-        data = await self._post(
-            f"/v2/businesses/{business_id}/goods-feedback/comments",
-            token=token, json={"feedbackId": _as_int(feedback_id)},
-            params={"limit": MAX_PAGE_SIZE}, retry_safe=True,
-        )
-        return ((data or {}).get("result") or {}).get("comments") or []
+        out: list[dict] = []
+        token_param: str | None = None
+        seen_tokens: set[str] = set()
+        for _ in range(MAX_PAGES):
+            params: dict = {"limit": MAX_PAGE_SIZE}
+            if token_param:
+                params["pageToken"] = token_param
+            data = await self._post(
+                f"/v2/businesses/{business_id}/goods-feedback/comments",
+                token=token, json={"feedbackId": _as_int(feedback_id)},
+                params=params, retry_safe=True,
+            )
+            rows, token_param = _pagination_page(data, "comments")
+            out.extend(rows)
+            if token_param is None:
+                return out
+            if token_param in seen_tokens:
+                raise MarketplacePaginationIncomplete("cycle")
+            seen_tokens.add(token_param)
+        raise MarketplacePaginationIncomplete("page_limit")
 
     # ── Reviews (write) ───────────────────────────────────────────────────────
     async def publish_feedback_answer(self, *, token: str, business_id: str,
@@ -229,6 +252,24 @@ class YandexClient:
             params["pageToken"] = page_token
         return await self._post(f"/v2/businesses/{business_id}/promos/offers",
                                 token=token, json={"promoId": str(promo_id)}, params=params, retry_safe=True)
+
+
+def _pagination_page(data, rows_key: str) -> tuple[list[dict], str | None]:
+    """Validate one read page without treating malformed/partial data as empty."""
+    if not isinstance(data, dict) or ("status" in data and data["status"] != "OK"):
+        raise MarketplacePaginationIncomplete("schema")
+    result = data.get("result")
+    if not isinstance(result, dict) or not isinstance(result.get(rows_key), list):
+        raise MarketplacePaginationIncomplete("schema")
+    paging = result.get("paging", {})
+    if not isinstance(paging, dict):
+        raise MarketplacePaginationIncomplete("schema")
+    next_token = paging.get("nextPageToken")
+    if next_token is None or next_token == "":
+        return result[rows_key], None
+    if not isinstance(next_token, str):
+        raise MarketplacePaginationIncomplete("schema")
+    return result[rows_key], next_token
 
 
 def _s(value) -> str | None:

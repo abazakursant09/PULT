@@ -7,6 +7,7 @@ and a second cycle never double-syncs or double-publishes. Provider + executor a
 """
 import asyncio
 import uuid
+import pytest
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from datetime import datetime
@@ -30,6 +31,26 @@ from services.marketplace.reviews import REVIEW_PROVIDERS
 import tasks.auto_review_pipeline as pipe
 import tasks.auto_publish_reviews as ap
 from services.marketplace.review_automation_gate import CONSENT_VERSION as _CV
+
+
+@pytest.fixture
+def pagination_no_io(monkeypatch):
+    import socket
+    import database
+    from sqlalchemy import event
+    attempts = []
+    def deny(*args, **kwargs):
+        attempts.append("forbidden")
+        raise AssertionError("pagination pipeline forbids network/default DB")
+    monkeypatch.setattr(socket.socket, "connect", deny)
+    monkeypatch.setattr(socket.socket, "connect_ex", deny)
+    monkeypatch.setattr(socket, "getaddrinfo", deny)
+    event.listen(database.engine.sync_engine, "do_connect", deny)
+    try:
+        yield
+        assert attempts == []
+    finally:
+        event.remove(database.engine.sync_engine, "do_connect", deny)
 
 _LOOP = asyncio.new_event_loop()
 
@@ -133,6 +154,44 @@ def _full_auto(monkeypatch, marketplace):
 
 def test_full_auto_wb(monkeypatch):
     _full_auto(monkeypatch, "wildberries")
+
+
+def test_pagination_incomplete_stops_batch_preserves_cursor_and_other_tenant(monkeypatch, pagination_no_io):
+    from services.marketplace.errors import MarketplacePaginationIncomplete
+    import services.review.ingest as ingest
+    async def scenario():
+        db = await _new_db()
+        engine = db.bind
+        try:
+            uid = await _seed(db, marketplace="yandex")
+            other = await _seed(db, marketplace="yandex")
+            db.add_all([Product(id=str(uuid.uuid4()), user_id=uid, name="extra", sku="extra", marketplace="yandex")
+                        for _ in range(3)])
+            await db.commit()
+            products = (await db.execute(select(Product).where(Product.user_id == uid).order_by(Product.id))).scalars().all()
+            seen = []
+            async def sync(session, product):
+                assert session is db
+                seen.append(product.id)
+                if product.id == products[1].id:
+                    raise MarketplacePaginationIncomplete("schema")
+                return {"imported": 0}
+            monkeypatch.setattr(ingest, "sync_product_reviews", sync)
+            _bind_session(monkeypatch, db)
+            out = await pipe.run_auto_sync_reviews()
+            assert [p for p in seen if p in {row.id for row in products}] == [products[0].id, products[1].id]
+            other_ids = (await db.execute(select(Product.id).where(Product.user_id == other))).scalars().all()
+            assert all(pid in seen for pid in other_ids)
+            conns = {c.user_id: c for c in (await db.execute(select(MarketplaceConnection))).scalars()}
+            assert conns[uid].review_sync_cursor == products[0].id
+            assert conns[uid].review_sync_fail_count == 1
+            assert conns[uid].review_sync_next_at > datetime.utcnow()
+            assert conns[other].review_sync_fail_count == 0
+            assert out["stopped"] == 1 and out["errors"] == 1
+        finally:
+            await db.close()
+            await engine.dispose()
+    _run(scenario())
 
 
 def test_full_auto_ozon(monkeypatch):
