@@ -113,7 +113,8 @@ def test_client_error_propagates_ambiguous(monkeypatch):
 
 def test_ozon_client_list_reviews_request(monkeypatch):
     calls = {}
-    async def fake_request(method, path, *, token, auth_header, extra_headers, json):
+    async def fake_request(method, path, *, token, auth_header, extra_headers, json, retry_safe):
+        assert retry_safe is True
         calls.update(method=method, path=path, auth_header=auth_header,
                      client_id=extra_headers.get("Client-Id"), body=json)
         return {"reviews": [{"id": "r1"}]}
@@ -128,7 +129,8 @@ def test_ozon_client_list_reviews_request(monkeypatch):
 
 def test_ozon_client_publish_request(monkeypatch):
     calls = {}
-    async def fake_request(method, path, *, token, auth_header, extra_headers, json):
+    async def fake_request(method, path, *, token, auth_header, extra_headers, json, retry_safe):
+        assert retry_safe is False
         calls.update(path=path, body=json, client_id=extra_headers.get("Client-Id"))
         return {"comment_id": 1}
     monkeypatch.setattr(ozon_client_mod.ozon_client._seller, "request", fake_request)

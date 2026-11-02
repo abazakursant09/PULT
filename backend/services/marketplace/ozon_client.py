@@ -33,6 +33,7 @@ class OzonClient:
             "POST", "/v1/product/import/prices", token=token,
             auth_header="Api-Key", extra_headers=self._headers(client_id),
             json={"prices": [{"offer_id": str(offer_id), "price": str(int(round(price)))}]},
+            retry_safe=False,
         )
 
     async def set_auto_promotion(self, *, token: str, client_id: str | None,
@@ -47,6 +48,7 @@ class OzonClient:
             "POST", path, token=token, auth_header="Api-Key",
             extra_headers=self._headers(client_id),
             json={"product_ids": [str(offer_id)]},
+            retry_safe=False,
         )
 
     # ── Advertising / Performance (campaign state control, A2.2-pre-b.4) ───────
@@ -60,7 +62,7 @@ class OzonClient:
                                  "ozon campaign action must be 'activate' or 'deactivate'")
         path = f"/api/client/campaign/{int(campaign_id)}/{action}"
         return await self._performance().request(
-            "POST", path, token=f"Bearer {token}", auth_header="Authorization")
+            "POST", path, token=f"Bearer {token}", auth_header="Authorization", retry_safe=False)
 
     async def list_campaigns_for_sku(self, *, token: str, sku=None) -> list[dict]:
         """Ozon Performance API campaign read (campaign identity, A2.2-pre-a.2).
@@ -82,7 +84,7 @@ class OzonClient:
         resolver's job over the observed relation.
         """
         data = await self._performance().request(
-            "GET", "/api/client/campaign", token=f"Bearer {token}", auth_header="Authorization")
+            "GET", "/api/client/campaign", token=f"Bearer {token}", auth_header="Authorization", retry_safe=True)
         rows = data.get("list") if isinstance(data, dict) else data
         rows = rows if isinstance(rows, list) else []
         out: list[dict] = []
@@ -101,10 +103,11 @@ class OzonClient:
 
     # ── Ingest reads (PULT-LAUNCH-1.4.5F) ─────────────────────────────────────
     # All Seller-API reads share the same auth (Api-Key header + Client-Id header) and never commit.
-    async def _seller_get(self, path: str, *, token: str, client_id: str | None, body: dict) -> dict:
+    async def _seller_get(self, path: str, *, token: str, client_id: str | None, body: dict,
+                          retry_safe: bool = False) -> dict:
         data = await self._seller.request(
             "POST", path, token=token, auth_header="Api-Key",
-            extra_headers=self._headers(client_id), json=body)
+            extra_headers=self._headers(client_id), json=body, retry_safe=retry_safe)
         return data if isinstance(data, dict) else {}
 
     async def list_products(self, *, token: str, client_id: str | None,
@@ -112,14 +115,14 @@ class OzonClient:
         """POST /v3/product/list → {result:{items:[{product_id, offer_id}], last_id, total}}.
         Cursor pagination via last_id (empty on first page)."""
         return await self._seller_get(
-            "/v3/product/list", token=token, client_id=client_id,
+            "/v3/product/list", token=token, client_id=client_id, retry_safe=True,
             body={"filter": {"visibility": "ALL"}, "last_id": last_id, "limit": int(limit)})
 
     async def product_info_list(self, *, token: str, client_id: str | None,
                                 product_ids: list) -> list[dict]:
         """POST /v3/product/info/list → item details (name, offer_id, product_id, ...) for a batch."""
         data = await self._seller_get(
-            "/v3/product/info/list", token=token, client_id=client_id,
+            "/v3/product/info/list", token=token, client_id=client_id, retry_safe=True,
             body={"product_id": [int(p) for p in product_ids if str(p).isdigit()]})
         items = (data.get("result") or {}).get("items") if isinstance(data.get("result"), dict) else data.get("items")
         return items if isinstance(items, list) else []
@@ -128,7 +131,7 @@ class OzonClient:
                              last_id: str = "", limit: int = 1000) -> dict:
         """POST /v5/product/info/prices → {result:{items:[{product_id, offer_id, price:{price,...}}], last_id}}."""
         return await self._seller_get(
-            "/v5/product/info/prices", token=token, client_id=client_id,
+            "/v5/product/info/prices", token=token, client_id=client_id, retry_safe=True,
             body={"filter": {"visibility": "ALL"}, "last_id": last_id, "limit": int(limit)})
 
     async def product_stocks(self, *, token: str, client_id: str | None,
@@ -136,14 +139,14 @@ class OzonClient:
         """POST /v4/product/info/stocks → {result:{items:[{product_id, offer_id, stocks:[{type,present}]}], last_id}}.
         A row carries FBO and FBS stock entries; the provider sums each type ONCE (never twice)."""
         return await self._seller_get(
-            "/v4/product/info/stocks", token=token, client_id=client_id,
+            "/v4/product/info/stocks", token=token, client_id=client_id, retry_safe=True,
             body={"filter": {"visibility": "ALL"}, "last_id": last_id, "limit": int(limit)})
 
     async def posting_fbo_list(self, *, token: str, client_id: str | None,
                                since: str, to: str, offset: int = 0, limit: int = 1000) -> list[dict]:
         """POST /v2/posting/fbo/list → FBO postings (posting_number, status, products, in_process_at)."""
         data = await self._seller_get(
-            "/v2/posting/fbo/list", token=token, client_id=client_id,
+            "/v2/posting/fbo/list", token=token, client_id=client_id, retry_safe=True,
             body={"filter": {"since": since, "to": to}, "offset": int(offset), "limit": int(limit),
                   "with": {"analytics_data": False, "financial_data": False}})
         rows = data.get("result")
@@ -153,7 +156,7 @@ class OzonClient:
                                since: str, to: str, offset: int = 0, limit: int = 1000) -> list[dict]:
         """POST /v3/posting/fbs/list → FBS postings. Confirmed current method."""
         data = await self._seller_get(
-            "/v3/posting/fbs/list", token=token, client_id=client_id,
+            "/v3/posting/fbs/list", token=token, client_id=client_id, retry_safe=True,
             body={"filter": {"since": since, "to": to}, "offset": int(offset), "limit": int(limit),
                   "with": {"analytics_data": False, "financial_data": False}})
         result = data.get("result")
@@ -168,7 +171,7 @@ class OzonClient:
         """POST /v3/finance/transaction/list → {result:{operations:[{operation_id, operation_type,
         amount, posting:{posting_number}, services:[{name, price}]}], page_count}}. page/page_size."""
         return await self._seller_get(
-            "/v3/finance/transaction/list", token=token, client_id=client_id,
+            "/v3/finance/transaction/list", token=token, client_id=client_id, retry_safe=True,
             body={"filter": {"date": {"from": date_from, "to": date_to}, "operation_type": [],
                              "posting_number": "", "transaction_type": "all"},
                   "page": int(page), "page_size": int(page_size)})
@@ -177,7 +180,7 @@ class OzonClient:
                            last_id: int = 0, limit: int = 1000) -> dict:
         """POST /v1/returns/list → {returns:[{id, product:{sku,offer_id}, ...}], has_next}. Cursor last_id."""
         return await self._seller_get(
-            "/v1/returns/list", token=token, client_id=client_id,
+            "/v1/returns/list", token=token, client_id=client_id, retry_safe=True,
             body={"filter": {}, "limit": int(limit), "last_id": int(last_id)})
 
     # ── Promotions READ (PULT-LAUNCH-2.5D-B) ──────────────────────────────────
@@ -189,7 +192,7 @@ class OzonClient:
         (id is the ONLY promotion identity; the title is never identity)."""
         data = await self._seller.request(
             "GET", "/v1/actions", token=token, auth_header="Api-Key",
-            extra_headers=self._headers(client_id))
+            extra_headers=self._headers(client_id), retry_safe=True)
         rows = data.get("result") if isinstance(data, dict) else data
         return rows if isinstance(rows, list) else []
 
@@ -198,7 +201,7 @@ class OzonClient:
         """POST /v1/actions/products → {result:{products:[{id, action_price, ...}], total}}. This is the
         ONLY method that proves a product is ACTIVELY participating in `action_id`. last_id paginates."""
         return await self._seller_get(
-            "/v1/actions/products", token=token, client_id=client_id,
+            "/v1/actions/products", token=token, client_id=client_id, retry_safe=True,
             body={"action_id": action_id, "limit": int(limit), "last_id": last_id})
 
     async def action_candidates(self, *, token: str, client_id: str | None,
@@ -206,7 +209,7 @@ class OzonClient:
         """POST /v1/actions/candidates → products ELIGIBLE to be added to `action_id`. A candidate is
         NOT a participant; the ingest layer never turns this into a participation observation."""
         return await self._seller_get(
-            "/v1/actions/candidates", token=token, client_id=client_id,
+            "/v1/actions/candidates", token=token, client_id=client_id, retry_safe=True,
             body={"action_id": action_id, "limit": int(limit), "last_id": last_id})
 
     def _performance(self) -> "BaseMarketplaceClient":
@@ -230,7 +233,7 @@ class OzonClient:
             body["product_id"] = str(product_ref)
         data = await self._seller.request(
             "POST", "/v1/review/list", token=token, auth_header="Api-Key",
-            extra_headers=self._headers(client_id), json=body,
+            extra_headers=self._headers(client_id), json=body, retry_safe=True,
         )
         if isinstance(data, dict):
             rows = data.get("reviews") or data.get("result") or []
@@ -244,6 +247,7 @@ class OzonClient:
             "POST", "/v1/review/comment/create", token=token, auth_header="Api-Key",
             extra_headers=self._headers(client_id),
             json={"review_id": str(review_id), "text": text, "mark_review_as_processed": False},
+            retry_safe=False,
         )
 
     async def set_bid(self, **_):  # Performance API, separate OAuth (ME-4b)

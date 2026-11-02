@@ -72,7 +72,8 @@ def _transport(captured, *, status=200, body=None):
 
 def test_activate_request_shape(monkeypatch):
     cap = []
-    async def fake_request(method, path, *, token, auth_header):
+    async def fake_request(method, path, *, token, auth_header, retry_safe):
+        assert retry_safe is False
         cap.append((method, path, token, auth_header)); return {"requestId": "rq"}
     monkeypatch.setattr(ozon_client._performance(), "request", fake_request)
     r = _run(ozon_client.set_campaign_state(token="B", campaign_id=5, action="activate"))
@@ -82,7 +83,8 @@ def test_activate_request_shape(monkeypatch):
 
 def test_deactivate_request_shape(monkeypatch):
     cap = []
-    async def fake_request(method, path, *, token, auth_header):
+    async def fake_request(method, path, *, token, auth_header, retry_safe):
+        assert retry_safe is False
         cap.append(path); return {}
     monkeypatch.setattr(ozon_client._performance(), "request", fake_request)
     _run(ozon_client.set_campaign_state(token="B", campaign_id=9, action="deactivate"))

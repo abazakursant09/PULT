@@ -543,7 +543,8 @@ def _capture_seller(monkeypatch):
     calls = []
 
     async def _fake(method, path, *, token, auth_header="Authorization", extra_headers=None,
-                    json=None, params=None):
+                    json=None, params=None, retry_safe):
+        assert retry_safe is True
         calls.append({"method": method, "path": path, "auth": auth_header,
                       "headers": extra_headers or {}, "json": json})
         return {"result": []}

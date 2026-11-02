@@ -214,7 +214,8 @@ def _script(monkeypatch, pages):
     """Answer `list_reviews` from a page_token -> payload map, recording the cursors asked for."""
     seen: list = []
 
-    async def _request(method, path, *, token, auth_header=None, json=None, params=None):
+    async def _request(method, path, *, token, retry_safe, auth_header=None, json=None, params=None):
+        assert retry_safe is True
         cursor = (params or {}).get("page_token")
         seen.append(cursor)
         return pages[cursor]
@@ -250,7 +251,8 @@ def test_a_cursor_that_never_ends_is_bounded(monkeypatch):
     bounded failure is the only acceptable one here."""
     calls = {"n": 0}
 
-    async def _request(method, path, *, token, auth_header=None, json=None, params=None):
+    async def _request(method, path, *, token, retry_safe, auth_header=None, json=None, params=None):
+        assert retry_safe is True
         calls["n"] += 1
         return {"result": {"feedbacks": [], "paging": {"nextPageToken": "same-again"}}}
     monkeypatch.setattr(yc.yandex_client._api, "request", _request)
@@ -263,7 +265,8 @@ def test_page_size_is_clamped_to_the_documented_maximum(monkeypatch):
     """Asking for more than Yandex documents is a client error, so the ceiling is enforced here."""
     seen = {}
 
-    async def _request(method, path, *, token, auth_header=None, json=None, params=None):
+    async def _request(method, path, *, token, retry_safe, auth_header=None, json=None, params=None):
+        assert retry_safe is True
         seen.update(params or {})
         return {"result": {"feedbacks": [], "paging": {}}}
     monkeypatch.setattr(yc.yandex_client._api, "request", _request)
@@ -297,10 +300,10 @@ def test_an_incomplete_credential_is_an_auth_error(monkeypatch):
 
 # ── Cabinet discovery ───────────────────────────────────────────────────────
 def _campaigns(monkeypatch, payload):
-    async def _get(path, *, token, params=None):
+    async def _request(method, path, *, token, retry_safe, auth_header=None, json=None, params=None):
+        assert retry_safe is True
         return payload
-    monkeypatch.setattr(yc.yandex_client._api, "request",
-                        lambda *a, **k: _get(a[1] if len(a) > 1 else "", token=k.get("token")))
+    monkeypatch.setattr(yc.yandex_client._api, "request", _request)
 
 
 def test_one_cabinet_is_resolved(monkeypatch):

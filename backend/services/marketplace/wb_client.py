@@ -31,7 +31,7 @@ class WBClient:
         if nm_id:
             params["nmId"] = nm_id
         data = await self._feedbacks.request(
-            "GET", "/api/v1/feedbacks", token=token, params=params
+            "GET", "/api/v1/feedbacks", token=token, params=params, retry_safe=True
         )
         # WB wraps payload in {"data": {"feedbacks": [...]}}
         return (data.get("data") or {}).get("feedbacks", []) if isinstance(data, dict) else []
@@ -45,6 +45,7 @@ class WBClient:
             "/api/v1/feedbacks/answer",
             token=token,
             json={"id": feedback_id, "text": text},
+            retry_safe=False,
         )
 
     # ── Prices (ME-3) ─────────────────────────────────────────────────────────
@@ -65,7 +66,7 @@ class WBClient:
         if discount is not None:
             item["discount"] = int(discount)
         return await self._prices.request(
-            "POST", "/api/v2/upload/task", token=token, json={"data": [item]}
+            "POST", "/api/v2/upload/task", token=token, json={"data": [item]}, retry_safe=False
         )
 
     async def set_discount(self, *, token: str, offer_id: str, discount: float) -> dict:
@@ -83,6 +84,7 @@ class WBClient:
         return await self._prices.request(
             "POST", "/api/v2/upload/task", token=token,
             json={"data": [{"nmID": nm_id, "discount": int(discount)}]},
+            retry_safe=False,
         )
 
     async def set_auto_promotion(self, *, token: str, offer_id: str, enabled: bool) -> dict:
@@ -101,6 +103,7 @@ class WBClient:
         return await self._prices.request(
             "POST", "/api/v1/promotions/participation", token=token,
             json={"nmID": nm_id, "participate": bool(enabled)},
+            retry_safe=False,
         )
 
     # ── Advertising (ME-4) ────────────────────────────────────────────────────
@@ -109,13 +112,13 @@ class WBClient:
         body: dict = {"advertId": int(campaign_id), "type": int(adv_type), "cpm": int(cpm)}
         if param is not None:
             body["param"] = int(param)
-        return await self._advert().request("POST", "/adv/v0/cpm", token=token, json=body)
+        return await self._advert().request("POST", "/adv/v0/cpm", token=token, json=body, retry_safe=False)
 
     async def set_campaign_state(self, *, token: str, campaign_id: int, action: str) -> dict:
         # action: "start" | "pause"
         path = "/adv/v0/start" if action == "start" else "/adv/v0/pause"
         return await self._advert().request(
-            "GET", path, token=token, params={"id": int(campaign_id)}
+            "GET", path, token=token, params={"id": int(campaign_id)}, retry_safe=False
         )
 
     async def list_adverts_for_nm(self, *, token: str, nm_id) -> list[dict]:
@@ -130,7 +133,7 @@ class WBClient:
         identity fields, leaving any field WB does not return as None (no guessing).
         """
         nm = int(nm_id)
-        data = await self._advert().request("GET", "/adv/v1/promotion/adverts", token=token)
+        data = await self._advert().request("GET", "/adv/v1/promotion/adverts", token=token, retry_safe=True)
         adverts = data if isinstance(data, list) else []
         out: list[dict] = []
         for adv in adverts:
@@ -163,7 +166,7 @@ class WBClient:
     async def update_card(self, *, token: str, card: dict) -> dict:
         """WB Content API: POST /content/v2/cards/update  body [card]."""
         return await self._content().request(
-            "POST", "/content/v2/cards/update", token=token, json=[card]
+            "POST", "/content/v2/cards/update", token=token, json=[card], retry_safe=False
         )
 
     async def list_cards(self, *, token: str, cursor: dict | None = None,
@@ -185,7 +188,7 @@ class WBClient:
                 cur["nmID"] = cursor["nmID"]
         body = {"settings": {"cursor": cur, "filter": {"withPhoto": -1}}}
         data = await self._content().request(
-            "POST", "/content/v2/get/cards/list", token=token, json=body)
+            "POST", "/content/v2/get/cards/list", token=token, json=body, retry_safe=True)
         if not isinstance(data, dict):
             return {"cards": [], "cursor": {}}
         return data
@@ -199,7 +202,7 @@ class WBClient:
         nmID and its price/discount. Returns the list of goods for this page.
         """
         data = await self._prices.request(
-            "GET", "/api/v2/list/goods/filter", token=token,
+            "GET", "/api/v2/list/goods/filter", token=token, retry_safe=True,
             params={"limit": int(limit), "offset": int(offset)})
         if isinstance(data, dict):
             return ((data.get("data") or {}).get("listGoods")) or []
@@ -225,7 +228,7 @@ class WBClient:
         type, ...}). all_promo=false = акции, доступные для участия. limit/offset pagination; `id` is
         the ONLY promotion identity — the title is never identity."""
         data = await self._calendar().request(
-            "GET", "/api/v1/calendar/promotions", token=token,
+            "GET", "/api/v1/calendar/promotions", token=token, retry_safe=True,
             params={"startDateTime": start_date_time, "endDateTime": end_date_time,
                     "allPromo": "true" if all_promo else "false", "limit": int(limit), "offset": int(offset)})
         proms = (data.get("data") or {}).get("promotions") if isinstance(data, dict) else None
@@ -236,7 +239,7 @@ class WBClient:
         proven start/end window and `type` per promotion."""
         params = [("promotionIDs", int(p)) for p in promotion_ids if str(p).isdigit()]
         data = await self._calendar().request(
-            "GET", "/api/v1/calendar/promotions/details", token=token, params=params)
+            "GET", "/api/v1/calendar/promotions/details", token=token, params=params, retry_safe=True)
         proms = (data.get("data") or {}).get("promotions") if isinstance(data, dict) else None
         return proms if isinstance(proms, list) else []
 
@@ -246,7 +249,7 @@ class WBClient:
         price, currencyCode, planPrice, discount, planDiscount}). inAction=true ⇒ actually participating;
         false ⇒ candidate. Неприменим для автоакций — never call for a type='auto' promotion."""
         data = await self._calendar().request(
-            "GET", "/api/v1/calendar/promotions/nomenclatures", token=token,
+            "GET", "/api/v1/calendar/promotions/nomenclatures", token=token, retry_safe=True,
             params={"promotionID": int(promotion_id), "inAction": "true" if in_action else "false",
                     "limit": int(limit), "offset": int(offset)})
         noms = (data.get("data") or {}).get("nomenclatures") if isinstance(data, dict) else None
@@ -259,7 +262,7 @@ class WBClient:
         Returns a JSON array of sale rows (each row carries nmId + forPay).
         """
         data = await self._statistics().request(
-            "GET", "/api/v1/supplier/sales", token=token,
+            "GET", "/api/v1/supplier/sales", token=token, retry_safe=True,
             params={"dateFrom": date_from, "flag": flag},
         )
         return data if isinstance(data, list) else []
@@ -269,7 +272,7 @@ class WBClient:
         """WB Statistics: GET /api/v1/supplier/orders?dateFrom=&flag=. One row per order line;
         `srid` is the stable order id, `lastChangeDate` drives incremental paging."""
         data = await self._statistics().request(
-            "GET", "/api/v1/supplier/orders", token=token,
+            "GET", "/api/v1/supplier/orders", token=token, retry_safe=True,
             params={"dateFrom": date_from, "flag": flag})
         return data if isinstance(data, list) else []
 
@@ -282,20 +285,20 @@ class WBClient:
         """WB Analytics: POST /api/v1/warehouse_remains → task id. The stocks snapshot is an async
         report (create → poll → download); the current supplier/stocks sync method was retired."""
         data = await self._analytics().request(
-            "POST", "/api/v1/warehouse_remains", token=token,
+            "POST", "/api/v1/warehouse_remains", token=token, retry_safe=False,
             params={"groupByNm": "true"})
         return str(((data or {}).get("data") or {}).get("taskId") or (data or {}).get("taskId") or "")
 
     async def warehouse_remains_status(self, *, token: str, task_id: str) -> str:
         """GET /api/v1/warehouse_remains/tasks/{id}/status → 'new'|'processing'|'done'|... ."""
         data = await self._analytics().request(
-            "GET", f"/api/v1/warehouse_remains/tasks/{task_id}/status", token=token)
+            "GET", f"/api/v1/warehouse_remains/tasks/{task_id}/status", token=token, retry_safe=True)
         return str(((data or {}).get("data") or {}).get("status") or (data or {}).get("status") or "")
 
     async def download_warehouse_remains(self, *, token: str, task_id: str) -> list[dict]:
         """GET /api/v1/warehouse_remains/tasks/{id}/download → rows (nmId, warehouseName, quantity)."""
         data = await self._analytics().request(
-            "GET", f"/api/v1/warehouse_remains/tasks/{task_id}/download", token=token)
+            "GET", f"/api/v1/warehouse_remains/tasks/{task_id}/download", token=token, retry_safe=True)
         if isinstance(data, list):
             return data
         return ((data or {}).get("data")) or [] if isinstance(data, dict) else []
@@ -307,7 +310,7 @@ class WBClient:
         Each row carries rrd_id (stable finance row id), srid, supplier_oper_name, quantity and the
         signed money components."""
         data = await self._finance().request(
-            "POST", "/api/finance/v1/sales-reports/detailed", token=token,
+            "POST", "/api/finance/v1/sales-reports/detailed", token=token, retry_safe=True,
             json={"period": {"begin": date_from, "end": date_to}})
         if isinstance(data, list):
             return data

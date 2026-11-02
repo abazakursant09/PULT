@@ -502,7 +502,8 @@ def test_single_alembic_head_unchanged():
 def test_client_campaign_prices_is_get_offer_prices(monkeypatch):
     calls = []
 
-    async def _fake(method, path, *, token, auth_header="Authorization", params=None, json=None):
+    async def _fake(method, path, *, token, retry_safe, auth_header="Authorization", params=None, json=None):
+        assert retry_safe is True
         calls.append({"method": method, "path": path, "auth": auth_header})
         return {"result": {"offers": [], "paging": {}}}
     monkeypatch.setattr(yandex_client._api, "request", _fake)

@@ -42,6 +42,7 @@ class BaseMarketplaceClient:
         extra_headers: dict | None = None,
         json: dict | None = None,
         params: dict | None = None,
+        retry_safe: bool = False,
     ) -> dict:
         """
         Perform an authenticated request. Returns parsed JSON (or {} for empty
@@ -49,6 +50,11 @@ class BaseMarketplaceClient:
 
         `token` is supplied by the executor from the vault at call time and is
         never logged.
+
+        Only an explicitly classified repeat-safe operation may replay after an
+        ambiguous timeout/5xx. HTTP verbs do not establish safety: some reads use
+        POST and some marketplace mutations use GET. Unknown operations fail
+        closed for ambiguous replay; existing throttle-refusal retries remain.
         """
         url = f"{self._base_url}{path}"
         headers = {auth_header: token, "Content-Type": "application/json"}
@@ -66,7 +72,7 @@ class BaseMarketplaceClient:
                         method, url, headers=headers, json=json, params=params
                     )
             except httpx.TimeoutException as exc:
-                if attempt <= self._max_retries:
+                if retry_safe is True and attempt <= self._max_retries:
                     await self._backoff(attempt)
                     continue
                 raise ExecutionError(ExecutionError.TIMEOUT, "marketplace timeout") from exc
@@ -76,7 +82,11 @@ class BaseMarketplaceClient:
                     ExecutionError.MARKETPLACE_5XX, "transport error"
                 ) from exc
 
-            if resp.status_code in _RETRYABLE_STATUS and attempt <= self._max_retries:
+            if (
+                resp.status_code in _RETRYABLE_STATUS
+                and attempt <= self._max_retries
+                and (retry_safe is True or resp.status_code in _RATE_LIMIT_STATUS)
+            ):
                 await self._backoff(attempt)
                 continue
 

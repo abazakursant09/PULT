@@ -33,13 +33,14 @@ class YandexClient:
         self._api = BaseMarketplaceClient(settings.yandex_partner_base)
 
     async def _post(self, path: str, *, token: str, json: dict | None = None,
-                    params: dict | None = None) -> dict:
+                    params: dict | None = None, retry_safe: bool = False) -> dict:
         return await self._api.request("POST", path, token=token, auth_header="Api-Key",
-                                       json=json, params=params)
+                                       json=json, params=params, retry_safe=retry_safe)
 
-    async def _get(self, path: str, *, token: str, params: dict | None = None) -> dict:
+    async def _get(self, path: str, *, token: str, params: dict | None = None,
+                   retry_safe: bool = False) -> dict:
         return await self._api.request("GET", path, token=token, auth_header="Api-Key",
-                                       params=params)
+                                       params=params, retry_safe=retry_safe)
 
     # ── Cabinet discovery ─────────────────────────────────────────────────────
     async def resolve_business_id(self, *, token: str) -> str:
@@ -49,7 +50,7 @@ class YandexClient:
         `business.id`. If it does not, we refuse rather than guess: picking the first would risk
         publishing a seller's replies into a cabinet that is not the one they meant.
         """
-        data = await self._get("/v2/campaigns", token=token)
+        data = await self._get("/v2/campaigns", token=token, retry_safe=True)
         campaigns = (data or {}).get("campaigns") or []
         ids = {
             str(c["business"]["id"])
@@ -86,7 +87,7 @@ class YandexClient:
                 params["page_token"] = token_param
             data = await self._post(
                 f"/v2/businesses/{business_id}/goods-feedback",
-                token=token, json={"offerIds": [str(offer_id)]}, params=params,
+                token=token, json={"offerIds": [str(offer_id)]}, params=params, retry_safe=True,
             )
             result = (data or {}).get("result") or {}
             out.extend(result.get("feedbacks") or [])
@@ -104,7 +105,7 @@ class YandexClient:
         data = await self._post(
             f"/v2/businesses/{business_id}/goods-feedback/comments",
             token=token, json={"feedbackId": _as_int(feedback_id)},
-            params={"limit": MAX_PAGE_SIZE},
+            params={"limit": MAX_PAGE_SIZE}, retry_safe=True,
         )
         return ((data or {}).get("result") or {}).get("comments") or []
 
@@ -120,6 +121,7 @@ class YandexClient:
             f"/v2/businesses/{business_id}/goods-feedback/comments/update",
             token=token,
             json={"feedbackId": _as_int(feedback_id), "comment": {"text": text}},
+            retry_safe=False,
         )
 
     # ── Campaign discovery (PULT-LAUNCH-1.4.5G) ───────────────────────────────
@@ -131,7 +133,7 @@ class YandexClient:
         projection only — ids and a display label — never the raw payload. The name is a label
         for a human to recognise, never used to auto-link anything.
         """
-        data = await self._get("/v2/campaigns", token=token)
+        data = await self._get("/v2/campaigns", token=token, retry_safe=True)
         campaigns = (data or {}).get("campaigns") or []
         out: list[dict] = []
         for c in campaigns:
@@ -161,7 +163,7 @@ class YandexClient:
         if page_token:
             params["page_token"] = page_token
         return await self._post(f"/v2/businesses/{business_id}/offer-mappings",
-                                token=token, json={}, params=params)
+                                token=token, json={}, params=params, retry_safe=True)
 
     async def campaign_prices(self, *, token: str, campaign_id: str,
                               page_token: str | None = None, limit: int = 500) -> dict:
@@ -171,7 +173,7 @@ class YandexClient:
         if page_token:
             params["pageToken"] = page_token
         return await self._get(f"/v2/campaigns/{campaign_id}/offer-prices",
-                               token=token, params=params)
+                               token=token, params=params, retry_safe=True)
 
     async def campaign_stocks(self, *, token: str, campaign_id: str,
                               page_token: str | None = None, limit: int = 200) -> dict:
@@ -181,7 +183,7 @@ class YandexClient:
         if page_token:
             params["pageToken"] = page_token
         return await self._post(f"/v2/campaigns/{campaign_id}/offers/stocks",
-                                token=token, json={}, params=params)
+                                token=token, json={}, params=params, retry_safe=True)
 
     async def campaign_orders(self, *, token: str, campaign_id: str, from_date: str, to_date: str,
                               page_token: str | None = None, limit: int = 50) -> dict:
@@ -191,7 +193,7 @@ class YandexClient:
         if page_token:
             params["pageToken"] = page_token
         return await self._get(f"/v2/campaigns/{campaign_id}/orders",
-                               token=token, params=params)
+                               token=token, params=params, retry_safe=True)
 
     async def campaign_returns(self, *, token: str, campaign_id: str,
                                page_token: str | None = None, limit: int = 50) -> dict:
@@ -202,7 +204,7 @@ class YandexClient:
         if page_token:
             params["pageToken"] = page_token
         return await self._get(f"/v2/campaigns/{campaign_id}/returns",
-                               token=token, params=params)
+                               token=token, params=params, retry_safe=True)
 
     # ── Promotions READ (PULT-LAUNCH-2.5D-Yandex-B3) ──────────────────────────
     # BUSINESS-level, read-only, evidence-only. These NEVER change a product's promotion state —
@@ -211,7 +213,7 @@ class YandexClient:
     async def list_promos(self, *, token: str, business_id: str) -> list[dict]:
         """POST /v2/businesses/{businessId}/promos → data.promotions[] ({id, name, mechanicsInfo.type,
         participating, period{dateTimeFrom,dateTimeTo}, ...}). Market promos only (not seller-created)."""
-        data = await self._post(f"/v2/businesses/{business_id}/promos", token=token, json={})
+        data = await self._post(f"/v2/businesses/{business_id}/promos", token=token, json={}, retry_safe=True)
         proms = ((data or {}).get("data") or {}).get("promotions")
         return proms if isinstance(proms, list) else []
 
@@ -226,7 +228,7 @@ class YandexClient:
         if page_token:
             params["pageToken"] = page_token
         return await self._post(f"/v2/businesses/{business_id}/promos/offers",
-                                token=token, json={"promoId": str(promo_id)}, params=params)
+                                token=token, json={"promoId": str(promo_id)}, params=params, retry_safe=True)
 
 
 def _s(value) -> str | None:
