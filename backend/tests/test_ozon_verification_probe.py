@@ -26,6 +26,7 @@ import uuid
 from datetime import datetime
 
 import pytest
+import httpx
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
@@ -45,8 +46,9 @@ from services.marketplace.verification import runner
 from services.marketplace.verification.adapters import get_adapter
 from services.marketplace.verification.adapters.base import ProbeContext, ProbeResponse
 from services.marketplace.verification.adapters.ozon import OzonProbeAdapter
-from services.marketplace.verification.transport import ProbeTransportError
+from services.marketplace.verification.transport import ProbeTransport, ProbeTransportError
 from services.marketplace.verification.taxonomy import VerificationOutcome as O
+from test_marketplace_retry_policy import no_external_io  # noqa: F401
 
 API_KEY = "ozon-api-key-secret"
 CLIENT_ID = "123456"
@@ -208,6 +210,83 @@ def test_429_is_rate_limited_and_parses_item_retry_after():
     assert result.retry_after_seconds == 120
 
 
+@pytest.mark.parametrize("stage", ["seller_info", "roles"])
+def test_standard_retry_after_is_propagated(stage):
+    responses = [_resp(429, None, {"retry-after": "120"})]
+    if stage == "roles":
+        responses.insert(0, _resp(200, SELLER_INFO_OK))
+    result, transport = _verify("prices", *responses)
+    assert result.outcome is O.RATE_LIMITED
+    assert result.retry_after_seconds == 120
+    assert len(transport.requests) == (2 if stage == "roles" else 1)
+    assert result.changes_state is False
+
+
+@pytest.mark.parametrize("name", ["retry-after", "item-retry-after"])
+@pytest.mark.parametrize("value,expected", [("0", 0), (" \t00120\t ", 120),
+                                         ("2147483647", 2147483647)])
+def test_retry_seconds_supported_storage_range(name, value, expected):
+    result, t = _verify("prices", _resp(429, None, {name: value}))
+    assert result.outcome is O.RATE_LIMITED
+    assert result.retry_after_seconds == expected
+    assert result.changes_state is False and len(t.requests) == 1
+
+
+@pytest.mark.parametrize("headers,expected", [
+    ({}, None), ({"other": "120"}, None),
+    ({"retry-after": "0", "item-retry-after": "120"}, 120),
+    ({"retry-after": "120", "item-retry-after": "0"}, 120),
+    ({"retry-after": "120", "item-retry-after": "invalid"}, None),
+    ({"retry-after": "invalid", "item-retry-after": "120"}, None),
+])
+def test_retry_advisory_combination(headers, expected):
+    result, _ = _verify("prices", _resp(429, None, headers))
+    assert result.outcome is O.RATE_LIMITED
+    assert result.retry_after_seconds == expected
+
+
+@pytest.mark.parametrize("name", ["retry-after", "item-retry-after"])
+@pytest.mark.parametrize("value", ["", " \t", "-1", "+1", "1.5", "1e2", "NaN", "Inf",
+    "120, 240", "120, 120", "Mon, 02 Nov 2026 12:00:00 GMT", "١٢٠", "１２０",
+    "2147483648", "9" * 5000, None, 120])
+def test_invalid_retry_advisory_stays_unknown(name, value):
+    result, t = _verify("prices", _resp(429, None, {name: value}))
+    assert result.outcome is O.RATE_LIMITED
+    assert result.retry_after_seconds is None
+    assert result.changes_state is False and len(t.requests) == 1
+
+
+@pytest.mark.parametrize("headers,expected", [
+    ([("rEtRy-AfTeR", "120")], 120),
+    ([("Retry-After", "120"), ("retry-after", "240")], None),
+])
+def test_real_transport_normalizes_retry_advisory(monkeypatch, headers, expected):
+    calls = []
+
+    class Client:
+        def __init__(self, *, timeout):
+            assert timeout == 8.0
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def request(self, method, url, *, headers, json):
+            assert method == "POST" and url == "https://api-seller.ozon.ru/v1/seller/info"
+            assert headers == {"Api-Key": API_KEY, "Client-Id": CLIENT_ID} and json == {}
+            calls.append(method)
+            return httpx.Response(429, headers=response_headers)
+
+    response_headers = headers
+    monkeypatch.setattr(httpx, "AsyncClient", Client)
+    result = asyncio.run(OzonProbeAdapter().verify(_ctx(), ProbeTransport()))
+    assert calls == ["POST"]
+    assert result.outcome is O.RATE_LIMITED and result.retry_after_seconds == expected
+    assert result.changes_state is False
+
+
 def test_rate_limit_message_without_429_is_still_rate_limited():
     result, _t = _verify("prices", _err("You have reached request rate limit per second"))
     assert result.outcome is O.RATE_LIMITED
@@ -360,6 +439,38 @@ def test_end_to_end_timeout_preserves_a_verified_credential():
         await db.refresh(credential)
         assert credential.verification_status == "verified", \
             "a timeout destroyed a proven Ozon credential"
+    asyncio.run(go())
+
+
+@pytest.mark.parametrize("prior_status", ["unverified", "verified"])
+@pytest.mark.parametrize("stage", ["seller_info", "roles"])
+def test_retry_advisory_persists_without_changing_verification(prior_status, stage):
+    async def go():
+        db = await _orm_session()
+        engine = db.bind
+        try:
+            user, conn, _acc, cred = await _ozon_connection(db)
+            stamp = datetime(2026, 1, 1) if prior_status == "verified" else None
+            cred.verification_status = prior_status
+            cred.verified_at = stamp
+            await db.commit()
+            responses = [_resp(429, None, {"retry-after": "120"})]
+            if stage == "roles":
+                responses.insert(0, _resp(200, SELLER_INFO_OK))
+            t = FakeTransport(*responses)
+            _, credential, result = await runner.verify_credential(
+                db, user_id=user.id, connection_id=conn.id, scope="prices", transport=t)
+            await db.refresh(credential)
+            await db.refresh(conn)
+            attempt = (await db.execute(sa.select(ConnectionVerificationAttempt))).scalar_one()
+            assert attempt.outcome == "rate_limited" and attempt.retry_after_seconds == 120
+            assert result.outcome is O.RATE_LIMITED and result.changes_state is False
+            assert credential.verification_status == prior_status and credential.verified_at == stamp
+            assert conn.verification_status == prior_status
+            assert len(t.requests) == (2 if stage == "roles" else 1)
+        finally:
+            await db.close()
+            await engine.dispose()
     asyncio.run(go())
 
 

@@ -29,6 +29,7 @@ What Ozon does NOT give us, and where this adapter therefore stays silent:
 """
 from __future__ import annotations
 
+import re
 from typing import Any, Optional
 
 from ..taxonomy import VerificationOutcome, VerificationResult
@@ -61,9 +62,10 @@ _MSG_MISSING_ROLE = "missing a required role"
 _MSG_IP_RESTRICTED = "restricted to specific ip"
 _MSG_RATE_LIMIT = "request rate limit"
 
-# Documented for Ozon's item-operation methods only — absent on these two, so it is read
-# defensively: no header is normal, not an error. Ozon has no standard `Retry-After`.
-_RETRY_HEADER = "item-retry-after"
+# Standard Retry-After seconds (Ozon announcement 2026-09-25), plus legacy item hints.
+# Advisory metadata only: no sleeps/retries. HTTP-date is unsupported in this adapter.
+_RETRY_HEADERS = ("retry-after", "item-retry-after")
+_MAX_RETRY_SECONDS = "2147483647"  # Persisted SQL Integer, not an invocation wait budget.
 
 
 def _headers(ctx: ProbeContext) -> dict[str, str]:
@@ -80,13 +82,23 @@ def _message(resp: ProbeResponse) -> str:
 
 
 def _retry_after(resp: ProbeResponse) -> Optional[int]:
-    raw = resp.headers.get(_RETRY_HEADER)
-    if raw is None:
-        return None
-    try:
-        return int(raw)
-    except (TypeError, ValueError):
-        return None       # an unparseable header must never break verification
+    delays = []
+    for name in _RETRY_HEADERS:
+        if name not in resp.headers:
+            continue
+        raw = resp.headers[name]
+        if not isinstance(raw, str):
+            return None
+        value = raw.strip(" \t")
+        if re.fullmatch(r"[0-9]+", value) is None:
+            return None  # Includes combined duplicate fields and unsupported HTTP-date.
+        digits = value.lstrip("0") or "0"
+        if len(digits) > len(_MAX_RETRY_SECONDS) or (
+            len(digits) == len(_MAX_RETRY_SECONDS) and digits > _MAX_RETRY_SECONDS
+        ):
+            return None  # Unknown advisory, never clamp or parse an oversized integer.
+        delays.append(int(digits))
+    return max(delays) if delays else None
 
 
 def _result(outcome: VerificationOutcome, probe_key: str, *,
