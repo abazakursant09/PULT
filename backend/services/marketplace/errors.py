@@ -13,6 +13,7 @@ class ExecutionError(Exception):
     MARKETPLACE_4XX = "MARKETPLACE_4XX"
     UNKNOWN_ACTION = "UNKNOWN_ACTION"
     CAPABILITY_NOT_SUPPORTED = "CAPABILITY_NOT_SUPPORTED"  # marketplace can't do this action
+    PAGINATION_INCOMPLETE = "PAGINATION_INCOMPLETE"
     # guard rejections carry a GUARD_<reason> code, built at raise site
     # retryable
     RATE_LIMIT = "RATE_LIMIT"
@@ -46,3 +47,17 @@ class ExecutionError(Exception):
 
     def to_dict(self) -> dict:
         return {"code": self.code, "detail": self.detail, "retryable": self.retryable}
+
+
+class MarketplacePaginationIncomplete(ExecutionError):
+    """A read stopped without proving completeness; never include cursors/payloads."""
+
+    def __init__(self, reason: str):
+        self.reason = reason if isinstance(reason, str) and reason in {
+            "cycle", "page_limit", "schema"
+        } else "schema"
+        super().__init__(
+            self.PAGINATION_INCOMPLETE,
+            f"marketplace read incomplete ({self.reason})",
+            retryable=False,
+        )
