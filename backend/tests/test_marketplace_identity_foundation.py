@@ -47,7 +47,7 @@ from schemas.marketplace import ConnectionCreate
 from services.marketplace import executor
 from services.workspace_resolver import WorkspaceMissing, resolve_workspace_id
 
-REV = "csr1a2b3c4d01"
+REV = "ymh1a2b3c4d01"
 PRIOR = "wsp1a2b3c4d01"
 TABLE = "marketplace_accounts"
 CONNS = "marketplace_connections"
@@ -217,12 +217,15 @@ def test_marketplace_accounts_table_shape(monkeypatch):
         eng.dispose()
 
     assert set(cols) == {"id", "workspace_id", "marketplace", "external_account_id",
-                         "identity_status", "label", "created_at", "updated_at"}
+                         "identity_status", "label", "created_at", "updated_at",
+                         "ym_review_read_not_before", "ym_review_read_indeterminate"}
     assert cols["workspace_id"]["nullable"] is False
     assert cols["marketplace"]["nullable"] is False
     assert cols["identity_status"]["nullable"] is False
     assert cols["external_account_id"]["nullable"] is True   # NULL until discovery
     assert cols["label"]["nullable"] is True
+    assert cols["ym_review_read_not_before"]["nullable"] is True
+    assert cols["ym_review_read_indeterminate"]["nullable"] is False
 
     # the model and the migration describe the same table
     assert set(MarketplaceAccount.__table__.columns.keys()) == set(cols)

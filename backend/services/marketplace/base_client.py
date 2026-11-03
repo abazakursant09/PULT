@@ -18,6 +18,7 @@ import httpx
 
 from config import settings
 from .errors import ExecutionError
+from .ym_review_read_hold import admit_selected_read, observe_selected_read
 
 log = logging.getLogger(__name__)
 
@@ -111,6 +112,7 @@ class BaseMarketplaceClient:
         throttle_wait = 0.0
         while True:
             attempt += 1
+            await admit_selected_read(self)
             try:
                 async with httpx.AsyncClient(
                     timeout=settings.marketplace_http_timeout
@@ -129,6 +131,7 @@ class BaseMarketplaceClient:
                     ExecutionError.MARKETPLACE_5XX, "transport error"
                 ) from exc
 
+            await observe_selected_read(self, resp)
             if resp.status_code in _RATE_LIMIT_STATUS:
                 # Explicit supported throttle domain; no constructor validation or claim for n>2.
                 n = self._max_retries

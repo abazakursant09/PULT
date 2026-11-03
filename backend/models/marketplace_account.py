@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, String, DateTime, ForeignKey, Index, UniqueConstraint
+from sqlalchemy import Boolean, Column, String, DateTime, ForeignKey, Index, UniqueConstraint, false
 from database import Base
 
 
@@ -56,6 +56,8 @@ class MarketplaceAccount(Base):
     label               = Column(String(120), nullable=True)
     created_at          = Column(DateTime, default=datetime.utcnow)
     updated_at          = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    ym_review_read_not_before = Column(DateTime(timezone=True), nullable=True)
+    ym_review_read_indeterminate = Column(Boolean, nullable=False, default=False, server_default=false())
 
     __table_args__ = (
         UniqueConstraint("marketplace", "external_account_id", name="uq_mp_account_mp_ext"),

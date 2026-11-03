@@ -17,7 +17,7 @@ one failing store never stops the rest.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,6 +37,7 @@ from services.review.draft import build_draft
 from services.marketplace import credential_vault
 from services.marketplace import review_automation_gate as gate
 from services.marketplace.errors import ExecutionError
+from services.marketplace.ym_review_read_hold import YMReviewReadDeferred, bind_review_read_context
 from services.marketplace.reviews import (
     answer_status as review_answer_status,
     get_review_provider,
@@ -178,6 +179,8 @@ async def run_auto_sync_reviews() -> dict:
             products = await _next_batch(db, rule.user_id, conn.marketplace,
                                          conn.review_sync_cursor, batch_size)
             conn_stop = False
+            read_not_before = None
+            read_deferred = False
             advanced_to = conn.review_sync_cursor
             for product in products:
                 try:
@@ -189,6 +192,9 @@ async def run_auto_sync_reviews() -> dict:
                 except ExecutionError as e:
                     errors += 1
                     if e.code in _CONNECTION_FATAL_CODES:
+                        if isinstance(e, YMReviewReadDeferred):
+                            read_deferred = True
+                            read_not_before = e.not_before
                         conn_stop = True                     # no more calls for this connection now
                         log.warning("auto-sync connection error conn=%s code=%s — stopping batch",
                                     conn.id, e.code)
@@ -211,8 +217,12 @@ async def run_auto_sync_reviews() -> dict:
                 stopped += 1
                 conn.review_sync_cursor = advanced_to
                 conn.review_sync_fail_count = (conn.review_sync_fail_count or 0) + 1
-                conn.review_sync_next_at = now + timedelta(
+                backoff_now = datetime.utcnow() if read_deferred else now
+                conn.review_sync_next_at = backoff_now + timedelta(
                     seconds=_next_sync_delay(conn.review_sync_fail_count))
+                if read_not_before is not None:
+                    bound = read_not_before.astimezone(timezone.utc).replace(tzinfo=None)
+                    conn.review_sync_next_at = max(conn.review_sync_next_at, bound)
             else:
                 # Whole batch attempted. A short batch means the end of the product list → wrap.
                 conn.review_sync_cursor = None if len(products) < batch_size else advanced_to
@@ -274,6 +284,14 @@ async def run_reconcile_moderation() -> dict:
 
             try:
                 cred_token = await _connection_credential(db, conn, provider)
+                credential_meta = (await db.execute(
+                    select(ApiCredential.meta).where(
+                        ApiCredential.connection_id == conn.id,
+                        ApiCredential.scope == review_ingest.FEEDBACKS_SCOPE,
+                    )
+                )).scalars().first()
+                cached_ref = (credential_meta or {}).get(review_ingest.ACCOUNT_REF_KEY)
+                account_ref = str(cached_ref) if cached_ref else None
             except Exception as e:                       # missing/undecryptable key — not a re-send
                 errors += 1
                 log.warning("moderation re-check: no usable credential conn=%s: %s", conn.id, e)
@@ -284,10 +302,11 @@ async def run_reconcile_moderation() -> dict:
                     comment_id = await _comment_id_for(db, review)
                     if not await is_active_background_user(db, rule.user_id):
                         break
-                    status = await review_answer_status(
-                        provider, cred_token, review.external_review_id,
-                        comment_id,
-                    )
+                    async with bind_review_read_context(db, conn, account_ref):
+                        status = await review_answer_status(
+                            provider, cred_token, review.external_review_id,
+                            comment_id,
+                        )
                 except ExecutionError as e:
                     errors += 1
                     if e.code in _CONNECTION_FATAL_CODES:

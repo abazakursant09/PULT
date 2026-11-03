@@ -1,6 +1,7 @@
 import logging
+import math
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -21,6 +22,7 @@ from services.review.state import derive_state
 from services.marketplace import executor, credential_vault, operation_key
 from services.marketplace.wb_client import wb_client
 from services.marketplace.reviews import get_review_provider, review_credential
+from services.marketplace.ym_review_read_hold import YMReviewReadDeferred
 from services.review.draft import classify_review, build_draft
 from services.review import ingest as review_ingest
 from models.execution_log import ExecutionLog
@@ -116,6 +118,14 @@ async def sync_reviews(
     # manual and automatic paths can never diverge. Honest errors map to HTTP codes here.
     try:
         result = await review_ingest.sync_product_reviews(db, product)
+    except YMReviewReadDeferred as exc:
+        if exc.reason == "identity":
+            raise HTTPException(409, "Идентификатор кабинета не подтверждён") from exc
+        if exc.reason == "hold" and exc.not_before is not None:
+            remaining = max(0, math.ceil((exc.not_before - datetime.now(timezone.utc)).total_seconds()))
+            raise HTTPException(429, "Чтение отзывов временно отложено",
+                                headers={"Retry-After": str(remaining)}) from exc
+        raise HTTPException(503, "Чтение отзывов временно недоступно") from exc
     except review_ingest.ReviewSyncUnsupported:
         raise HTTPException(422, f"приём отзывов для «{product.marketplace}» пока не поддерживается")
     except review_ingest.ReviewSyncNoConnection:
