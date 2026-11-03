@@ -16,7 +16,7 @@ from __future__ import annotations
 from config import settings
 from .base_client import BaseMarketplaceClient
 from .errors import ExecutionError, MarketplacePaginationIncomplete
-from .ym_review_read_hold import selected_review_read
+from .ym_review_read_hold import selected_yandex_operation
 
 MARKETPLACE = "yandex"
 
@@ -50,7 +50,8 @@ class YandexClient:
         `business.id`. If it does not, we refuse rather than guess: picking the first would risk
         publishing a seller's replies into a cabinet that is not the one they meant.
         """
-        data = await self._get("/v2/campaigns", token=token, retry_safe=True)
+        with selected_yandex_operation("resolve_business_id", client=self._api):
+            data = await self._get("/v2/campaigns", token=token, retry_safe=True)
         campaigns = (data or {}).get("campaigns") or []
         ids = {
             str(c["business"]["id"])
@@ -93,7 +94,7 @@ class YandexClient:
             params: dict = {"limit": page}
             if token_param:
                 params["pageToken"] = token_param
-            with selected_review_read(business_id, "reviews", client=self._api):
+            with selected_yandex_operation("reviews", business_id=business_id, client=self._api):
                 data = await self._post(
                     f"/v2/businesses/{business_id}/goods-feedback",
                     token=token, json={"offerIds": [str(offer_id)]}, params=params, retry_safe=True,
@@ -120,7 +121,7 @@ class YandexClient:
             params: dict = {"limit": MAX_PAGE_SIZE}
             if token_param:
                 params["pageToken"] = token_param
-            with selected_review_read(business_id, "comments", client=self._api):
+            with selected_yandex_operation("comments", business_id=business_id, client=self._api):
                 data = await self._post(
                     f"/v2/businesses/{business_id}/goods-feedback/comments",
                     token=token, json={"feedbackId": _as_int(feedback_id)},
@@ -143,12 +144,10 @@ class YandexClient:
         The response carries the whole comment — id and moderation status included — so the caller
         learns immediately whether the reply is live or still awaiting moderation.
         """
-        return await self._post(
-            f"/v2/businesses/{business_id}/goods-feedback/comments/update",
-            token=token,
-            json={"feedbackId": _as_int(feedback_id), "comment": {"text": text}},
-            retry_safe=False,
-        )
+        request = build_publish_feedback_request(
+            business_id=business_id, feedback_id=feedback_id, text=text)
+        with selected_yandex_operation("publish_feedback_answer", business_id=business_id, client=self._api):
+            return await self._post(request["path"], token=token, json=request["json"], retry_safe=False)
 
     # ── Campaign discovery (PULT-LAUNCH-1.4.5G) ───────────────────────────────
     async def list_campaigns(self, *, token: str) -> list[dict]:
@@ -159,7 +158,8 @@ class YandexClient:
         projection only — ids and a display label — never the raw payload. The name is a label
         for a human to recognise, never used to auto-link anything.
         """
-        data = await self._get("/v2/campaigns", token=token, retry_safe=True)
+        with selected_yandex_operation("list_campaigns", client=self._api):
+            data = await self._get("/v2/campaigns", token=token, retry_safe=True)
         campaigns = (data or {}).get("campaigns") or []
         out: list[dict] = []
         for c in campaigns:
@@ -188,8 +188,9 @@ class YandexClient:
         params: dict = {"limit": int(limit)}
         if page_token:
             params["page_token"] = page_token
-        return await self._post(f"/v2/businesses/{business_id}/offer-mappings",
-                                token=token, json={}, params=params, retry_safe=True)
+        with selected_yandex_operation("offer_mappings", business_id=business_id, client=self._api):
+            return await self._post(f"/v2/businesses/{business_id}/offer-mappings",
+                                    token=token, json={}, params=params, retry_safe=True)
 
     async def campaign_prices(self, *, token: str, campaign_id: str,
                               page_token: str | None = None, limit: int = 500) -> dict:
@@ -198,8 +199,9 @@ class YandexClient:
         params: dict = {"limit": int(limit)}
         if page_token:
             params["pageToken"] = page_token
-        return await self._get(f"/v2/campaigns/{campaign_id}/offer-prices",
-                               token=token, params=params, retry_safe=True)
+        with selected_yandex_operation("campaign_prices", campaign_id=campaign_id, client=self._api):
+            return await self._get(f"/v2/campaigns/{campaign_id}/offer-prices",
+                                   token=token, params=params, retry_safe=True)
 
     async def campaign_stocks(self, *, token: str, campaign_id: str,
                               page_token: str | None = None, limit: int = 200) -> dict:
@@ -208,8 +210,9 @@ class YandexClient:
         params: dict = {"limit": int(limit)}
         if page_token:
             params["pageToken"] = page_token
-        return await self._post(f"/v2/campaigns/{campaign_id}/offers/stocks",
-                                token=token, json={}, params=params, retry_safe=True)
+        with selected_yandex_operation("campaign_stocks", campaign_id=campaign_id, client=self._api):
+            return await self._post(f"/v2/campaigns/{campaign_id}/offers/stocks",
+                                    token=token, json={}, params=params, retry_safe=True)
 
     async def campaign_orders(self, *, token: str, campaign_id: str, from_date: str, to_date: str,
                               page_token: str | None = None, limit: int = 50) -> dict:
@@ -218,8 +221,9 @@ class YandexClient:
         params: dict = {"fromDate": from_date, "toDate": to_date, "limit": int(limit)}
         if page_token:
             params["pageToken"] = page_token
-        return await self._get(f"/v2/campaigns/{campaign_id}/orders",
-                               token=token, params=params, retry_safe=True)
+        with selected_yandex_operation("campaign_orders", campaign_id=campaign_id, client=self._api):
+            return await self._get(f"/v2/campaigns/{campaign_id}/orders",
+                                   token=token, params=params, retry_safe=True)
 
     async def campaign_returns(self, *, token: str, campaign_id: str,
                                page_token: str | None = None, limit: int = 50) -> dict:
@@ -229,8 +233,9 @@ class YandexClient:
         params: dict = {"type": "RETURN", "limit": int(limit)}
         if page_token:
             params["pageToken"] = page_token
-        return await self._get(f"/v2/campaigns/{campaign_id}/returns",
-                               token=token, params=params, retry_safe=True)
+        with selected_yandex_operation("campaign_returns", campaign_id=campaign_id, client=self._api):
+            return await self._get(f"/v2/campaigns/{campaign_id}/returns",
+                                   token=token, params=params, retry_safe=True)
 
     # ── Promotions READ (PULT-LAUNCH-2.5D-Yandex-B3) ──────────────────────────
     # BUSINESS-level, read-only, evidence-only. These NEVER change a product's promotion state —
@@ -239,7 +244,8 @@ class YandexClient:
     async def list_promos(self, *, token: str, business_id: str) -> list[dict]:
         """POST /v2/businesses/{businessId}/promos → data.promotions[] ({id, name, mechanicsInfo.type,
         participating, period{dateTimeFrom,dateTimeTo}, ...}). Market promos only (not seller-created)."""
-        data = await self._post(f"/v2/businesses/{business_id}/promos", token=token, json={}, retry_safe=True)
+        with selected_yandex_operation("list_promos", business_id=business_id, client=self._api):
+            data = await self._post(f"/v2/businesses/{business_id}/promos", token=token, json={}, retry_safe=True)
         proms = ((data or {}).get("data") or {}).get("promotions")
         return proms if isinstance(proms, list) else []
 
@@ -253,8 +259,16 @@ class YandexClient:
         params: dict = {"limit": int(limit)}
         if page_token:
             params["pageToken"] = page_token
-        return await self._post(f"/v2/businesses/{business_id}/promos/offers",
-                                token=token, json={"promoId": str(promo_id)}, params=params, retry_safe=True)
+        with selected_yandex_operation("list_promo_offers", business_id=business_id, client=self._api):
+            return await self._post(f"/v2/businesses/{business_id}/promos/offers",
+                                    token=token, json={"promoId": str(promo_id)}, params=params, retry_safe=True)
+
+
+def build_publish_feedback_request(*, business_id, feedback_id, text):
+    """Pure exact publish request shared by claim preparation and actual dispatch."""
+    return {"method": "POST", "path": f"/v2/businesses/{business_id}/goods-feedback/comments/update",
+            "auth_header": "Api-Key", "extra_headers": None,
+            "json": {"feedbackId": _as_int(feedback_id), "comment": {"text": text}}, "params": None}
 
 
 def _pagination_page(data, rows_key: str) -> tuple[list[dict], str | None]:

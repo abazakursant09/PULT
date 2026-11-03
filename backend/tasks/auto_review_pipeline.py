@@ -17,6 +17,7 @@ one failing store never stops the rest.
 from __future__ import annotations
 
 import logging
+from contextlib import AsyncExitStack
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
@@ -37,7 +38,7 @@ from services.review.draft import build_draft
 from services.marketplace import credential_vault
 from services.marketplace import review_automation_gate as gate
 from services.marketplace.errors import ExecutionError
-from services.marketplace.ym_review_read_hold import YMReviewReadDeferred, bind_review_read_context
+from services.marketplace.ym_review_read_hold import YMReviewReadDeferred
 from services.marketplace.reviews import (
     answer_status as review_answer_status,
     get_review_provider,
@@ -282,55 +283,51 @@ async def run_reconcile_moderation() -> dict:
             if not rows:
                 continue
 
+            credential_context = AsyncExitStack()
             try:
-                cred_token = await _connection_credential(db, conn, provider)
-                credential_meta = (await db.execute(
-                    select(ApiCredential.meta).where(
-                        ApiCredential.connection_id == conn.id,
-                        ApiCredential.scope == review_ingest.FEEDBACKS_SCOPE,
-                    )
-                )).scalars().first()
-                cached_ref = (credential_meta or {}).get(review_ingest.ACCOUNT_REF_KEY)
-                account_ref = str(cached_ref) if cached_ref else None
-            except Exception as e:                       # missing/undecryptable key — not a re-send
+                cred_token = await credential_context.enter_async_context(
+                    review_ingest.feedbacks_read_context(db, conn, provider))
+            except Exception as e:
+                await credential_context.aclose()
                 errors += 1
                 log.warning("moderation re-check: no usable credential conn=%s: %s", conn.id, e)
                 continue
 
-            for review in rows:
-                try:
-                    comment_id = await _comment_id_for(db, review)
-                    if not await is_active_background_user(db, rule.user_id):
-                        break
-                    async with bind_review_read_context(db, conn, account_ref):
+            try:
+                for review in rows:
+                    try:
+                        comment_id = await _comment_id_for(db, review)
+                        if not await is_active_background_user(db, rule.user_id):
+                            break
                         status = await review_answer_status(
-                            provider, cred_token, review.external_review_id,
-                            comment_id,
+                            provider, cred_token, review.external_review_id, comment_id,
                         )
-                except ExecutionError as e:
-                    errors += 1
-                    if e.code in _CONNECTION_FATAL_CODES:
-                        # The marketplace is refusing us as a caller — stop this connection now,
-                        # exactly as the sync loop does, instead of walking the rest of the batch.
-                        log.warning("moderation re-check stopped conn=%s code=%s", conn.id, e.code)
-                        break
-                    continue
-                except Exception as e:
-                    errors += 1
-                    log.warning("moderation re-check failed review=%s: %s", review.id, e)
-                    continue
+                    except ExecutionError as e:
+                        errors += 1
+                        if e.code in _CONNECTION_FATAL_CODES:
+                            # The marketplace is refusing us as a caller — stop this connection now,
+                            # exactly as the sync loop does, instead of walking the rest of the batch.
+                            log.warning("moderation re-check stopped conn=%s code=%s", conn.id, e.code)
+                            break
+                        continue
+                    except Exception as e:
+                        errors += 1
+                        log.warning("moderation re-check failed review=%s: %s", review.id, e)
+                        continue
 
-                if status == "PUBLISHED":
-                    review.status = "published"
-                    review.published_at = datetime.utcnow()
-                    resolved += 1
-                elif status in ("BANNED", "DELETED"):
-                    review.status = "failed"
-                    review.failure_reason = "маркетплейс отклонил ответ"
-                    rejected += 1
-                else:
-                    pending += 1                 # UNMODERATED or not found — leave it alone
-            await db.commit()
+                    if status == "PUBLISHED":
+                        review.status = "published"
+                        review.published_at = datetime.utcnow()
+                        resolved += 1
+                    elif status in ("BANNED", "DELETED"):
+                        review.status = "failed"
+                        review.failure_reason = "маркетплейс отклонил ответ"
+                        rejected += 1
+                    else:
+                        pending += 1                 # UNMODERATED or not found — leave it alone
+                await db.commit()
+            finally:
+                await credential_context.aclose()
 
     log.info("moderation re-check: resolved=%s rejected=%s pending=%s errors=%s",
              resolved, rejected, pending, errors)

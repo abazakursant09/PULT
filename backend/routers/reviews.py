@@ -26,6 +26,7 @@ from services.marketplace.ym_review_read_hold import YMReviewReadDeferred
 from services.review.draft import classify_review, build_draft
 from services.review import ingest as review_ingest
 from models.execution_log import ExecutionLog
+from ._op_http import raise_if_deferred
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -291,6 +292,7 @@ async def publish_review_response(
         idempotency_key=operation_key.review_key(review.id),
     )
 
+    raise_if_deferred(res)
     if res.status in ("ambiguous", "needs_reconcile"):
         # AR5: the write may have committed on the marketplace but no clean response came back.
         # Never present this as a failure the seller should simply retry — a second click hits the

@@ -56,6 +56,9 @@ class MarketplaceAccount(Base):
     label               = Column(String(120), nullable=True)
     created_at          = Column(DateTime, default=datetime.utcnow)
     updated_at          = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # Historical B1 physical names retained without DDL: B2 broadens this local
+    # account safety policy to explicitly bound, proven-current-key YM operations.
+    # Not an official quota bucket. Success/key rotation never clears either field.
     ym_review_read_not_before = Column(DateTime(timezone=True), nullable=True)
     ym_review_read_indeterminate = Column(Boolean, nullable=False, default=False, server_default=false())
 

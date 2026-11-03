@@ -14,6 +14,11 @@ memory and never leaves it: only a classified outcome is persisted.
 from __future__ import annotations
 
 import httpx
+from types import SimpleNamespace
+
+from services.marketplace.ym_review_read_hold import (
+    YMReviewReadDeferred, admit_probe_request, observe_yandex_response,
+)
 
 from .adapters.base import ProbeRequest, ProbeResponse
 
@@ -43,6 +48,7 @@ class ProbeTransport:
         self._timeout = timeout
 
     async def request(self, req: ProbeRequest) -> ProbeResponse:
+        await _admit_probe(self, req)
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 resp = await client.request(
@@ -52,6 +58,8 @@ class ProbeTransport:
             raise ProbeTransportError(ProbeTransportError.TIMEOUT) from None
         except httpx.HTTPError:
             raise ProbeTransportError(ProbeTransportError.UNAVAILABLE) from None
+
+        await _observe_probe(self, resp)  # original httpx.Headers, before any flattening
 
         body = None
         if resp.content:
@@ -65,3 +73,31 @@ class ProbeTransport:
             headers={k.lower(): v for k, v in resp.headers.items()},
             json=body,
         )
+
+
+async def _admit_probe(client, req):
+    await admit_probe_request(client, req)
+
+
+async def _observe_probe(client, response):
+    try:
+        await observe_yandex_response(client, response)
+    except YMReviewReadDeferred as exc:
+        exc.probe_http_status = response.status_code  # only a real response may supply this
+        raise
+
+
+class BoundProbeTransport:
+    """Keep injected probe transports on the same explicitly selected boundary."""
+
+    def __init__(self, transport):
+        self.transport = transport
+
+    async def request(self, req):
+        await _admit_probe(self.transport, req)
+        response = await self.transport.request(req)
+        # Preserve the injected response's original header container; never flatten it again.
+        await _observe_probe(self.transport, SimpleNamespace(
+            status_code=response.status, headers=response.headers,
+        ))
+        return response

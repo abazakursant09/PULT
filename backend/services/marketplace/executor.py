@@ -5,11 +5,13 @@ rule) both flow through `execute()`. Nothing else may call a marketplace client.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+from contextlib import AsyncExitStack, nullcontext
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from sqlalchemy import or_, select, text, bindparam
+from sqlalchemy import event, or_, select, text, bindparam
 from sqlalchemy import DateTime as _SA_DateTime, Integer as _SA_Integer, String as _SA_String
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,6 +34,7 @@ from .operation_fingerprint import (  # noqa: F401 — re-exported for backward-
 )
 from .errors import ExecutionError
 from .ozon_performance_auth import PERFORMANCE_SCOPE
+from . import ym_review_read_hold as ym_hold
 
 log = logging.getLogger(__name__)
 
@@ -145,7 +148,8 @@ async def _resolve_connection(
         q = q.where(MarketplaceConnection.id == connection_id)
     else:
         q = q.where(MarketplaceConnection.marketplace == marketplace)
-    conn = (await db.execute(q)).scalars().first()
+    with db.no_autoflush:
+        conn = (await db.execute(q)).scalars().first()
     if conn is None:
         raise ExecutionError(ExecutionError.NO_CONNECTION, f"no {marketplace} connection")
     if conn.status != "connected":
@@ -288,10 +292,11 @@ async def execute(
                     f"{action_type} not supported on {target_mp} (capability {cap_key}, {avail.get('status')})",
                 )
         # 4) guard (before any network)
-        await guard.check(
-            db=db, user_id=user_id, action_type=action_type,
-            payload=payload, mode=mode, rule=rule,
-        )
+        with db.no_autoflush:
+            await guard.check(
+                db=db, user_id=user_id, action_type=action_type,
+                payload=payload, mode=mode, rule=rule,
+            )
     except ExecutionError as e:
         # rejected before any side effect; persist a rejected log for audit (not for dry_run)
         if dry_run:
@@ -327,12 +332,128 @@ async def execute(
     # Legacy-transition guard: a pre-1B-B row for the SAME provable identity (review.id / decision.id)
     # blocks a new dispatch regardless of its status — old rows have no trustworthy dispatch_started_at,
     # so we cannot prove the provider was not already called. 0 provider calls, no new claim, no leak.
-    if await _legacy_alias_hit(db, user_id, idempotency_key, decision_id):
+    with db.no_autoflush:
+        legacy_hit = await _legacy_alias_hit(db, user_id, idempotency_key, decision_id)
+    if legacy_hit:
         return ExecutionResult(None, "needs_reconcile", action_type, target_mp,
                                error={"code": "LEGACY_OPERATION_NEEDS_RECONCILE",
                                       "detail": "операция найдена в прежнем формате — проверьте кабинет",
                                       "retryable": False},
                                reversible=spec.reversible)
+
+    async def finalize_owned_claim(*args, **kwargs):
+        # The entry point retains delegation to the one fenced dispatch owner.
+        return await _dispatch_and_finalize(*args, **kwargs)
+
+    try:
+        async with AsyncExitStack() as stack:
+            return await _execute_admitted(
+                db=db, user_id=user_id, action_type=action_type, target_mp=target_mp,
+                payload=payload, mode=mode, conn=conn, spec=spec, insight_key=insight_key,
+                idempotency_key=idempotency_key, decision_id=decision_id, fp=fp,
+                reverted_from=reverted_from, ozon_perf=ozon_perf, stack=stack,
+                finalize_owned_claim=finalize_owned_claim)
+    except ym_hold.YMReviewReadDeferred as exc:
+        error = exc.to_dict()
+        error["reason"] = exc.reason
+        if exc.not_before is not None:
+            error["not_before"] = exc.not_before.isoformat()
+        return ExecutionResult(None, "deferred", action_type, target_mp, error=error)
+    except ym_hold.YMClaimCommitUncertain:
+        # No normal result may reach auto/manual callers that subsequently commit
+        # this session. An uncertain transaction is not an ordinary hold denial.
+        await _invalidate_uncertain_session(db)
+        raise
+    except asyncio.CancelledError:
+        if _canon_mp(target_mp) == "yandex" and action_type == "publish_review_response":
+            await _invalidate_uncertain_session(db)
+        raise
+
+
+def _reject_uncertain_session(*_args, **_kwargs):
+    raise ym_hold.YMClaimCommitUncertain()
+
+
+async def _invalidate_uncertain_session(db):
+    """Permanently refuse caller reuse, even if connection disposal itself fails.
+
+    Only the uncertain/cancelled invocation reaches here. Normal denied admission
+    keeps caller state intact. ORM hooks are per-session public API, not global
+    listeners; no SQL, caller flush, rollback-as-success, or commit is attempted.
+    """
+    sync = db.sync_session
+    sync.autobegin = False
+    for name in ("before_commit", "before_flush", "do_orm_execute"):
+        if not event.contains(sync, name, _reject_uncertain_session):
+            event.listen(sync, name, _reject_uncertain_session)
+    try:
+        async with asyncio.timeout(2.0):
+            await db.invalidate()
+    except Exception:
+        # The failed-session guards remain installed. Propagation forces the
+        # caller to abort; never report safe retained work on a reusable session.
+        log.warning("uncertain YM execution: session invalidation not confirmed")
+
+
+async def _prepare_write_admission(stack, db, conn, spec, payload):
+    """Prepare one coherent YM credential locally; no provider calls or new identity discovery."""
+    snapshot = await ym_hold.load_credential_snapshot(
+        db, connection_id=conn.id, scope=spec.required_scope)
+    if snapshot is None:
+        raise ExecutionError(ExecutionError.MISSING_SCOPE,
+                             f"no credential for scope '{spec.required_scope}'")
+    token = credential_vault.decrypt(snapshot.secret_enc)
+    account_ref = snapshot.meta.get("account_ref")
+    binding = await stack.enter_async_context(ym_hold.bind_cabinet_context(db, conn, snapshot))
+    intent = None
+    if binding is not None:
+        from .yandex_client import yandex_client, build_publish_feedback_request
+
+        account_ref = binding.business_id
+        request = build_publish_feedback_request(
+            business_id=account_ref, feedback_id=payload["feedback_id"], text=payload["text"])
+        intent = ym_hold.make_write_intent(
+            binding, client=yandex_client._api, request=request, token=token)
+    return binding, intent, token, account_ref
+
+
+async def _execute_admitted(*, db, user_id, action_type, target_mp, payload, mode, conn, spec,
+                            insight_key, idempotency_key, decision_id, fp, reverted_from,
+                            ozon_perf, stack, finalize_owned_claim):
+    managed_path = _canon_mp(target_mp) == "yandex" and action_type == "publish_review_response"
+    grant = None
+    claim_stack = None
+    prepared = None
+    credential_error = None
+    if managed_path:
+        with db.no_autoflush:
+            existing = (await db.execute(select(ExecutionLog).where(
+                ExecutionLog.user_id == user_id,
+                ExecutionLog.idempotency_key == idempotency_key))).scalars().first()
+        if existing is not None:
+            return _resolve_existing(existing, fp, spec, action_type, target_mp)
+        try:
+            binding, intent, token, account_ref = await _prepare_write_admission(
+                stack, db, conn, spec, payload)
+            prepared = (token, account_ref)
+        except ym_hold.YMReviewReadDeferred:
+            raise
+        except (ExecutionError, ValueError) as exc:
+            # Preserve original claim accounting: missing credentials become failed;
+            # a vault ValueError still propagates with the undispatched claim retained.
+            credential_error = exc
+            binding, intent = None, None
+        claim_stack = await stack.enter_async_context(AsyncExitStack())
+        grant = await claim_stack.enter_async_context(
+            ym_hold.claim_admission(db, binding=binding, intent=intent))
+        with db.no_autoflush:
+            existing = (await db.execute(select(ExecutionLog).where(
+                ExecutionLog.user_id == user_id,
+                ExecutionLog.idempotency_key == idempotency_key))).scalars().first()
+        if existing is not None:
+            await grant.rollback_unclaimed()
+            return _resolve_existing(existing, fp, spec, action_type, target_mp)
+        await grant.allow_new_claim()
 
     # Claim-before-dispatch: INSERT a pending row; the partial-UNIQUE(user_id, v1-key) lets exactly one
     # concurrent request win. The loser gets IntegrityError → rollback → resolve against the winner.
@@ -340,9 +461,28 @@ async def execute(
                    idempotency_key, status="pending", connection_id=conn.id,
                    decision_id=decision_id, request_fingerprint=fp)
     db.add(rec)
+    permit = None
+    stamp = None
     try:
-        await db.commit()
-    except IntegrityError:
+        # Defaults belong to our INSERT, not to a later refreshed generation that
+        # another owner may already have advanced after the claim commit.
+        await db.flush([rec])
+        owned_generation = rec.claim_generation
+        log_id = rec.id
+        if grant is None:
+            await db.commit()
+        else:
+            stamp = ym_hold.ClaimStamp(log_id, idempotency_key, fp, owned_generation)
+            permit = await grant.commit_claim(db.commit, stamp=stamp)
+    except IntegrityError as exc:
+        if claim_stack is not None:
+            # End admission on the actual INSERT exception before rollback/winner
+            # lookup. Those original prior-result reads are not part of a new claim's
+            # lock-to-commit budget; leaving its timer live can cancel a cached win.
+            try:
+                await claim_stack.__aexit__(type(exc), exc, exc.__traceback__)
+            except IntegrityError:
+                pass  # The core preserves this same original unique-conflict signal.
         await db.rollback()   # MANDATORY before any SELECT — the aborted txn must be rolled back first
         existing = (
             await db.execute(
@@ -353,23 +493,29 @@ async def execute(
             )
         ).scalars().first()
         return _resolve_existing(existing, fp, spec, action_type, target_mp)
+    if claim_stack is not None:
+        # End only the admission/commit budget, retaining invocation binding through dispatch.
+        await claim_stack.aclose()
     await db.refresh(rec)
     # SECURITY-2D-1C-C1 — the generation THIS worker owns is the one on its own freshly-created claim.
-    # Captured here and never re-read right before the CAS: re-reading could adopt a generation a
+    # Captured at our INSERT flush above and never re-read before the CAS: re-reading could adopt a generation a
     # concurrent re-own just bumped, defeating the fence.
-    owned_generation = rec.claim_generation
-    # Capture the log id into a local BEFORE the CAS: a CAS-phase rollback EXPIRES the ORM instance, so
+    # The log id was captured into a local BEFORE commit: a CAS-phase rollback EXPIRES the ORM instance, so
     # reading rec.id afterwards would trigger a sync lazy-load (MissingGreenlet on async drivers) and mask
     # the safe needs_reconcile. The id is immutable, so the local is always correct.
-    log_id = rec.id
 
     # Resolve the dispatch context + token BEFORE the fencing CAS, so between the CAS commit and the
     # provider call there are ZERO further DB reads. A credential/token failure here happens while the row
     # is still an un-dispatched pending claim (no provider call) and is recorded as a clean 'failed'.
     try:
-        account_ref = await _account_ref(db, conn.id, spec.required_scope)
-        # Ozon campaign_control resolves its bearer in-dispatch (Performance OAuth); no static token.
-        token = None if ozon_perf else await _resolve_token(db, conn.id, spec.required_scope)
+        if credential_error is not None:
+            raise credential_error
+        if prepared is not None:
+            token, account_ref = prepared
+        else:
+            account_ref = await _account_ref(db, conn.id, spec.required_scope)
+            # Ozon campaign_control resolves its bearer in-dispatch; no static token.
+            token = None if ozon_perf else await _resolve_token(db, conn.id, spec.required_scope)
     except ExecutionError as e:
         rec.status = "failed"
         rec.error_code = e.code
@@ -416,10 +562,11 @@ async def execute(
     # so there is exactly ONE provider-dispatch call-site in the whole backend (a guard test enforces this).
     # The behaviour is byte-identical to the previous inline block; the future operator resume (C3C2) will
     # call the SAME helper after its own fencing CAS, keeping a single provider-dispatch point.
-    return await _dispatch_and_finalize(
-        db, rec, spec, token, payload, ctx, reverted_from=reverted_from, user_id=user_id,
-        action_type=action_type, target_mp=target_mp, mode=mode, now=now,
-        fenced_attempt_count=fenced.attempt_count)
+    with ym_hold.activate_first_write(permit, stamp=stamp) if permit is not None else nullcontext():
+        return await finalize_owned_claim(
+            db, rec, spec, token, payload, ctx, reverted_from=reverted_from, user_id=user_id,
+            action_type=action_type, target_mp=target_mp, mode=mode, now=now,
+            fenced_attempt_count=fenced.attempt_count)
 
 
 async def _dispatch_and_finalize(db, rec, spec, token, payload, ctx, *, reverted_from, user_id,

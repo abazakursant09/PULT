@@ -28,6 +28,7 @@ from database import AsyncSessionLocal
 from models.execution_log import ExecutionLog
 from services.marketplace.operation_key import canonical_client_uuid, OperationKeyError
 from services.marketplace.recovery import operator_view, operator_resolve, operator_resume
+from ._op_http import raise_deferred
 
 router = APIRouter()
 
@@ -338,6 +339,9 @@ async def authorize_retry(log_id: str, response: Response,
         log_id=log_id, tenant_user_id=ctx.user_id, actor_id=ctx.operator_id,
         correlation_id=correlation_id, reason_code=reason_code, now=datetime.now(timezone.utc))
 
+    if out.status == "deferred":
+        reason = out.reason_code if out.reason_code in {"hold", "identity", "authority", "indeterminate"} else None
+        raise_deferred({"code": out.reason_code, "reason": reason, "not_before": out.not_before}, log_id=out.log_id)
     if out.status == "not_found":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
     if out.status == "conflict":

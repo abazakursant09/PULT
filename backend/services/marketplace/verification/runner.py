@@ -10,7 +10,8 @@ database transaction open for as long as a marketplace takes to answer.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
+import math
 from typing import Optional
 
 from sqlalchemy import select
@@ -18,12 +19,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.api_credential import ApiCredential
 from models.marketplace_connection import MarketplaceConnection
+from services.marketplace.ym_review_read_hold import (
+    YMReviewReadDeferred, bind_cabinet_context, load_probe_credential_snapshot,
+    selected_yandex_operation,
+)
 
 from . import service
 from .adapters import get_adapter
 from .adapters.base import ProbeContext
 from .taxonomy import VerificationOutcome, VerificationResult
-from .transport import ProbeTransport, ProbeTransportError
+from .transport import BoundProbeTransport, ProbeTransport, ProbeTransportError
 
 SPINE_VERSION = "1"
 
@@ -93,7 +98,15 @@ async def verify_credential(
 
     # The single decryption boundary in the whole verification path.
     try:
-        secret = credential_secret(credential)
+        snapshot = await load_probe_credential_snapshot(db, conn, scope=scope)
+    except YMReviewReadDeferred:
+        result = _spine_result(VerificationOutcome.MARKETPLACE_UNAVAILABLE,
+                               f"spine.local_admission.{scope}")
+        await service.record_attempt(db, connection=conn, credential=credential, scope=scope, result=result)
+        await db.commit()
+        return conn, credential, result
+    try:
+        secret = credential_secret(snapshot if snapshot is not None else credential)
     except ValueError:
         # Our key cannot read our ciphertext — almost always a changed CRED_ENC_KEY. This
         # says nothing about the seller's token, so it must not touch persisted state, and
@@ -105,20 +118,37 @@ async def verify_credential(
         return conn, credential, result
 
     # Evidence for detecting a replacement that lands while we are out on the network.
-    probed_id = credential.id
-    probed_updated_at = credential.updated_at
+    probed_id = snapshot.id if snapshot is not None else credential.id
+    probed_updated_at = snapshot.updated_at if snapshot is not None else credential.updated_at
+    if isinstance(probed_updated_at, str):
+        probed_updated_at = datetime.fromisoformat(probed_updated_at)
 
     context = ProbeContext(
         secret=secret,
         marketplace=conn.marketplace,
         scope=scope,
         ozon_client_id=conn.ozon_client_id,
-        credential_meta=dict(credential.meta or {}),
+        credential_meta=dict(snapshot.meta if snapshot is not None else (credential.meta or {})),
     )
 
     started_at = datetime.utcnow()
     try:
-        result = await adapter.verify(context, transport)
+        async with bind_cabinet_context(db, conn, snapshot):
+            with selected_yandex_operation("probe_auth_token", client=transport):
+                guarded = (transport if snapshot is None or type(transport) is ProbeTransport
+                           else BoundProbeTransport(transport))
+                result = await adapter.verify(context, guarded)
+    except YMReviewReadDeferred as exc:
+        actual_status = getattr(exc, "probe_http_status", None)
+        limited = exc.reason == "hold" or actual_status in {420, 429}
+        delay = (max(0, math.ceil((exc.not_before - datetime.now(timezone.utc)).total_seconds()))
+                 if exc.reason == "hold" and exc.not_before is not None else None)
+        result = VerificationResult(
+            outcome=(VerificationOutcome.RATE_LIMITED if limited
+                     else VerificationOutcome.MARKETPLACE_UNAVAILABLE),
+            probe_key=f"spine.local_admission.{scope}", adapter_version=SPINE_VERSION,
+            http_status=actual_status, retry_after_seconds=delay,
+        )
     except ProbeTransportError as exc:
         # Transport failure is marketplace-independent, so the spine classifies it — an
         # adapter never has to reimplement "the network broke".

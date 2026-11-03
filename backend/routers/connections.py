@@ -17,12 +17,17 @@ from models.marketplace_account import MarketplaceAccount
 from models.marketplace_connection import MarketplaceConnection
 from models.marketplace_store import MarketplaceStore
 from models.api_credential import ApiCredential
+from models.workspace import Workspace
 from schemas.marketplace import (
     CampaignLinkOut, CampaignLinkRequest, CampaignOut,
     ConnectionCreate, ConnectionOut, ScopeVerificationOut, VerifyOut, VerifyRequest,
 )
 from services.marketplace import credential_vault
 from services.marketplace.errors import ExecutionError
+from services.marketplace.ym_review_read_hold import (
+    YMReviewReadDeferred, bind_cabinet_context, load_credential_snapshot,
+    SECRET_GENERATION_KEY, CABINET_PROOF_KEY,
+)
 from services.marketplace.yandex_client import yandex_client
 from services.marketplace.verification import runner as verification_runner
 from services.marketplace.verification import service as verification_service
@@ -54,6 +59,21 @@ _UNVERIFIED = "unverified"
 # here — the route calls no marketplace — but they are answered by different future slices
 # (discovery vs. a verification probe), so they are kept as separate constants.
 _UNVERIFIED_CREDENTIALS = "unverified"
+
+_YM_GENERATION = SECRET_GENERATION_KEY
+_YM_PROVENANCE = CABINET_PROOF_KEY
+
+
+def _ym_denial(exc: YMReviewReadDeferred) -> HTTPException:
+    from datetime import timezone
+    import math
+
+    if exc.reason == "identity":
+        return HTTPException(409, "cabinet binding changed")
+    if exc.reason == "hold" and exc.not_before is not None:
+        delay = max(0, math.ceil((exc.not_before - datetime.now(timezone.utc)).total_seconds()))
+        return HTTPException(429, "cabinet request deferred", headers={"Retry-After": str(delay)})
+    return HTTPException(503, "cabinet request unavailable")
 
 
 async def _disable_automation(db: AsyncSession, connection_id: str) -> None:
@@ -89,6 +109,8 @@ async def _yandex_external_id(conn: MarketplaceConnection, credential) -> str | 
     token = credential_vault.decrypt(credential.secret_enc)
     try:
         return await yandex_client.resolve_business_id(token=token)
+    except YMReviewReadDeferred:
+        raise
     except ExecutionError:
         # Verified, but the cabinet could not be resolved (ambiguous / unreachable). Do not guess.
         return None
@@ -122,6 +144,10 @@ async def _capture_external_identity(db: AsyncSession, conn: MarketplaceConnecti
     Idempotent: an id already present is left as-is. A clash with another Account raises
     `_ExternalIdentityConflict`, which the caller turns into a safe 409. Nothing is merged.
     """
+    capture = _IDENTITY_CAPTURE_WRITERS.get(conn.marketplace)
+    if capture is not None:
+        await capture(db, conn, credential)
+        return
     resolver = _EXTERNAL_ID_RESOLVER.get(conn.marketplace)
     account_id = conn.marketplace_account_id
     if resolver is None or account_id is None:
@@ -150,6 +176,71 @@ async def _capture_external_identity(db: AsyncSession, conn: MarketplaceConnecti
         # uq_mp_account_mp_ext: this real cabinet is already on another Account.
         raise _ExternalIdentityConflict()
     await db.commit()
+
+
+async def _capture_yandex_identity(db, conn, credential) -> None:
+    """Existing discovery, with proof tied to the exact key generation it observed."""
+    snapshot = await load_credential_snapshot(db, connection_id=conn.id, scope=credential.scope)
+    if (snapshot is None or snapshot.id != credential.id
+            or snapshot.verification_status != "verified" or conn.marketplace_account_id is None):
+        return
+    ciphertext = bytes(snapshot.secret_enc)
+    generation = snapshot.meta.get(_YM_GENERATION)
+    account_id, workspace_id, user_id = conn.marketplace_account_id, conn.workspace_id, conn.user_id
+    marketplace = conn.marketplace
+    async with bind_cabinet_context(db, conn, snapshot):
+        external_id = await _yandex_external_id(conn, snapshot)
+    if not external_id:
+        return
+    # Same account->credential lock order as admission. Never hold these across discovery.
+    with db.no_autoflush:
+        account = (await db.execute(
+            select(MarketplaceAccount).join(Workspace, Workspace.id == MarketplaceAccount.workspace_id)
+            .where(MarketplaceAccount.id == account_id, MarketplaceAccount.workspace_id == workspace_id,
+                   MarketplaceAccount.marketplace == marketplace, Workspace.owner_user_id == user_id)
+            .with_for_update().execution_options(populate_existing=True)
+        )).scalars().first()
+        fresh = (await db.execute(
+            select(ApiCredential).where(ApiCredential.id == snapshot.id,
+                                        ApiCredential.connection_id == conn.id,
+                                        ApiCredential.scope == snapshot.scope)
+            .with_for_update().execution_options(populate_existing=True)
+        )).scalars().first()
+        current = (await db.execute(
+            select(MarketplaceConnection).where(MarketplaceConnection.id == conn.id)
+            .execution_options(populate_existing=True)
+        )).scalars().first()
+    if account is None:
+        raise _ExternalIdentityConflict()
+    if (fresh is None or current is None or bytes(fresh.secret_enc) != ciphertext
+            or (fresh.meta or {}).get(_YM_GENERATION) != generation
+            or fresh.verification_status != "verified"
+            or current.marketplace_account_id != account_id or current.workspace_id != workspace_id
+            or current.user_id != user_id or current.marketplace != marketplace
+            or current.status != "connected"):
+        return  # rotation/authority changed: the old observation cannot install proof
+    if account.external_account_id and account.external_account_id != external_id:
+        raise _ExternalIdentityConflict()
+    meta = dict(fresh.meta or {})
+    if generation is None:
+        generation = uuid.uuid4().hex  # legacy key acquires provenance only after real capture
+    if not isinstance(generation, str) or not generation:
+        raise YMReviewReadDeferred("authority")
+    meta[_YM_GENERATION] = generation
+    meta[_YM_PROVENANCE] = {"version": 1, "generation": generation,
+                            "credential_id": snapshot.id,
+                            "account_id": account_id, "business_id": str(external_id)}
+    fresh.meta = meta
+    account.external_account_id = str(external_id)
+    account.identity_status = "verified"
+    try:
+        await db.flush()
+    except IntegrityError:
+        raise _ExternalIdentityConflict() from None
+    await db.commit()  # includes same-ID proof installation, not just first identity capture
+
+
+_IDENTITY_CAPTURE_WRITERS = {"yandex": _capture_yandex_identity}
 
 
 async def _to_out(db: AsyncSession, conn: MarketplaceConnection) -> ConnectionOut:
@@ -346,12 +437,18 @@ async def create_connection(
     # credential that a probe genuinely confirmed.
     if existing:
         existing.secret_enc = enc
+        if conn.marketplace in _IDENTITY_CAPTURE_WRITERS:
+            meta = dict(existing.meta or {})
+            meta[_YM_GENERATION] = uuid.uuid4().hex
+            meta.pop(_YM_PROVENANCE, None)
+            existing.meta = meta
         existing.verification_status = _UNVERIFIED_CREDENTIALS
         existing.verified_at = None
         existing.updated_at = datetime.utcnow()
     else:
         db.add(ApiCredential(id=str(uuid.uuid4()), connection_id=conn.id,
                              scope=body.scope, secret_enc=enc,
+                             meta=({_YM_GENERATION: uuid.uuid4().hex} if conn.marketplace in _IDENTITY_CAPTURE_WRITERS else {}),
                              verification_status=_UNVERIFIED_CREDENTIALS, verified_at=None))
 
     await db.flush()
@@ -412,6 +509,8 @@ async def verify_connection_scope(
             # someone else's; the reply cannot tell which. Same safe 409, no owner revealed.
             await db.rollback()
             raise HTTPException(409, "this cabinet is already connected")
+        except YMReviewReadDeferred as exc:
+            raise _ym_denial(exc) from None
 
     return VerifyOut(
         connection_id=conn.id,
@@ -498,12 +597,23 @@ async def _owned_yandex_connection(
     return conn, account
 
 
-async def _yandex_token(db: AsyncSession, connection_id: str) -> str:
-    cred = (await db.execute(
-        select(ApiCredential).where(ApiCredential.connection_id == connection_id))).scalars().first()
+async def _yandex_token(db: AsyncSession, connection_id: str, *, snapshot=None) -> str:
+    cred = snapshot or await _yandex_snapshot(db, connection_id)
     if cred is None:
         raise HTTPException(409, "connection has no stored credentials")
     return credential_vault.decrypt(cred.secret_enc)
+
+
+async def _yandex_snapshot(db, connection_id):
+    # Preserve the existing first-row choice; bind that exact row, not another scope.
+    row = (await db.execute(select(ApiCredential.id, ApiCredential.scope).where(
+        ApiCredential.connection_id == connection_id))).first()
+    if row is None:
+        return None
+    snapshot = await load_credential_snapshot(db, connection_id=connection_id, scope=row.scope)
+    if snapshot is None or snapshot.id != row.id:
+        raise YMReviewReadDeferred("identity")
+    return snapshot
 
 
 async def _stores_by_campaign(db: AsyncSession, account_id: str) -> dict[str, MarketplaceStore]:
@@ -525,9 +635,13 @@ async def list_connection_campaigns(
     (wrongly) spanned two cabinets could not be used to map a foreign campaign in here.
     """
     conn, account = await _owned_yandex_connection(db, current_user.id, connection_id)
-    token = await _yandex_token(db, conn.id)
     try:
-        campaigns = await yandex_client.list_campaigns(token=token)
+        snapshot = await _yandex_snapshot(db, conn.id)
+        token = await _yandex_token(db, conn.id, snapshot=snapshot)
+        async with bind_cabinet_context(db, conn, snapshot):
+            campaigns = await yandex_client.list_campaigns(token=token)
+    except YMReviewReadDeferred as exc:
+        raise _ym_denial(exc) from None
     except ExecutionError:
         # A read failure is not a mapping error the seller can fix by retyping — surface it plainly.
         raise HTTPException(502, "could not read campaigns from Yandex")
@@ -575,9 +689,13 @@ async def link_connection_campaign(
         raise HTTPException(422, "campaign_id is required")
 
     # The campaign must be one this key actually reaches, in THIS cabinet — never map a made-up id.
-    token = await _yandex_token(db, conn.id)
     try:
-        campaigns = await yandex_client.list_campaigns(token=token)
+        snapshot = await _yandex_snapshot(db, conn.id)
+        token = await _yandex_token(db, conn.id, snapshot=snapshot)
+        async with bind_cabinet_context(db, conn, snapshot):
+            campaigns = await yandex_client.list_campaigns(token=token)
+    except YMReviewReadDeferred as exc:
+        raise _ym_denial(exc) from None
     except ExecutionError:
         raise HTTPException(502, "could not read campaigns from Yandex")
     match = next((c for c in campaigns if str(c.get("campaign_id")) == campaign_id), None)
