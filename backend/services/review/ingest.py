@@ -8,6 +8,7 @@ savepoint — the guarantee is the database, not an app-level check.
 from __future__ import annotations
 
 import uuid
+from contextlib import AsyncExitStack, asynccontextmanager
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -20,7 +21,9 @@ from models.marketplace_connection import MarketplaceConnection
 from models.api_credential import ApiCredential
 from services.marketplace import credential_vault
 from services.marketplace.reviews import get_review_provider, review_credential, resolve_account_ref
-from services.marketplace.ym_review_read_hold import bind_review_read_context
+from services.marketplace.ym_review_read_hold import (
+    bind_cabinet_context, bind_review_read_context, load_credential_snapshot,
+)
 from services.review.draft import classify_review
 
 FEEDBACKS_SCOPE = "feedbacks"
@@ -95,29 +98,7 @@ async def sync_product_reviews(db: AsyncSession, product) -> dict:
     if conn is None:
         raise ReviewSyncNoConnection()
 
-    cred = (
-        await db.execute(
-            select(ApiCredential).where(
-                ApiCredential.connection_id == conn.id, ApiCredential.scope == FEEDBACKS_SCOPE
-            )
-        )
-    ).scalars().first()
-    if cred is None:
-        raise ReviewSyncNoScope()
-
-    if not await is_active_background_user(db, product.user_id):
-        raise ReviewSyncNoConnection("inactive user")
-    token = credential_vault.decrypt(cred.secret_enc)
-    account_ref = await ensure_account_ref(db, cred, provider, token)
-    # Shape the token into what this marketplace's provider expects (e.g. Ozon's composite
-    # "<client_id>:<api_key>") — the same helper the publish dispatcher uses, so sync and publish agree.
-    cred_token = review_credential(
-        product.marketplace, token,
-        {"ozon_client_id": conn.ozon_client_id, "account_ref": account_ref},
-    )
-    if not await is_active_background_user(db, product.user_id):
-        raise ReviewSyncNoConnection("inactive user")
-    async with bind_review_read_context(db, conn, account_ref):
+    async with feedbacks_read_context(db, conn, provider) as cred_token:
         reviews = await provider.fetch_reviews(cred_token, product.sku)
 
     imported = 0
@@ -140,3 +121,35 @@ async def sync_product_reviews(db: AsyncSession, product) -> dict:
             skipped += 1
     await db.commit()
     return {"synced": len(reviews), "imported": imported, "skipped": skipped}
+
+
+@asynccontextmanager
+async def feedbacks_read_context(db: AsyncSession, conn, provider):
+    """Keep discovery and reads on one local credential snapshot; legacy B1 still applies."""
+    cred = (
+        await db.execute(
+            select(ApiCredential).where(
+                ApiCredential.connection_id == conn.id, ApiCredential.scope == FEEDBACKS_SCOPE
+            )
+        )
+    ).scalars().first()
+    if cred is None:
+        raise ReviewSyncNoScope()
+
+    if not await is_active_background_user(db, conn.user_id):
+        raise ReviewSyncNoConnection("inactive user")
+    snapshot = (await load_credential_snapshot(db, connection_id=conn.id, scope=FEEDBACKS_SCOPE)
+                if conn.marketplace == "yandex" else None)
+    if conn.marketplace == "yandex" and snapshot is None:
+        raise ReviewSyncNoScope()
+    token = credential_vault.decrypt(snapshot.secret_enc if snapshot is not None else cred.secret_enc)
+    async with AsyncExitStack() as stack:
+        binding = await stack.enter_async_context(bind_cabinet_context(db, conn, snapshot))
+        account_ref = (binding.business_id if binding is not None
+                       else await ensure_account_ref(db, cred, provider, token))
+        if binding is None:
+            await stack.enter_async_context(bind_review_read_context(db, conn, account_ref))
+        if not await is_active_background_user(db, conn.user_id):
+            raise ReviewSyncNoConnection("inactive user")
+        yield review_credential(conn.marketplace, token,
+                                {"ozon_client_id": conn.ozon_client_id, "account_ref": account_ref})

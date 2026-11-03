@@ -22,6 +22,7 @@ helper; it never calls a provider client directly.
 from __future__ import annotations
 
 import logging
+from contextlib import AsyncExitStack, nullcontext
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
@@ -36,11 +37,12 @@ from models.execution_recovery_audit import ExecutionRecoveryAudit
 from services.marketplace import action_catalog
 from services.marketplace.errors import ExecutionError
 from services.marketplace.recovery import resume_eligibility
+from services.marketplace import ym_review_read_hold as ym_hold
 # Reuse the executor's dispatch context helpers + the SINGLE shared dispatch/finalize point. resume() adds
 # NO second provider-dispatch call-site (a guard test enforces exactly one, inside the shared helper).
 from services.marketplace.executor import (
     _resolve_connection, _resolve_token, _account_ref, capability_for_action, _canon_mp,
-    _dispatch_and_finalize,
+    _dispatch_and_finalize, _prepare_write_admission,
 )
 
 logger = logging.getLogger(__name__)
@@ -89,6 +91,7 @@ class ResumeResult:
     dispatch_attempted: Optional[bool] = None
     terminal_status: Optional[str] = None   # success | failed | ambiguous | needs_reconcile | ...
     audit: Optional[dict] = None
+    not_before: Optional[datetime] = None
 
 
 def _audit_snapshot(a: ExecutionRecoveryAudit, result_code: str) -> dict:
@@ -124,7 +127,7 @@ async def resume(*, log_id: str, tenant_user_id: str, actor_id: str, correlation
 
     # ── Pre-dispatch transaction: lock, live re-check, prepare context, INSERT audit, guarded CAS, commit.
     try:
-        async with AsyncSessionLocal() as db:
+        async with AsyncSessionLocal() as db, AsyncExitStack() as stack:
             rec = (await db.execute(select(ExecutionLog).where(
                 ExecutionLog.id == log_id, ExecutionLog.user_id == tenant_user_id
             ).with_for_update())).scalars().first()
@@ -145,8 +148,17 @@ async def resume(*, log_id: str, tenant_user_id: str, actor_id: str, correlation
             ozon_perf = (capability_for_action(rec.action_type) == "campaign_control"
                          and _canon_mp(conn.marketplace) == "ozon")
             try:
-                account_ref = await _account_ref(db, conn.id, spec.required_scope)
-                token = None if ozon_perf else await _resolve_token(db, conn.id, spec.required_scope)
+                binding, intent = None, None
+                managed_path = (_canon_mp(conn.marketplace) == "yandex"
+                                and rec.action_type == "publish_review_response")
+                if managed_path:
+                    binding, intent, token, account_ref = await _prepare_write_admission(
+                        stack, db, conn, spec, rec.payload)
+                else:
+                    account_ref = await _account_ref(db, conn.id, spec.required_scope)
+                    token = None if ozon_perf else await _resolve_token(db, conn.id, spec.required_scope)
+            except ym_hold.YMReviewReadDeferred:
+                raise
             except (ExecutionError, ValueError):
                 # Missing credential/scope (ExecutionError) or a decrypt/tamper failure (ValueError) →
                 # safe conflict, no audit / no CAS / no provider. Never leak the secret or the reason text.
@@ -156,6 +168,16 @@ async def resume(*, log_id: str, tenant_user_id: str, actor_id: str, correlation
             prev_status = rec.status
             prev_resolution = rec.manual_resolution
             reverted_from = _revert_original_id(rec.idempotency_key)
+            permit = None
+            stamp = ym_hold.ClaimStamp(log_id, rec.idempotency_key,
+                                       rec.request_fingerprint, owned_generation)
+            claim_stack = None
+            grant = None
+            if managed_path:
+                claim_stack = await stack.enter_async_context(AsyncExitStack())
+                grant = await claim_stack.enter_async_context(
+                    ym_hold.claim_admission(db, binding=binding, intent=intent))
+                await grant.allow_new_claim()
 
             # INSERT the authorize_retry audit (idempotency claim on the global UNIQUE(correlation_id)) and
             # flush FIRST — a duplicate/constraint error surfaces BEFORE the fencing UPDATE, so the row is
@@ -176,7 +198,11 @@ async def resume(*, log_id: str, tenant_user_id: str, actor_id: str, correlation
                 await db.rollback()
                 return ResumeResult(status="conflict", reason_code="operation_in_progress", log_id=log_id)
 
-            await db.commit()                       # audit + fence + retry_authorized land together.
+            if grant is None:
+                await db.commit()                   # audit + fence + retry_authorized land together.
+            else:
+                permit = await grant.commit_claim(db.commit, stamp=stamp)
+                await claim_stack.aclose()
             audit_snap = _audit_snapshot(audit, "APPLIED")
 
             # ── After the pre-dispatch commit: ZERO DB/network/token/capability work before the single
@@ -184,12 +210,19 @@ async def resume(*, log_id: str, tenant_user_id: str, actor_id: str, correlation
             # exactly one spec.dispatch call, then writes the terminal state in its own commit.
             ctx = {"marketplace": conn.marketplace, "ozon_client_id": conn.ozon_client_id,
                    "db": db, "connection_id": conn.id, "account_ref": account_ref}
-            res = await _dispatch_and_finalize(
-                db, rec, spec, token, rec.payload, ctx, reverted_from=reverted_from,
-                user_id=tenant_user_id, action_type=rec.action_type, target_mp=conn.marketplace,
-                mode=rec.mode, now=now, fenced_attempt_count=fenced.attempt_count)
+            with ym_hold.activate_first_write(permit, stamp=stamp) if permit is not None else nullcontext():
+                res = await _dispatch_and_finalize(
+                    db, rec, spec, token, rec.payload, ctx, reverted_from=reverted_from,
+                    user_id=tenant_user_id, action_type=rec.action_type, target_mp=conn.marketplace,
+                    mode=rec.mode, now=now, fenced_attempt_count=fenced.attempt_count)
             return ResumeResult(status="dispatched", log_id=log_id, dispatch_attempted=True,
                                 terminal_status=res.status, audit=audit_snap)
+    except ym_hold.YMReviewReadDeferred as exc:
+        return ResumeResult(status="deferred", reason_code=exc.reason, log_id=log_id,
+                            dispatch_attempted=False, not_before=exc.not_before)
+    except ym_hold.YMClaimCommitUncertain:
+        return ResumeResult(status="error", reason_code="claim_commit_uncertain", log_id=log_id,
+                            dispatch_attempted=False)
     except IntegrityError:
         # correlation_id already used (a concurrent first-time race) → resolve idempotently in a FRESH
         # session. NEVER dispatch here. Do not read the expired ORM objects from the aborted transaction

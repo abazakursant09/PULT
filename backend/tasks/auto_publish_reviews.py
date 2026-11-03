@@ -11,7 +11,7 @@ skips the rule. Wired into the scheduler; gated by settings.automation_enabled (
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
@@ -202,6 +202,26 @@ async def run_auto_publish_reviews() -> dict:
                     idempotency_key=operation_key.review_key(review.id),
                     rule=rule_dict,
                 )
+                if res.status == "deferred":
+                    # No provider attempt or claim: preserve all publication bookkeeping.
+                    admission_error = res.error or {}
+                    bound = admission_error.get("not_before") if (
+                        admission_error.get("reason") == "hold" or (
+                            admission_error.get("code") == "YM_ADMISSION_DEFERRED"
+                            and admission_error.get("reason") is None)) else None
+                    if isinstance(bound, str):
+                        try:
+                            bound = datetime.fromisoformat(bound)
+                        except ValueError:
+                            bound = None
+                    if isinstance(bound, datetime) and bound.tzinfo is not None:
+                        retry_at = bound.astimezone(timezone.utc).replace(tzinfo=None)
+                    else:
+                        retry_at = datetime.utcnow() + timedelta(
+                            minutes=_backoff_minutes(review.publication_attempts or 0))
+                    review.retry_next_at = max(review.retry_next_at, retry_at) if review.retry_next_at else retry_at
+                    deferred += 1
+                    continue
                 if res.ok:
                     outcome = _apply_publish_result(review, res.result, res.log_id)
                     if outcome == "published":

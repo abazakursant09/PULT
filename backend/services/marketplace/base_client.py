@@ -18,7 +18,7 @@ import httpx
 
 from config import settings
 from .errors import ExecutionError
-from .ym_review_read_hold import admit_selected_read, observe_selected_read
+from .ym_review_read_hold import admit_yandex_attempt, observe_yandex_response
 
 log = logging.getLogger(__name__)
 
@@ -112,7 +112,10 @@ class BaseMarketplaceClient:
         throttle_wait = 0.0
         while True:
             attempt += 1
-            await admit_selected_read(self)
+            await admit_yandex_attempt(
+                self, method=method, path=path, token=token, auth_header=auth_header,
+                extra_headers=extra_headers, json=json, params=params, attempt=attempt,
+            )
             try:
                 async with httpx.AsyncClient(
                     timeout=settings.marketplace_http_timeout
@@ -131,7 +134,7 @@ class BaseMarketplaceClient:
                     ExecutionError.MARKETPLACE_5XX, "transport error"
                 ) from exc
 
-            await observe_selected_read(self, resp)
+            await observe_yandex_response(self, resp)
             if resp.status_code in _RATE_LIMIT_STATUS:
                 # Explicit supported throttle domain; no constructor validation or claim for n>2.
                 n = self._max_retries

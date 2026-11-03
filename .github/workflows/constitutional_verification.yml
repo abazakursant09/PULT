@@ -320,6 +320,7 @@ jobs:
             tests/test_decision_close_atomic_pg.py::test_pg_sequential_repeat_skips \
             tests/test_decision_close_atomic_pg.py::test_pg_failure_before_commit_then_retry \
             tests/test_ym_review_read_hold_pg.py \
+            tests/test_ym_b2_pg.py \
             tests/test_decision_close_atomic_pg.py::test_pg_different_decisions_independent
 
   # Proves the FULL Alembic chain runs on the database production actually uses. The chain was

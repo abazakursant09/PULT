@@ -32,6 +32,8 @@ from __future__ import annotations
 
 import json
 import uuid
+import hmac
+from contextlib import asynccontextmanager
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Optional
@@ -41,6 +43,8 @@ from sqlalchemy import select
 from models.imported_card_content import ImportedCardContentRow
 from models.imported_product import ImportedProductRow
 from models.marketplace_account import MarketplaceAccount
+from models.marketplace_connection import MarketplaceConnection
+from models.api_credential import ApiCredential
 from models.marketplace_operation import MarketplaceOperation
 from models.marketplace_price_observation import PROMO_KEY_SENTINEL
 from models.marketplace_store import MarketplaceStore
@@ -48,6 +52,10 @@ from models.product import Product
 from models.product_placement import ProductPlacement
 from services.account_product_resolver import FOUND, AccountProductIndex
 from services.marketplace.errors import ExecutionError
+from services.marketplace import credential_vault
+from services.marketplace.ym_review_read_hold import (
+    CABINET_PROOF_KEY, YMReviewReadDeferred, bind_cabinet_context, load_credential_snapshot,
+)
 from services.marketplace.ingest.change_only import observe_price, observe_promotion
 from services.marketplace.yandex_client import yandex_client
 
@@ -262,6 +270,43 @@ async def fetch_and_persist_page(db, state, token: str, client_id: Optional[str]
     if state.data_type in UNSUPPORTED:
         # Defensive: the scheduler parks these without calling us; never guess a shape.
         return {"done": True, "count": 0, "defer": False, "unsupported": True}
+    if state.data_type not in DATA_TYPES:
+        raise ValueError(f"unsupported Yandex data_type: {state.data_type}")
+    async with _dataset_binding(db, state, token):
+        return await _fetch_dataset_page(db, state, token)
+
+
+@asynccontextmanager
+async def _dataset_binding(db, state, token):
+    conn = (await db.execute(select(MarketplaceConnection).where(
+        MarketplaceConnection.id == state.marketplace_connection_id))).scalars().first()
+    if conn is None:
+        raise YMReviewReadDeferred("authority")
+    store = (await db.execute(select(MarketplaceStore).where(
+        MarketplaceStore.id == state.marketplace_store_id))).scalars().first()
+    if (conn.marketplace != MARKETPLACE or conn.marketplace_account_id != state.marketplace_account_id
+            or (getattr(state, "_owner_user_id", None) and conn.user_id != state._owner_user_id)
+            or store is None or store.marketplace_account_id != state.marketplace_account_id):
+        raise YMReviewReadDeferred("identity")
+    row = (await db.execute(select(ApiCredential.id, ApiCredential.scope).where(
+        ApiCredential.connection_id == conn.id))).first()
+    snapshot = None
+    if row is not None:
+        snapshot = await load_credential_snapshot(db, connection_id=conn.id, scope=row.scope)
+        if snapshot is None or snapshot.id != row.id:
+            raise YMReviewReadDeferred("identity")
+        if snapshot.meta.get(CABINET_PROOF_KEY) is not None:
+            try:
+                exact = credential_vault.decrypt(snapshot.secret_enc)
+            except ValueError:
+                raise YMReviewReadDeferred("authority") from None
+            if not hmac.compare_digest(exact.encode("utf-8"), token.encode("utf-8")):
+                raise YMReviewReadDeferred("identity")
+    async with bind_cabinet_context(db, conn, snapshot):
+        yield
+
+
+async def _fetch_dataset_page(db, state, token):
     if state.data_type in ("products", "cards"):
         return await _page_offer_mappings(db, state, token, kind=state.data_type)
     if state.data_type == "prices":
