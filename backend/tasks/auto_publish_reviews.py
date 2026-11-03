@@ -202,7 +202,7 @@ async def run_auto_publish_reviews() -> dict:
                     idempotency_key=operation_key.review_key(review.id),
                     rule=rule_dict,
                 )
-                if res.status == "deferred":
+                if getattr(res, "status", None) == "deferred":
                     # No provider attempt or claim: preserve all publication bookkeeping.
                     admission_error = res.error or {}
                     bound = admission_error.get("not_before") if (

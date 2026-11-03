@@ -341,13 +341,18 @@ async def execute(
                                       "retryable": False},
                                reversible=spec.reversible)
 
+    async def finalize_owned_claim(*args, **kwargs):
+        # The entry point retains delegation to the one fenced dispatch owner.
+        return await _dispatch_and_finalize(*args, **kwargs)
+
     try:
         async with AsyncExitStack() as stack:
             return await _execute_admitted(
                 db=db, user_id=user_id, action_type=action_type, target_mp=target_mp,
                 payload=payload, mode=mode, conn=conn, spec=spec, insight_key=insight_key,
                 idempotency_key=idempotency_key, decision_id=decision_id, fp=fp,
-                reverted_from=reverted_from, ozon_perf=ozon_perf, stack=stack)
+                reverted_from=reverted_from, ozon_perf=ozon_perf, stack=stack,
+                finalize_owned_claim=finalize_owned_claim)
     except ym_hold.YMReviewReadDeferred as exc:
         error = exc.to_dict()
         error["reason"] = exc.reason
@@ -414,7 +419,7 @@ async def _prepare_write_admission(stack, db, conn, spec, payload):
 
 async def _execute_admitted(*, db, user_id, action_type, target_mp, payload, mode, conn, spec,
                             insight_key, idempotency_key, decision_id, fp, reverted_from,
-                            ozon_perf, stack):
+                            ozon_perf, stack, finalize_owned_claim):
     managed_path = _canon_mp(target_mp) == "yandex" and action_type == "publish_review_response"
     grant = None
     claim_stack = None
@@ -472,7 +477,7 @@ async def _execute_admitted(*, db, user_id, action_type, target_mp, payload, mod
     except IntegrityError as exc:
         if claim_stack is not None:
             # End admission on the actual INSERT exception before rollback/winner
-            # lookup. Those original recovery reads are not part of a new claim's
+            # lookup. Those original prior-result reads are not part of a new claim's
             # lock-to-commit budget; leaving its timer live can cancel a cached win.
             try:
                 await claim_stack.__aexit__(type(exc), exc, exc.__traceback__)
@@ -558,7 +563,7 @@ async def _execute_admitted(*, db, user_id, action_type, target_mp, payload, mod
     # The behaviour is byte-identical to the previous inline block; the future operator resume (C3C2) will
     # call the SAME helper after its own fencing CAS, keeping a single provider-dispatch point.
     with ym_hold.activate_first_write(permit, stamp=stamp) if permit is not None else nullcontext():
-        return await _dispatch_and_finalize(
+        return await finalize_owned_claim(
             db, rec, spec, token, payload, ctx, reverted_from=reverted_from, user_id=user_id,
             action_type=action_type, target_mp=target_mp, mode=mode, now=now,
             fenced_attempt_count=fenced.attempt_count)

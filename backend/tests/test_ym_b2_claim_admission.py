@@ -42,18 +42,22 @@ async def seed_claim_rows(db, *, marketplace="yandex", managed=True, held=True, 
                          "version": 1, "generation": nonce, "credential_id": kid,
                          "account_id": aid, "business_id": "BIZ1"}})
     db.add(User(id=uid, email=f"{uid}@example.invalid", name="Synthetic", hashed_password="x"))
+    await db.flush()  # Explicit FK order also applies on PostgreSQL, not only SQLite.
     db.add(Workspace(id=wid, owner_user_id=uid))
+    await db.flush()
     db.add(MarketplaceAccount(
         id=aid, workspace_id=wid, marketplace=marketplace,
         external_account_id="BIZ1" if managed else None,
         identity_status="verified" if managed else "unverified_legacy",
         ym_review_read_not_before=FUTURE if held else None,
     ))
+    await db.flush()
     db.add(MarketplaceConnection(
         id=cid, user_id=uid, workspace_id=wid, marketplace_account_id=aid,
         marketplace=marketplace, status="connected", scopes=["feedbacks"],
         verification_status="verified" if managed else "unverified", verified_at=now,
     ))
+    await db.flush()
     db.add(ApiCredential(
         id=kid, connection_id=cid, scope="feedbacks",
         secret_enc=credential_vault.encrypt("SYNTHETIC"), meta=meta,
@@ -109,6 +113,12 @@ async def scenario(tmp_path, monkeypatch, *, marketplace="yandex", managed=True,
                 "requestId": "synthetic-request", "result": {"id": 7, "status": "PUBLISHED"},
             })
 
+    if marketplace == "wildberries":
+        # Older suite members leave a successful instance stub installed. Exercise
+        # the real transport in this scenario and restore prior state on teardown.
+        from services.marketplace.wb_client import WBClient, wb_client
+        monkeypatch.setattr(wb_client, "publish_feedback_answer",
+                            WBClient.publish_feedback_answer.__get__(wb_client, WBClient))
     monkeypatch.setattr(httpx, "AsyncClient", SyntheticHTTP)
     monkeypatch.setattr(ym_review_read_hold, "AsyncSessionLocal", factory)
     try:
