@@ -21,6 +21,7 @@ reconciled; everything else is still_unknown with ZERO provider calls.
 from __future__ import annotations
 
 import logging
+from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,6 +36,7 @@ log = logging.getLogger(__name__)
 INTENT_OBSERVED = "intent_observed"
 TARGET_NOT_OBSERVED = "target_not_observed"
 STILL_UNKNOWN = "still_unknown"
+_OZON_PRICE_MAX_PAGES = 20  # Local read budget; incomplete scans never classify intent.
 
 # Actions with NO authoritative read path (see the 2D-1C design): never call a provider, never guess.
 _NO_READ_PATH = frozenset({"ad_set_bid", "update_card", "stop_auto_promotion"})
@@ -108,13 +110,59 @@ async def _observe_price(db, row) -> str:
         rows = await wb_client.list_prices(token=token)
         current = _find(rows, ("nmID", "nm_id", "offer_id"), offer, ("price",))
     elif mp == "ozon":
-        rows = await ozon_client.product_prices(token=token, client_id=conn.ozon_client_id)
-        current = _find(rows, ("offer_id", "product_id"), offer, ("price",))
+        return await _observe_ozon_price(ozon_client, token, conn.ozon_client_id, offer, target)
     else:
         return STILL_UNKNOWN
     if current is None:
         return STILL_UNKNOWN
     return INTENT_OBSERVED if _money(current) == target else TARGET_NOT_OBSERVED
+
+
+def _ozon_price_scalar(value) -> Decimal | None:
+    """Comparison only; never changes the executor's fingerprint or money representation."""
+    if isinstance(value, bool) or not isinstance(value, (str, int, float, Decimal)):
+        return None
+    try:
+        amount = Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
+    return amount if amount.is_finite() and amount >= 0 else None
+
+
+async def _observe_ozon_price(client, token, client_id, offer, target) -> str:
+    want = _ozon_price_scalar(target)
+    if want is None or isinstance(offer, bool) or not isinstance(offer, (str, int)) or str(offer) == "":
+        return STILL_UNKNOWN
+    cursor, seen, matches, current = "", set(), 0, None
+    for _ in range(_OZON_PRICE_MAX_PAGES):
+        page = await client.product_prices(token=token, client_id=client_id, last_id=cursor)
+        result = page.get("result") if isinstance(page, dict) else None
+        if not isinstance(result, dict):
+            return STILL_UNKNOWN
+        items, next_cursor = result.get("items"), result.get("last_id")
+        if not isinstance(items, list) or not isinstance(next_cursor, str):
+            return STILL_UNKNOWN
+        for item in items:
+            if not isinstance(item, dict):
+                return STILL_UNKNOWN
+            if not isinstance(item.get("offer_id"), str) or not item["offer_id"]:
+                return STILL_UNKNOWN
+            # The saved target is a merchant article, never the Ozon product_id namespace.
+            if item["offer_id"] == str(offer):
+                matches += 1
+                price = item.get("price")
+                current = _ozon_price_scalar(price.get("price")) if isinstance(price, dict) else None
+                if matches > 1 or current is None:
+                    return STILL_UNKNOWN
+        if not next_cursor:
+            if matches != 1:
+                return STILL_UNKNOWN
+            return INTENT_OBSERVED if current == want else TARGET_NOT_OBSERVED
+        if next_cursor in seen:
+            return STILL_UNKNOWN
+        seen.add(next_cursor)
+        cursor = next_cursor
+    return STILL_UNKNOWN
 
 
 async def _observe_ad_state(db, row) -> str:

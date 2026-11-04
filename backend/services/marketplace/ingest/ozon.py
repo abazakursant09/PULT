@@ -25,6 +25,7 @@ Decimal, never float; an unknown amount is NULL; no buyer PII, no raw payload.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import uuid
 from datetime import datetime
@@ -40,7 +41,7 @@ from models.marketplace_price_observation import PROMO_KEY_SENTINEL
 from models.product import Product
 from models.product_placement import ProductPlacement
 from services.account_product_resolver import FOUND, AccountProductIndex
-from services.marketplace.errors import ExecutionError
+from services.marketplace.errors import ExecutionError, MarketplacePaginationIncomplete
 from services.marketplace.ingest.change_only import observe_price
 from services.marketplace.ozon_client import ozon_client
 
@@ -53,6 +54,8 @@ DATA_TYPES = ("products", "prices", "stocks", "fbo_postings", "fbs_postings", "f
 
 _PAGE = 1000
 _ACTION_PAGE = 1000
+_CATALOG_MAX_PAGES = 1000  # Local per-pass safety bound, not a provider quota.
+_CATALOG_CURSOR_LIMIT = 500  # Existing ApiSyncState.cursor storage bound.
 _EPOCH = "2019-06-20T00:00:00.000Z"
 
 
@@ -261,12 +264,70 @@ async def _snapshot_row(db, state, ext: str) -> ImportedProductRow:
     return row
 
 
+def _catalog_cursor(value) -> dict:
+    """Read old checkpoints and the bounded, constant-space cycle detector."""
+    if value is not None and (not isinstance(value, str) or len(value) > _CATALOG_CURSOR_LIMIT):
+        raise MarketplacePaginationIncomplete("schema")
+    try:
+        cur = json.loads(value) if value else {}
+    except (ValueError, TypeError):
+        raise MarketplacePaginationIncomplete("schema") from None
+    if not isinstance(cur, dict) or not isinstance(cur.get("last_id", ""), str):
+        raise MarketplacePaginationIncomplete("schema")
+    guard = cur.get("cursor_guard")
+    if guard is None:
+        return cur
+    if not isinstance(guard, dict):
+        raise MarketplacePaginationIncomplete("schema")
+    anchor = guard.get("anchor")
+    power, distance, pages = (guard.get(key) for key in ("power", "distance", "pages"))
+    if (not isinstance(anchor, str) or len(anchor) != 64 or any(c not in "0123456789abcdef" for c in anchor)
+            or any(type(n) is not int for n in (power, distance, pages))
+            or power < 1 or power & (power - 1) or not 1 <= distance <= power
+            or pages < distance or not cur.get("last_id")):
+        raise MarketplacePaginationIncomplete("schema")
+    if pages >= _CATALOG_MAX_PAGES:
+        raise MarketplacePaginationIncomplete("page_limit")
+    return cur
+
+
+def _catalog_progress(page, cur: dict) -> tuple[list, str | None]:
+    """Validate progress before any page rows are written or a checkpoint advances."""
+    result = page.get("result") if isinstance(page, dict) else None
+    if not isinstance(result, dict):
+        raise MarketplacePaginationIncomplete("schema")
+    items, next_last = result.get("items"), result.get("last_id")
+    if (not isinstance(items, list) or not all(isinstance(item, dict) for item in items)
+            or not isinstance(next_last, str)):
+        raise MarketplacePaginationIncomplete("schema")
+    if not next_last:
+        return items, None
+    previous = cur.get("last_id", "")
+    guard = cur.get("cursor_guard") or {
+        "anchor": hashlib.sha256(previous.encode()).hexdigest(),
+        "power": 1, "distance": 0, "pages": 0,
+    }
+    anchor, power, distance = (guard[key] for key in ("anchor", "power", "distance"))
+    # Brent's doubling anchor detects cycles without a growing checkpoint list.
+    if distance == power:
+        anchor, power, distance = hashlib.sha256(previous.encode()).hexdigest(), power * 2, 0
+    digest = hashlib.sha256(next_last.encode()).hexdigest()
+    if next_last == previous or digest == anchor:
+        raise MarketplacePaginationIncomplete("cycle")
+    next_cur = {**cur, "last_id": next_last, "cursor_guard": {
+        "anchor": anchor, "power": power, "distance": distance + 1, "pages": guard["pages"] + 1,
+    }}
+    encoded = json.dumps(next_cur, ensure_ascii=False, separators=(",", ":"))
+    if len(encoded) > _CATALOG_CURSOR_LIMIT:
+        raise MarketplacePaginationIncomplete("page_limit")
+    return items, encoded
+
+
 async def _page_prices(db, state, *, token, client_id) -> dict:
     now = datetime.utcnow()
-    last_id = json.loads(state.cursor).get("last_id") if state.cursor else ""
-    page = await ozon_client.product_prices(token=token, client_id=client_id, last_id=last_id or "")
-    result = page.get("result") or {}
-    items = result.get("items") or []
+    cur = _catalog_cursor(state.cursor)
+    page = await ozon_client.product_prices(token=token, client_id=client_id, last_id=cur.get("last_id", ""))
+    items, next_cur = _catalog_progress(page, cur)
     index = await _index(db, state.marketplace_account_id)
     for it in items:
         if not isinstance(it, dict):
@@ -281,18 +342,16 @@ async def _page_prices(db, state, *, token, client_id) -> dict:
         row.product_id = await _resolve(db, index, ext, _s(it.get("offer_id")))
         row.link_status = "linked" if row.product_id else "unassigned"
         row.fetched_at = now
-    next_last = result.get("last_id")
-    done = not items or not next_last
-    state.cursor = None if done else json.dumps({"last_id": next_last})
+    done = next_cur is None
+    state.cursor = next_cur
     return {"done": done, "count": len(items), "defer": False}
 
 
 async def _page_stocks(db, state, *, token, client_id) -> dict:
     now = datetime.utcnow()
-    last_id = json.loads(state.cursor).get("last_id") if state.cursor else ""
-    page = await ozon_client.product_stocks(token=token, client_id=client_id, last_id=last_id or "")
-    result = page.get("result") or {}
-    items = result.get("items") or []
+    cur = _catalog_cursor(state.cursor)
+    page = await ozon_client.product_stocks(token=token, client_id=client_id, last_id=cur.get("last_id", ""))
+    items, next_cur = _catalog_progress(page, cur)
     index = await _index(db, state.marketplace_account_id)
     for it in items:
         if not isinstance(it, dict):
@@ -311,9 +370,8 @@ async def _page_stocks(db, state, *, token, client_id) -> dict:
         row.product_id = await _resolve(db, index, ext, _s(it.get("offer_id")))
         row.link_status = "linked" if row.product_id else "unassigned"
         row.fetched_at = now
-    next_last = result.get("last_id")
-    done = not items or not next_last
-    state.cursor = None if done else json.dumps({"last_id": next_last})
+    done = next_cur is None
+    state.cursor = next_cur
     return {"done": done, "count": len(items), "defer": False}
 
 
@@ -478,12 +536,11 @@ async def _page_price_observations(db, state, *, token, client_id) -> dict:
     IGNORED (removed from v5). commissions are not stored as a proven base. Every absent value stays
     NULL and is named in missing_fields."""
     now = datetime.utcnow()
-    cur = json.loads(state.cursor) if state.cursor else {}
+    cur = _catalog_cursor(state.cursor)
     run_id = cur.get("run_id") or str(uuid.uuid4())
-    last_id = cur.get("last_id") or ""
-    page = await ozon_client.product_prices(token=token, client_id=client_id, last_id=last_id or "")
-    result = page.get("result") if isinstance(page.get("result"), dict) else {}
-    items = result.get("items") or []
+    cur["run_id"] = run_id
+    page = await ozon_client.product_prices(token=token, client_id=client_id, last_id=cur.get("last_id", ""))
+    items, next_cur = _catalog_progress(page, cur)
     index = await _index(db, state.marketplace_account_id)
     for it in items:
         if not isinstance(it, dict):
@@ -525,9 +582,8 @@ async def _page_price_observations(db, state, *, token, client_id) -> dict:
             commission_base=None, commission_base_status="unknown",
             marketplace_subsidy=None, subsidy_status="unknown",
             provider_dataset="prices", missing_fields=missing)
-    next_last = result.get("last_id")
-    done = not items or not next_last
-    state.cursor = None if done else json.dumps({"run_id": run_id, "last_id": next_last})
+    done = next_cur is None
+    state.cursor = next_cur
     return {"done": done, "count": len(items), "defer": False}
 
 

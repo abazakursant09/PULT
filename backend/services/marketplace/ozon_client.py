@@ -8,9 +8,25 @@ from __future__ import annotations
 
 from config import settings
 from .base_client import BaseMarketplaceClient
-from .errors import ExecutionError
+from .errors import ExecutionError, MarketplacePaginationIncomplete
 
 MARKETPLACE = "ozon"
+
+
+def _catalog_wire_page(data: dict, previous: str) -> dict:
+    """Decode only the documented prices/stocks envelope, preserving the internal API."""
+    items, cursor = data.get("items"), data.get("cursor")
+    if not isinstance(items, list) or not isinstance(cursor, str):
+        raise MarketplacePaginationIncomplete("schema")
+    for item in items:
+        product_id = item.get("product_id") if isinstance(item, dict) else None
+        if (isinstance(product_id, bool) or not isinstance(product_id, (int, str))
+                or not str(product_id).isascii() or not str(product_id).isdecimal()):
+            raise MarketplacePaginationIncomplete("schema")
+    if cursor and cursor == previous:
+        raise MarketplacePaginationIncomplete("cycle")
+    # Existing callers and saved checkpoints use last_id. It remains an opaque token.
+    return {"result": {"items": items, "last_id": cursor}}
 
 
 class OzonClient:
@@ -129,18 +145,24 @@ class OzonClient:
 
     async def product_prices(self, *, token: str, client_id: str | None,
                              last_id: str = "", limit: int = 1000) -> dict:
-        """POST /v5/product/info/prices → {result:{items:[{product_id, offer_id, price:{price,...}}], last_id}}."""
-        return await self._seller_get(
+        """POST /v5/product/info/prices: wire cursor/items → internal result.items/last_id."""
+        if not isinstance(last_id, str):
+            raise MarketplacePaginationIncomplete("schema")
+        data = await self._seller_get(
             "/v5/product/info/prices", token=token, client_id=client_id, retry_safe=True,
-            body={"filter": {"visibility": "ALL"}, "last_id": last_id, "limit": int(limit)})
+            body={"filter": {"visibility": "ALL"}, "cursor": last_id, "limit": int(limit)})
+        return _catalog_wire_page(data, last_id)
 
     async def product_stocks(self, *, token: str, client_id: str | None,
                              last_id: str = "", limit: int = 1000) -> dict:
-        """POST /v4/product/info/stocks → {result:{items:[{product_id, offer_id, stocks:[{type,present}]}], last_id}}.
+        """POST /v4/product/info/stocks: wire cursor/items → internal result.items/last_id.
         A row carries FBO and FBS stock entries; the provider sums each type ONCE (never twice)."""
-        return await self._seller_get(
+        if not isinstance(last_id, str):
+            raise MarketplacePaginationIncomplete("schema")
+        data = await self._seller_get(
             "/v4/product/info/stocks", token=token, client_id=client_id, retry_safe=True,
-            body={"filter": {"visibility": "ALL"}, "last_id": last_id, "limit": int(limit)})
+            body={"filter": {"visibility": "ALL"}, "cursor": last_id, "limit": int(limit)})
+        return _catalog_wire_page(data, last_id)
 
     async def posting_fbo_list(self, *, token: str, client_id: str | None,
                                since: str, to: str, offset: int = 0, limit: int = 1000) -> list[dict]:
