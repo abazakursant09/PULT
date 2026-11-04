@@ -177,8 +177,9 @@ class OzonClient:
                   "page": int(page), "page_size": int(page_size)})
 
     async def returns_list(self, *, token: str, client_id: str | None,
-                           last_id: int = 0, limit: int = 1000) -> dict:
-        """POST /v1/returns/list → {returns:[{id, product:{sku,offer_id}, ...}], has_next}. Cursor last_id."""
+                           last_id: int = 0, limit: int = 500) -> dict:
+        """POST /v1/returns/list → {returns:[{id, product:{sku,offer_id}, ...}], has_next}.
+        Cursor last_id; the documented maximum page size is 500."""
         return await self._seller_get(
             "/v1/returns/list", token=token, client_id=client_id, retry_safe=True,
             body={"filter": {}, "limit": int(limit), "last_id": int(last_id)})
