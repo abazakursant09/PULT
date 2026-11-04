@@ -136,10 +136,10 @@ class OzonClient:
 
     async def product_info_list(self, *, token: str, client_id: str | None,
                                 product_ids: list) -> list[dict]:
-        """POST /v3/product/info/list → item details (name, offer_id, product_id, ...) for a batch."""
+        """POST /v3/product/info/list → details; int64 IDs are JSON strings on the wire."""
         data = await self._seller_get(
             "/v3/product/info/list", token=token, client_id=client_id, retry_safe=True,
-            body={"product_id": [int(p) for p in product_ids if str(p).isdigit()]})
+            body={"product_id": [str(int(p)) for p in product_ids if str(p).isdigit()]})
         items = (data.get("result") or {}).get("items") if isinstance(data.get("result"), dict) else data.get("items")
         return items if isinstance(items, list) else []
 
