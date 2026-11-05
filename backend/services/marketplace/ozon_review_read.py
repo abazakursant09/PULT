@@ -241,6 +241,13 @@ class OzonReviewReader:
         if expected_sku is not None and not _integer(expected_sku, 64):
             _invalid()
         budget = _Budget(limits if limits is not None else ReviewReadLimits())
+        return await self._selection(token=token, headers=headers, limit=limit,
+            sort_dir=sort_dir, expected_sku=expected_sku, budget=budget)
+
+    async def _selection(self, *, token: str, headers: dict, limit: int,
+                         sort_dir: str, expected_sku: int | None,
+                         budget: _Budget) -> tuple[ReviewInfo, ...]:
+        """Internal shared-budget seam; callers validate options before entry."""
         seen: set[str] = set()
         ids: dict[str, None] = {}
         cursor = None
