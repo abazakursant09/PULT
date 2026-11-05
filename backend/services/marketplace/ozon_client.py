@@ -9,6 +9,7 @@ from __future__ import annotations
 from config import settings
 from .base_client import BaseMarketplaceClient
 from .errors import ExecutionError, MarketplacePaginationIncomplete
+from .ozon_review_read import OzonReviewReader, ReviewInfo, ReviewPage, ReviewReadLimits
 
 MARKETPLACE = "ozon"
 
@@ -32,6 +33,7 @@ def _catalog_wire_page(data: dict, previous: str) -> dict:
 class OzonClient:
     def __init__(self):
         self._seller = BaseMarketplaceClient(settings.ozon_seller_base)
+        self._review_reads_v2 = OzonReviewReader(settings.ozon_seller_base)
 
     def _headers(self, client_id: str | None) -> dict:
         if not client_id:
@@ -262,6 +264,32 @@ class OzonClient:
             rows = data.get("reviews") or data.get("result") or []
             return rows if isinstance(rows, list) else []
         return data if isinstance(data, list) else []
+
+    async def review_list_page_v2(self, *, token: str, client_id: str | None,
+                                  limit: int = 100, sort_dir: str = "ASC",
+                                  last_id: str | None = None,
+                                  limits: ReviewReadLimits | None = None) -> ReviewPage:
+        """Raw selection page; not an unanswered/product or cabinet ownership contract."""
+        return await self._review_reads_v2.list_page(
+            token=token, headers=self._headers(client_id), limit=limit,
+            sort_dir=sort_dir, last_id=last_id, limits=limits)
+
+    async def review_info_v2(self, *, token: str, client_id: str | None,
+                             review_id: str, expected_sku: int | None = None,
+                             limits: ReviewReadLimits | None = None) -> ReviewInfo:
+        """Strict detail identity; SKU equality alone does not prove cabinet ownership."""
+        return await self._review_reads_v2.info(
+            token=token, headers=self._headers(client_id), review_id=review_id,
+            expected_sku=expected_sku, limits=limits)
+
+    async def read_review_selection_v2(self, *, token: str, client_id: str | None,
+                                       limit: int = 100, sort_dir: str = "ASC",
+                                       expected_sku: int | None = None,
+                                       limits: ReviewReadLimits | None = None) -> tuple[ReviewInfo, ...]:
+        """Bounded raw list→info selection. Existing review provider is NOT switched."""
+        return await self._review_reads_v2.read_selection(
+            token=token, headers=self._headers(client_id), limit=limit,
+            sort_dir=sort_dir, expected_sku=expected_sku, limits=limits)
 
     async def publish_feedback_answer(self, *, token: str, client_id: str | None,
                                       review_id: str, text: str) -> dict:
