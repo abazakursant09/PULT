@@ -10,12 +10,14 @@ const VERSIONS: Record<string, string[]> = {
   'baseline-browser-mapping': ['2.11.0'], 'brace-expansion': ['1.1.21', '5.0.12'],
   browserslist: ['4.28.7'], 'js-yaml': ['4.3.2'], 'postcss-selector-parser': ['6.1.5'],
   'caniuse-lite': ['1.0.30001806'], 'electron-to-chromium': ['1.5.393'], 'node-releases': ['2.0.51'],
+  minimatch: ['3.1.5', '11.0.1'],
 }
 const OVERRIDES = {
   'baseline-browser-mapping': '2.11.0', 'brace-expansion@^1.0.0': '1.1.21',
   'brace-expansion@^5.0.0': '5.0.12', 'js-yaml': '4.3.2', 'postcss-selector-parser': '6.1.5',
   browserslist: { '.': '4.28.7', 'caniuse-lite': '1.0.30001806',
     'electron-to-chromium': '1.5.393', 'node-releases': '2.0.51' },
+  '@typescript-eslint/typescript-estree': { minimatch: '11.0.1' },
 }
 type Entry = { version?: string; resolved?: string; integrity?: string }
 type Manifest = { overrides?: Record<string, string | Record<string, string>> }
@@ -98,6 +100,45 @@ describe('reviewed development parser security graph', () => {
     expect(() => yaml.load(input, { maxTotalMergeKeys: 10 })).toThrow(/merge|limit/i)
   })
 
+  it('bounds globpart amplification in the parser-resolved minimatch (GHSA-g3hv-75wg-m249)', () => {
+    const typed = createRequire(requirePackage.resolve('@typescript-eslint/typescript-estree/package.json'))
+    const script = `const {Minimatch}=require(process.argv[1]);
+      const matcher=new Minimatch('a/**/../b/c/'.repeat(5)+'file.ts',
+        {optimizationLevel:2,braceExpandMax:8,platform:'linux'});
+      if(matcher.globParts.length>8)throw Error('globpart budget exceeded');
+      console.log('GLOBPART_BUDGET_OK')`
+    // The old copy creates 32 parts from this small input. Bound the child as well as the fixture.
+    const child = spawnSync(process.execPath,
+      ['--max-old-space-size=64', '-e', script, typed.resolve('minimatch')],
+      { encoding: 'utf8', timeout: 5000, killSignal: 'SIGKILL', maxBuffer: 65536 })
+    expect(child.error).toBeUndefined()
+    expect(child.status, child.stderr).toBe(0)
+    expect(child.stdout).toContain('GLOBPART_BUDGET_OK')
+  })
+
+  it.each([
+    ['report-a.csv', 'report-{a,b}.csv', true],
+    ['report-c.csv', 'report-{a,b}.csv', false],
+    ['.config.ts', '*.ts', true],
+    ['src/deep/file.ts', '**/*.ts', true],
+    ['src/deep/file.js', '**/*.ts', false],
+  ])('preserves parser dot:true matching for %s against %s', (file, pattern, matched) => {
+    const typed = createRequire(requirePackage.resolve('@typescript-eslint/typescript-estree/package.json'))
+    expect(typed('minimatch').minimatch(file, pattern, { dot: true })).toBe(matched)
+  })
+
+  it.each(['minimatch-security-check.js', '.minimatch-security-check.js'])(
+    'preserves the real parser project-service allowDefaultProject path for %s', file => {
+      const parser = requirePackage('@typescript-eslint/typescript-estree')
+      const result = parser.parseAndGenerateServices('const value = 1', {
+        filePath: join(ROOT, file), tsconfigRootDir: ROOT,
+        projectService: { allowDefaultProject: ['*.js'] },
+        disallowAutomaticSingleRunInference: true,
+      })
+      expect(result.services.program).toBeTruthy()
+      expect(result.ast.body[0].type).toBe('VariableDeclaration')
+    }, 30000) // A cold TypeScript project service loads the real project's configuration and libs.
+
   it('throws for conflicting baseline options without terminating its caller', () => {
     const script = `const m=require(process.argv[1]);let caught=false;
       try{m.getCompatibleVersions({targetYear:2023,widelyAvailableOnDate:'2024-01-01',suppressWarnings:true})}
@@ -130,6 +171,7 @@ describe('reviewed development parser security graph', () => {
       'baseline-browser-mapping': ['2.10.22'], 'brace-expansion': ['1.1.14', '5.0.7'],
       browserslist: ['4.28.2'], 'js-yaml': ['4.1.1'], 'postcss-selector-parser': ['6.1.2'],
       'caniuse-lite': ['1.0.30001782'], 'electron-to-chromium': ['1.5.328'], 'node-releases': ['2.0.36'],
+      minimatch: ['3.1.4', '10.2.5'],
     }
     dangerous.push([`stale ${name} copy ${index}`, data => { data.lock.packages![path].version = old[name][index] }])
   })
