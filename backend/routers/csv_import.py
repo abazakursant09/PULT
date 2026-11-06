@@ -948,9 +948,12 @@ async def finance_summary(
         }
 
     # By period (YYYY-MM)
+    # Reuse one expression: asyncpg gives separately constructed literals distinct
+    # parameter positions, which PostgreSQL cannot equate in SELECT/GROUP BY.
+    period_expr = func.substr(ImportedFinanceRow.date, 1, 7)
     period_agg = await db.execute(
         select(
-            func.substr(ImportedFinanceRow.date, 1, 7).label("period"),
+            period_expr.label("period"),
             func.sum(ImportedFinanceRow.revenue).label("revenue"),
             func.sum(ImportedFinanceRow.net_profit).label("profit"),
             func.sum(ImportedFinanceRow.commission).label("commission"),
@@ -961,8 +964,8 @@ async def finance_summary(
             ImportedFinanceRow.user_id == uid,
             ImportedFinanceRow.date.isnot(None),
         )
-        .group_by(func.substr(ImportedFinanceRow.date, 1, 7))
-        .order_by(func.substr(ImportedFinanceRow.date, 1, 7))
+        .group_by(period_expr)
+        .order_by(period_expr)
     )
     by_period = []
     for row in period_agg:
@@ -984,7 +987,9 @@ async def finance_summary(
     prod_agg = await db.execute(
         select(
             ImportedFinanceRow.sku,
-            ImportedFinanceRow.title,
+            # One representative title per SKU/marketplace, without splitting
+            # money totals when imported titles differ. Not a latest-title claim.
+            func.max(ImportedFinanceRow.title).label("title"),
             ImportedFinanceRow.marketplace,
             func.sum(ImportedFinanceRow.revenue).label("revenue"),
             func.sum(ImportedFinanceRow.net_profit).label("profit"),
