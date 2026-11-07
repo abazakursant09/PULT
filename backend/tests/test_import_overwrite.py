@@ -5,6 +5,7 @@ prove overwrite does not double totals, touches only the current user, and leave
 seller's data intact.
 """
 import asyncio
+import hashlib
 import uuid
 from types import SimpleNamespace
 
@@ -20,6 +21,7 @@ from dependencies import get_current_user
 from rate_limit import limit_import
 import models  # registers tables
 from models.import_record import ImportRecord
+from models.imported_card_content import ImportedCardContentRow
 from models.imported_finance import ImportedFinanceRow
 from models.marketplace_account import MarketplaceAccount
 from models.marketplace_store import MarketplaceStore
@@ -152,4 +154,67 @@ def test_overwrite_with_no_prior_import_just_inserts():
     c = _client(db, uid)
     sid = _run(_seed_store(db, uid))
     _upload_and_confirm(c, sid, mode="overwrite")
+    assert _run(_total_revenue(db, uid)) == _REVENUE_ONE
+
+
+def test_overwrite_preserves_pre_change_pending_card_content_type(tmp_path):
+    db = _run(_new_db())
+    uid = str(uuid.uuid4())
+    c = _client(db, uid)
+    sid = _run(_seed_store(db, uid))
+    store = _run(db.get(MarketplaceStore, sid))
+    payload = (
+        "Артикул WB,Описание,Остаток\n"
+        "ART-LEGACY,Сохранённое описание,4\n"
+    ).encode("utf-8")
+    temp_csv = tmp_path / "legacy-card-content.csv"
+    temp_csv.write_bytes(payload)
+    # Simulate an already-previewed upload, without going through today's type detection.
+    record = ImportRecord(
+        id=str(uuid.uuid4()), user_id=uid, filename=temp_csv.name,
+        file_hash=hashlib.sha256(payload).hexdigest(), marketplace=store.marketplace,
+        import_type="card_content", status="pending", source="csv",
+        marketplace_account_id=store.marketplace_account_id, marketplace_store_id=sid,
+        total_rows=1, valid_rows=1, temp_path=str(temp_csv),
+    )
+    db.add(record)
+    _run(db.commit())
+    import_id = record.id
+
+    response = c.post(f"/api/import/{import_id}/confirm", json={"mode": "overwrite"})
+    assert response.status_code == 200, response.text
+    assert response.json()["imported_count"] == 1
+    _run(db.refresh(record))
+    assert record.status == "confirmed"
+    assert record.import_type == "card_content"
+    rows = _run(db.execute(select(ImportedCardContentRow).where(
+        ImportedCardContentRow.import_id == import_id))).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].sku == "ART-LEGACY"
+    assert rows[0].description == "Сохранённое описание"
+    assert rows[0].marketplace_account_id == store.marketplace_account_id
+
+
+def test_upload_finance_headers_override_products_hint_and_persist_finance():
+    db = _run(_new_db())
+    uid = str(uuid.uuid4())
+    c = _client(db, uid)
+    sid = _run(_seed_store(db, uid))
+
+    upload = c.post("/api/import/upload",
+                    files={"file": ("finance.csv", _CSV, "text/csv")},
+                    data={"marketplace_store_id": sid, "import_type": "products"})
+    assert upload.status_code == 200, upload.text
+    preview = upload.json()
+    assert preview["import_type"] == "finance"
+    assert preview["valid_rows"] == 1
+    assert not preview["errors"]
+    import_id = preview["import_id"]
+
+    confirmed = c.post(f"/api/import/{import_id}/confirm", json={"mode": "new"})
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["imported_count"] == 1
+    record = _run(db.get(ImportRecord, import_id))
+    assert record.import_type == "finance"
+    assert record.status == "confirmed"
     assert _run(_total_revenue(db, uid)) == _REVENUE_ONE

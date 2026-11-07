@@ -131,12 +131,17 @@ def _detect_marketplace(headers_lower: list[str]) -> Optional[str]:
     return None
 
 
-def _detect_import_type(headers_lower: list[str]) -> Optional[str]:
+def _detect_import_type(headers_lower: list[str], hint: Optional[str] = None) -> Optional[str]:
     hset = set(headers_lower)
     fin_score  = sum(1 for h in hset if any(s in h for s in _FIN_SIGS))
     prod_score = sum(1 for h in hset if any(s in h for s in _PROD_SIGS))
     ret_score  = sum(1 for h in hset if any(s in h for s in _RET_SIGS))
     card_score = sum(1 for h in hset if any(s in h for s in _CARD_SIGS))
+    scores = {'finance': fin_score, 'products': prod_score,
+              'returns': ret_score, 'card_content': card_score}
+    highest = max(scores.values())
+    if highest > 0 and scores.get(hint, 0) == highest and list(scores.values()).count(highest) > 1:
+        return hint
     # Card-content headers carry a distinctive signature (описание + характеристики / description)
     # that finance/products/returns never do; when present it wins so a card export is not
     # mistaken for products.
@@ -423,6 +428,8 @@ def parse_csv(
     file_bytes: bytes,
     marketplace: Optional[str] = None,
     import_type: Optional[str] = None,
+    *,
+    import_type_is_hint: bool = False,
 ) -> ParseResult:
     result = ParseResult()
 
@@ -461,7 +468,12 @@ def parse_csv(
 
     # Auto-detect marketplace / type
     result.marketplace  = marketplace  or _detect_marketplace(headers_lower)
-    result.import_type  = import_type  or _detect_import_type(headers_lower)
+    # New uploads treat the UI choice as a hint. Confirmation (including previews
+    # made before this change) must keep its already persisted report type.
+    result.import_type = (
+        _detect_import_type(headers_lower, import_type) or import_type
+        if import_type_is_hint else import_type or _detect_import_type(headers_lower)
+    )
 
     if not result.import_type:
         result.errors.append(

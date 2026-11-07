@@ -280,7 +280,7 @@ async def upload_csv(
     parser_code = to_parser_code(store.marketplace)
     if parser_code is None:
         raise HTTPException(422, "Маркетплейс магазина не поддерживается")
-    result = parse_csv(raw, parser_code, itype)
+    result = parse_csv(raw, parser_code, itype, import_type_is_hint=True)
 
     eff_type = result.import_type or itype or "unknown"
 
