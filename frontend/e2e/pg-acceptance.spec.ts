@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test'
 import { API, WEB, db, go, onboard, query, register, report, startBackend, stopBackend, type Seller } from './pg-helpers'
 import { runSessionCases } from './pg-session-cases'
+import type { PresentationCard, DecisionFeedItem } from '../lib/api'
+import { marketplaceLabel } from '../lib/feedGrouping'
 
 // Four composed real-browser tests. No marketplace, real mail, mock auth or DB writes.
 // Reset mail is captured by the test-owned backend; this does NOT prove delivery.
@@ -24,6 +26,18 @@ async function money(seller: Seller, revenue: number, profit: number) {
   await expect(seller.page.getByText(rubles(revenue))).toBeVisible()
   await expect(seller.page.getByText(rubles(profit))).toBeVisible()
   expect(query('SELECT COUNT(*) n FROM imported_finance_rows WHERE user_id=%s', [seller.id])[0].n).toBe(6)
+}
+
+async function openOwnProduct(seller: Seller) {
+  await expect(seller.page.getByLabel('Загрузка', { exact: true })).toHaveCount(0)
+  const summary = seller.page.locator('details > summary')
+    .filter({ hasText: 'ART-1001' }).filter({ hasText: marketplaceLabel('wildberries') })
+  if (await summary.count()) {
+    await expect(summary).toHaveCount(1)
+    const disclosure = summary.locator('xpath=..')
+    if (await disclosure.getAttribute('open') === null) await summary.click()
+    await expect(disclosure).toHaveAttribute('open', '')
+  }
 }
 
 test('PostgreSQL: two real sellers import independent reports and see exact money and diagnosis', async ({ browser }) => {
@@ -66,8 +80,33 @@ test('PostgreSQL: two real sellers import independent reports and see exact mone
     const signals = query("SELECT user_id,COUNT(*) n FROM revenue_signal WHERE signal_key='revenue_collapse' GROUP BY user_id")
     expect(signals.find(row => row.user_id === a.id)?.n).toBe(1)
     expect(signals.find(row => row.user_id === b.id)?.n ?? 0).toBe(0)
+    const items = (cards: PresentationCard[]): DecisionFeedItem[] => cards.flatMap(card => [
+      ...card.items, ...card.recommendation_groups.flatMap(group => group.items),
+    ])
+    const presentation = async (seller: Seller) => {
+      const response = await seller.context.request.get(`${API}/api/presentation/cards?limit=50`)
+      expect(response.status()).toBe(200)
+      return items((await response.json()).cards)
+    }
+    const aItems = await presentation(a)
+    const [source] = query("SELECT id FROM revenue_signal WHERE user_id=%s AND signal_key='revenue_collapse'", [a.id])
+    const collapse = aItems.find(item => item.source_table === 'revenue_signal' && item.source_id === source.id)
+    expect(Boolean(collapse), 'A own revenue diagnosis reaches the actual presentation API').toBe(true)
+    const headline = collapse!.what_happened || collapse!.title
+    expect(typeof headline === 'string' && headline.length > 0).toBe(true)
+    await openOwnProduct(a)
+    await expect(a.page.getByText(headline!, { exact: true }).first()).toBeVisible()
     await go(b.page, '/dashboard')
-    await expect(b.page.getByText(/ART-1001/)).toHaveCount(0)
+    await openOwnProduct(b)
+    const bItems = await presentation(b)
+    // The SAME SKU can legitimately have B's own advice from other contours.
+    // Source-row identities, unlike product/canonical item keys, are tenant-distinct.
+    const aSources = new Set(aItems.map(item => `${item.source_table}:${item.source_id}`))
+    expect(bItems.some(item => aSources.has(`${item.source_table}:${item.source_id}`))).toBe(false)
+    expect(bItems.some(item => item.source_table === 'revenue_signal'
+      && item.source_context?.signal_key === 'revenue_collapse')).toBe(false)
+    await expect(b.page.getByText(headline!, { exact: true })).toHaveCount(0)
+    console.info('PG_SHARED_SKU_NEGATIVE_CONTROL_NO_FOREIGN_SOURCE_OR_COLLAPSE')
   })
 })
 
