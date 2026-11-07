@@ -5,7 +5,7 @@ from typing import Optional
 
 import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from jose import jwt
+from services import session_jwt as jwt
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select, func, update, text, bindparam, Boolean, DateTime, String
 from sqlalchemy.exc import SQLAlchemyError
@@ -343,7 +343,7 @@ async def login_mfa(
     response: Response,
     db: AsyncSession = Depends(get_db),
 ):
-    from jose import JWTError
+    from services.session_jwt import JWTError
 
     try:
         payload = jwt.decode(

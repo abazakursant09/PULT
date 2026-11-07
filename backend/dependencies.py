@@ -1,7 +1,8 @@
 from typing import Optional
 
 from fastapi import Depends, HTTPException, Request
-from jose import jwt, JWTError
+from services import session_jwt as jwt
+from services.session_jwt import JWTError
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession

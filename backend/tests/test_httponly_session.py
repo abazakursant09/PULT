@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
-from jose import jwt
+from services import session_jwt as jwt
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool

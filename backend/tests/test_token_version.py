@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
-from jose import jwt
+from services import session_jwt as jwt
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
