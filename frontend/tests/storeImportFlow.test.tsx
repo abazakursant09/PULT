@@ -46,6 +46,23 @@ describe('store-scoped CSV flow', () => {
     ])
   })
 
+  it.each([
+    { errors: ['Не найдена обязательная колонка артикула'], valid_rows: 0, total_rows: 1 },
+    { errors: ['Файл не может быть импортирован'], valid_rows: 1, total_rows: 1 },
+    { errors: [], valid_rows: 0, total_rows: 1 },
+  ])('blocks confirmation of a fatal or empty preview: %j', async invalid => {
+    vi.spyOn(api.csvImport, 'upload').mockResolvedValue(preview(invalid))
+    const confirm = vi.spyOn(api.csvImport, 'confirm')
+    const user = userEvent.setup()
+    const { container } = render(<StoreImportPage params={{ storeId: 'st-1' }} />)
+    await reachPreview(user, container)
+    const button = await screen.findByRole('button', { name: /Импортировать 1 строк/i })
+    expect(button).toBeDisabled()
+    await user.click(button)
+    expect(confirm).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Отмена', exact: true })).toBeEnabled()
+  })
+
   it('offers every report type the backend can parse', async () => {
     render(<StoreImportPage params={{ storeId: 'st-1' }} />)
     for (const label of ['Товары', 'Финансы', 'Возвраты', 'Данные карточек товаров']) {

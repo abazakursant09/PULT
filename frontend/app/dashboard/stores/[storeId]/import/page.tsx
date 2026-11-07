@@ -111,7 +111,7 @@ export default function StoreImportPage() {
   }
 
   const confirm = async () => {
-    if (!preview) return
+    if (!preview || preview.errors.length > 0 || preview.valid_rows <= 0) return
     setStage('confirming'); setError('')
     try {
       setResult(await api.csvImport.confirm(preview.import_id, mode))
@@ -286,6 +286,9 @@ export default function StoreImportPage() {
           {preview.errors.length > 0 && (
             <p className="l-oxide" role="alert" style={{ paddingTop: 16 }}>{preview.errors[0]}</p>
           )}
+          {preview.errors.length === 0 && preview.valid_rows <= 0 && (
+            <p className="l-oxide" role="alert" style={{ paddingTop: 16 }}>В файле нет корректных строк для импорта. Исправьте файл и загрузите его заново.</p>
+          )}
 
           <h3 className="l-caps l-muted" style={{ padding: '30px 0 10px' }}>Что сделать с данными</h3>
           <label style={{ display: 'flex', gap: 12, alignItems: 'flex-start', padding: '13px 0', borderBottom: '1px solid var(--line)', cursor: 'pointer' }}>
@@ -315,7 +318,7 @@ export default function StoreImportPage() {
           {error && <p className="l-oxide" role="alert" style={{ paddingTop: 16 }}>{error}</p>}
 
           <div style={{ display: 'flex', gap: 12, paddingTop: 24, flexWrap: 'wrap' }}>
-            <button type="button" className="l-btn-ink" onClick={() => void confirm()} disabled={stage === 'confirming'}>
+            <button type="button" className="l-btn-ink" onClick={() => void confirm()} disabled={stage === 'confirming' || preview.errors.length > 0 || preview.valid_rows <= 0}>
               {stage === 'confirming' ? 'Импортируем…' : `Импортировать ${preview.total_rows} строк`}
             </button>
             <button type="button" className="l-btn" onClick={restart} disabled={stage === 'confirming'}>Отмена</button>
