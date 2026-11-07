@@ -5,7 +5,7 @@ import path from 'path'
 // The spec owns only its backend child so restart/restore tests exercise the same UI.
 export default defineConfig({
   testDir: '.',
-  testMatch: 'pg-acceptance.spec.ts',
+  testMatch: 'pg-acceptance.pw.ts',
   timeout: 600_000,
   expect: { timeout: 20_000 },
   workers: 1,
