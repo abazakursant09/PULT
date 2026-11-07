@@ -22,7 +22,7 @@ import time
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from httpx import ASGITransport, AsyncClient
-from jose import jwt as jose_jwt
+from services import session_jwt as jose_jwt
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine

@@ -148,7 +148,8 @@ def test_email_validator_remains_compatible_without_dns():
 
 
 def test_hmac_jwt_remains_compatible_and_algorithm_pinned():
-    from jose import JWTError, jwt
+    from services import session_jwt as jwt
+    from services.session_jwt import JWTError
     key = "synthetic-offline-test-key-not-a-production-secret"
     token = jwt.encode({"sub": "synthetic-user", "ver": 1}, key, algorithm="HS256")
     assert jwt.decode(token, key, algorithms=["HS256"])["sub"] == "synthetic-user"
