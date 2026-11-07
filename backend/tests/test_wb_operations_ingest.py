@@ -124,6 +124,24 @@ def _use(monkeypatch, stub):
 
 
 # ── Model / money ───────────────────────────────────────────────────────────────
+@pytest.mark.parametrize("value", [
+    "NaN", "-NaN", "sNaN", "Infinity", "-Infinity", "inf",
+    Decimal("NaN"), Decimal("sNaN"), Decimal("Infinity"), Decimal("-Infinity"),
+    float("nan"), float("inf"), float("-inf"),
+])
+def test_decimal_money_rejects_nonfinite(value):
+    assert wb_ingest._dec(value) is None
+
+
+@pytest.mark.parametrize("value", [
+    0, "0", "-0", Decimal("0"), "1234.56", "-1234.56", "0.001", "1e3",
+])
+def test_decimal_money_preserves_finite_values(value):
+    actual = wb_ingest._dec(value)
+    assert isinstance(actual, Decimal)
+    assert actual.as_tuple() == Decimal(str(value)).as_tuple()
+
+
 def test_decimal_amount_roundtrips(monkeypatch):
     db = _run(_new_db()); uid, acc, store, conn = _run(_seed(db))
     st = _run(_state(db, conn, store, "sales"))
@@ -264,6 +282,63 @@ def test_unknown_sale_prefix_is_other(monkeypatch):
 
 
 # ── Finance ─────────────────────────────────────────────────────────────────────
+@pytest.mark.parametrize(("gross", "expected"), [
+    ({"retail_amount": 0}, Decimal("0")),
+    ({"retail_amount": "0"}, Decimal("0")),
+    ({"retail_amount": Decimal("0")}, Decimal("0")),
+    ({"retail_amount": "-0"}, Decimal("0")),
+    ({}, None),
+    ({"retail_amount": None}, None),
+    ({"retail_amount": ""}, None),
+    ({"retail_amount": "invalid"}, None),
+    ({"retail_amount": "NaN"}, None),
+    ({"retail_amount": "Infinity"}, None),
+    ({"retail_amount": "-Infinity"}, None),
+    ({"retail_amount": "1234.56"}, Decimal("1234.56")),
+    ({"retail_amount": "-1234.56"}, Decimal("-1234.56")),
+])
+def test_finance_gross_never_uses_settlement(monkeypatch, gross, expected):
+    """Guard legacy normalization; these synthetic rows do not prove the native WB contract."""
+    db = _run(_new_db())
+    try:
+        _, _, store, conn = _run(_seed(db))
+        st = _run(_state(db, conn, store, "finance"))
+        row = {"rrd_id": "rr1", "supplier_oper_name": "Продажа", "ppvz_for_pay": "987.65",
+               "rr_dt": "2026-07-01", "currency_name": "RUB", **gross}
+        _use(monkeypatch, _StubWB(finance=[row]))
+        _run(wb_ingest.fetch_and_persist_page(db, st, "tok"))
+        _run(db.commit())
+        op = _run(db.execute(select(MarketplaceOperation))).scalars().one()
+        assert op.amount == expected
+        assert op.operation_type == "sale" and op.currency == "RUB"
+        assert op.provider_dataset == "finance" and op.provider_operation_code == "Продажа"
+        assert st.coverage_complete is False
+    finally:
+        _run(db.close())
+        _run(db.bind.dispose())
+
+
+@pytest.mark.parametrize("field", ["commission_amount", "delivery_amount", "penalty", "deduction"])
+@pytest.mark.parametrize("value", ["NaN", "Infinity", "-Infinity"])
+def test_finance_nonfinite_component_is_unknown(monkeypatch, field, value):
+    """Invalid components follow the existing unknown-value policy, not a zero-money policy."""
+    db = _run(_new_db())
+    try:
+        _, _, store, conn = _run(_seed(db))
+        st = _run(_state(db, conn, store, "finance"))
+        row = {"rrd_id": "rr1", "supplier_oper_name": "Продажа", "retail_amount": "1000",
+               "rr_dt": "2026-07-01", "currency_name": "RUB", field: value}
+        _use(monkeypatch, _StubWB(finance=[row]))
+        _run(wb_ingest.fetch_and_persist_page(db, st, "tok"))
+        _run(db.commit())
+        op = _run(db.execute(select(MarketplaceOperation))).scalars().one()
+        assert op.operation_type == "sale" and op.amount == Decimal("1000")
+        assert st.coverage_complete is False
+    finally:
+        _run(db.close())
+        _run(db.bind.dispose())
+
+
 def test_finance_components_do_not_overwrite(monkeypatch):
     db = _run(_new_db()); uid, acc, store, conn = _run(_seed(db))
     st = _run(_state(db, conn, store, "finance"))
