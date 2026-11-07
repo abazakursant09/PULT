@@ -71,13 +71,14 @@ _FINANCE_TYPE = {
 
 
 def _dec(value) -> Optional[Decimal]:
-    """A signed money value as Decimal, or None. Never float, never coerced to 0."""
+    """A finite signed money value as Decimal, or None. Never coerced to 0."""
     if value is None or value == "":
         return None
     try:
-        return Decimal(str(value))
+        parsed = Decimal(str(value))
     except (InvalidOperation, ValueError, TypeError):
         return None
+    return parsed if parsed.is_finite() else None
 
 
 def _int(value) -> Optional[int]:
@@ -427,7 +428,8 @@ async def _page_finance(db, state, token: str) -> dict:
         await _upsert_operation(
             db, state, external_operation_id=rrd, operation_type=primary,
             provider_dataset="finance", provider_code=oper_name, parent=srid, product_id=product_id, occurred_at=occurred,
-            quantity=_int(r.get("quantity")), amount=_dec(r.get("retail_amount") or r.get("ppvz_for_pay")),
+            # Seller settlement is not gross revenue, even when gross is zero or unknown.
+            quantity=_int(r.get("quantity")), amount=_dec(r.get("retail_amount")),
             currency=_s(r.get("currency_name")), now=now)
         count += 1
         # Each money component of the SAME report row is a distinct, separately-keyed operation, so
