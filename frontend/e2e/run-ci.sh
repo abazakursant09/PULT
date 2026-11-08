@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 # GitHub-hosted Linux only. Install dependencies BEFORE entering this namespace.
 set -euo pipefail
+PULT_E2E_SUITE="${PULT_E2E_SUITE:-sqlite}"
+case "$PULT_E2E_SUITE" in sqlite|postgres) ;; *) exit 2 ;; esac
+if [ "$PULT_E2E_SUITE" = postgres ]; then
+  test -x "$PULT_E2E_PG_BIN/initdb"
+  test -x "$PULT_E2E_PG_BIN/pg_dump"
+fi
 
 python - <<'PY'
 import os
@@ -22,6 +28,8 @@ test -d "$PYTHON_LIBDIR"
 exec sudo -n /usr/bin/env -i \
   PATH="$PATH" HOME="$HOME" LANG=C.UTF-8 LD_LIBRARY_PATH="$PYTHON_LIBDIR" \
   E2E_DB_PATH="$E2E_DB_PATH" CI=true APP_ENV=development \
+  RUNNER_TEMP="$RUNNER_TEMP" PULT_E2E_SUITE="$PULT_E2E_SUITE" \
+  PULT_E2E_PG_ROOT="${PULT_E2E_PG_ROOT:-}" PULT_E2E_PG_BIN="${PULT_E2E_PG_BIN:-}" \
   SMTP_HOST= SMTP_USER= SMTP_PASSWORD= SENTRY_DSN= CRED_ENC_KEY= \
   BILLING_ENABLED=false NEXT_PUBLIC_BILLING_ENABLED=false \
   API_DATA_SYNC_ENABLED=false AUTOMATION_ENABLED=false \
@@ -47,11 +55,31 @@ with socket.socket() as probe:
 print("E2E_LOOPBACK_NAMESPACE_ACTIVE", flush=True)
 PY
 result=0
-npm run test:e2e -- e2e/mvp-path.spec.ts --project=chromium --retries=0 --forbid-only --global-timeout=600000 --trace=off </dev/null || result=$?
+if [ "$PULT_E2E_SUITE" = postgres ]; then
+  python e2e/pg-database.py init
+  "$PULT_E2E_PG_BIN/initdb" -D "$PULT_E2E_PG_ROOT/data" -U pult_e2e \
+    --auth-host=scram-sha-256 --auth-local=trust --pwfile="$PULT_E2E_PG_ROOT/password.txt" \
+    --encoding=UTF8 --no-locale > "$PULT_E2E_PG_ROOT/initdb.log"
+  stop_pg() {
+    if "$PULT_E2E_PG_BIN/pg_ctl" -D "$PULT_E2E_PG_ROOT/data" status >/dev/null 2>&1; then
+      "$PULT_E2E_PG_BIN/pg_ctl" -D "$PULT_E2E_PG_ROOT/data" -m fast -w stop
+    fi
+  }
+  trap stop_pg EXIT
+  "$PULT_E2E_PG_BIN/pg_ctl" -D "$PULT_E2E_PG_ROOT/data" -l "$PULT_E2E_PG_ROOT/postgres.log" \
+    -o "-h 127.0.0.1 -p 55432 -c unix_socket_directories=''" -w start
+  python e2e/pg-database.py create
+  npm run test:e2e -- --config=e2e/pg-playwright.config.ts --project=chromium --retries=0 \
+    --forbid-only --global-timeout=900000 --trace=off </dev/null || result=$?
+  stop_pg
+  trap - EXIT
+else
+  npm run test:e2e -- e2e/mvp-path.spec.ts --project=chromium --retries=0 --forbid-only --global-timeout=600000 --trace=off </dev/null || result=$?
+fi
 # Check INSIDE the same namespace after Playwright's teardown, including failures.
 python - <<'PY' || result=1
 import socket
-for port in (8099, 3099):
+for port in (8099, 3099, 8097, 3097, 55432):
     with socket.socket() as probe:
         probe.settimeout(0.3)
         assert probe.connect_ex(("127.0.0.1", port)) != 0, f"E2E server still listening: {port}"

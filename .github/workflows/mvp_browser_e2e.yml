@@ -1,6 +1,7 @@
 name: MVP Browser E2E
 
-# One real register -> CSV -> recommendation flow. No product credentials or services.
+# SQLite smoke plus PostgreSQL two-user, restore and session browser acceptance.
+# No product credentials, real mail or external services.
 # Runtime inputs are covered; documentation-only PRs do not spend browser minutes.
 on:
   pull_request:
@@ -27,7 +28,7 @@ concurrency:
 jobs:
   mvp-browser-e2e:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
     defaults:
       run:
         shell: bash
@@ -72,6 +73,22 @@ jobs:
 
       - name: Run MVP browser
         working-directory: frontend
+        run: bash e2e/run-ci.sh
+
+      - name: Prepare native PostgreSQL tools and disposable root
+        run: |
+          if [ ! -x /usr/lib/postgresql/16/bin/initdb ]; then
+            sudo apt-get update
+            sudo apt-get install -y postgresql-16
+          fi
+          echo "PULT_E2E_PG_BIN=/usr/lib/postgresql/16/bin" >> "$GITHUB_ENV"
+          PG_E2E_ROOT="$(mktemp -d "${RUNNER_TEMP%/}/pult-pg-e2e.XXXXXXXX")"
+          echo "PULT_E2E_PG_ROOT=$PG_E2E_ROOT" >> "$GITHUB_ENV"
+
+      - name: Run PostgreSQL browser, native restore and session acceptance
+        working-directory: frontend
+        env:
+          PULT_E2E_SUITE: postgres
         run: bash e2e/run-ci.sh
 
 # No upload-artifact: traces/DBs may contain synthetic auth tokens; keep them job-local.

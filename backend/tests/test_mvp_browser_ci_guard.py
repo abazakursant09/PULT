@@ -54,7 +54,8 @@ def test_browser_workflow_triggers_and_permissions_are_narrow():
         "group": "mvp-browser-e2e-${{ github.ref }}", "cancel-in-progress": "true",
     }
     job = _job()
-    assert job["runs-on"] == "ubuntu-24.04" and job["timeout-minutes"] == "15"
+    # Both independently bounded SQLite and PostgreSQL suites share this job.
+    assert job["runs-on"] == "ubuntu-24.04" and job["timeout-minutes"] == "30"
     assert job["defaults"] == {"run": {"shell": "bash"}}
     assert not ({"if", "continue-on-error", "permissions", "environment", "services"} & job.keys())
 
@@ -83,6 +84,8 @@ def test_browser_workflow_runs_the_namespace_runner_without_failure_masking():
     assert set(steps) == {
         "Checkout", "Set up Python", "Set up Node", "Install locked backend dependencies",
         "Install locked frontend dependencies", "Install Chromium", "Prepare disposable database", "Run MVP browser",
+        "Prepare native PostgreSQL tools and disposable root",
+        "Run PostgreSQL browser, native restore and session acceptance",
     }
     assert steps["Run MVP browser"] == {
         "name": "Run MVP browser", "working-directory": "frontend", "run": "bash e2e/run-ci.sh",
@@ -117,6 +120,8 @@ def test_browser_runner_scrubs_environment_and_disables_external_features():
     assert set(shlex.split(env_block)) == {
         "PATH=$PATH", "HOME=$HOME", "LANG=C.UTF-8", "LD_LIBRARY_PATH=$PYTHON_LIBDIR",
         "E2E_DB_PATH=$E2E_DB_PATH", "CI=true",
+        "RUNNER_TEMP=$RUNNER_TEMP", "PULT_E2E_SUITE=$PULT_E2E_SUITE",
+        "PULT_E2E_PG_ROOT=${PULT_E2E_PG_ROOT:-}", "PULT_E2E_PG_BIN=${PULT_E2E_PG_BIN:-}",
         "APP_ENV=development", "SMTP_HOST=", "SMTP_USER=", "SMTP_PASSWORD=", "SENTRY_DSN=", "CRED_ENC_KEY=",
         "BILLING_ENABLED=false", "NEXT_PUBLIC_BILLING_ENABLED=false", "API_DATA_SYNC_ENABLED=false",
         "AUTOMATION_ENABLED=false", "NEXT_TELEMETRY_DISABLED=1", "DO_NOT_TRACK=1",
@@ -148,6 +153,48 @@ def test_browser_runner_preserves_failure_and_checks_shutdown_inside_namespace()
     assert child.count(SCENARIO_COMMAND) == 1
     assert SCENARIO_COMMAND + " </dev/null || result=$?\n" in child
     assert "python - <<'PY' || result=1\n" in child
-    assert "for port in (8099, 3099):" in child
+    assert "for port in (8099, 3099, 8097, 3097, 55432):" in child
     assert 'probe.connect_ex(("127.0.0.1", port)) != 0' in child
     assert "|| true" not in script and "exit 0" not in script
+
+
+def test_browser_workflow_prepares_only_native_tools_and_fresh_owned_pg_root():
+    steps = _steps()
+    name = "Prepare native PostgreSQL tools and disposable root"
+    assert steps[name] == {
+        "name": name,
+        "run": 'if [ ! -x /usr/lib/postgresql/16/bin/initdb ]; then\n'
+               '  sudo apt-get update\n'
+               '  sudo apt-get install -y postgresql-16\n'
+               'fi\n'
+               'echo "PULT_E2E_PG_BIN=/usr/lib/postgresql/16/bin" >> "$GITHUB_ENV"\n'
+               'PG_E2E_ROOT="$(mktemp -d "${RUNNER_TEMP%/}/pult-pg-e2e.XXXXXXXX")"\n'
+               'echo "PULT_E2E_PG_ROOT=$PG_E2E_ROOT" >> "$GITHUB_ENV"\n',
+    }
+    name = "Run PostgreSQL browser, native restore and session acceptance"
+    assert steps[name] == {
+        "name": name, "working-directory": "frontend",
+        "env": {"PULT_E2E_SUITE": "postgres"}, "run": "bash e2e/run-ci.sh",
+    }
+    assert list(steps).index("Run MVP browser") < list(steps).index(name)
+
+
+def test_browser_postgres_branch_keeps_failure_capture_and_owned_cluster_cleanup():
+    script = _script()
+    assert 'PULT_E2E_SUITE="${PULT_E2E_SUITE:-sqlite}"' in script
+    assert 'case "$PULT_E2E_SUITE" in sqlite|postgres) ;; *) exit 2 ;; esac' in script
+    child = script.split("<<'E2E_SCRIPT'\n", 1)[1]
+    branch = child.split('if [ "$PULT_E2E_SUITE" = postgres ]; then\n', 1)[1].split('\nelse\n', 1)[0]
+    assert 'python e2e/pg-database.py init\n' in branch
+    assert 'python e2e/pg-database.py create\n' in branch
+    flat = re.sub(r"\s+", " ", branch.replace("\\\n", " "))
+    command = (
+        "npm run test:e2e -- --config=e2e/pg-playwright.config.ts --project=chromium --retries=0 "
+        "--forbid-only --global-timeout=900000 --trace=off </dev/null || result=$?"
+    )
+    assert flat.count(command) == 1
+    assert '--auth-host=scram-sha-256 --auth-local=trust --pwfile="$PULT_E2E_PG_ROOT/password.txt"' in flat
+    assert '-o "-h 127.0.0.1 -p 55432 -c unix_socket_directories=\'\'" -w start' in flat
+    assert '"$PULT_E2E_PG_BIN/pg_ctl" -D "$PULT_E2E_PG_ROOT/data" -m fast -w stop' in branch
+    assert branch.index('trap stop_pg EXIT\n') < branch.index(command.split(' --project=', 1)[0])
+    assert branch.endswith('  stop_pg\n  trap - EXIT')
