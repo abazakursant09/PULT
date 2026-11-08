@@ -13,6 +13,7 @@ on:
       - docker-compose.backup.yml
       - docs/backup-restore-policy.md
       - backend/tests/test_backup_restore_contract_guard.py
+      - backend/tests/test_backup_verifier.py
       - backend/alembic/**
       - backend/models/**
       - .github/workflows/backup_restore_synthetic.yml
@@ -24,6 +25,7 @@ on:
       - backend/tests/test_pitr_minio_image_guard.py
       - docker-compose.backup.yml
       - backend/tests/test_backup_restore_contract_guard.py
+      - backend/tests/test_backup_verifier.py
       - .github/workflows/backup_restore_synthetic.yml
 
 permissions:
@@ -59,7 +61,7 @@ jobs:
         working-directory: backend
         run: |
           pip install --require-hashes -r requirements-ci.lock
-          python -m pytest tests/test_backup_restore_contract_guard.py -q
+          python -m pytest tests/test_backup_restore_contract_guard.py tests/test_backup_verifier.py -q
 
       - name: Build backup runner image (pinned base + pinned rclone/age, hash-verified)
         run: docker buildx build --load -t pult-backup:ci ops/backup
@@ -81,6 +83,19 @@ jobs:
               "RCLONE_CONFIG_BK_TYPE=s3 RCLONE_CONFIG_BK_PROVIDER=Minio RCLONE_CONFIG_BK_ACCESS_KEY_ID=$S3_KEY RCLONE_CONFIG_BK_SECRET_ACCESS_KEY=$S3_SECRET RCLONE_CONFIG_BK_ENDPOINT=http://minio:9000 RCLONE_CONFIG_BK_FORCE_PATH_STYLE=true rclone mkdir bk:$BUCKET" && break || sleep 2; done
           for i in $(seq 1 30); do docker exec pgsource pg_isready -U postgres && break || sleep 2; done
           echo "PG16 server line:"; docker logs pgsource 2>&1 | grep -m1 "starting PostgreSQL 16" || true
+
+      - name: Create separate prefix-scoped writer and verifier (synthetic only)
+        run: |
+          set -euo pipefail
+          docker exec minio mc alias set local http://127.0.0.1:9000 "$S3_KEY" "$S3_SECRET"
+          docker cp ops/backup/ci-writer-policy.json minio:/tmp/writer.json
+          docker cp ops/backup/ci-verifier-policy.json minio:/tmp/verifier.json
+          docker exec minio mc admin policy create local splitwriter /tmp/writer.json
+          docker exec minio mc admin policy create local splitverifier /tmp/verifier.json
+          docker exec minio mc admin user add local ciwriter ciwritersecret123
+          docker exec minio mc admin user add local civerifier civerifiersecret123
+          docker exec minio mc admin policy attach local splitwriter --user ciwriter
+          docker exec minio mc admin policy attach local splitverifier --user civerifier
 
       - name: Alembic upgrade head on source (assert single head ymh1a2b3c4d01)
         working-directory: backend
@@ -125,13 +140,29 @@ jobs:
           OUT="$(docker run --rm --network pultbk \
             -e PGHOST=pgsource -e PGUSER=pult_backup -e PGPASSWORD=cirolepw -e PGDATABASE=business_pult \
             -e BACKUP_S3_ENDPOINT=http://minio:9000 -e BACKUP_S3_BUCKET="$BUCKET" -e BACKUP_S3_PREFIX="$PREFIX" \
-            -e BACKUP_S3_PROVIDER=Minio -e BACKUP_S3_ACCESS_KEY_ID="$S3_KEY" -e BACKUP_S3_SECRET_ACCESS_KEY="$S3_SECRET" \
+            -e BACKUP_S3_PROVIDER=Minio -e BACKUP_S3_ACCESS_KEY_ID=ciwriter -e BACKUP_S3_SECRET_ACCESS_KEY=ciwritersecret123 \
+            -e BACKUP_VERIFY_ACCESS_KEY_ID=civerifier -e BACKUP_VERIFY_SECRET_ACCESS_KEY=civerifiersecret123 \
             -e BACKUP_ENCRYPTION_RECIPIENT="${{ steps.cap.outputs.recipient }}" \
             pult-backup:ci backup.sh)"
           echo "$OUT"
           KEY="$(printf '%s\n' "$OUT" | sed -n 's/.*SUCCESS key=\([^ ]*\).*/\1/p' | head -1)"
           test -n "$KEY" || { echo "no backup key parsed"; exit 1; }
           echo "key=$KEY" >> "$GITHUB_OUTPUT"
+
+      - name: Verify split-principal permissions with positive controls
+        env:
+          GOOD_KEY: ${{ steps.bk.outputs.key }}
+        run: |
+          set -euo pipefail
+          docker exec minio mc alias set writer http://127.0.0.1:9000 ciwriter ciwritersecret123
+          docker exec minio mc alias set verifier http://127.0.0.1:9000 civerifier civerifiersecret123
+          # Successful backup above proves writer PUT; reader GET proves object/access health.
+          docker exec minio mc cat "verifier/$BUCKET/$GOOD_KEY" > /dev/null
+          if docker exec minio mc cat "writer/$BUCKET/$GOOD_KEY" > /dev/null 2>&1; then exit 1; fi
+          if docker exec minio mc stat "writer/$BUCKET/$GOOD_KEY" > /dev/null 2>&1; then exit 1; fi
+          if docker exec minio mc cp /tmp/verifier.json "verifier/$BUCKET/$PREFIX/forbidden" > /dev/null 2>&1; then exit 1; fi
+          if docker exec minio mc rm "writer/$BUCKET/$GOOD_KEY" > /dev/null 2>&1; then exit 1; fi
+          if docker exec minio mc rm "verifier/$BUCKET/$GOOD_KEY" > /dev/null 2>&1; then exit 1; fi
 
       - name: Destroy source, spin FRESH empty target
         run: |
@@ -146,7 +177,7 @@ jobs:
           docker run --rm --network pultbk -v "$RUNNER_TEMP/age.key":/ident:ro \
             -e PGHOST=pgtarget -e PGUSER=postgres -e PGPASSWORD="$PGPW" -e PGDATABASE=business_pult \
             -e RESTORE_S3_ENDPOINT=http://minio:9000 -e RESTORE_S3_BUCKET="$BUCKET" -e RESTORE_S3_PROVIDER=Minio \
-            -e RESTORE_S3_ACCESS_KEY_ID="$S3_KEY" -e RESTORE_S3_SECRET_ACCESS_KEY="$S3_SECRET" \
+            -e RESTORE_S3_ACCESS_KEY_ID=civerifier -e RESTORE_S3_SECRET_ACCESS_KEY=civerifiersecret123 \
             -e RESTORE_OBJECT_KEY="${{ steps.bk.outputs.key }}" -e BACKUP_RESTORE_IDENTITY_FILE=/ident \
             -e EXPECTED_ALEMBIC_HEAD=ymh1a2b3c4d01 -e EXPECTED_SCHEMA_SHA="${{ steps.cap.outputs.schema_sha }}" \
             -e EXPECTED_USERS_COUNT="${{ steps.cap.outputs.ucount }}" -e EXPECTED_USERS_CKSUM="${{ steps.cap.outputs.ucksum }}" \

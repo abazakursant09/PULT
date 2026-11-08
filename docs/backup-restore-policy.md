@@ -34,9 +34,18 @@ Runner tools (build-time pinned, SHA-256 verified via BuildKit `ADD --checksum`,
   upload path exists; encryption failure aborts before any upload.
 - TLS verification is mandatory (rclone secure default; no insecure flag in any script).
 - Role separation:
-  - **Writer**: PutObject (+AbortMultipartUpload) + HeadObject on the bucket/prefix only —
-    append-oriented with scoped metadata verification. No content GetObject, no DeleteObject,
+  - **Writer**: PutObject (+AbortMultipartUpload) on the bucket/prefix only —
+    append-oriented, with no HeadObject or content GetObject, no DeleteObject,
     no ListAllMyBuckets, no lifecycle/Object-Lock admin, no other prefix.
+  - **Verifier**: separate read-only principal, GetObject on the same prefix (S3 HEAD
+    requires this permission, which also permits ciphertext downloads). No Put/Delete/admin
+    and no age private key. The runner uses this principal to stat both ciphertext and
+    manifest; upload uses no destination checks, post-upload HEAD, or bucket creation.
+    Both credentials are held by the coordinator: this is IAM separation, not process
+    isolation. Distinct access key IDs are mandatory (this alone cannot establish distinct
+    principals; IAM provisioning must enforce that). The synthetic MinIO fixture creates
+    separate prefix-scoped writer/verifier users. Real Selectel permissions still require
+    a provider canary; a local fixture is not provider proof.
   - **Reader (restore)**: GetObject + HeadObject on the prefix; prefix-scoped ListBucket only if
     restore-point selection needs it. No Put/Delete. Distinct principal from the writer.
   - Retention/Object-Lock administration is a **separate** principal.

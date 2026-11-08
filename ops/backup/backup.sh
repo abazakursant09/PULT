@@ -13,6 +13,9 @@ die() { printf '%s backup: FAIL: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" >&2
 : "${BACKUP_S3_ENDPOINT:?BACKUP_S3_ENDPOINT required}"; : "${BACKUP_S3_BUCKET:?BACKUP_S3_BUCKET required}"
 : "${BACKUP_S3_PREFIX:?BACKUP_S3_PREFIX required}"; : "${BACKUP_S3_ACCESS_KEY_ID:?required}"
 : "${BACKUP_S3_SECRET_ACCESS_KEY:?required}"; : "${BACKUP_ENCRYPTION_RECIPIENT:?age recipient required}"
+: "${BACKUP_VERIFY_ACCESS_KEY_ID:?separate verifier required}"
+: "${BACKUP_VERIFY_SECRET_ACCESS_KEY:?separate verifier required}"
+[ "$BACKUP_VERIFY_ACCESS_KEY_ID" != "$BACKUP_S3_ACCESS_KEY_ID" ] || die "writer and verifier must use distinct access keys"
 PGPORT="${PGPORT:-5432}"
 # PGPASSWORD may come from a file (never on the command line, never logged).
 if [ -n "${PGPASSWORD_FILE:-}" ]; then PGPASSWORD="$(cat "$PGPASSWORD_FILE")"; export PGPASSWORD; fi
@@ -26,6 +29,16 @@ export RCLONE_CONFIG_BK_SECRET_ACCESS_KEY="$BACKUP_S3_SECRET_ACCESS_KEY"
 export RCLONE_CONFIG_BK_ENDPOINT="$BACKUP_S3_ENDPOINT"
 export RCLONE_CONFIG_BK_REGION="${BACKUP_S3_REGION:-}"
 export RCLONE_CONFIG_BK_FORCE_PATH_STYLE=true
+
+# Separate read-only principal: HEAD uses GetObject permission in S3. Never fall back
+# to writer credentials. Both credentials live in this coordinator, NOT isolated processes.
+export RCLONE_CONFIG_BV_TYPE=s3
+export RCLONE_CONFIG_BV_PROVIDER="$RCLONE_CONFIG_BK_PROVIDER"
+export RCLONE_CONFIG_BV_ACCESS_KEY_ID="$BACKUP_VERIFY_ACCESS_KEY_ID"
+export RCLONE_CONFIG_BV_SECRET_ACCESS_KEY="$BACKUP_VERIFY_SECRET_ACCESS_KEY"
+export RCLONE_CONFIG_BV_ENDPOINT="$BACKUP_S3_ENDPOINT"
+export RCLONE_CONFIG_BV_REGION="$RCLONE_CONFIG_BK_REGION"
+export RCLONE_CONFIG_BV_FORCE_PATH_STYLE=true
 
 TMP="$(mktemp -d /work/pult-backup.XXXXXX)" || die "cannot allocate private /work directory"
 trap 'rm -rf "$TMP"' EXIT INT TERM
@@ -83,14 +96,20 @@ cat > "$MANIFEST" <<JSON
 JSON
 
 log "upload ciphertext + manifest"
-rclone copyto "$CIPHER" "bk:${BACKUP_S3_BUCKET}/${KEY}" || die "ciphertext upload failed"
-rclone copyto "$MANIFEST" "bk:${BACKUP_S3_BUCKET}/${MKEY}" || die "manifest upload failed"
+rclone copyto "$CIPHER" "bk:${BACKUP_S3_BUCKET}/${KEY}" --no-check-dest --s3-no-head --s3-no-check-bucket || die "ciphertext upload failed"
+rclone copyto "$MANIFEST" "bk:${BACKUP_S3_BUCKET}/${MKEY}" --no-check-dest --s3-no-head --s3-no-check-bucket || die "manifest upload failed"
 
 # Scoped verify (HeadObject-equivalent): the object exists and its remote size matches the
 # ciphertext we uploaded. A bare upload is NOT treated as success without this.
-REMOTE_SIZE="$(rclone lsjson --stat "bk:${BACKUP_S3_BUCKET}/${KEY}" 2>/dev/null | sed -n 's/.*"Size"[: ]*\([0-9][0-9]*\).*/\1/p' | head -1)"
-[ -n "$REMOTE_SIZE" ] || die "verify: uploaded object not found (HeadObject empty)"
-[ "$REMOTE_SIZE" = "$CIPHER_SIZE" ] || die "verify: remote size $REMOTE_SIZE != local $CIPHER_SIZE"
+verify_size() {
+  rclone lsjson --stat "bv:${BACKUP_S3_BUCKET}/$1" > "$TMP/stat.json" 2>/dev/null || die "verify: metadata request failed"
+  REMOTE_SIZE="$(sed -n 's/.*"Size"[: ]*\([0-9][0-9]*\).*/\1/p' "$TMP/stat.json" | head -1)"
+  [ -n "$REMOTE_SIZE" ] || die "verify: uploaded object not found (HeadObject empty)"
+  [ "$REMOTE_SIZE" = "$2" ] || die "verify: remote size mismatch"
+}
+verify_size "$KEY" "$CIPHER_SIZE"
+MANIFEST_SIZE="$(wc -c < "$MANIFEST" | tr -d ' ')"
+verify_size "$MKEY" "$MANIFEST_SIZE"
 
 END="$(date -u +%s)"
 log "SUCCESS key=$KEY ciphertext_size=$CIPHER_SIZE ciphertext_sha256=$CIPHER_SHA duration_s=$((END-START))"
