@@ -100,6 +100,8 @@ def test_mocked_allocation_failure_stops_full_runner_before_downstream(name, tmp
         "BACKUP_S3_ENDPOINT": "https://synthetic.invalid", "BACKUP_S3_BUCKET": "synthetic",
         "BACKUP_S3_PREFIX": "synthetic", "BACKUP_S3_ACCESS_KEY_ID": "synthetic",
         "BACKUP_S3_SECRET_ACCESS_KEY": "synthetic", "BACKUP_ENCRYPTION_RECIPIENT": "synthetic",
+        "BACKUP_VERIFY_ACCESS_KEY_ID": "synthetic-verifier",
+        "BACKUP_VERIFY_SECRET_ACCESS_KEY": "synthetic-verifier-secret",
         "RESTORE_S3_ENDPOINT": "https://synthetic.invalid", "RESTORE_S3_BUCKET": "synthetic",
         "RESTORE_S3_ACCESS_KEY_ID": "synthetic", "RESTORE_S3_SECRET_ACCESS_KEY": "synthetic",
         "RESTORE_OBJECT_KEY": "synthetic", "BACKUP_RESTORE_IDENTITY_FILE": identity.as_posix(),
