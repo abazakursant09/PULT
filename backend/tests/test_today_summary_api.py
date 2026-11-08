@@ -10,6 +10,8 @@ import asyncio
 import uuid
 from datetime import date, timedelta
 
+import pytest
+
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
@@ -25,7 +27,19 @@ from models.operations_signal import OperationsSignal
 import services.finance_aggregator as fin_agg
 from routers.today import get_today_summary, TodaySummaryView
 
-YEST = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+@pytest.fixture(autouse=True)
+def summary_day(request, monkeypatch):
+    # Collection and execution can fall on different sides of midnight.
+    # Keep the fixture rows and the real aggregator on the same test clock.
+    day = getattr(request, "param", date(2026, 11, 8))
+
+    class SummaryDate(date):
+        @classmethod
+        def today(cls):
+            return day
+
+    monkeypatch.setattr(fin_agg, "date", SummaryDate)
+    return day
 
 
 def _run(c):
@@ -47,7 +61,8 @@ class _User:
 
 async def _fin(db, uid, *, sku, revenue, net_profit, mp="ozon"):
     db.add(ImportedFinanceRow(import_id=str(uuid.uuid4()), user_id=uid, marketplace=mp,
-                              date=YEST, sku=sku, title=sku, revenue=revenue, net_profit=net_profit,
+                              date=(fin_agg.date.today() - timedelta(days=1)).isoformat(),
+                              sku=sku, title=sku, revenue=revenue, net_profit=net_profit,
                               ad_spend=0.0, quantity=1))
 
 
@@ -106,7 +121,8 @@ def test_feed_counts(monkeypatch):
 
 # ── (3) loss_products_count from get_loss_products ───────────────────────────
 
-def test_loss_products_count(monkeypatch):
+@pytest.mark.parametrize("summary_day", [date(2026, 11, 7), date(2026, 11, 9)], indirect=True)
+def test_loss_products_count(monkeypatch, summary_day):
     async def go():
         factory = await _factory(); uid = str(uuid.uuid4())
         monkeypatch.setattr(fin_agg, "AsyncSessionLocal", factory)
