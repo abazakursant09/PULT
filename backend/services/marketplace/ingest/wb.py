@@ -21,6 +21,7 @@ This module writes nothing a user total reads yet (source='api', isolated until 
 no marketplace unless the scheduler is enabled.
 """
 from __future__ import annotations
+from services.marketplace.ingest_read_guard import read_only_ingest
 
 import json
 import uuid
@@ -306,6 +307,7 @@ async def _upsert_operation(db, state, *, external_operation_id: str, operation_
 
 # ── Page drivers (one page, one transaction; cursor moves only on commit) ───────
 
+@read_only_ingest('wildberries')
 async def fetch_and_persist_page(db, state, token: str, client_id=None) -> dict:
     """Pull ONE step for state.data_type, persist it and the advanced cursor in one transaction.
 
