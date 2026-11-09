@@ -36,7 +36,7 @@ from schemas.marketplace import ConnectionCreate
 from fastapi import HTTPException
 from services.account_write_guard import lock_active_account
 from sqlalchemy.dialects import postgresql
-from services.erasure_inventory import inventory_account
+from services.erasure_inventory import inventory_account, dry_run_account_erasure
 
 
 @pytest.fixture
@@ -127,7 +127,52 @@ def test_missing_account_fails_closed(inventory_db):
         loop.run_until_complete(inventory_account(db, "missing"))
 
 
-def test_inventory_does_not_flush_pending_operator_changes(inventory_db):
+def test_erasure_dry_run_is_select_only_and_never_authorizes(inventory_db):
+    loop, engine, db, owners = inventory_db
+    statements = []
+    def observe(conn, cursor, statement, parameters, context, many):
+        statements.append(statement)
+    event.listen(engine.sync_engine, "before_cursor_execute", observe)
+    try:
+        a = loop.run_until_complete(dry_run_account_erasure(db, owners[0]))
+        b = loop.run_until_complete(dry_run_account_erasure(db, owners[1]))
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", observe)
+    assert statements and all(s.lstrip().upper().startswith("SELECT") for s in statements)
+    for report in (a, b):
+        assert report["status"] == "blocked" and report["read_only"]
+        assert report["executable"] is False and report["complete_erasure_ready"] is False
+        assert "retention_policy_required" in report["blockers"]
+        assert "backups" in report["unverified_stages"]
+        assert all(row["disposition"] == "review_only" for row in report["table_reviews"])
+        assert not set(report["excluded_shared_tables"]) & {r["table"] for r in report["table_reviews"]}
+        encoded = json.dumps(report)
+        assert all(uid not in encoded for uid in owners)
+        assert "SECRET-" not in encoded and "PRIVATE-" not in encoded
+        review = next(r for r in report["table_reviews"] if r["table"] == "supplier_reviews")
+        assert "cross_party_review_required" in review["reasons"]
+    assert a == b  # counts only; not an owner-bound execution token
+
+
+def test_erasure_dry_run_reports_mixed_owner_blocker(inventory_db):
+    loop, _, db, owners = inventory_db
+    a, b = db.info["synthetic_resources"]
+    async def exercise():
+        db.add(ApiSyncState(marketplace_connection_id=a["connection"],
+            marketplace_account_id=a["account"], marketplace_store_id=b["store"], data_type="prices"))
+        await db.commit()
+        report = await dry_run_account_erasure(db, owners[0])
+        assert "conflicting_owner_paths" in report["blockers"]
+        assert {"table": "api_sync_states", "count": 1} in report["conflicting_owner_paths"]
+        row = next(r for r in report["table_reviews"] if r["table"] == "api_sync_states")
+        assert row["observed_owner_rows"] == 0 and "conflicting_owner_paths" in row["reasons"]
+        with pytest.raises(ValueError, match="Account not found"):
+            await dry_run_account_erasure(db, "missing")
+    loop.run_until_complete(exercise())
+
+
+@pytest.mark.parametrize("reporter", [inventory_account, dry_run_account_erasure])
+def test_inventory_does_not_flush_pending_operator_changes(inventory_db, reporter):
     loop, engine, db, owners = inventory_db
     pending = User(email="pending@example.com", name="pending", hashed_password="NOT-WRITTEN")
     db.add(pending)
@@ -138,9 +183,9 @@ def test_inventory_does_not_flush_pending_operator_changes(inventory_db):
 
     event.listen(engine.sync_engine, "before_cursor_execute", observe)
     try:
-        loop.run_until_complete(inventory_account(db, owners[0]))
+        loop.run_until_complete(reporter(db, owners[0]))
         with pytest.raises(ValueError):
-            loop.run_until_complete(inventory_account(db, "missing"))
+            loop.run_until_complete(reporter(db, "missing"))
     finally:
         event.remove(engine.sync_engine, "before_cursor_execute", observe)
     assert pending in db.new
@@ -149,7 +194,8 @@ def test_inventory_does_not_flush_pending_operator_changes(inventory_db):
     loop.run_until_complete(db.rollback())
 
 
-def test_legacy_table_missing_from_models_is_flagged_without_reading_content(inventory_db):
+@pytest.mark.parametrize("reporter", [inventory_account, dry_run_account_erasure])
+def test_legacy_table_missing_from_models_is_flagged_without_reading_content(inventory_db, reporter):
     loop, engine, db, owners = inventory_db
 
     async def create_legacy():
@@ -165,13 +211,30 @@ def test_legacy_table_missing_from_models_is_flagged_without_reading_content(inv
 
     event.listen(engine.sync_engine, "before_cursor_execute", observe)
     try:
-        report = loop.run_until_complete(inventory_account(db, owners[0]))
+        report = loop.run_until_complete(reporter(db, owners[0]))
     finally:
         event.remove(engine.sync_engine, "before_cursor_execute", observe)
     assert "forgotten_private_data" in report["unclassified_tables"]
     assert "DO-NOT-READ" not in json.dumps(report)
     assert not any("from forgotten_private_data" in s.lower() for s in statements)
     assert report["schema_scope"] == "default_schema_tables"
+
+
+def test_empty_owner_dry_run_still_cannot_authorize_deletion(inventory_db):
+    loop, _, db, _ = inventory_db
+    async def exercise():
+        uid = str(uuid.uuid4())
+        db.add(User(id=uid, email=f"{uid}@example.invalid", name="empty", hashed_password="synthetic"))
+        await db.commit()
+        report = await dry_run_account_erasure(db, uid)
+        counts = {row["table"]: row["observed_owner_rows"] for row in report["table_reviews"]}
+        assert counts["users"] == 1
+        assert all(count == 0 for table, count in counts.items() if table != "users")
+        assert report["conflicting_owner_paths"] == []
+        assert report["status"] == "blocked" and report["executable"] is False
+        assert "purge_executor_not_implemented" in report["blockers"]
+        assert "retention_policy_required" in report["blockers"]
+    loop.run_until_complete(exercise())
 
 
 def test_mixed_owner_links_are_conflicts_not_owned_rows(inventory_db):
