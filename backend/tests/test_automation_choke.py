@@ -9,6 +9,9 @@ dispatch calls, so every "0 calls" assertion is about real dispatches, not just 
 """
 import asyncio
 import uuid
+from types import SimpleNamespace
+
+import pytest
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
@@ -24,6 +27,58 @@ from services.marketplace import executor, credential_vault, operation_key
 from services.marketplace.wb_client import wb_client
 
 AUTOMATION_CODE = "GUARD_AUTOMATION_DISABLED"
+
+
+@pytest.mark.parametrize("mode", ["manual_l3", "automated_l4", "unexpected_mode"])
+@pytest.mark.parametrize("flag", [True, None, 0, "false"])
+def test_read_only_rejects_every_execution_mode_before_access(monkeypatch, mode, flag):
+    monkeypatch.setattr(executor, "settings", SimpleNamespace(
+        automation_enabled=True, marketplace_read_only=flag))
+    class NoDatabaseAccess:
+        def __getattr__(self, name):
+            raise AssertionError(f"dry-run accessed database: {name}")
+    result = _run(executor.execute(db=NoDatabaseAccess(), user_id="synthetic",
+        action_type="publish_review_response", payload=_review_payload(), mode=mode, dry_run=True))
+    assert result.status == "rejected"
+    assert result.error["code"] == "GUARD_MARKETPLACE_READ_ONLY"
+
+
+def test_read_only_audits_manual_rejection_without_credentials(monkeypatch):
+    async def go():
+        db, uid, _ = await _setup()
+        monkeypatch.setattr(settings, "marketplace_read_only", True)
+        async def forbidden(*args, **kwargs):
+            raise AssertionError("read-only reached credential resolution")
+        monkeypatch.setattr(executor, "_resolve_connection", forbidden)
+        try:
+            result = await executor.execute(db=db, user_id=uid,
+                action_type="publish_review_response", payload=_review_payload(), mode="manual_l3")
+            record = await db.get(ExecutionLog, result.log_id)
+            assert record.status == "rejected"
+            assert record.error_code == "GUARD_MARKETPLACE_READ_ONLY"
+            assert record.dispatch_started_at is None
+            return result
+        finally:
+            await db.close()
+    result = _run(go())
+    assert result.error["code"] == "GUARD_MARKETPLACE_READ_ONLY"
+
+
+def test_read_only_blocks_manual_inverse_provider_call(monkeypatch):
+    async def go():
+        db, uid, conn_id = await _setup()
+        log_id = await _seed_price_log(db, uid, conn_id, mode="manual_l3")
+        monkeypatch.setattr(settings, "marketplace_read_only", True)
+        counter = {"calls": 0}
+        monkeypatch.setattr(wb_client, "set_price", _counting_setprice(counter))
+        try:
+            result = await executor.revert(db=db, user_id=uid, log_id=log_id)
+            assert counter["calls"] == 0
+            return result
+        finally:
+            await db.close()
+    result = _run(go())
+    assert result.error["code"] == "GUARD_MARKETPLACE_READ_ONLY"
 
 
 def _run(coro):

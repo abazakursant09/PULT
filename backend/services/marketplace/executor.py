@@ -226,6 +226,20 @@ async def execute(
         return ExecutionResult(rec.id, "rejected", action_type, target_mp or "unknown",
                                error=err.to_dict())
 
+    # Independent operator barrier: manual commands and reverts must not bypass the
+    # free-test read-only regime. Refuse before connection/token/replay/dispatch.
+    # Only explicit False disables the barrier (fail closed on invalid runtime values).
+    if settings.marketplace_read_only is not False:
+        err = ExecutionError.guard("MARKETPLACE_READ_ONLY", "изменения в маркетплейсах отключены: режим только чтения")
+        if dry_run:
+            return ExecutionResult(None, "rejected", action_type, target_mp or "unknown", error=err.to_dict())
+        rec = _new_log(user_id, action_type, target_mp, mode, payload, insight_key,
+                       idempotency_key, status="rejected", error_code=err.code,
+                       connection_id=connection_id, decision_id=decision_id)
+        db.add(rec)
+        await db.commit()
+        return ExecutionResult(rec.id, "rejected", action_type, target_mp or "unknown", error=err.to_dict())
+
     # SECURITY-2D-1A — last-resort kill switch for AUTONOMOUS execution. An automated (L4) action
     # requires settings.automation_enabled to be exactly True; the check lives HERE, inside the single
     # executor entry point, BEFORE any connection / token / capability / guard / idempotency / dispatch,
