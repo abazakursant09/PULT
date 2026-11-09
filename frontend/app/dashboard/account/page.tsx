@@ -3,7 +3,7 @@ import { Suspense, useEffect, useState, useCallback, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import {
   User, Shield, ShieldCheck, ShieldOff, Bell, Globe, AlertTriangle,
-  Send, Check, RefreshCw, Copy, Calendar, Clock, Trash2, AlertCircle,
+  Send, Check, RefreshCw, Copy, Calendar, Clock, Trash2, AlertCircle, LogOut,
 } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 
@@ -74,6 +74,8 @@ function SectionIcon({ icon: Icon, gold }: { icon: React.ElementType; gold?: boo
 
 // ─── Profile Tab ──────────────────────────────────────────────────────────────
 function ProfileTab() {
+  const [loggingOut, setLoggingOut] = useState(false)
+  const [logoutError, setLogoutError] = useState('')
   const [user, setUser] = useState<
     { name: string; email: string; plan?: string; subscription_end_date?: string | null } | null
   >(null)
@@ -88,6 +90,22 @@ function ProfileTab() {
   // account it was on a paid tariff — the same fabrication as the "СТАТУС: Активен" line that
   // used to sit beside it, and which is gone. When we do not know, we say nothing.
   const paid = hasActiveSubscription(user)
+
+  async function logout() {
+    if (loggingOut) return
+    setLoggingOut(true)
+    setLogoutError('')
+    try {
+      await api.auth.logout()
+    } catch {
+      setLogoutError('Не удалось выйти. Проверьте соединение и повторите попытку.')
+      setLoggingOut(false)
+      return
+    }
+    clearSession()
+    // A full navigation also discards user-specific in-memory API/React caches.
+    window.location.href = '/login'
+  }
 
   return (
     <div className="space-y-4">
@@ -132,6 +150,13 @@ function ProfileTab() {
             hello@biznes-pult.ru
           </a>.
         </p>
+        <div className="mt-5">
+          <Button type="button" variant="outline" onClick={logout} disabled={loggingOut} aria-busy={loggingOut}>
+            <LogOut size={16} aria-hidden="true" />
+            {loggingOut ? 'Выходим…' : 'Выйти из аккаунта'}
+          </Button>
+          {logoutError && <p role="alert" className="mt-3 text-sm">{logoutError}</p>}
+        </div>
       </DarkCard>
     </div>
   )

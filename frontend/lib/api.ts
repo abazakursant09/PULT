@@ -135,6 +135,8 @@ async function _fetch<T>(path: string, init: RequestInit | undefined, attempt = 
       throw new HttpError(await _parseError(res), res.status)
     }
 
+    // Logout and other no-content mutations deliberately return no JSON body.
+    if (res.status === 204) return undefined as T
     return res.json() as Promise<T>
   } catch (err) {
     clearTimeout(timer)
