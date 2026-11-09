@@ -663,10 +663,15 @@ def test_source_guard_new_model_only_in_ingest():
             refs.append(rel)
     # PULT-LAUNCH-2.5E-1 — the promotion tables are WRITTEN from exactly ONE module, the shared
     # change-only writer; yandex.py assembles the evidence and delegates the write to it. The retention
-    # sweep and the read-only advisory resolver (2.5F-B, SELECT-only, feature OFF) also reference them.
-    assert sorted(refs) == ["services/marketplace/ingest/change_only.py",
+    # sweep, read-only advisory resolver and SELECT-only account inventory also reference them.
+    assert sorted(refs) == ["services/erasure_inventory.py",
+                            "services/marketplace/ingest/change_only.py",
                             "services/marketplace/retention/observation_sweep.py",
                             "services/protection/observation_resolver.py"], refs
+    import inspect
+    import services.erasure_inventory as inventory
+    for verb in ("insert(", "update(", "delete(", ".add(", ".commit(", ".flush("):
+        assert verb not in inspect.getsource(inventory).lower(), f"erasure_inventory must not call {verb}"
 
 
 # ══ MIGRATION ypo1a2b3c4d01 ══════════════════════════════════════════════════════

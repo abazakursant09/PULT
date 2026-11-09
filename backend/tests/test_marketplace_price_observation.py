@@ -443,8 +443,10 @@ def test_observation_writer_is_flag_gated_and_unscheduled():
             refs.append(rel)
     # The ONLY production references are the shared change-only WRITER (2.5E-1), the retention SWEEP
     # (2.5E-2B-2, feature OFF, unscheduled), and the read-only advisory RESOLVER (2.5F-B, feature OFF) —
-    # the sanctioned modules that touch the table; the resolver only SELECTs (asserted below).
-    assert sorted(refs) == ["services/marketplace/ingest/change_only.py",
+    # the sanctioned modules that touch the table. The account inventory is another
+    # SELECT-only reader; neither reader is authority to write or schedule collection.
+    assert sorted(refs) == ["services/erasure_inventory.py",
+                            "services/marketplace/ingest/change_only.py",
                             "services/marketplace/retention/observation_sweep.py",
                             "services/protection/observation_resolver.py"], refs
     # the resolver is READ-ONLY: it never writes the observation tables (2.5F-B advisory bridge).
@@ -452,6 +454,9 @@ def test_observation_writer_is_flag_gated_and_unscheduled():
     _resolver_src = inspect.getsource(_orv).lower()
     for _verb in ("insert(", "update(", "delete(", ".add(", ".commit(", ".flush("):
         assert _verb not in _resolver_src, f"observation_resolver must not call {_verb}"
+    import services.erasure_inventory as _inventory
+    for _verb in ("insert(", "update(", "delete(", ".add(", ".commit(", ".flush("):
+        assert _verb not in inspect.getsource(_inventory).lower(), f"erasure_inventory must not call {_verb}"
 
     from config import settings
     assert settings.api_data_sync_enabled is False        # master switch OFF by default
