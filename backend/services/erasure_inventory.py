@@ -38,6 +38,51 @@ OWNERLESS_REVIEW = {
 }
 
 
+async def dry_run_account_erasure(db, user_id: str) -> dict:
+    """Operator-only review report, never a deletion program or authorization.
+
+    Reuse the live inventory rather than trusting caller-supplied row counts.
+    Even an empty/conflict-free account cannot pass while external stages,
+    retention decisions and a safe purge executor are unimplemented.
+    Caller is responsible for authorization, as with inventory_account.
+    """
+    inventory = await inventory_account(db, user_id)
+    cross_party = {item["table"] for item in inventory["cross_party_review"]}
+    conflicts = {item["table"]: item["count"]
+                 for item in inventory["conflicting_owner_paths"] if item["count"]}
+    rows = []
+    for item in inventory["counts"]:
+        reasons = ["retention_policy_required"]
+        if item["table"] in cross_party:
+            reasons.append("cross_party_review_required")
+        if item["table"] in conflicts:
+            reasons.append("conflicting_owner_paths")
+        rows.append({"table": item["table"], "observed_owner_rows": item["count"],
+                     "ownership_basis": item["basis"], "disposition": "review_only",
+                     "reasons": reasons})
+    return {
+        "format_version": 1,
+        "mode": "dry_run",
+        "schema_scope": inventory["schema_scope"],
+        "status": "blocked",
+        "read_only": True,
+        "executable": False,
+        "complete_erasure_ready": False,
+        "blockers": ["purge_executor_not_implemented", "retention_policy_required",
+                     "external_stages_not_verified"]
+                    + (["unclassified_tables"] if inventory["unclassified_tables"] else [])
+                    + (["conflicting_owner_paths"] if conflicts else []),
+        "table_reviews": rows,
+        "excluded_shared_tables": inventory["shared_reference_tables"],
+        "unclassified_tables": inventory["unclassified_tables"],
+        "ownerless_review": inventory["ownerless_review"],
+        "conflicting_owner_paths": [{"table": name, "count": count}
+                                    for name, count in sorted(conflicts.items())],
+        "unverified_stages": inventory["not_inspected"],
+        "warning": "Review only: row counts are not deletion targets or authorization. No deadlines are assigned.",
+    }
+
+
 async def inventory_account(db, user_id: str) -> dict:
     """Operator-side count report. No user IDs or content returned in the report.
 
