@@ -32,6 +32,7 @@ from services.marketplace.yandex_client import yandex_client
 from services.marketplace.verification import runner as verification_runner
 from services.marketplace.verification import service as verification_service
 from services.workspace_resolver import WorkspaceMissing, resolve_workspace_id
+from services.account_write_guard import lock_active_account
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -296,6 +297,7 @@ async def create_connection(
     if required_field and not (getattr(body, required_field, None) or "").strip():
         raise HTTPException(422, f"{required_field} is required for {body.marketplace}")
 
+    await lock_active_account(db, current_user)
     try:
         workspace_id = await resolve_workspace_id(db, current_user.id)
     except WorkspaceMissing:

@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import ImportedDataExport from '@/components/ImportedDataExport'
 import { Upload, Calculator, Store, Truck, FileText } from 'lucide-react'
 
 // L2 — Truth Layer hub. Single home for facts. No recommendations, no "what to do" CTAs.
@@ -33,6 +34,8 @@ export default function DataHubPage() {
           </Link>
         ))}
       </div>
+      <ImportedDataExport />
+      <ImportedDataExport analysis />
     </div>
   )
 }

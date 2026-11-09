@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
@@ -19,6 +19,10 @@ from dependencies import get_current_user
 from models.notification import Notification
 from models.referral_record import ReferralRecord
 from models.user import User
+from models.marketplace_connection import MarketplaceConnection
+from models.api_credential import ApiCredential
+from models.automation_rule import AutomationRule
+from services.account_write_guard import lock_active_account
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -230,6 +234,7 @@ async def delete_account(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    await lock_active_account(db, current_user)
     now = datetime.utcnow()
 
     # Check if this user was referred within the last 30 days → invalidate referrer's record
@@ -257,6 +262,21 @@ async def delete_account(
     # deleted_at check in get_current_user already 403s a deleted user, but bumping token_version makes
     # any copied cookie fail closed (401) even before that path — defence in depth. Atomic SQL increment.
     current_user.token_version = User.token_version + 1
+
+    # Deactivation must not leave existing marketplace authority armed for recovery.
+    # Keep credential row IDs for nullable audit FKs, but destroy their stored key
+    # material/metadata. This is not full erasure of history, backups or in-flight work.
+    owned_connections = select(MarketplaceConnection.id).where(
+        MarketplaceConnection.user_id == current_user.id)
+    await db.execute(update(AutomationRule).where(
+        AutomationRule.user_id == current_user.id).values(enabled=False))
+    await db.execute(update(ApiCredential).where(
+        ApiCredential.connection_id.in_(owned_connections)).values(
+            secret_enc=b"", meta={}, verification_status="unverified", verified_at=None))
+    await db.execute(update(MarketplaceConnection).where(
+        MarketplaceConnection.user_id == current_user.id).values(
+            status="revoked", credential_fingerprint=None,
+            verification_status="unverified", verified_at=None))
 
     await db.commit()
 
