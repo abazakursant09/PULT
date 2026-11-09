@@ -107,6 +107,11 @@ class Settings(BaseSettings):
     ozon_performance_base: str = "https://api-performance.ozon.ru"
     yandex_partner_base: str = "https://api.partner.market.yandex.ru"
     marketplace_http_timeout: float = 15.0
+    # Operator-only launch barrier for ALL executor provider writes (manual and auto).
+    # Compatibility default preserves existing installations. The read-only free test
+    # MUST explicitly set MARKETPLACE_READ_ONLY=true on every backend/worker.
+    # Does not cancel requests already dispatched or prove all integrations read-only.
+    marketplace_read_only: bool = False
     # PULT-LAUNCH-1.4.5E: master switch for API data ingestion (WB provider + scheduler). OFF by
     # default and NOT seller-controlled. While false, run_api_sync makes ZERO marketplace calls, so
     # a verified connection stores no data yet — the honest state until the source policy (1.4.5H)
