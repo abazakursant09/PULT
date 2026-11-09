@@ -21,6 +21,7 @@ from models.automation_rule import AutomationRule
 from models.marketplace_connection import MarketplaceConnection
 from schemas.marketplace import AutomationRuleCreate, AutomationRuleOut, AutomationRuleModeUpdate
 from services.marketplace import action_catalog
+from services.account_write_guard import lock_active_account
 from services.marketplace import review_automation_gate as gate
 
 log = logging.getLogger(__name__)
@@ -137,6 +138,7 @@ async def create_rule(
     if body.mode not in ("confirm", "auto"):
         raise HTTPException(422, "mode must be 'confirm' or 'auto'")
     _validate_review_policy(body.action_type, body.guard or {})
+    await lock_active_account(db, current_user)
 
     # Auto Reviews rules are per-connection: require an owned connection.
     if body.action_type == REVIEW_ACTION:
@@ -179,6 +181,7 @@ async def grant_consent(
     db: AsyncSession = Depends(get_db),
 ):
     """Record explicit seller consent to automated publishing for this rule's connection."""
+    await lock_active_account(db, current_user)
     rule = await _load_owned_rule(db, rule_id, current_user)
     if rule.action_type != REVIEW_ACTION:
         raise HTTPException(422, "consent applies only to review-automation rules")
@@ -201,6 +204,7 @@ async def revoke_consent(
     db: AsyncSession = Depends(get_db),
 ):
     """Revoke consent — disables the rule in the SAME transaction; no new auto-publish may occur."""
+    await lock_active_account(db, current_user)
     rule = await _load_owned_rule(db, rule_id, current_user)
     rule.consent_revoked_at = datetime.utcnow()
     rule.enabled = False
@@ -219,6 +223,7 @@ async def set_mode(
 ):
     if body.mode not in ("confirm", "auto"):
         raise HTTPException(422, "mode must be 'confirm' or 'auto'")
+    await lock_active_account(db, current_user)
     rule = await _load_owned_rule(db, rule_id, current_user)
     # Switching an already-enabled rule to auto while the kill switch is off would create a false
     # "on" state — the same invariant the enable path enforces, on the resulting (mode, enabled).
@@ -238,6 +243,7 @@ async def toggle_rule(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    await lock_active_account(db, current_user)
     rule = await _load_owned_rule(db, rule_id, current_user)
     # Turning OFF is always allowed and immediate. Turning ON a review rule must pass the
     # consent + connection preconditions — the same the auto-publish gate enforces — so a UI can

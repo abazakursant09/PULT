@@ -89,7 +89,9 @@ def _client(db, uid):
     app = FastAPI()
     app.include_router(automation_router.router, prefix="/api")
     app.dependency_overrides[get_db] = lambda: db
-    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=uid)
+    # Match the authenticated session snapshot; missing versions must fail closed.
+    version = _run(db.scalar(select(User.token_version).where(User.id == uid)))
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=uid, token_version=version)
     return TestClient(app)
 
 

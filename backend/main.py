@@ -19,6 +19,7 @@ init_sentry()
 from database import init_db
 from routers import auth, products, reviews, pricing, monitor, finance, legal, startup, assistant, mfa, notifications, success_stories, telegram_settings, supplier_verification, suppliers_catalog, logistics, deals, supplier_reviews, promo, referrals, marking, ideas, payments, ai_image_service, csv_import, seo_projects, action_engine, rebuild_tracker, seo_intelligence, creative, connections, marketplace_accounts, store_catalog, source_policy, execution, automation, advertising, seo_execution, product_graph, decisions, analytics, learning, seo, advertising_engine, review_engine, growth_engine, legal_engine, decision_outcome, decision_feed, decision_apply, promotion_activation, today, presentation
 from routers import internal_recovery  # SECURITY-2D-1C-C3A — read-only operator recovery API
+from routers import data_export
 from routers.ai_image_service import queue_worker as ai_queue_worker
 from tasks.health_monitor import run_health_monitor
 from tasks.seed_catalog import seed_catalog
@@ -167,6 +168,7 @@ app.include_router(ideas.router,                 prefix="/api/ideas",   tags=["i
 app.include_router(payments.router,              prefix="/api",         tags=["payments"])
 app.include_router(ai_image_service.router,      prefix="/api",         tags=["ai-image"])
 app.include_router(csv_import.router,            prefix="/api",         tags=["import"])
+app.include_router(data_export.router,           prefix="/api",         tags=["data-export"])
 app.include_router(seo_projects.router,          prefix="/api",         tags=["seo-projects"])
 app.include_router(action_engine.router,         prefix="/api",         tags=["action-engine"])
 app.include_router(rebuild_tracker.router,       prefix="/api",         tags=["rebuild-tracker"])
