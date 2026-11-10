@@ -18,6 +18,7 @@ import httpx
 
 from config import settings
 from .errors import ExecutionError
+from .ingest_read_guard import admit_ingest_read
 from .ym_review_read_hold import admit_yandex_attempt, observe_yandex_response
 
 log = logging.getLogger(__name__)
@@ -103,6 +104,7 @@ class BaseMarketplaceClient:
         POST and some marketplace mutations use GET. Unknown operations fail
         closed for ambiguous replay; existing throttle-refusal retries remain.
         """
+        admit_ingest_read(self._base_url, method, path)
         url = f"{self._base_url}{path}"
         headers = {auth_header: token, "Content-Type": "application/json"}
         if extra_headers:
@@ -111,6 +113,7 @@ class BaseMarketplaceClient:
         attempt = 0
         throttle_wait = 0.0
         while True:
+            admit_ingest_read(self._base_url, method, path)
             attempt += 1
             await admit_yandex_attempt(
                 self, method=method, path=path, token=token, auth_header=auth_header,

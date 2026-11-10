@@ -24,6 +24,7 @@ as two sales, and nothing here enters a user total until the source policy (1.4.
 Decimal, never float; an unknown amount is NULL; no buyer PII, no raw payload.
 """
 from __future__ import annotations
+from services.marketplace.ingest_read_guard import read_only_ingest
 
 import hashlib
 import json
@@ -169,6 +170,7 @@ async def _upsert_operation(db, state, *, external_operation_id, operation_type,
 
 # ── Page drivers ────────────────────────────────────────────────────────────────
 
+@read_only_ingest('ozon')
 async def fetch_and_persist_page(db, state, token: str, client_id: Optional[str] = None) -> dict:
     """One step for state.data_type, page + cursor committed together by the scheduler."""
     kw = {"token": token, "client_id": client_id}
