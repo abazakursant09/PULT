@@ -42,6 +42,11 @@ class User(Base):
 
     # ── Soft delete / Account recovery ─────────────────────────────────────────
     deleted_at    = Column(DateTime,  nullable=True)
+    # Explicit ordinary-closure state. NULL remains legacy, never retroactive consent.
+    closure_policy_version = Column(String(32), nullable=True)
+    closure_started_at = Column(DateTime(timezone=True), nullable=True)
+    closure_restore_requested_at = Column(DateTime(timezone=True), nullable=True)
+    closure_purge_started_at = Column(DateTime(timezone=True), nullable=True)
     was_referrer  = Column(Boolean,   nullable=False, default=False, server_default='0')
     was_referred  = Column(Boolean,   nullable=False, default=False, server_default='0')
     is_restored   = Column(Boolean,   nullable=False, default=False, server_default='0')

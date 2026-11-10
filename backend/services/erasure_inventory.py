@@ -13,6 +13,7 @@ from models.marketplace_account import MarketplaceAccount
 from models.marketplace_store import MarketplaceStore
 from models.marketplace_connection import MarketplaceConnection
 from models.api_credential import ApiCredential
+from services.account_closure_policy import rollout_status
 
 SHARED_REFERENCE_TABLES = frozenset({
     "marketplace_category_rows", "marketplace_category_attribute_rows",
@@ -68,6 +69,7 @@ async def dry_run_account_erasure(db, user_id: str) -> dict:
         "read_only": True,
         "executable": False,
         "complete_erasure_ready": False,
+        "ordinary_closure_policy": rollout_status(),
         "blockers": ["purge_executor_not_implemented", "retention_policy_required",
                      "external_stages_not_verified"]
                     + (["unclassified_tables"] if inventory["unclassified_tables"] else [])

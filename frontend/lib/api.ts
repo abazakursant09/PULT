@@ -355,6 +355,11 @@ export interface AuthResponse {
   user: User
 }
 
+export interface RecoveryConfirmedResponse {
+  login_required: true
+  message: string
+}
+
 export interface MfaRequiredResponse {
   mfa_required: true
   mfa_token: string
@@ -1285,7 +1290,7 @@ export const api = {
         body: JSON.stringify({ email, name, password, consent, ...(ref_code ? { ref_code } : {}) }),
       }),
     verifyEmail: (token: string) =>
-      req<AuthResponse>(`/api/auth/verify-email?token=${encodeURIComponent(token)}`),
+      req<AuthResponse | RecoveryConfirmedResponse>(`/api/auth/verify-email?token=${encodeURIComponent(token)}`),
     resendVerification: (email: string) =>
       req<ResendVerificationResponse>('/api/auth/resend-verification', {
         method: 'POST', body: JSON.stringify({ email }),
@@ -1483,6 +1488,10 @@ export const api = {
   },
 
   account: {
+    close: () =>
+      req<{ ok: boolean; state: 'closed_recoverable'; recovery_deadline: string; erasure_complete: false; message: string }>('/api/account/close', {
+        method: 'POST', body: JSON.stringify({ policy_version: 'normal-close-30d-v1', confirm: true }),
+      }),
     delete: () =>
       req<{ ok: boolean; message: string }>('/api/account', { method: 'DELETE' }),
   },

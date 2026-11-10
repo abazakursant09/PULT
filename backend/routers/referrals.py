@@ -23,6 +23,8 @@ from models.marketplace_connection import MarketplaceConnection
 from models.api_credential import ApiCredential
 from models.automation_rule import AutomationRule
 from services.account_write_guard import lock_active_account
+from services import account_closure
+from schemas.account_closure import AccountClosureRequest
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -234,8 +236,26 @@ async def delete_account(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    if account_closure.has_closure(current_user):
+        raise HTTPException(409, 'Используйте подтверждённое закрытие аккаунта на 30 дней.')
+    return await _deactivate_account(db, current_user)
+
+
+@router.post('/account/close')
+async def close_account(
+    data: AccountClosureRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if data.confirm is not True:
+        raise HTTPException(400, 'Подтвердите закрытие аккаунта на 30 дней.')
+    return await _deactivate_account(db, current_user, ordinary_closure=True)
+
+
+async def _deactivate_account(db, current_user, *, ordinary_closure=False):
     await lock_active_account(db, current_user)
     now = datetime.utcnow()
+    deadline = account_closure.begin_closure(current_user) if ordinary_closure else None
 
     # Check if this user was referred within the last 30 days → invalidate referrer's record
     if current_user.referred_by_id:
@@ -291,4 +311,8 @@ async def delete_account(
         log.warning("account_deleted: could not remove uploads for user=%s", current_user.id)
 
     log.info("account_deleted: user=%s", current_user.id)
+    if ordinary_closure:
+        return {'ok': True, 'state': 'closed_recoverable', 'recovery_deadline': deadline,
+                'erasure_complete': False,
+                'message': 'Аккаунт закрыт. Для восстановления в течение 30 дней подтвердите email.'}
     return {"ok": True, "message": "Аккаунт помечен как удалённый. Email может быть повторно использован."}
