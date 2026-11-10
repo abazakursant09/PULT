@@ -124,6 +124,7 @@ jobs:
             tests/test_token_version_pg.py::test_pg_concurrent_logout_no_lost_update \
             tests/test_token_version_pg.py::test_pg_old_jwt_rejected_after_bump_new_accepted \
             tests/test_token_version_pg.py::test_pg_reset_bump_revokes_old_session \
+            tests/test_account_closure_pg.py::test_pg_one_recovery_link_cannot_be_consumed_twice \
             tests/test_token_version_pg.py::test_pg_db_failure_is_503 \
             tests/test_auth_throttle_pg.py::test_pg_concurrent_failures_all_counted \
             tests/test_auth_throttle_pg.py::test_pg_block_boundary_is_exact \

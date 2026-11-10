@@ -686,17 +686,17 @@ function LanguageTab() {
 
 // ─── Danger Tab ───────────────────────────────────────────────────────────────
 function DangerTab() {
-  const router = useRouter()
   const [confirm,  setConfirm]  = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [error,    setError]    = useState('')
 
   async function deleteAccount() {
+    if (deleting) return
     setDeleting(true); setError('')
     try {
-      await api.account.delete()
+      await api.account.close()
       clearSession()
-      router.push('/login')
+      window.location.href = '/login'
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Ошибка')
       setDeleting(false); setConfirm(false)
@@ -714,9 +714,11 @@ function DangerTab() {
           <p className="text-[15px] font-semibold" style={{ color: 'var(--danger)' }}>Деактивация аккаунта</p>
         </div>
         <p className="text-[13px] mb-5" style={{ color: 'var(--text-2)', lineHeight: 1.65 }}>
-          Аккаунт будет деактивирован, а не полностью удалён. Сохранённые данные аккаунта остаются
-          в системе, доступ по текущим сессиям прекращается. Восстановить аккаунт можно через
-          повторную регистрацию с тем же email. Реферальная история сохраняется.
+          Аккаунт будет закрыт, доступ по текущим сессиям прекращается. В течение 30 дней
+          можно запросить восстановление через регистрацию с тем же email и подтвердить новое письмо.
+          После подтверждения потребуется обычный вход с паролем и 2FA, если она включена.
+          После 30 дней восстановление недоступно. Удаление данных выполняется отдельно;
+          закрытие аккаунта не означает мгновенного стирания всех копий.
           Подключения отключаются, сохранённые API-ключи очищаются, автоматизация выключается.
           После восстановления для подключения кабинетов потребуется заново добавить ключи.
         </p>
@@ -738,7 +740,7 @@ function DangerTab() {
           <div className="space-y-3">
             <div className="p-4 rounded-[8px]" style={{ background: 'rgba(239,68,68,0.04)', border: '1px solid rgba(239,68,68,0.15)' }}>
               <p className="text-[13px] font-semibold mb-1" style={{ color: 'var(--danger)' }}>Вы уверены?</p>
-              <p className="text-[13px]" style={{ color: 'var(--text-2)' }}>Аккаунт будет деактивирован, текущие сессии потеряют доступ. Данные не стираются полностью. Подключения и автоматизация отключаются, сохранённые API-ключи очищаются. Для восстановления нужна повторная регистрация с тем же email; ключи потребуется добавить заново.</p>
+              <p className="text-[13px]" style={{ color: 'var(--text-2)' }}>Подтверждаю закрытие аккаунта с возможностью восстановления в течение 30 дней по новому письму на тот же email. Сессии, подключения и автоматизация отключаются, API-ключи очищаются и автоматически не восстанавливаются. Закрытие не означает немедленного стирания всех данных.</p>
             </div>
             <div className="flex gap-3">
               <Button variant="destructive" onClick={deleteAccount} loading={deleting}>

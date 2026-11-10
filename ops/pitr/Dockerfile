@@ -22,8 +22,8 @@ RUN apk add --no-cache \
       samurai=1.2-r8 \
       pkgconf=2.5.1-r0 \
       openssl-dev=3.5.9-r0 \
-      zlib-dev=1.3.2-r1 \
-      zlib=1.3.2-r1 \
+      zlib-dev=1.4-r0 \
+      zlib=1.4-r0 \
       xz-dev=5.8.4-r0 \
       xz-libs=5.8.4-r0 \
       lz4-dev=1.10.0-r1 \
@@ -61,7 +61,7 @@ RUN apk add --no-cache \
       libcrypto3=3.5.9-r0 \
       lz4-libs=1.10.0-r1 \
       libxml2=2.13.9-r2 \
-      zlib=1.3.2-r1 \
+      zlib=1.4-r0 \
       xz-libs=5.8.4-r0 \
       zstd-libs=1.5.7-r2
 COPY --from=builder /usr/bin/pgbackrest /usr/bin/pgbackrest

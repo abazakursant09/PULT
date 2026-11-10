@@ -55,7 +55,7 @@ def pg_hold(request, monkeypatch):
 
 def config(dbm):
     cfg = dbm._alembic_config()
-    assert ScriptDirectory.from_config(cfg).get_heads() == [REVISION]
+    assert ScriptDirectory.from_config(cfg).get_heads() == ['acl1a2b3c4d01']
     return cfg
 
 
@@ -299,7 +299,7 @@ def test_pg_seeded_additive_migration_old_reader_compatibility_and_downgrade_gua
                            "VALUES (:id,:uid,'yandex',:wid,:aid,'[\"feedbacks\"]')"),
                    {"id": cid, "uid": uid, "wid": wid, "aid": aid})
     command.upgrade(cfg, "head")
-    assert ScriptDirectory.from_config(cfg).get_heads() == [REVISION]
+    assert ScriptDirectory.from_config(cfg).get_heads() == ['acl1a2b3c4d01']
     with engine.begin() as db:
         saved = db.execute(sa.text("SELECT label,ym_review_read_not_before,ym_review_read_indeterminate "
                                   "FROM marketplace_accounts WHERE id=:id"), {"id": aid}).one()

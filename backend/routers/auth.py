@@ -26,6 +26,8 @@ from models.consent_record import ConsentRecord
 from routers.mfa import claim_totp_step
 from services.email import send_verification_email, send_password_reset_email
 from services.reset_token import hash_reset_token
+from services import account_closure
+from schemas.account_closure import RecoveryConfirmedResponse
 from schemas.auth import (
     ForgotPasswordResponse, RegisterResponse, SessionResponse,
     UserLogin, UserRegister, UserResponse,
@@ -149,7 +151,8 @@ async def register(
             )
 
     # ── Check for existing user (including soft-deleted) ──────────────────────
-    result = await db.execute(select(User).where(User.email == data.email))
+    result = await db.execute(select(User).where(User.email == data.email).with_for_update()
+                              .execution_options(populate_existing=True))
     existing = result.scalar_one_or_none()
 
     if existing and not existing.deleted_at:
@@ -157,11 +160,15 @@ async def register(
 
     # ── Account recovery ──────────────────────────────────────────────────────
     if existing and existing.deleted_at:
+        ordinary_recovery = account_closure.has_closure(existing)
+        if ordinary_recovery:
+            account_closure.request_recovery(existing)
         verification_token = secrets.token_urlsafe(32)
         existing.hashed_password       = hash_password(data.password)
         existing.name                  = data.name
-        existing.deleted_at            = None
-        existing.is_restored           = True
+        if not ordinary_recovery:
+            existing.deleted_at        = None
+            existing.is_restored       = True
         existing.verification_token    = verification_token
         existing.is_verified           = False
         existing.registered_ip         = ip
@@ -180,6 +187,11 @@ async def register(
         await db.refresh(existing)
         log.info("account_restored: user=%s", existing.id)   # no email/IP in application logs
         sent = await send_verification_email(existing.email, existing.name, verification_token)
+        if ordinary_recovery:
+            return RegisterResponse(
+                message=('Для восстановления подтвердите email. Аккаунт остаётся закрытым.'
+                         if sent else 'Письмо отправить не удалось. Аккаунт остаётся закрытым.'),
+                verification_email_sent=sent)
         return RegisterResponse(
             message=("Аккаунт восстановлен. Проверьте почту и подтвердите email для входа."
                      if sent else
@@ -256,28 +268,38 @@ async def register(
 
 # ── Verify email ──────────────────────────────────────────────────────────────
 
-@router.get("/verify-email", response_model=SessionResponse)
+@router.get("/verify-email", response_model=SessionResponse | RecoveryConfirmedResponse)
 async def verify_email(
     response: Response,
     token: str = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
-        select(User).where(User.verification_token == token)
+        select(User).where(User.verification_token == token).with_for_update()
+        .execution_options(populate_existing=True)
     )
     user = result.scalar_one_or_none()
 
     if not user:
         raise HTTPException(status_code=400, detail="Недействительная или устаревшая ссылка подтверждения")
 
-    if not user.is_verified:
+    restoring_closure = user.deleted_at is not None and account_closure.has_closure(user)
+    if restoring_closure:
+        account_closure.finish_recovery(user)
+
+    verified_version = user.token_version
+    if not user.is_verified or restoring_closure:
         user.is_verified = True
         user.verification_token = None
         await db.commit()
         await db.refresh(user)
         log.info("email_verified: user=%s", user.id)   # no email in application logs
 
-    set_session_cookie(response, create_access_token(str(user.id), user.token_version))
+    if restoring_closure:
+        # Email recovery proves ownership, not completion of the account's MFA gate.
+        clear_session_cookie(response)
+        return RecoveryConfirmedResponse()
+    set_session_cookie(response, create_access_token(str(user.id), verified_version))
     return SessionResponse(user=UserResponse.model_validate(user))
 
 
@@ -487,12 +509,21 @@ async def resend_verification(
     # SECURITY-2C-2 — per-email + per-IP throttle (replaces the in-memory per-IP limiter); the neutral
     # response and this shared throttle keep it enumeration-safe.
     await _throttle_or_429(db, "email", request, identity=data.email)
-    result = await db.execute(select(User).where(User.email == data.email))
+    result = await db.execute(select(User).where(User.email == data.email).with_for_update()
+                              .execution_options(populate_existing=True))
     user = result.scalar_one_or_none()
 
     # Only an existing, non-deleted, still-unverified account gets a mail. Everything else falls
     # through to the same neutral message with no observable difference.
-    if user and not user.deleted_at and not user.is_verified:
+    pending_recovery = False
+    if (user and user.deleted_at and account_closure.has_closure(user)
+            and user.closure_restore_requested_at is not None):
+        try:
+            account_closure.require_recovery_window(user)
+            pending_recovery = True
+        except HTTPException:
+            pass  # Keep the same enumeration-safe response for expired/purging accounts.
+    if user and not user.is_verified and (not user.deleted_at or pending_recovery):
         token = secrets.token_urlsafe(32)
         user.verification_token = token
         await db.commit()
@@ -520,10 +551,11 @@ async def forgot_password(
     # SECURITY-2C-2 — per-email + per-IP throttle (replaces the in-memory per-IP limiter). The neutral
     # response below plus this shared throttle keep it enumeration-safe.
     await _throttle_or_429(db, "email", request, identity=data.email)
-    result = await db.execute(select(User).where(User.email == data.email))
+    result = await db.execute(select(User).where(User.email == data.email).with_for_update()
+                              .execution_options(populate_existing=True))
     user = result.scalar_one_or_none()
 
-    if not user:
+    if not user or (user.deleted_at is not None and account_closure.has_closure(user)):
         # Don't reveal whether email is registered
         return ForgotPasswordResponse(
             message="Если этот email зарегистрирован, мы отправили на него ссылку для сброса пароля.",
@@ -574,6 +606,9 @@ UPDATE users
        is_verified         = :verified,
        verification_token  = NULL
  WHERE reset_token = :digest
+   AND NOT (deleted_at IS NOT NULL AND (
+       closure_policy_version IS NOT NULL OR closure_started_at IS NOT NULL
+       OR closure_restore_requested_at IS NOT NULL OR closure_purge_started_at IS NOT NULL))
    AND reset_token_expires IS NOT NULL
    AND reset_token_expires > :now
 RETURNING id

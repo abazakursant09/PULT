@@ -69,10 +69,12 @@ const BASELINES: Record<string, ReturnType<typeof captureContract>> = {
     "securityImports": "42612563ab59362d79c6ca257ed14c6d8669ed8124eff4f15ae03d18400d1225"
   },
   "verify-email": {
-    "code": "545af962112a4cf7c2b5299affa3c0ee453a47471f14d1cb4220d0b71ea5df81",
+    // Intentional security behavior change: recovery requires normal login/MFA.
+    // accountRecoveryVerification.test.tsx proves this branch independently.
+    "code": "de85b4070c0630d65a348421033ce7b970b4268f8cd2bf32e9a8e155be00fec7",
     "attributes": "ce9ad965d67e18b9a8e4341f89b62728e3a8cd86658e6d083d426dc385fb277f",
     "gates": "c3b7ab4527028cb57491ba10bb158e2315b41e8e0f812779973b12b21a31269d",
-    "securityImports": "6cde33d0894f477fc8732d7dce24abf136705f730eb96d57e0317c654a3e7ff2"
+    "securityImports": "6aa6a8a897eb62f3c45de4332a72d053d6c70414f977f152a82466d068b31eb3"
   }
 }
 

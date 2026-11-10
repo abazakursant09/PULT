@@ -49,7 +49,7 @@ def test_revision_has_pinned_single_parent():
     parents = set()
     for value in declarations.values():
         parents.update(value if isinstance(value, tuple) else [value])
-    assert set(declarations) - parents == {REVISION}
+    assert set(declarations) - parents == {'acl1a2b3c4d01'}
 
 
 def config_for():

@@ -96,9 +96,10 @@ export default function SettingsPage() {
   }
 
   async function deleteAccount() {
+    if (deleting) return
     setDeleting(true); setDeleteError('')
     try {
-      await api.account.delete()
+      await api.account.close()
       clearSession()
       window.location.href = '/login'
     } catch (err: unknown) {
@@ -288,10 +289,12 @@ export default function SettingsPage() {
           <div className="flex items-start gap-3 mb-4">
             <AlertCircle size={16} style={{ color: 'var(--danger)', flexShrink: 0, marginTop: 2 }} />
             <div>
-              <p className="font-semibold" style={{ color: 'var(--text)', fontSize: '0.9375rem' }}>Удаление аккаунта</p>
+              <p className="font-semibold" style={{ color: 'var(--text)', fontSize: '0.9375rem' }}>Закрытие аккаунта</p>
               <p style={{ fontSize: '0.8125rem', color: 'var(--text-3)', marginTop: 3, lineHeight: 1.6 }}>
-                Аккаунт будет помечен как удалённый. Email сохраняется и может быть использован
-                для повторной регистрации с восстановлением реферальной истории.
+                Аккаунт будет закрыт. В течение 30 дней можно запросить восстановление через регистрацию
+                с тем же email и подтвердить новое письмо, затем пройти обычный вход с паролем и 2FA.
+                Сессии и подключения отключаются, API-ключи очищаются, автоматизация выключается.
+                Закрытие не означает мгновенного стирания всех данных.
               </p>
             </div>
           </div>
@@ -305,16 +308,17 @@ export default function SettingsPage() {
           {!deleteConfirm ? (
             <Button variant="outline" onClick={() => setDeleteConfirm(true)}
                     style={{ color: 'var(--danger)', borderColor: 'rgba(220,38,38,0.3)' }}>
-              <Trash2 size={14} /> Удалить аккаунт
+              <Trash2 size={14} /> Закрыть аккаунт
             </Button>
           ) : (
             <div className="rounded-xl p-4" style={{ background: 'rgba(220,38,38,0.05)', border: '1px solid rgba(220,38,38,0.2)' }}>
               <p style={{ fontSize: '0.875rem', color: 'var(--danger)', fontWeight: 500, marginBottom: 12 }}>
-                Вы уверены? Это действие нельзя отменить из панели управления.
+                Подтверждаю закрытие с восстановлением в течение 30 дней по новому письму на тот же email.
+                Ключи и автоматизация автоматически не восстанавливаются.
               </p>
               <div className="flex gap-3">
                 <Button variant="destructive" onClick={deleteAccount} loading={deleting}>
-                  {!deleting && <><Trash2 size={13} /> Да, удалить</>}
+                  {!deleting && <><Trash2 size={13} /> Да, закрыть</>}
                 </Button>
                 <Button variant="ghost" onClick={() => { setDeleteConfirm(false); setDeleteError('') }}>
                   Отмена

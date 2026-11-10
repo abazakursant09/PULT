@@ -7,7 +7,7 @@ import authStyles from '../auth.module.css'
 import { CheckCircle2, XCircle, Loader2 } from 'lucide-react'
 import { PultMark } from '@/components/brand/PultMark'
 import { api } from '@/lib/api'
-import { setUser } from '@/lib/session'
+import { clearSession, setUser } from '@/lib/session'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -67,6 +67,13 @@ function VerifyEmailContent() {
     }
     api.auth.verifyEmail(token)
       .then(data => {
+        if ('login_required' in data) {
+          clearSession()
+          setMessage(data.message)
+          setStatus('success')
+          setTimeout(() => router.push('/login'), 2000)
+          return
+        }
         setUser(data.user)
         setStatus('success')
         setTimeout(() => router.push('/dashboard'), 2000)
@@ -116,7 +123,7 @@ function VerifyEmailContent() {
                 Email подтверждён!
               </h1>
               <p style={{ color: 'var(--text-2)', fontSize: '0.9375rem', marginBottom: 16 }}>
-                Переходим в панель управления...
+                {message || 'Переходим в панель управления...'}
               </p>
               <Loader2 size={18} className="animate-spin mx-auto" style={{ color: 'var(--violet-text)' }} />
             </>

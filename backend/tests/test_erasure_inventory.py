@@ -143,6 +143,11 @@ def test_erasure_dry_run_is_select_only_and_never_authorizes(inventory_db):
         assert report["status"] == "blocked" and report["read_only"]
         assert report["executable"] is False and report["complete_erasure_ready"] is False
         assert "retention_policy_required" in report["blockers"]
+        policy = report['ordinary_closure_policy']
+        assert policy['recovery_window_days'] == 30
+        assert policy['state'] == 'not_activated'
+        assert policy['legacy_deleted_at_is_not_policy_acceptance'] is True
+        assert policy['automatic_erasure_implemented'] is False
         assert "backups" in report["unverified_stages"]
         assert all(row["disposition"] == "review_only" for row in report["table_reviews"])
         assert not set(report["excluded_shared_tables"]) & {r["table"] for r in report["table_reviews"]}
