@@ -73,7 +73,9 @@ describe('the API-key reminder does not return', () => {
     expect(src).not.toMatch(/напомним/i)
     expect(src).not.toMatch(/180/)
     expect(src).not.toMatch(/ozon_api_key_date/)
-    expect(src).not.toMatch(/API-ключ/)
+    // Closure honestly explains key clearing; it is not a key-expiry reminder or editor.
+    expect(src).not.toMatch(/API-ключ[^.\n]*(истека|действител|напомин)/i)
+    expect(src).toContain('API-ключи очищаются')
   })
 })
 
@@ -89,16 +91,15 @@ describe('the support action reaches a human', () => {
 })
 
 describe('account recovery copy matches the same server contract on both pages', () => {
-  it('preserves same-email recovery and referral history without inventing a recovery window', () => {
-    // routers/referrals.py soft-deletes with no expiry: there is no 30-day window to promise.
+  it('uses the explicit 30-day recovery contract on both closure surfaces', () => {
     const account = code(...ACCOUNT).replace(/\s+/g, ' ')
     const settings = code(...SETTINGS).replace(/\s+/g, ' ')
 
     for (const src of [account, settings]) {
-      expect(src).not.toMatch(/30 дней/)
+      expect(src).toMatch(/30 дней/)
+      expect(src).toContain('api.account.close()')
+      expect(src).not.toContain('api.account.delete()')
+      expect(src).toContain('подтвердить новое письмо')
     }
-    expect(account).toContain('Восстановить аккаунт можно через повторную регистрацию с тем же email.')
-    expect(account).toContain('Реферальная история сохраняется.')
-    expect(settings).toContain('Email сохраняется и может быть использован для повторной регистрации с восстановлением реферальной истории.')
   })
 })

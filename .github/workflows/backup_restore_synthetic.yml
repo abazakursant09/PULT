@@ -97,7 +97,7 @@ jobs:
           docker exec minio mc admin policy attach local splitwriter --user ciwriter
           docker exec minio mc admin policy attach local splitverifier --user civerifier
 
-      - name: Alembic upgrade head on source (assert single head ymh1a2b3c4d01)
+      - name: Alembic upgrade head on source (assert single head acl1a2b3c4d01)
         working-directory: backend
         env:
           ALEMBIC_DATABASE_URL: postgresql+asyncpg://postgres:cipg@localhost:55432/business_pult
@@ -105,7 +105,7 @@ jobs:
           set -euo pipefail
           alembic upgrade head
           H="$(alembic heads | awk '{print $1}')"
-          test "$H" = "ymh1a2b3c4d01" || { echo "unexpected head $H"; exit 1; }
+          test "$H" = "acl1a2b3c4d01" || { echo "unexpected head $H"; exit 1; }
 
       - name: Create temp read-only backup role + seed synthetic data
         run: |
@@ -179,7 +179,7 @@ jobs:
             -e RESTORE_S3_ENDPOINT=http://minio:9000 -e RESTORE_S3_BUCKET="$BUCKET" -e RESTORE_S3_PROVIDER=Minio \
             -e RESTORE_S3_ACCESS_KEY_ID=civerifier -e RESTORE_S3_SECRET_ACCESS_KEY=civerifiersecret123 \
             -e RESTORE_OBJECT_KEY="${{ steps.bk.outputs.key }}" -e BACKUP_RESTORE_IDENTITY_FILE=/ident \
-            -e EXPECTED_ALEMBIC_HEAD=ymh1a2b3c4d01 -e EXPECTED_SCHEMA_SHA="${{ steps.cap.outputs.schema_sha }}" \
+            -e EXPECTED_ALEMBIC_HEAD=acl1a2b3c4d01 -e EXPECTED_SCHEMA_SHA="${{ steps.cap.outputs.schema_sha }}" \
             -e EXPECTED_USERS_COUNT="${{ steps.cap.outputs.ucount }}" -e EXPECTED_USERS_CKSUM="${{ steps.cap.outputs.ucksum }}" \
             pult-backup:ci restore.sh
 

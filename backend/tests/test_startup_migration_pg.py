@@ -167,7 +167,14 @@ def test_pg_startup_prior_upgrade_preserves_user_and_repeat(pg_startup):
     _seed(engine)
     before = _rows(engine)
     _boot(dbm)
-    assert _rows(engine) == before
+    after = _rows(engine)
+    assert len(after) == len(before)
+    lifecycle_fields = {'closure_policy_version', 'closure_started_at',
+                        'closure_restore_requested_at', 'closure_purge_started_at'}
+    for old, new in zip(before, after):
+        assert {key: new[key] for key in old} == old
+        assert set(new) - set(old) == lifecycle_fields
+        assert all(new[key] is None for key in lifecycle_fields)
     _prove_repeat(engine, dbm)
 
 
