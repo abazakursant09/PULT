@@ -88,6 +88,12 @@ class Settings(BaseSettings):
     yookassa_secret_key: str = ""
     yookassa_return_url: str = ""
 
+    # Operator-only first-test barrier for deals, public stories, supplier reviews
+    # and referral payment/reward mutations. Safe default: related writes are held.
+    # Explicit False preserves the former full path after separate operator admission.
+    # Independent of billing/provider switches; never controlled by a customer request.
+    shared_workflows_read_only: bool = True
+
     # ── Marketplace Execution Layer (ME-1) ────────────────────────────────────
     # Fernet key (urlsafe-base64, 32 bytes) used to encrypt marketplace API
     # tokens at rest. If empty, a key is derived from secret_key for development
