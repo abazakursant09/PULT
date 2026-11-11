@@ -13,6 +13,9 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 
+from logging_privacy import install_access_log_redaction
+install_access_log_redaction()
+
 from services.sentry_setup import init_sentry
 init_sentry()
 
