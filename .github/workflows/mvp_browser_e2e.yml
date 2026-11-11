@@ -61,6 +61,21 @@ jobs:
         working-directory: frontend
         run: npm ci
 
+      - name: Use official Ubuntu package mirrors
+        run: |
+          set -euo pipefail
+          # Hosted-runner Azure mirror DNS failed before any browser test ran.
+          # Keep Ubuntu's signed repositories/keyrings, HTTPS and every test intact.
+          getent ahosts archive.ubuntu.com >/dev/null
+          getent ahosts security.ubuntu.com >/dev/null
+          for list in /etc/apt/apt-mirrors.txt /etc/apt/apt-security-mirrors.txt; do
+            test -f "$list"
+            test ! -L "$list"
+          done
+          grep -Eq '^https?://(azure\.archive|archive)\.ubuntu\.com/ubuntu/?$' /etc/apt/apt-mirrors.txt
+          printf '%s\n' 'https://archive.ubuntu.com/ubuntu/' | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+          printf '%s\n' 'https://security.ubuntu.com/ubuntu/' | sudo tee /etc/apt/apt-security-mirrors.txt >/dev/null
+
       - name: Install Chromium
         working-directory: frontend
         run: npx --no-install playwright install --with-deps chromium
