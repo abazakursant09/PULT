@@ -1,9 +1,12 @@
 """Synthetic DB/route tests; no email or provider calls."""
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import pytest
-from fastapi import HTTPException, Response
+from fastapi import FastAPI, HTTPException, Response
+from httpx import ASGITransport, AsyncClient
 from pydantic import ValidationError
 from sqlalchemy import select
 
@@ -11,7 +14,10 @@ from test_erasure_inventory import inventory_db  # noqa: F401  shared disposable
 from models.user import User
 from models.api_credential import ApiCredential
 from models.automation_rule import AutomationRule
-from routers import auth
+from models.marketplace_connection import MarketplaceConnection
+from database import get_db
+from dependencies import get_current_user
+from routers import auth, referrals
 from routers.referrals import close_account, delete_account
 from schemas.account_closure import AccountClosureRequest
 from schemas.auth import UserRegister
@@ -165,13 +171,183 @@ def test_nonboolean_confirmation_rejected(bad):
         body(bad)
 
 
-def test_legacy_delete_does_not_enroll_user_in_new_policy(inventory_db, runtime):
+LEGACY_DELETE_DETAIL = 'Используйте подтверждённое закрытие аккаунта на 30 дней.'
+
+
+def closure_http_app(db, owner=None, *, authenticated=True):
+    app = FastAPI()
+    app.include_router(referrals.router, prefix='/api')
+    auth_calls = []
+
+    async def database():
+        yield db
+
+    async def owner_auth():
+        auth_calls.append(owner.id)
+        return owner
+
+    app.dependency_overrides[get_db] = database
+    if authenticated:
+        app.dependency_overrides[get_current_user] = owner_auth
+    return app, auth_calls
+
+
+@pytest.fixture
+def legacy_delete_state(inventory_db, monkeypatch, tmp_path):
+    """Persisted two-owner controls plus poison DB: rejection may touch none."""
     loop, _, db, owners = inventory_db
+    models = (User, ApiCredential, MarketplaceConnection, AutomationRule)
+
+    async def setup():
+        users = [await db.get(User, uid) for uid in owners]
+        for index, user in enumerate(users):
+            user.name = f'SYNTHETIC_OWNER_{index}'
+            user.registered_ip = f'192.0.2.{index + 1}'
+            user.hashed_password = f'SYNTHETIC_ORIGINAL_HASH_{index}'
+            db.add(AutomationRule(user_id=user.id, contour='money', action_type='legacy', enabled=True))
+        await db.commit()
+        objects = []
+        for model in models:
+            objects.extend((await db.execute(select(model).order_by(model.id))).scalars().all())
+        return users, objects
+
+    users, objects = loop.run_until_complete(setup())
+    memory_before = deepcopy([tuple(getattr(obj, col.key) for col in obj.__table__.columns) for obj in objects])
+
+    async def persisted():
+        with db.no_autoflush:
+            return [list((await db.execute(select(*model.__table__.columns).order_by(model.id))).mappings())
+                    for model in models]
+
+    rows_before = deepcopy(loop.run_until_complete(persisted()))
+    files = []
+    for index, owner in enumerate(owners):
+        directory = tmp_path / owner
+        directory.mkdir()
+        path = directory / 'synthetic.csv'
+        path.write_bytes(f'owner,amount\nsynthetic-{index},{900 + index}\n'.encode())
+        files.append((path, path.read_bytes()))
+    from routers import csv_import
+    monkeypatch.setattr(csv_import, '_UPLOAD_DIR', str(tmp_path))
+    deactivate = AsyncMock(side_effect=AssertionError('legacy DELETE reached deactivation'))
+    uploads = Mock(side_effect=AssertionError('legacy DELETE reached upload cleanup'))
+    monkeypatch.setattr(referrals, '_deactivate_account', deactivate)
+    monkeypatch.setattr(referrals, '_remove_upload_dir', uploads)
+    poison = SimpleNamespace(**{
+        name: AsyncMock(side_effect=AssertionError('legacy DELETE touched database'))
+        for name in ('execute', 'get', 'commit', 'flush', 'refresh', 'delete', 'rollback')})
+    poison.add = Mock(side_effect=AssertionError('legacy DELETE added a row'))
+    poison.add_all = Mock(side_effect=AssertionError('legacy DELETE added rows'))
+    yield SimpleNamespace(loop=loop, owner=users[0], db=poison, deactivate=deactivate, uploads=uploads)
+    # Check persisted and in-memory values independently; never refresh away a mutation.
+    assert memory_before == [tuple(getattr(obj, col.key) for col in obj.__table__.columns) for obj in objects]
+    assert rows_before == loop.run_until_complete(persisted())
+    assert not db.new and not db.dirty and not db.deleted
+    assert all(path.is_file() and path.read_bytes() == content for path, content in files)
+
+
+def assert_legacy_helpers_untouched(state):
+    state.deactivate.assert_not_called()
+    state.uploads.assert_not_called()
+    for spy in vars(state.db).values():
+        spy.assert_not_called()
+
+
+def test_legacy_delete_direct_rejects_without_mutation(legacy_delete_state):
+    state = legacy_delete_state
+
+    async def exercise():
+        with pytest.raises(HTTPException) as error:
+            await delete_account(db=state.db, current_user=state.owner)
+        assert error.value.status_code == 409
+        assert error.value.detail == LEGACY_DELETE_DETAIL
+        assert_legacy_helpers_untouched(state)
+
+    state.loop.run_until_complete(exercise())
+
+
+def test_legacy_delete_http_rejects_without_mutation(legacy_delete_state):
+    state = legacy_delete_state
+    app, authenticated = closure_http_app(state.db, state.owner)
+
+    async def exercise():
+        async with AsyncClient(transport=ASGITransport(app=app, raise_app_exceptions=False),
+                               base_url='http://testserver') as client:
+            response = await client.request('DELETE', '/api/account?confirm=true',
+                json={'confirm': True, 'policy_version': POLICY_VERSION},
+                headers={'Origin': 'http://testserver'})
+        assert response.status_code == 409
+        assert response.json() == {'detail': LEGACY_DELETE_DETAIL}
+        assert 'set-cookie' not in response.headers and 'location' not in response.headers
+        assert authenticated == [state.owner.id]
+        assert_legacy_helpers_untouched(state)
+
+    state.loop.run_until_complete(exercise())
+
+
+def test_legacy_delete_http_retains_authentication(legacy_delete_state):
+    state = legacy_delete_state
+    app, _ = closure_http_app(state.db, authenticated=False)
+
+    async def exercise():
+        async with AsyncClient(transport=ASGITransport(app=app), base_url='http://testserver') as client:
+            response = await client.delete('/api/account', headers={'Origin': 'http://testserver'})
+        assert response.status_code == 401
+        assert 'set-cookie' not in response.headers
+        assert_legacy_helpers_untouched(state)
+
+    state.loop.run_until_complete(exercise())
+
+
+@pytest.mark.parametrize('confirm,status', [(False, 400), (1, 422), ('true', 422), (None, 422), ('missing', 422)],
+                         ids=['false', 'integer', 'string', 'null', 'missing'])
+def test_close_http_requires_strict_confirmation_without_mutation(legacy_delete_state, confirm, status):
+    state = legacy_delete_state
+    app, _ = closure_http_app(state.db, state.owner)
+
+    async def exercise():
+        payload = {'policy_version': POLICY_VERSION}
+        if confirm != 'missing':
+            payload['confirm'] = confirm
+        async with AsyncClient(transport=ASGITransport(app=app), base_url='http://testserver') as client:
+            response = await client.post('/api/account/close', json=payload,
+                                         headers={'Origin': 'http://testserver'})
+        assert response.status_code == status
+        assert_legacy_helpers_untouched(state)
+
+    state.loop.run_until_complete(exercise())
+
+
+def test_confirmed_close_http_keeps_ordinary_30_day_contract(inventory_db, runtime, monkeypatch):
+    loop, _, db, owners = inventory_db
+    uploads = Mock()
+    monkeypatch.setattr(referrals, '_remove_upload_dir', uploads)
+
     async def exercise():
         user = await db.get(User, owners[0])
-        await delete_account(db, user)
+        old_version = user.token_version
+        original = (user.hashed_password, user.name, user.registered_ip)
+        app, authenticated = closure_http_app(db, user)
+        async with AsyncClient(transport=ASGITransport(app=app), base_url='http://testserver') as client:
+            response = await client.post('/api/account/close',
+                json={'policy_version': POLICY_VERSION, 'confirm': True},
+                headers={'Origin': 'http://testserver'})
+        assert response.status_code == 200
+        result = response.json()
+        assert result['ok'] is True and result['state'] == 'closed_recoverable'
+        assert result['erasure_complete'] is False
+        assert result['recovery_deadline'] == (START + timedelta(days=30)).isoformat()
         await db.refresh(user)
-        assert user.deleted_at is not None and user.closure_policy_version is None
+        assert user.deleted_at is not None and user.closure_policy_version == POLICY_VERSION
+        assert user.token_version == old_version + 1
+        assert (user.hashed_password, user.name, user.registered_ip) == original
+        a, b = db.info['synthetic_resources']
+        assert (await db.get(ApiCredential, a['credential'])).secret_enc == b''
+        assert (await db.get(ApiCredential, b['credential'])).secret_enc == b'SECRET-CIPHERTEXT'
+        assert (await db.get(User, owners[1])).deleted_at is None
+        uploads.assert_called_once_with(owners[0])
+        assert authenticated == [owners[0]]
+
     loop.run_until_complete(exercise())
 
 

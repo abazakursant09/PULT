@@ -146,7 +146,7 @@ def test_actual_connection_and_deactivation_race(monkeypatch, deactivation_first
                         await writer.rollback()
                 async def deactivate():
                     try:
-                        return await referrals.delete_account(db=deleter, current_user=user)
+                        return await referrals._deactivate_account(db=deleter, current_user=user)
                     finally:
                         await deleter.rollback()
                 first = asyncio.create_task(deactivate() if deactivation_first else connect())

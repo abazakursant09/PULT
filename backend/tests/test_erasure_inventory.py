@@ -30,7 +30,7 @@ from models.connection_verification_attempt import ConnectionVerificationAttempt
 from models.auth_rate_limit_bucket import AuthRateLimitBucket
 from services import auth_throttle
 from models.automation_rule import AutomationRule
-from routers.referrals import delete_account
+from routers.referrals import _deactivate_account
 from routers.connections import create_connection
 from schemas.marketplace import ConnectionCreate
 from fastapi import HTTPException
@@ -331,7 +331,7 @@ def test_deactivation_disarms_only_owner_and_removes_key_material(inventory_db):
         audit_id = audit.id
         user = await db.get(User, owners[0])
         old_version = user.token_version
-        await delete_account(db=db, current_user=user)
+        await _deactivate_account(db=db, current_user=user)
         await db.refresh(user)
         assert user.deleted_at is not None and user.token_version == old_version + 1
         connection = await db.get(MarketplaceConnection, a["connection"])
@@ -361,7 +361,7 @@ def test_deactivation_failure_rolls_back_connection_and_key_changes(inventory_db
 
         monkeypatch.setattr(db, "commit", fail_commit)
         with pytest.raises(RuntimeError, match="synthetic commit failure"):
-            await delete_account(db=db, current_user=user)
+            await _deactivate_account(db=db, current_user=user)
         monkeypatch.setattr(db, "commit", original_commit)
         await db.rollback()
         user = await db.get(User, owners[0])
@@ -378,7 +378,7 @@ def test_previously_authenticated_request_cannot_reconnect_deleted_account(inven
     async def exercise():
         user = await db.get(User, owners[0])
         stale = SimpleNamespace(id=user.id, token_version=user.token_version)
-        await delete_account(db=db, current_user=user)
+        await _deactivate_account(db=db, current_user=user)
         with pytest.raises(HTTPException) as error:
             await create_connection(ConnectionCreate(marketplace="ozon", scope="prices",
                 ozon_client_id="synthetic", token="synthetic-new-key"), current_user=stale, db=db)
@@ -435,7 +435,7 @@ def test_stale_request_cannot_enable_automation_after_deactivation(inventory_db)
         rule_id = rule.id
         user = await db.get(User, owners[0])
         stale = SimpleNamespace(id=user.id, token_version=user.token_version)
-        await delete_account(db=db, current_user=user)
+        await _deactivate_account(db=db, current_user=user)
         with pytest.raises(HTTPException) as error:
             await toggle_rule(rule_id, current_user=stale, db=db)
         assert error.value.status_code == 403

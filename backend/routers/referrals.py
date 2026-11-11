@@ -257,9 +257,7 @@ async def delete_account(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if account_closure.has_closure(current_user):
-        raise HTTPException(409, 'Используйте подтверждённое закрытие аккаунта на 30 дней.')
-    return await _deactivate_account(db, current_user)
+    raise HTTPException(409, 'Используйте подтверждённое закрытие аккаунта на 30 дней.')
 
 
 @router.post('/account/close')
