@@ -147,6 +147,12 @@ async def _sync_state(db: AsyncSession, state: ApiSyncState, provider, token: st
             _record_failure(state, exc, now, prev_fail)   # writes only — never reads an expired attr
             await db.commit()
             return
+        if result.get("unsupported"):
+            # Direct page-driver callers must not turn an explicit unsupported
+            # result (including legacy done=True shapes) into successful coverage.
+            _park(state, "unsupported", getattr(provider, "UNSUPPORTED_REASON", "unsupported"), now)
+            await db.commit()
+            return
         prev_fail = 0   # a page came back clean — the failure streak is broken
         state.fail_count = 0
         state.last_safe_error_code = None

@@ -52,6 +52,12 @@ DATA_TYPES = ("card_content", "prices", "orders", "sales", "stocks", "finance",
               # Read-only; reached only through run_api_sync_once (ZERO calls while the flag is OFF).
               "price_observations", "promotions")
 
+# Owner-approved first-free-test HOLD: native amounts/returns/adjustments are not
+# admitted yet. Keep a visible sync state, but never fetch or claim success.
+# CSV and sibling read datasets are outside this restriction.
+UNSUPPORTED = frozenset({"finance"})
+UNSUPPORTED_REASON = "wb_finance_release_hold"
+
 _CARD_PAGE = 100
 _PRICE_PAGE = 1000
 _OBS_PAGE = 1000
@@ -315,6 +321,9 @@ async def fetch_and_persist_page(db, state, token: str, client_id=None) -> dict:
     `defer` True (stocks async report not ready) means "come back later", nothing more to do now.
     Raising leaves the transaction to be rolled back, so the cursor never advances past unwritten
     rows. `client_id` is accepted for a uniform provider signature (WB does not use it)."""
+    if state.data_type in UNSUPPORTED:
+        # Defensive for direct drivers; the scheduler normally parks this first.
+        return {"done": False, "count": 0, "defer": False, "unsupported": True}
     if state.data_type == "card_content":
         return await _page_cards(db, state, token)
     if state.data_type == "prices":
