@@ -31,6 +31,21 @@ def require_recovery_window(user):
     return result
 
 
+def review_erasure_eligibility(user):
+    """Ordinary closure snapshot; neither a row lock nor permission to DELETE."""
+    result = evaluate_closure(
+        policy_version=user.closure_policy_version,
+        closed_at=_database_utc(user.closure_started_at), now=utc_now(),
+        purge_started=user.closure_purge_started_at is not None)
+    # Recovery retains historical closure fields. Only a still-closed account
+    # can be due for review; history alone must never reopen a purge candidate.
+    if user.deleted_at is None:
+        result.update(state='blocked', reason='account_not_closed',
+                      recovery_eligible=False, recovery_deadline=None,
+                      erasure_review_due=False)
+    return result
+
+
 def begin_closure(user):
     if user.closure_purge_started_at is not None:
         raise HTTPException(403, 'Очистка аккаунта уже начата.')
