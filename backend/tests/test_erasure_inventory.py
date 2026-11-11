@@ -6,7 +6,7 @@ from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import event, select, text, update
+from sqlalchemy import event, func, select, text, update
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -19,6 +19,8 @@ from models.marketplace_store import MarketplaceStore
 from models.marketplace_connection import MarketplaceConnection
 from models.api_credential import ApiCredential
 from models.product import Product
+from models.imported_product import ImportedProductRow
+from models.imported_finance import ImportedFinanceRow
 from models.review_response import ReviewResponse
 from models.decision import Decision
 from models.decision_outcome import DecisionOutcome
@@ -261,6 +263,82 @@ def test_mixed_owner_links_are_conflicts_not_owned_rows(inventory_db):
         assert next(r["count"] for r in report["counts"] if r["table"] == "api_sync_states") == 1
         assert next(r["count"] for r in report["conflicting_owner_paths"] if r["table"] == "api_sync_states") == 1
         assert report["complete_erasure_ready"] is False
+
+
+@pytest.mark.parametrize("model,column", [
+    (Product, "marketplace_account_id"),
+    (ImportedProductRow, "marketplace_account_id"),
+    (ImportedProductRow, "marketplace_store_id"),
+    (ImportedProductRow, "product_id"),
+    (ImportedFinanceRow, "marketplace_account_id"),
+    (ImportedFinanceRow, "marketplace_store_id"),
+    (ImportedFinanceRow, "product_id"),
+])
+@pytest.mark.parametrize("foreign_row", [False, True], ids=["foreign-parent", "foreign-row"])
+def test_csv_direct_owner_parent_conflicts_are_read_only_blockers(inventory_db, model, column, foreign_row):
+    loop, engine, db, owners = inventory_db
+    resources = db.info["synthetic_resources"]
+    table_name = model.__tablename__
+
+    async def exercise():
+        product_ids = [await db.scalar(select(Product.id).where(Product.user_id == uid)) for uid in owners]
+        links = [{"marketplace_account_id": resource["account"],
+                  "marketplace_store_id": resource["store"], "product_id": pid}
+                 for resource, pid in zip(resources, product_ids)]
+
+        def row(index, *, legacy=False):
+            values = {"user_id": owners[index], "marketplace": "ozon"}
+            if model is Product:
+                values.update(name="PRIVATE-CSV-NAME", marketplace_account_id=None if legacy else links[index]["marketplace_account_id"])
+            else:
+                values.update(import_id=str(uuid.uuid4()), title="PRIVATE-CSV-TITLE",
+                              **{key: None if legacy else value for key, value in links[index].items()})
+                if model is ImportedProductRow:
+                    values["sku"] = "synthetic"
+            return model(**values)
+
+        # Both coherent links and nullable legacy CSV rows must remain countable.
+        for index in (0, 1):
+            db.add_all([row(index), row(index, legacy=True)])
+        await db.commit()
+        baseline = {uid: await inventory_account(db, uid) for uid in owners}
+        expected = {uid: next(item["count"] for item in report["counts"] if item["table"] == table_name)
+                    for uid, report in baseline.items()}
+        assert all(count == (3 if model is Product else 2) for count in expected.values())
+        assert all(not any(item["table"] == table_name and item["count"]
+                           for item in report["conflicting_owner_paths"]) for report in baseline.values())
+        index = int(foreign_row)
+        mixed = row(index)
+        setattr(mixed, column, links[1 - index][column])
+        db.add(mixed)
+        await db.commit()
+        before = await db.scalar(select(func.count()).select_from(model))
+        statements = []
+
+        def observe(conn, cursor, statement, parameters, context, many):
+            statements.append(statement)
+
+        event.listen(engine.sync_engine, "before_cursor_execute", observe)
+        try:
+            for uid in owners:
+                report = await dry_run_account_erasure(db, uid)
+                conflicts = {item["table"]: item["count"] for item in report["conflicting_owner_paths"]}
+                assert conflicts.get(table_name, 0) == 1
+                review = next(item for item in report["table_reviews"] if item["table"] == table_name)
+                assert review["observed_owner_rows"] == expected[uid]
+                assert "conflicting_owner_paths" in review["reasons"]
+                assert "conflicting_owner_paths" in report["blockers"]
+                assert report["status"] == "blocked" and report["executable"] is False
+                assert report["complete_erasure_ready"] is False
+                assert "PRIVATE-CSV" not in json.dumps(report)
+                assert all(owner not in json.dumps(report) for owner in owners)
+                assert await dry_run_account_erasure(db, uid) == report
+        finally:
+            event.remove(engine.sync_engine, "before_cursor_execute", observe)
+        assert statements and all(statement.lstrip().upper().startswith("SELECT") for statement in statements)
+        assert await db.scalar(select(func.count()).select_from(model)) == before
+
+    loop.run_until_complete(exercise())
 
 
 def test_nullable_verification_links_allowed_but_foreign_credential_conflicts(inventory_db):

@@ -138,6 +138,15 @@ async def inventory_account(db, user_id: str) -> dict:
         conflict_rules[table_name] = and_(or_(*owned), not_(consistent))
         return select(table.c.id).where(consistent)
 
+    # CSV ownership includes the direct owner, not merely optional parent FKs.
+    # Raw product_ids remain diagnostic anchors: a conflicted Product must not
+    # hide reachable child rows. This is not recursive deletion authority.
+    user_ids = select(User.id).where(User.id == user_id)
+    linked("products", (("user_id", user_ids), ("marketplace_account_id", account_ids)))
+    for table_name in ("imported_product_rows", "imported_finance_rows"):
+        linked(table_name, (("user_id", user_ids), ("marketplace_account_id", account_ids),
+               ("marketplace_store_id", store_ids), ("product_id", product_ids)))
+
     linked("connection_verification_attempts", (("connection_id", connection_ids),
            ("credential_id", credential_ids), ("marketplace_account_id", account_ids)))
     linked("api_sync_states", (("marketplace_connection_id", connection_ids),
