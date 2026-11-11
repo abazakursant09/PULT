@@ -14,6 +14,7 @@ from models.marketplace_store import MarketplaceStore
 from models.marketplace_connection import MarketplaceConnection
 from models.api_credential import ApiCredential
 from services.account_closure_policy import rollout_status
+from services.account_closure import review_erasure_eligibility
 
 SHARED_REFERENCE_TABLES = frozenset({
     "marketplace_category_rows", "marketplace_category_attribute_rows",
@@ -70,8 +71,11 @@ async def dry_run_account_erasure(db, user_id: str) -> dict:
         "executable": False,
         "complete_erasure_ready": False,
         "ordinary_closure_policy": rollout_status(),
+        "account_closure_review": inventory["account_closure_review"],
         "blockers": ["purge_executor_not_implemented", "retention_policy_required",
                      "external_stages_not_verified"]
+                    + ([] if inventory["account_closure_review"]["erasure_review_due"]
+                       else ["ordinary_closure_not_review_due"])
                     + (["unclassified_tables"] if inventory["unclassified_tables"] else [])
                     + (["conflicting_owner_paths"] if conflicts else []),
         "table_reviews": rows,
@@ -81,7 +85,8 @@ async def dry_run_account_erasure(db, user_id: str) -> dict:
         "conflicting_owner_paths": [{"table": name, "count": count}
                                     for name, count in sorted(conflicts.items())],
         "unverified_stages": inventory["not_inspected"],
-        "warning": "Review only: row counts are not deletion targets or authorization. No deadlines are assigned.",
+        "warning": ("Review only: counts and lifecycle snapshots are not deletion targets or authorization. "
+                    "No erasure actions are scheduled."),
     }
 
 
@@ -92,9 +97,13 @@ async def inventory_account(db, user_id: str) -> dict:
     A known count does not authorize destruction or resolve retention obligations.
     """
     with db.no_autoflush:
-        exists = await db.scalar(select(User.id).where(User.id == user_id))
-    if exists is None:
+        user = (await db.execute(select(
+            User.id, User.deleted_at, User.closure_policy_version,
+            User.closure_started_at, User.closure_purge_started_at,
+        ).where(User.id == user_id))).one_or_none()
+    if user is None:
         raise ValueError("Account not found")
+    closure_review = review_erasure_eligibility(user)
 
     workspace_ids = select(Workspace.id).where(Workspace.owner_user_id == user_id)
     account_ids = select(MarketplaceAccount.id).where(
@@ -209,6 +218,7 @@ async def inventory_account(db, user_id: str) -> dict:
         "format_version": 1,
         "read_only": True,
         "complete_erasure_ready": False,
+        "account_closure_review": closure_review,
         "counts": counts,
         "schema_scope": "default_schema_tables",
         "unclassified_tables": sorted(unclassified),
@@ -218,6 +228,6 @@ async def inventory_account(db, user_id: str) -> dict:
         "ownerless_review": OWNERLESS_REVIEW.copy(),
         "not_inspected": ["files", "backups", "queues", "external_processors", "retention_grounds",
                           "views", "non_default_schemas", "intra_owner_relationship_consistency",
-                          "direct_owner_parent_consistency"],
+                          "direct_owner_parent_consistency", "concurrent_lifecycle_state"],
         "warning": "Counts are not authorization to delete; indirect and shared references require review.",
     }
