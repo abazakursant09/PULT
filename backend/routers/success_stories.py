@@ -9,6 +9,7 @@ from dependencies import get_current_user
 from models.user import User
 from models.success_story import SuccessStory
 from schemas.success_story import SuccessStoryCreate, SuccessStoryOut
+from services.shared_workflow_guard import require_shared_workflow_write
 
 router = APIRouter()
 
@@ -23,7 +24,10 @@ async def list_stories(db: AsyncSession = Depends(get_db)):
     return result.scalars().all()
 
 
-@router.post("/success-stories", response_model=SuccessStoryOut, status_code=201)
+@router.post(
+    "/success-stories", response_model=SuccessStoryOut, status_code=201,
+    dependencies=[Depends(require_shared_workflow_write)],
+)
 async def create_story(
     data: SuccessStoryCreate,
     current_user: User = Depends(get_current_user),

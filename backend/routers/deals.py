@@ -8,6 +8,7 @@ from database import get_db
 from models.deal import Deal
 from dependencies import get_current_user
 from models.user import User
+from services.shared_workflow_guard import require_shared_workflow_write
 
 router = APIRouter()
 
@@ -64,7 +65,9 @@ def _generate_contract(deal: Deal) -> str:
     )
 
 
-@router.post("/deals", response_model=DealOut)
+@router.post(
+    "/deals", response_model=DealOut, dependencies=[Depends(require_shared_workflow_write)],
+)
 async def create_deal(
     body: DealCreate,
     db: AsyncSession = Depends(get_db),
@@ -114,7 +117,10 @@ async def get_deal(
     return deal
 
 
-@router.patch("/deals/{deal_id}/status", response_model=DealOut)
+@router.patch(
+    "/deals/{deal_id}/status", response_model=DealOut,
+    dependencies=[Depends(require_shared_workflow_write)],
+)
 async def update_deal_status(
     deal_id: str,
     body: DealStatusUpdate,
@@ -135,7 +141,10 @@ async def update_deal_status(
     return deal
 
 
-@router.post("/deals/{deal_id}/sign", response_model=DealOut)
+@router.post(
+    "/deals/{deal_id}/sign", response_model=DealOut,
+    dependencies=[Depends(require_shared_workflow_write)],
+)
 async def sign_deal(
     deal_id: str,
     db: AsyncSession = Depends(get_db),

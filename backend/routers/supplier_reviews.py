@@ -10,6 +10,7 @@ from models.supplier import Supplier
 from models.transport_company import TransportCompany
 from dependencies import get_current_user
 from models.user import User
+from services.shared_workflow_guard import require_shared_workflow_write
 
 router = APIRouter()
 
@@ -60,7 +61,10 @@ async def _recalc_rating(db: AsyncSession, target_type: str, target_id: str) -> 
         obj.total_reviews = total_reviews
 
 
-@router.post("/supplier-reviews", response_model=ReviewOut)
+@router.post(
+    "/supplier-reviews", response_model=ReviewOut,
+    dependencies=[Depends(require_shared_workflow_write)],
+)
 async def create_review(
     body: ReviewCreate,
     db: AsyncSession = Depends(get_db),

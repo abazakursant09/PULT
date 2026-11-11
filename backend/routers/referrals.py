@@ -25,6 +25,10 @@ from models.automation_rule import AutomationRule
 from services.account_write_guard import lock_active_account
 from services import account_closure
 from schemas.account_closure import AccountClosureRequest
+from services.shared_workflow_guard import (
+    require_shared_workflow_write,
+    shared_workflow_writes_held,
+)
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -113,15 +117,26 @@ async def get_my_stats(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    code = await _ensure_code(current_user, db)
-    valid_count = await _revalidate_records(current_user.id, db)
-    await _check_milestones(current_user, valid_count, db)
+    read_only = shared_workflow_writes_held()
+    if not read_only:
+        code = await _ensure_code(current_user, db)
+        valid_count = await _revalidate_records(current_user.id, db)
+        await _check_milestones(current_user, valid_count, db)
 
-    q = await db.execute(
+    query = (
         select(ReferralRecord).where(ReferralRecord.referrer_id == current_user.id)
         .order_by(ReferralRecord.joined_at.desc())
     )
+    if read_only:
+        # Reading the stored snapshot must neither grant rewards nor flush pending state.
+        with db.no_autoflush:
+            q = await db.execute(query)
+    else:
+        q = await db.execute(query)
     records = q.scalars().all()
+    if read_only:
+        code = current_user.referral_code or ""
+        valid_count = sum(1 for record in records if record.is_valid)
 
     total_invited = len(records)
     total_paid    = sum(1 for r in records if r.is_paid)
@@ -137,7 +152,11 @@ async def get_my_stats(
 
     referred_by_email: Optional[str] = None
     if current_user.referred_by_id:
-        rb = await db.get(User, current_user.referred_by_id)
+        if read_only:
+            with db.no_autoflush:
+                rb = await db.get(User, current_user.referred_by_id)
+        else:
+            rb = await db.get(User, current_user.referred_by_id)
         referred_by_email = rb.email if rb else None
 
     return {
@@ -186,7 +205,9 @@ async def get_invitees(
     return result
 
 
-@router.post("/referrals/mark-paid/{invitee_id}")
+@router.post(
+    "/referrals/mark-paid/{invitee_id}", dependencies=[Depends(require_shared_workflow_write)],
+)
 async def mark_referral_paid(
     invitee_id: str,
     db: AsyncSession = Depends(get_db),
