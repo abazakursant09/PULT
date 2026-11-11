@@ -164,14 +164,17 @@ async def register(
         if ordinary_recovery:
             account_closure.request_recovery(existing)
         verification_token = secrets.token_urlsafe(32)
-        existing.hashed_password       = hash_password(data.password)
-        existing.name                  = data.name
         if not ordinary_recovery:
+            existing.hashed_password   = hash_password(data.password)
+            existing.name              = data.name
+            existing.registered_ip     = ip
             existing.deleted_at        = None
             existing.is_restored       = True
+        # An ordinary recovery request is unauthenticated: rotate only its email
+        # proof, never the owner's login secret, profile or registration provenance.
+        # After proof, normal password/MFA login (or the separate reset flow) applies.
         existing.verification_token    = verification_token
         existing.is_verified           = False
-        existing.registered_ip         = ip
         # Preserve referral_code, referred_by_id, was_referrer, was_referred
         # Do NOT create a new ReferralRecord — bonuses don't repeat
         # LEGAL-PRELAUNCH-F2 — a recovery is a fresh consent ACTION: append ONE new evidence row (never
