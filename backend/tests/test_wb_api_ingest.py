@@ -360,8 +360,12 @@ def test_flag_on_runs_and_persists(monkeypatch):
     assert _run(db.execute(select(func.count()).select_from(ImportedCardContentRow))).scalar_one() == 1
     assert _run(db.execute(select(func.count()).select_from(ImportedProductRow))).scalar_one() == 1
     states = _run(db.execute(select(ApiSyncState))).scalars().all()
-    # cards/prices/orders/sales/finance sync in one pass; stocks defers to a second tick (running).
-    assert {s.status for s in states} <= {"synced", "running"}
+    # Finance stays visibly parked under the release HOLD; sibling reads keep working.
+    finance = [s for s in states if s.data_type == "finance"]
+    assert len(finance) == 1 and finance[0].status == "unsupported"
+    assert finance[0].last_success_at is None
+    assert finance[0].last_safe_error_code == wb_ingest.UNSUPPORTED_REASON
+    assert {s.status for s in states if s.data_type != "finance"} <= {"synced", "running"}
     assert not any(s.status in ("paused", "failed") for s in states)
 
 
@@ -406,8 +410,13 @@ def test_auth_error_pauses_connection(monkeypatch):
     monkeypatch.setattr(api_sync.wb_ingest, "wb_client", _Auth())
     _run(api_sync.run_api_sync_once(db))
     states = _run(db.execute(select(ApiSyncState))).scalars().all()
-    assert states and all(s.status == "paused" for s in states)
-    assert all(s.last_safe_error_code == "AUTH" for s in states)
+    assert states
+    for state in states:
+        if state.data_type == "finance":
+            assert state.status == "unsupported" and state.last_safe_error_code == wb_ingest.UNSUPPORTED_REASON
+            assert state.last_success_at is None
+        else:
+            assert state.status == "paused" and state.last_safe_error_code == "AUTH"
 
 
 def test_backoff_open_makes_zero_calls(monkeypatch):

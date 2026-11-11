@@ -37,6 +37,16 @@ import tasks.api_sync as api_sync
 _LOOP = asyncio.new_event_loop()
 
 
+@pytest.fixture
+def unadmitted_finance_normalization(monkeypatch):
+    """Offline legacy mapping contract only, NOT release admission of native finance.
+
+    Public HOLD is tested with the real default in test_wb_finance_release_hold.
+    These selected unit cases retain the existing normalization regression proof.
+    """
+    monkeypatch.setattr(wb_ingest, "UNSUPPORTED", frozenset())
+
+
 def _run(coro):
     return _LOOP.run_until_complete(coro)
 
@@ -175,7 +185,7 @@ def test_repeat_operation_no_duplicate(monkeypatch):
     assert _run(db.execute(select(func.count()).select_from(MarketplaceOperation))).scalar_one() == 1
 
 
-def test_other_keeps_provider_code(monkeypatch):
+def test_other_keeps_provider_code(monkeypatch, unadmitted_finance_normalization):
     db = _run(_new_db()); uid, acc, store, conn = _run(_seed(db))
     st = _run(_state(db, conn, store, "finance"))
     _use(monkeypatch, _StubWB(finance=[{"rrd_id": "rr1", "srid": "sr1", "nm_id": 1,
@@ -297,7 +307,7 @@ def test_unknown_sale_prefix_is_other(monkeypatch):
     ({"retail_amount": "1234.56"}, Decimal("1234.56")),
     ({"retail_amount": "-1234.56"}, Decimal("-1234.56")),
 ])
-def test_finance_gross_never_uses_settlement(monkeypatch, gross, expected):
+def test_finance_gross_never_uses_settlement(monkeypatch, gross, expected, unadmitted_finance_normalization):
     """Guard legacy normalization; these synthetic rows do not prove the native WB contract."""
     db = _run(_new_db())
     try:
@@ -320,7 +330,7 @@ def test_finance_gross_never_uses_settlement(monkeypatch, gross, expected):
 
 @pytest.mark.parametrize("field", ["commission_amount", "delivery_amount", "penalty", "deduction"])
 @pytest.mark.parametrize("value", ["NaN", "Infinity", "-Infinity"])
-def test_finance_nonfinite_component_is_unknown(monkeypatch, field, value):
+def test_finance_nonfinite_component_is_unknown(monkeypatch, field, value, unadmitted_finance_normalization):
     """Invalid components follow the existing unknown-value policy, not a zero-money policy."""
     db = _run(_new_db())
     try:
@@ -339,7 +349,7 @@ def test_finance_nonfinite_component_is_unknown(monkeypatch, field, value):
         _run(db.bind.dispose())
 
 
-def test_finance_components_do_not_overwrite(monkeypatch):
+def test_finance_components_do_not_overwrite(monkeypatch, unadmitted_finance_normalization):
     db = _run(_new_db()); uid, acc, store, conn = _run(_seed(db))
     st = _run(_state(db, conn, store, "finance"))
     _use(monkeypatch, _StubWB(finance=[{
@@ -353,7 +363,7 @@ def test_finance_components_do_not_overwrite(monkeypatch):
     assert by["logistics"] == Decimal("-40")
 
 
-def test_finance_unknown_amount_is_null(monkeypatch):
+def test_finance_unknown_amount_is_null(monkeypatch, unadmitted_finance_normalization):
     db = _run(_new_db()); uid, acc, store, conn = _run(_seed(db))
     st = _run(_state(db, conn, store, "finance"))
     _use(monkeypatch, _StubWB(finance=[{"rrd_id": "rr1", "srid": "sr1", "nm_id": 1,
@@ -363,7 +373,7 @@ def test_finance_unknown_amount_is_null(monkeypatch):
     assert op.amount is None   # never coerced to 0
 
 
-def test_v5_endpoint_never_called(monkeypatch):
+def test_v5_endpoint_never_called(monkeypatch, unadmitted_finance_normalization):
     db = _run(_new_db()); uid, acc, store, conn = _run(_seed(db))
     st = _run(_state(db, conn, store, "finance"))
     stub = _StubWB(finance=[{"rrd_id": "rr1", "srid": "s", "supplier_oper_name": "Продажа",
@@ -373,7 +383,7 @@ def test_v5_endpoint_never_called(monkeypatch):
     assert stub.v5_called is False   # get_sales (v5-style realization) is never used by finance
 
 
-def test_finance_repeat_no_duplicate(monkeypatch):
+def test_finance_repeat_no_duplicate(monkeypatch, unadmitted_finance_normalization):
     db = _run(_new_db()); uid, acc, store, conn = _run(_seed(db))
     st = _run(_state(db, conn, store, "finance"))
     row = [{"rrd_id": "rr1", "srid": "s", "nm_id": 1, "supplier_oper_name": "Продажа",
@@ -484,7 +494,7 @@ def test_flag_off_zero_calls(monkeypatch):
     assert _run(db.execute(select(func.count()).select_from(MarketplaceOperation))).scalar_one() == 0
 
 
-def test_scheduler_runs_all_types(monkeypatch):
+def test_scheduler_runs_supported_types_and_holds_finance(monkeypatch):
     db = _run(_new_db()); uid, acc, store, conn = _run(_seed(db))
     monkeypatch.setattr(api_sync.settings, "api_data_sync_enabled", True)
     stub = _StubWB(
@@ -510,7 +520,11 @@ def test_scheduler_runs_all_types(monkeypatch):
     _run(db.commit())
     _run(api_sync.run_api_sync_once(db))
     ops = _run(db.execute(select(MarketplaceOperation))).scalars().all()
-    assert {o.operation_type for o in ops} >= {"order", "sale", "sale"}   # order + sale + finance sale
+    assert {o.operation_type for o in ops} >= {"order", "sale"}
+    assert all(o.provider_dataset != "finance" for o in ops)
+    finance = _run(db.execute(select(ApiSyncState).where(ApiSyncState.data_type == "finance"))).scalar_one()
+    assert finance.status == "unsupported" and finance.last_success_at is None
+    assert finance.last_safe_error_code == wb_ingest.UNSUPPORTED_REASON
     stock_rows = _run(db.execute(select(ImportedProductRow)
                                  .where(ImportedProductRow.source == "api"))).scalars().all()
     assert any(r.stock == 9 for r in stock_rows)
@@ -547,7 +561,13 @@ def test_auth_pauses_all_types(monkeypatch):
     monkeypatch.setattr(api_sync.wb_ingest, "wb_client", _Auth())
     _run(api_sync.run_api_sync_once(db))
     states = _run(db.execute(select(ApiSyncState))).scalars().all()
-    assert states and all(s.status == "paused" and s.last_safe_error_code == "AUTH" for s in states)
+    assert states
+    for state in states:
+        if state.data_type == "finance":
+            assert state.status == "unsupported" and state.last_safe_error_code == wb_ingest.UNSUPPORTED_REASON
+            assert state.last_success_at is None
+        else:
+            assert state.status == "paused" and state.last_safe_error_code == "AUTH"
 
 
 def test_backoff_open_zero_calls(monkeypatch):
