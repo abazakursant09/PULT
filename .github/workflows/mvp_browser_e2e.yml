@@ -61,6 +61,25 @@ jobs:
         working-directory: frontend
         run: npm ci
 
+      - name: Use official Ubuntu package mirrors
+        run: |
+          set -euo pipefail
+          # runner-images uses one priority-tagged mirror list for all Ubuntu pockets.
+          # Use Kernel.org's Ubuntu archive when the ubuntu.com DNS zone is unavailable.
+          # Ubuntu signing keys, suites, TLS verification and all tests stay unchanged.
+          die() { printf '%s\n' "Ubuntu mirror preflight: $1" >&2; exit 1; }
+          getent ahosts mirrors.edge.kernel.org >/dev/null || die 'mirror DNS unavailable'
+          for suite in noble noble-security; do
+            curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+              --connect-timeout 10 --max-time 30 --max-filesize 2097152 --output /dev/null \
+              "https://mirrors.edge.kernel.org/ubuntu/dists/$suite/InRelease" || die 'signed repository metadata unavailable'
+          done
+          test -f /etc/apt/apt-mirrors.txt && test ! -L /etc/apt/apt-mirrors.txt && test -s /etc/apt/apt-mirrors.txt || die 'mirror list missing or unsafe'
+          test -f /etc/apt/sources.list.d/ubuntu.sources && test ! -L /etc/apt/sources.list.d/ubuntu.sources || die 'unsupported sources layout'
+          grep -Fq 'mirror+file:/etc/apt/apt-mirrors.txt' /etc/apt/sources.list.d/ubuntu.sources || die 'sources do not use the mirror list'
+          grep -Eq '^https?://(azure\.archive|archive|security)\.ubuntu\.com/ubuntu/([[:space:]]+priority:[0-9]+)?[[:space:]]*$|^https://mirrors\.edge\.kernel\.org/ubuntu/[[:space:]]*$' /etc/apt/apt-mirrors.txt || die 'unrecognized mirror list'
+          printf '%s\n' 'https://mirrors.edge.kernel.org/ubuntu/' | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+
       - name: Install Chromium
         working-directory: frontend
         run: npx --no-install playwright install --with-deps chromium

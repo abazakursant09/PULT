@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 import re
 import shlex
+from textwrap import dedent
 
+import pytest
 import yaml
 
 REPO = Path(__file__).resolve().parents[2]
@@ -15,6 +18,25 @@ SCENARIO_COMMAND = (
     "npm run test:e2e -- e2e/mvp-path.spec.ts --project=chromium --retries=0 "
     "--forbid-only --global-timeout=600000 --trace=off"
 )
+MIRROR_STEP = "Use official Ubuntu package mirrors"
+MIRROR_COMMAND = dedent(r"""
+    set -euo pipefail
+    # runner-images uses one priority-tagged mirror list for all Ubuntu pockets.
+    # Use Kernel.org's Ubuntu archive when the ubuntu.com DNS zone is unavailable.
+    # Ubuntu signing keys, suites, TLS verification and all tests stay unchanged.
+    die() { printf '%s\n' "Ubuntu mirror preflight: $1" >&2; exit 1; }
+    getent ahosts mirrors.edge.kernel.org >/dev/null || die 'mirror DNS unavailable'
+    for suite in noble noble-security; do
+      curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+        --connect-timeout 10 --max-time 30 --max-filesize 2097152 --output /dev/null \
+        "https://mirrors.edge.kernel.org/ubuntu/dists/$suite/InRelease" || die 'signed repository metadata unavailable'
+    done
+    test -f /etc/apt/apt-mirrors.txt && test ! -L /etc/apt/apt-mirrors.txt && test -s /etc/apt/apt-mirrors.txt || die 'mirror list missing or unsafe'
+    test -f /etc/apt/sources.list.d/ubuntu.sources && test ! -L /etc/apt/sources.list.d/ubuntu.sources || die 'unsupported sources layout'
+    grep -Fq 'mirror+file:/etc/apt/apt-mirrors.txt' /etc/apt/sources.list.d/ubuntu.sources || die 'sources do not use the mirror list'
+    grep -Eq '^https?://(azure\.archive|archive|security)\.ubuntu\.com/ubuntu/([[:space:]]+priority:[0-9]+)?[[:space:]]*$|^https://mirrors\.edge\.kernel\.org/ubuntu/[[:space:]]*$' /etc/apt/apt-mirrors.txt || die 'unrecognized mirror list'
+    printf '%s\n' 'https://mirrors.edge.kernel.org/ubuntu/' | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+""").lstrip("\n")
 
 
 def _workflow():
@@ -39,6 +61,22 @@ def _steps():
 def _script():
     assert RUNNER.is_file(), "namespace runner missing"
     return RUNNER.read_text(encoding="utf-8")
+
+
+def _assert_no_external_product_inputs(workflow):
+    # Only the complete, reviewed package-setup step may contain repository URLs.
+    # Keep credential and privileged-execution bans across the entire workflow.
+    assert not re.search(r"secrets\.|upload-artifact|pull_request_target|self-hosted", repr(workflow))
+    steps = workflow["jobs"]["mvp-browser-e2e"]["steps"]
+    mirrors = [step for step in steps if step.get("name") == MIRROR_STEP]
+    assert len(mirrors) == 1
+    assert mirrors[0] == {"name": MIRROR_STEP, "run": MIRROR_COMMAND}
+    without_mirror = deepcopy(workflow)
+    without_mirror["jobs"]["mvp-browser-e2e"]["steps"] = [
+        step for step in without_mirror["jobs"]["mvp-browser-e2e"]["steps"]
+        if step.get("name") != MIRROR_STEP
+    ]
+    assert not re.search(r"https?://", repr(without_mirror))
 
 
 def test_browser_workflow_triggers_and_permissions_are_narrow():
@@ -84,6 +122,7 @@ def test_browser_workflow_runs_the_namespace_runner_without_failure_masking():
     assert set(steps) == {
         "Checkout", "Set up Python", "Set up Node", "Install locked backend dependencies",
         "Install locked frontend dependencies", "Install Chromium", "Prepare disposable database", "Run MVP browser",
+        MIRROR_STEP,
         "Prepare native PostgreSQL tools and disposable root",
         "Run PostgreSQL browser, native restore and session acceptance",
     }
@@ -91,8 +130,38 @@ def test_browser_workflow_runs_the_namespace_runner_without_failure_masking():
         "name": "Run MVP browser", "working-directory": "frontend", "run": "bash e2e/run-ci.sh",
     }
     assert all("continue-on-error" not in step and "if" not in step for step in steps.values())
-    parsed_code = repr(_workflow())
-    assert not re.search(r"secrets\.|upload-artifact|pull_request_target|self-hosted|https?://", parsed_code)
+    _assert_no_external_product_inputs(_workflow())
+
+
+def test_browser_mirror_setup_is_exact_and_precedes_chromium_install():
+    _assert_no_external_product_inputs(_workflow())
+    names = list(_steps())
+    assert names.index("Install locked frontend dependencies") < names.index(MIRROR_STEP)
+    assert names.index(MIRROR_STEP) < names.index("Install Chromium")
+
+
+@pytest.mark.parametrize("mutation", [
+    "product_url", "secret_elsewhere", "secret_in_mirror", "extra_mirror_command",
+    "extra_mirror_setting", "duplicate_mirror",
+])
+def test_browser_mirror_exception_rejects_unreviewed_inputs(mutation):
+    workflow = _workflow()
+    steps = workflow["jobs"]["mvp-browser-e2e"]["steps"]
+    mirror = next(step for step in steps if step["name"] == MIRROR_STEP)
+    if mutation == "product_url":
+        workflow["jobs"]["mvp-browser-e2e"]["env"]["PRODUCT_URL"] = "https://product.invalid"
+    elif mutation == "secret_elsewhere":
+        workflow["jobs"]["mvp-browser-e2e"]["env"]["TOKEN"] = "${{ secrets.PRODUCT_TOKEN }}"
+    elif mutation == "secret_in_mirror":
+        mirror["run"] += "echo '${{ secrets.PRODUCT_TOKEN }}'\n"
+    elif mutation == "extra_mirror_command":
+        mirror["run"] += "curl https://unreviewed.invalid\n"
+    elif mutation == "extra_mirror_setting":
+        mirror["env"] = {"EXTRA": "unreviewed"}
+    else:
+        steps.append(deepcopy(mirror))
+    with pytest.raises(AssertionError):
+        _assert_no_external_product_inputs(workflow)
 
 
 def test_browser_workflow_prepares_fresh_run_local_database():
