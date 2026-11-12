@@ -13,6 +13,9 @@ die() { printf '%s restore: FAIL: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" >&
 : "${RESTORE_S3_SECRET_ACCESS_KEY:?required}"; : "${RESTORE_OBJECT_KEY:?RESTORE_OBJECT_KEY required}"
 : "${BACKUP_RESTORE_IDENTITY_FILE:?age private identity file required}"
 PGPORT="${PGPORT:-5432}"
+# A concrete NEW database name only, never libpq conninfo or a system database.
+case "$PGDATABASE" in postgres|template0|template1|*[!a-zA-Z0-9_-]*) die "invalid restore target name";; esac
+[ "${#PGDATABASE}" -le 63 ] || die "invalid restore target name"
 if [ -n "${PGPASSWORD_FILE:-}" ]; then PGPASSWORD="$(cat "$PGPASSWORD_FILE")"; export PGPASSWORD; fi
 [ -f "$BACKUP_RESTORE_IDENTITY_FILE" ] || die "identity file not found"
 
@@ -29,6 +32,13 @@ trap 'rm -rf "$TMP"' EXIT INT TERM
 CIPHER="$TMP/db.dump.age"; PLAIN="$TMP/db.dump"; MANIFEST="$TMP/manifest.json"
 KEY="$RESTORE_OBJECT_KEY"; MKEY="${KEY}.manifest.json"
 
+# Trust input is external to the restored database AND to the backup/manifest.
+# Missing/untrusted/nonempty history blocks before any fetch/decrypt/database work.
+: "${RESTORE_ERASURE_CHECKPOINT_FILE:?external complete checkpoint required}"
+[ -f "$RESTORE_ERASURE_CHECKPOINT_FILE" ] && [ ! -L "$RESTORE_ERASURE_CHECKPOINT_FILE" ] || die "invalid checkpoint source"
+head -c 65537 "$RESTORE_ERASURE_CHECKPOINT_FILE" > "$TMP/erasure.checkpoint" || die "cannot snapshot checkpoint"
+erasure-checkpoint.sh "$TMP/erasure.checkpoint" || die "erasure checkpoint blocked restore"
+
 log "fetch manifest + ciphertext"
 rclone copyto "rd:${RESTORE_S3_BUCKET}/${MKEY}" "$MANIFEST" || die "manifest fetch failed"
 rclone copyto "rd:${RESTORE_S3_BUCKET}/${KEY}" "$CIPHER" || die "ciphertext fetch failed"
@@ -44,6 +54,7 @@ REMOTE_SIZE="$(rclone lsjson --stat "rd:${RESTORE_S3_BUCKET}/${KEY}" 2>/dev/null
 [ "$REMOTE_SIZE" = "$MAN_CIPHER_SIZE" ] || die "remote size $REMOTE_SIZE != manifest $MAN_CIPHER_SIZE"
 sha256sum "$CIPHER" > "$TMP/c.sha"; GOT_CIPHER_SHA="$(cut -d' ' -f1 "$TMP/c.sha")"
 [ "$GOT_CIPHER_SHA" = "$MAN_CIPHER_SHA" ] || die "ciphertext sha256 mismatch (corrupt/tampered)"
+[ "$MAN_CIPHER_SHA" = "$RESTORE_ERASURE_EXPECTED_CIPHER_SHA256" ] || die "backup does not match trusted erasure checkpoint"
 
 log "decrypt (age identity)"
 age -d -i "$BACKUP_RESTORE_IDENTITY_FILE" -o "$PLAIN" "$CIPHER" || die "decryption failed"
@@ -61,4 +72,20 @@ pg_restore --exit-on-error --no-owner --no-privileges --dbname="$PGDATABASE" "$P
 
 log "integrity verification"
 integrity.sh || die "integrity verification failed"
-log "SUCCESS restored key=$KEY"
+# This runner never releases a database to the application. The target must
+# already be isolated from applications/workers throughout restore. Close new
+# connections after integrity, and refuse a terminal result with other sessions.
+psql -X -d postgres -v "target_db=$PGDATABASE" -v ON_ERROR_STOP=1 >/dev/null 2>&1 <<'SQL' || die "target quarantine failed; keep infrastructure isolated"
+SELECT set_config('pult.restore_target', :'target_db', false);
+SELECT format('ALTER DATABASE %I ALLOW_CONNECTIONS false', current_setting('pult.restore_target')) \gexec
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_stat_activity WHERE datname=current_setting('pult.restore_target')) THEN
+    RAISE EXCEPTION 'other sessions remain';
+  END IF;
+END $$;
+SQL
+# Detect a changed local head/export, but do not claim this proves a durable
+# external head has not advanced. Fresh authority is required before ANY release.
+cmp -s "$RESTORE_ERASURE_CHECKPOINT_FILE" "$TMP/erasure.checkpoint" || die "checkpoint changed during restore; target remains quarantined"
+erasure-checkpoint.sh "$TMP/erasure.checkpoint" || die "final checkpoint validation failed"
+log "QUARANTINED restored key=$KEY (not application release)"

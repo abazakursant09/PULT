@@ -14,6 +14,7 @@ on:
       - docs/backup-restore-policy.md
       - backend/tests/test_backup_restore_contract_guard.py
       - backend/tests/test_backup_verifier.py
+      - backend/tests/test_restore_erasure_checkpoint.py
       - backend/alembic/**
       - backend/models/**
       - .github/workflows/backup_restore_synthetic.yml
@@ -26,6 +27,7 @@ on:
       - docker-compose.backup.yml
       - backend/tests/test_backup_restore_contract_guard.py
       - backend/tests/test_backup_verifier.py
+      - backend/tests/test_restore_erasure_checkpoint.py
       - .github/workflows/backup_restore_synthetic.yml
 
 permissions:
@@ -61,7 +63,7 @@ jobs:
         working-directory: backend
         run: |
           pip install --require-hashes -r requirements-ci.lock
-          python -m pytest tests/test_backup_restore_contract_guard.py tests/test_backup_verifier.py -q
+          python -m pytest tests/test_backup_restore_contract_guard.py tests/test_backup_verifier.py tests/test_restore_erasure_checkpoint.py -q
 
       - name: Build backup runner image (pinned base + pinned rclone/age, hash-verified)
         run: docker buildx build --load -t pult-backup:ci ops/backup
@@ -148,6 +150,18 @@ jobs:
           KEY="$(printf '%s\n' "$OUT" | sed -n 's/.*SUCCESS key=\([^ ]*\).*/\1/p' | head -1)"
           test -n "$KEY" || { echo "no backup key parsed"; exit 1; }
           echo "key=$KEY" >> "$GITHUB_OUTPUT"
+          CIPHER_SHA="$(printf '%s\n' "$OUT" | sed -n 's/.*ciphertext_sha256=\([0-9a-f]*\).*/\1/p' | head -1)"
+          test "${#CIPHER_SHA}" = 64
+          echo "cipher_sha=$CIPHER_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Synthetic complete empty erasure checkpoint (not production journal proof)
+        id: checkpoint
+        run: |
+          set -euo pipefail
+          printf 'pult-erasure-checkpoint-v1\nscope synthetic\nsequence 1\nbackup-sha256 %s\ncoverage complete\n' \
+            '${{ steps.bk.outputs.cipher_sha }}' > "$RUNNER_TEMP/erasure.checkpoint"
+          chmod 0444 "$RUNNER_TEMP/erasure.checkpoint"
+          echo "sha=$(sha256sum "$RUNNER_TEMP/erasure.checkpoint" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Verify split-principal permissions with positive controls
         env:
@@ -174,19 +188,66 @@ jobs:
       - name: Restore into new empty target + integrity
         run: |
           set -euo pipefail
+          restore_target() {
           docker run --rm --network pultbk -v "$RUNNER_TEMP/age.key":/ident:ro \
-            -e PGHOST=pgtarget -e PGUSER=postgres -e PGPASSWORD="$PGPW" -e PGDATABASE=business_pult \
+            -v "$RUNNER_TEMP/erasure.checkpoint":/checkpoint:ro \
+            -e RESTORE_ERASURE_CHECKPOINT_FILE=/checkpoint \
+            -e RESTORE_ERASURE_CHECKPOINT_SHA256='${{ steps.checkpoint.outputs.sha }}' \
+            -e RESTORE_ERASURE_EXPECTED_SCOPE=synthetic -e RESTORE_ERASURE_EXPECTED_SEQUENCE=1 \
+            -e RESTORE_ERASURE_EXPECTED_CIPHER_SHA256='${{ steps.bk.outputs.cipher_sha }}' \
+            -e PGHOST=pgtarget -e PGUSER=postgres -e PGPASSWORD="$PGPW" -e PGDATABASE="$1" \
             -e RESTORE_S3_ENDPOINT=http://minio:9000 -e RESTORE_S3_BUCKET="$BUCKET" -e RESTORE_S3_PROVIDER=Minio \
             -e RESTORE_S3_ACCESS_KEY_ID=civerifier -e RESTORE_S3_SECRET_ACCESS_KEY=civerifiersecret123 \
             -e RESTORE_OBJECT_KEY="${{ steps.bk.outputs.key }}" -e BACKUP_RESTORE_IDENTITY_FILE=/ident \
             -e EXPECTED_ALEMBIC_HEAD=acl1a2b3c4d01 -e EXPECTED_SCHEMA_SHA="${{ steps.cap.outputs.schema_sha }}" \
             -e EXPECTED_USERS_COUNT="${{ steps.cap.outputs.ucount }}" -e EXPECTED_USERS_CKSUM="${{ steps.cap.outputs.ucksum }}" \
             pult-backup:ci restore.sh
+          }
+          restore_target business_pult
+
+          # Separate post-restore negative: an existing peer must prevent the
+          # terminal outcome, while the target remains closed to NEW connections.
+          docker exec pgtarget psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE occupied_restore'
+          docker exec pgtarget psql -U postgres -d occupied_restore -v ON_ERROR_STOP=1 \
+            -c "SET application_name='restore_guard_held_peer'; SELECT pg_sleep(120)" > "$RUNNER_TEMP/held-peer.out" 2>&1 &
+          PEER=$!
+          for i in $(seq 1 30); do
+            N="$(docker exec pgtarget psql -U postgres -d postgres -tAc "SELECT count(*) FROM pg_stat_activity WHERE datname='occupied_restore' AND application_name='restore_guard_held_peer'")"
+            test "$N" = 1 && break
+            sleep 0.2
+          done
+          test "$N" = 1
+          if restore_target occupied_restore > "$RUNNER_TEMP/occupied-restore.out" 2>&1; then
+            echo 'existing-session quarantine unexpectedly succeeded'; exit 1
+          fi
+          if grep -F 'QUARANTINED restored' "$RUNNER_TEMP/occupied-restore.out"; then exit 1; fi
+          grep -F 'target quarantine failed' "$RUNNER_TEMP/occupied-restore.out"
+          CLOSED="$(docker exec pgtarget psql -U postgres -d postgres -tAc "SELECT datallowconn FROM pg_database WHERE datname='occupied_restore'")"
+          test "$CLOSED" = f
+          N="$(docker exec pgtarget psql -U postgres -d postgres -tAc "SELECT count(*) FROM pg_stat_activity WHERE datname='occupied_restore' AND application_name='restore_guard_held_peer'")"
+          test "$N" = 1
+          docker exec pgtarget psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
+            -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='occupied_restore' AND application_name='restore_guard_held_peer'"
+          wait "$PEER" || true
+
+      - name: Assert restored database is not accepting connections (including superuser)
+        run: |
+          set -euo pipefail
+          ALLOW="$(docker exec pgtarget psql -U postgres -d postgres -tAc "SELECT datallowconn FROM pg_database WHERE datname='business_pult'")"
+          test "$ALLOW" = f
+          if docker exec pgtarget psql -U postgres -d business_pult -c 'SELECT 1' > "$RUNNER_TEMP/quarantine.out" 2>&1; then exit 1; fi
+          grep -F 'not currently accepting connections' "$RUNNER_TEMP/quarantine.out"
+          docker exec pgtarget psql -U postgres -d postgres -c 'SELECT 1'
 
       - name: Negative matrix (all must fail-closed)
         run: |
           set -euo pipefail
           docker run --rm --network pultbk -v "$RUNNER_TEMP/age.key":/ident:ro \
+            -v "$RUNNER_TEMP/erasure.checkpoint":/checkpoint:ro \
+            -e RESTORE_ERASURE_CHECKPOINT_FILE=/checkpoint \
+            -e RESTORE_ERASURE_CHECKPOINT_SHA256='${{ steps.checkpoint.outputs.sha }}' \
+            -e RESTORE_ERASURE_EXPECTED_SCOPE=synthetic -e RESTORE_ERASURE_EXPECTED_SEQUENCE=1 \
+            -e RESTORE_ERASURE_EXPECTED_CIPHER_SHA256='${{ steps.bk.outputs.cipher_sha }}' \
             -e PGHOST=pgtarget -e PGUSER=postgres -e PGPASSWORD="$PGPW" \
             -e GOOD_KEY="${{ steps.bk.outputs.key }}" -e BACKUP_RESTORE_IDENTITY_FILE=/ident -e NEG_PREFIX="$PREFIX/neg" \
             -e RESTORE_S3_ENDPOINT=http://minio:9000 -e RESTORE_S3_BUCKET="$BUCKET" -e RESTORE_S3_PROVIDER=Minio \
