@@ -94,6 +94,61 @@ both SHA-256s/sizes/object-key/tool versions.
 
 ## Verified restore
 
+### Erasure blocking foundation (not automatic replay or application admission)
+
+`restore.sh` now requires an independently trusted complete erasure checkpoint
+before fetching S3 content. This is a deliberately conservative availability
+tradeoff: **any nonempty history blocks the entire restore**, even if those UUIDs
+are absent from `users`. No descendant/ownerless data is assumed erased and no
+automatic `DELETE` is attempted. Intent/partial/completed erasures all require
+reconciliation; ordinary reversible account closure is not a completed purge.
+
+The UTF-8/ASCII checkpoint contract has exactly five LF-separated lines for an
+authoritative empty history (no optional/unknown fields):
+
+```text
+pult-erasure-checkpoint-v1
+scope <installation-scope>
+sequence <positive-canonical-decimal>
+backup-sha256 <lowercase-64-hex-ciphertext-digest>
+coverage complete
+```
+
+Extra records, missing history, partial batches, unknown versions and mismatched
+pins fail closed. Supply the read-only file plus its exact SHA-256, installation
+scope, **exact current head sequence**, and backup digest through the restore-only
+environment contract. These pins must come from trusted current state **outside
+the restored database, backup manifest and checkpoint transport**. Taking the
+digest from an untrusted file beside that same file is not authentication or
+freshness. An empty set means complete history across the eligible recovery
+horizon, not an empty batch. Do not manufacture an empty checkpoint to restore
+an installation with erasures. Only the synthetic CI fixture may assert its
+known empty history. Snapshotted bytes are bounded to 64 KiB and hash-checked;
+the fetched ciphertext must additionally match the trusted backup digest.
+
+The target must be a separate isolated database with **no application, scheduler,
+external dispatchers or other clients throughout the operation**. Preserve the
+original integrity count/checksum proof. After it, the runner sets PostgreSQL
+`ALLOW_CONNECTIONS=false`, rejects remaining other sessions, and checks that the
+local checkpoint export did not change. Exit zero and `QUARANTINED` mean only
+that isolated restore completed; they **never** authorize application release.
+Any failed stage leaves the target unapproved and infrastructure isolation must
+remain in place. Do not point this runner at a working database. Quarantine
+requires database-owner authority; errors are not bypassed.
+
+No automatic reopening, rollback to a legacy unguarded runner, missing-checkpoint
+override or synthetic bypass exists. Recovery of an interrupted run uses another
+new isolated target. Before any future release, a separate reviewed procedure must
+reconcile the latest durable external head, fence concurrent purges, perform full
+replay/verification and authorize admission. The local export comparison alone
+does not establish that an immutable external head has not advanced.
+
+**Still open:** durable external journal writer/read protocol and independent
+latest-head verification; full purge mapping/replay; real retention enforcement;
+PITR admission. `ops/pitr/restore.sh` remains explicitly synthetic-only and is not
+an alternative production admission path. This change does not erase old backups,
+change retention periods, publish real checkpoints/IDs, or permit public launch.
+
 Restore fetches, checks remote size + ciphertext SHA-256 against the manifest, decrypts with the
 private identity, checks plaintext SHA-256, `pg_restore --list`, asserts the target is **empty**
 (never `--clean`), restores, then runs integrity checks (Alembic head `rob1a2b3c4d01`, full

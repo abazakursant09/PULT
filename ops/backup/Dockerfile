@@ -33,7 +33,7 @@ RUN set -eu; \
     rclone version | head -1; age --version
 
 # Runner scripts are baked in (self-contained image; no host bind mounts of code at runtime).
-COPY --chmod=0755 backup.sh restore.sh integrity.sh seed_synthetic.sh ci_negative.sh /usr/local/bin/
+COPY --chmod=0755 backup.sh restore.sh erasure-checkpoint.sh integrity.sh seed_synthetic.sh ci_negative.sh /usr/local/bin/
 
 WORKDIR /work
 USER 10002:10002
