@@ -21,6 +21,7 @@ on:
       - backend/tests/test_erasure_journal_s3.py
       - backend/tests/test_erasure_anchor.py
       - backend/tests/test_erasure_anchor_process.py
+      - backend/tests/test_erasure_custodian.py
       - backend/alembic/**
       - backend/models/**
       - .github/workflows/backup_restore_synthetic.yml
@@ -40,6 +41,7 @@ on:
       - backend/tests/test_erasure_journal_s3.py
       - backend/tests/test_erasure_anchor.py
       - backend/tests/test_erasure_anchor_process.py
+      - backend/tests/test_erasure_custodian.py
       - .github/workflows/backup_restore_synthetic.yml
 
 permissions:
@@ -75,7 +77,10 @@ jobs:
         working-directory: backend
         run: |
           pip install --require-hashes -r requirements-ci.lock
-          python -m pytest tests/test_backup_restore_contract_guard.py tests/test_backup_verifier.py tests/test_restore_erasure_checkpoint.py tests/test_erasure_journal.py tests/test_erasure_journal_s3.py tests/test_erasure_anchor.py tests/test_erasure_anchor_process.py -q
+          python -m pytest tests/test_backup_restore_contract_guard.py tests/test_backup_verifier.py tests/test_restore_erasure_checkpoint.py tests/test_erasure_journal.py tests/test_erasure_journal_s3.py tests/test_erasure_anchor.py tests/test_erasure_anchor_process.py tests/test_erasure_custodian.py -q
+
+      - name: Synthetic Linux custodian isolation (real distinct unprivileged UIDs)
+        run: sudo -n -- "$(command -v python)" -I -B ops/backup/tests/custodian_isolation_proof.py
 
       - name: Build backup runner image (pinned base + pinned rclone/age, hash-verified)
         run: docker buildx build --load -t pult-backup:ci ops/backup

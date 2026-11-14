@@ -1,7 +1,7 @@
 # Independent erasure-head custodian: dormant reference implementation
 
 This slice adds a **local, independently read-back, durable storage protocol**.
-It does not deploy a custodian, authenticate an RPC boundary, grant IAM access,
+It does not deploy a custodian, expose a network RPC boundary, grant IAM access,
 execute a purge, export a restore checkpoint, admit a restored database, enable
 API/SMTP, or authorize public launch. Synthetic local tests are not live Selectel
 proof or evidence that the actual infrastructure is isolated.
@@ -19,7 +19,8 @@ reader and the persisted metadata. A writer runner receives candidate bytes/ETag
 not authority to change custodian storage. The reference runner uses in-process
 objects to exercise the protocol; **Python object privacy is not a security
 boundary**. Production requires a separate OS principal/service and authenticated
-ephemeral-session protocol, neither implemented nor claimed here. The journal
+ephemeral-session protocol. The optional Linux adapter below implements a local
+UID-authenticated boundary; it is not deployed or packaged here. The journal
 writer must have no filesystem/backup/administrative access to the custodian.
 
 Creating a custodian file is an explicit operation with operator-supplied scope,
@@ -131,10 +132,85 @@ after extraction. Existing restore/quarantine, backup and canary guards remain
 unchanged and are included in the combined local gate. The CI workflow adds these
 new tests but does not package them into the backup image or execute a live CLI.
 
-Still open: independently provisioned/isolated custodian and authenticated service
-boundary, bootstrap custody and anti-rollback recovery controls, live provider
+Still open: independently provisioned production custodian and host integration,
+bootstrap custody and anti-rollback recovery controls, live provider
 protocol/IAM tests, explicit recovery of unresolved attempts, stable subject IDs,
 full purge/replay mapping, purge/restore fencing, retention enforcement and PITR
 admission. Existing restore guards remain unchanged and accept no journal export
 from this code. A `complete` journal event is still a caller assertion, not proof
 that every related record was erased.
+
+## Optional Linux process boundary (not a deployment)
+
+`erasure_custodian.py` adds `UnixCustodianServer` and `UnixAnchoredJournal`, using
+only the Python standard library. The host supplies the custodian, its read-only
+reader and explicit writer UID to a **dedicated process**. It must run under a
+different non-root UID from the writer. Both processes require equal real,
+effective, saved and filesystem UIDs, no effective/permitted/inheritable/ambient
+capabilities, and set Linux `no_new_privs`. Windows and unsupported systems fail
+closed; there is no weaker TCP, shared-token or same-UID fallback.
+
+The existing SQLite file, sidecars and state directory must be owned by the
+custodian with modes `0600`/`0700`. The socket directory is custodian-owned
+`0750`, with a dedicated shared group, and the socket is `0660`. Group members
+cannot create, replace or unlink entries in that directory. Ancestors must be
+root/custodian-owned and non-writable by other principals (a root-owned sticky
+temporary directory is allowed). Links, hard-linked files, unsafe permissions,
+missing state and an existing socket cause refusal, never chmod/repair/bootstrap
+or automatic removal. A trusted operator must review stale sockets after exit.
+
+Each side validates the other using kernel `SO_PEERCRED` before disclosing an
+event or accepting a frame. This authenticates credentials **at connect/listen
+time**, not each individual message; see [Linux unix(7)](https://man7.org/linux/man-pages/man7/unix.7.html).
+It does not stop a deliberately cooperating authorized writer from delegating
+its connected descriptor. Same-UID processes are one trust domain. Dedicated
+UIDs must not be shared with arbitrary helpers; root, kernel, host administrators,
+capability-bearing processes and a compromised custodian remain trusted/outside
+this boundary. No claim of container/VM, seccomp or independent-machine isolation
+is made. The listener is serial with bounded backlog; it is not an availability
+or denial-of-service guarantee.
+
+The exact canonical, length-prefixed JSON schema binds protocol version, scope,
+generation and location in every frame. Length is checked before allocation;
+duplicates, extra fields, noncanonical data and incomplete frames are refused.
+Socket IO uses a single 60-second deadline, not a fresh timeout for each byte.
+The supplied reader retains its own bounded IO; this is not a real-time bound on
+all external storage/hardware operations. Neither credentials nor paths come
+from requests. No RPC methods exist for SQL, bootstrap, reset, resume or export.
+
+One append uses one connection: prepare returns only `PREPARED`; claim durably
+records `DISPATCHED` before returning candidate bytes/ETag; the client sends one
+conditional PUT and asks for confirmation only after a normal acknowledgement.
+The custodian independently reads the exact candidate and commits the head.
+The client validates the binding, candidate chain and requested event. Tickets
+never leave server memory, are scoped to that connection and are abandoned on
+every exit. Reconnecting cannot reconstruct one. Disconnect after preparation or
+claim sacrifices availability and retains the durable pending blocker.
+
+Any lost response after confirmation starts yields `ANCHOR_RESPONSE_UNKNOWN`,
+even if the COMMIT actually succeeded; earlier ambiguous loss yields `UNKNOWN`.
+`UNKNOWN` can also occur before preparation; it does not prove a pending receipt
+exists. Only read-only receipt inspection can distinguish those cases.
+The old outcome is never promoted to success. A separate `observe` connection
+can diagnose a receipt, not reset or confirm it. A confirmed head is a point-in-time
+storage result, not purge permission or a lease. UID authentication does not make
+an authorized writer's acknowledgement or `complete` assertion honest.
+
+`ops/backup/tests/custodian_isolation_proof.py` runs explicitly as a root **test
+orchestrator**, copying only the bounded source files into a fresh local fixture.
+Children drop to distinct numeric UIDs with no supplementary groups; no users,
+services or global ACLs are installed. It exercises the production socket and
+SQLite path, positive controls, denied file/key/process/socket access, bilateral
+UID checks, disconnect/restart, no replay/automatic adoption, one PUT, cancellation,
+and a forced exit after COMMIT before reply. It requires Linux/root and fails
+rather than skipping this proof. The existing synthetic CI invokes it separately;
+ordinary offline framing tests do not claim OS isolation. The fake remote store
+is not S3, the fixture keys are artificial, and process termination is not power
+loss. Existing SQLite/journal/transport/restore behavior is not replaced.
+
+No production credential loader, service manager unit, host provisioning or cloud
+change is included. Before use, the host integration must validate code/config/
+credential ownership, dedicated IDs/groups, actual reader-only IAM and absence of
+application mounts/backups/admin paths into the trusted state. Store recovery and
+joint rollback, live Selectel consistency/IAM, purge/restore fencing, stable subject
+mapping, retention and PITR admission remain separate open gates.
