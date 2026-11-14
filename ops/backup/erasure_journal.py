@@ -196,6 +196,23 @@ class Outcome:
     observed: Head | None = None
 
 
+@dataclass(frozen=True)
+class Prepared:
+    """Immutable candidate; preparation performs no write and grants no authority."""
+    body: bytes = field(repr=False)
+    etag: str = field(repr=False)
+    base: Head
+    head: Head
+
+    def __post_init__(self):
+        if type(self.body) is not bytes or not 0 < len(self.body) <= MAX_BYTES:
+            raise JournalError("invalid prepared bytes")
+        Stored(b"", self.etag)
+        if (not isinstance(self.base, Head) or not isinstance(self.head, Head)
+                or self.head.sequence != self.base.sequence + 1):
+            raise JournalError("invalid prepared head transition")
+
+
 class Journal:
     def __init__(self, store: Store, scope: str):
         self.store = store
@@ -212,7 +229,7 @@ class Journal:
             raise JournalError("initialization requires explicit genesis pin")
         return self._write(empty(self.scope), etag=None)
 
-    def append(self, event: Event, expected: Head) -> Outcome:
+    def prepare(self, event: Event, expected: Head) -> Prepared | Outcome:
         if not isinstance(event, Event):
             raise JournalError("invalid event")
         snapshot, etag = self.observe(expected)
@@ -224,7 +241,14 @@ class Journal:
                 return Outcome("ALREADY_STORED_UNANCHORED", snapshot.head)
         if snapshot.head != expected:
             raise Conflict("head advanced; refresh independent trusted state")
-        return self._write(_append(snapshot, event), etag=etag)
+        candidate = _append(snapshot, event)
+        return Prepared(candidate.encode(), etag, expected, candidate.head)
+
+    def append(self, event: Event, expected: Head) -> Outcome:
+        prepared = self.prepare(event, expected)
+        if isinstance(prepared, Outcome):
+            return prepared
+        return self._write(decode(prepared.body, self.scope), etag=prepared.etag)
 
     def _write(self, candidate: Snapshot, *, etag: str | None) -> Outcome:
         ambiguous = False

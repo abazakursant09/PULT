@@ -15,8 +15,19 @@ from ops.backup.erasure_journal import (
 )
 
 
-class S3JournalStore:
-    def __init__(self, *, endpoint, region, bucket, key, reader, writer, _test_transport=None):
+def _validate_credential(credential):
+    if (type(credential) is not dict or set(credential) != {"access_key", "secret_key"}
+            or not _credential_format_ok(credential["access_key"], credential["secret_key"])):
+        raise JournalError("invalid explicit credentials")
+    try:
+        credential["secret_key"].encode("utf-8")
+    except UnicodeError:
+        raise JournalError("invalid explicit credentials") from None
+
+
+class S3JournalReader:
+    """Read-only capability: no writer credential and no write method."""
+    def __init__(self, *, endpoint, region, bucket, key, reader, _test_transport=None):
         import httpx
         # Offline fixtures only. Never accept a live client/transport that can
         # weaken TLS, add proxies, redirects, authentication or hidden retries.
@@ -28,26 +39,26 @@ class S3JournalStore:
                 or not isinstance(key, str)
                 or not re.fullmatch(r"pult/erasure-test/[A-Za-z0-9_-]{1,64}/journal\.json", key)):
             raise JournalError("unapproved journal location")
-        for credential in (reader, writer):
-            if (type(credential) is not dict or set(credential) != {"access_key", "secret_key"}
-                    or not _credential_format_ok(credential["access_key"], credential["secret_key"])):
-                raise JournalError("invalid explicit credentials")
-            try:
-                credential["secret_key"].encode("utf-8")
-            except UnicodeError:
-                raise JournalError("invalid explicit credentials") from None
-        if reader["access_key"] == writer["access_key"]:
-            raise JournalError("separate reader and writer keys required")
+        _validate_credential(reader)
         manifest = {"endpoint": endpoint, "region": region}
         self._reader = SelectelS3Transport(manifest, reader)
-        self._writer = SelectelS3Transport(manifest, writer)
+        self._writer = None
         self._url = endpoint + "/" + bucket + "/" + key
         self._uri = "/" + bucket + "/" + key
+        self._scope = key.split("/")[-2]
         self._test_transport = _test_transport
         self._client = None
 
     def __repr__(self):
-        return "<S3JournalStore private bounded journal>"
+        return "<S3JournalReader private bounded journal>"
+
+    @property
+    def location(self):
+        return self._url
+
+    @property
+    def scope(self):
+        return self._scope
 
     def close(self):
         if self._client is not None:
@@ -56,7 +67,8 @@ class S3JournalStore:
 
     def _request(self, method, body=b"", headers=None):
         # Keep scope bounded even if this private method is accidentally misused.
-        if method not in ("GET", "PUT") or len(body) > MAX_BYTES:
+        if (method not in ("GET", "PUT") or len(body) > MAX_BYTES
+                or (method == "PUT" and self._writer is None)):
             raise JournalError("unsupported journal request")
         import httpx
         if self._client is None:
@@ -100,6 +112,20 @@ class S3JournalStore:
 
     def read(self):
         return self._request("GET")
+
+
+class S3JournalStore(S3JournalReader):
+    """Compatible split-key GET/conditional-PUT capability for the writer runner."""
+    def __init__(self, *, endpoint, region, bucket, key, reader, writer, _test_transport=None):
+        super().__init__(endpoint=endpoint, region=region, bucket=bucket, key=key,
+                         reader=reader, _test_transport=_test_transport)
+        _validate_credential(writer)
+        if reader["access_key"] == writer["access_key"]:
+            raise JournalError("separate reader and writer keys required")
+        self._writer = SelectelS3Transport({"endpoint": endpoint, "region": region}, writer)
+
+    def __repr__(self):
+        return "<S3JournalStore private bounded journal>"
 
     def write(self, body, *, etag):
         if type(body) is not bytes or not 0 < len(body) <= MAX_BYTES:

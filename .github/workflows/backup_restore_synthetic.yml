@@ -12,11 +12,15 @@ on:
       - backend/tests/test_pitr_minio_image_guard.py
       - docker-compose.backup.yml
       - docs/backup-restore-policy.md
+      - docs/erasure-journal-protocol.md
+      - docs/erasure-anchor-protocol.md
       - backend/tests/test_backup_restore_contract_guard.py
       - backend/tests/test_backup_verifier.py
       - backend/tests/test_restore_erasure_checkpoint.py
       - backend/tests/test_erasure_journal.py
       - backend/tests/test_erasure_journal_s3.py
+      - backend/tests/test_erasure_anchor.py
+      - backend/tests/test_erasure_anchor_process.py
       - backend/alembic/**
       - backend/models/**
       - .github/workflows/backup_restore_synthetic.yml
@@ -27,11 +31,15 @@ on:
       - ops/pitr/minio-test/**
       - backend/tests/test_pitr_minio_image_guard.py
       - docker-compose.backup.yml
+      - docs/erasure-journal-protocol.md
+      - docs/erasure-anchor-protocol.md
       - backend/tests/test_backup_restore_contract_guard.py
       - backend/tests/test_backup_verifier.py
       - backend/tests/test_restore_erasure_checkpoint.py
       - backend/tests/test_erasure_journal.py
       - backend/tests/test_erasure_journal_s3.py
+      - backend/tests/test_erasure_anchor.py
+      - backend/tests/test_erasure_anchor_process.py
       - .github/workflows/backup_restore_synthetic.yml
 
 permissions:
@@ -67,7 +75,7 @@ jobs:
         working-directory: backend
         run: |
           pip install --require-hashes -r requirements-ci.lock
-          python -m pytest tests/test_backup_restore_contract_guard.py tests/test_backup_verifier.py tests/test_restore_erasure_checkpoint.py tests/test_erasure_journal.py tests/test_erasure_journal_s3.py -q
+          python -m pytest tests/test_backup_restore_contract_guard.py tests/test_backup_verifier.py tests/test_restore_erasure_checkpoint.py tests/test_erasure_journal.py tests/test_erasure_journal_s3.py tests/test_erasure_anchor.py tests/test_erasure_anchor_process.py -q
 
       - name: Build backup runner image (pinned base + pinned rclone/age, hash-verified)
         run: docker buildx build --load -t pult-backup:ci ops/backup
