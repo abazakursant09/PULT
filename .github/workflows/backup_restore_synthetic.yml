@@ -14,6 +14,7 @@ on:
       - docs/backup-restore-policy.md
       - docs/erasure-journal-protocol.md
       - docs/erasure-anchor-protocol.md
+      - docs/erasure-custodian-deployment.md
       - backend/tests/test_backup_restore_contract_guard.py
       - backend/tests/test_backup_verifier.py
       - backend/tests/test_restore_erasure_checkpoint.py
@@ -22,6 +23,7 @@ on:
       - backend/tests/test_erasure_anchor.py
       - backend/tests/test_erasure_anchor_process.py
       - backend/tests/test_erasure_custodian.py
+      - backend/tests/test_erasure_custodian_host.py
       - backend/alembic/**
       - backend/models/**
       - .github/workflows/backup_restore_synthetic.yml
@@ -34,6 +36,7 @@ on:
       - docker-compose.backup.yml
       - docs/erasure-journal-protocol.md
       - docs/erasure-anchor-protocol.md
+      - docs/erasure-custodian-deployment.md
       - backend/tests/test_backup_restore_contract_guard.py
       - backend/tests/test_backup_verifier.py
       - backend/tests/test_restore_erasure_checkpoint.py
@@ -42,6 +45,7 @@ on:
       - backend/tests/test_erasure_anchor.py
       - backend/tests/test_erasure_anchor_process.py
       - backend/tests/test_erasure_custodian.py
+      - backend/tests/test_erasure_custodian_host.py
       - .github/workflows/backup_restore_synthetic.yml
 
 permissions:
@@ -77,10 +81,21 @@ jobs:
         working-directory: backend
         run: |
           pip install --require-hashes -r requirements-ci.lock
-          python -m pytest tests/test_backup_restore_contract_guard.py tests/test_backup_verifier.py tests/test_restore_erasure_checkpoint.py tests/test_erasure_journal.py tests/test_erasure_journal_s3.py tests/test_erasure_anchor.py tests/test_erasure_anchor_process.py tests/test_erasure_custodian.py -q
+          python -m pytest tests/test_backup_restore_contract_guard.py tests/test_backup_verifier.py tests/test_restore_erasure_checkpoint.py tests/test_erasure_journal.py tests/test_erasure_journal_s3.py tests/test_erasure_anchor.py tests/test_erasure_anchor_process.py tests/test_erasure_custodian.py tests/test_erasure_custodian_host.py -q
 
       - name: Synthetic Linux custodian isolation (real distinct unprivileged UIDs)
         run: sudo -n -- "$(command -v python)" -I -B ops/backup/tests/custodian_isolation_proof.py
+
+      - name: Synthetic custodian host preflight (minimal pinned runtime, no external IO)
+        run: |
+          set -euo pipefail
+          RUNTIME="$(mktemp -d /tmp/pult-custodian-host-runtime.XXXXXX)"
+          case "$RUNTIME" in /tmp/pult-custodian-host-runtime.*) ;; *) exit 1 ;; esac
+          python -m venv --without-pip "$RUNTIME/venv"
+          python -m pip --python "$RUNTIME/venv" install --ignore-installed --only-binary=:all: --no-deps --require-hashes -r ops/backup/custodian/requirements.lock
+          sudo -n chown -hR root:root -- "$RUNTIME"
+          sudo -n chmod 0755 "$RUNTIME"
+          sudo -n -- "$RUNTIME/venv/bin/python" -I -B ops/backup/tests/custodian_host_proof.py
 
       - name: Build backup runner image (pinned base + pinned rclone/age, hash-verified)
         run: docker buildx build --load -t pult-backup:ci ops/backup

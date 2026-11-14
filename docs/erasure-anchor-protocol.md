@@ -208,8 +208,9 @@ ordinary offline framing tests do not claim OS isolation. The fake remote store
 is not S3, the fixture keys are artificial, and process termination is not power
 loss. Existing SQLite/journal/transport/restore behavior is not replaced.
 
-No production credential loader, service manager unit, host provisioning or cloud
-change is included. Before use, the host integration must validate code/config/
+The optional [host preparation kit](erasure-custodian-deployment.md) supplies a
+strict credential/config entry point and an inactive unit. No host provisioning,
+unit installation or cloud change is included. Before use, the host integration must validate code/config/
 credential ownership, dedicated IDs/groups, actual reader-only IAM and absence of
 application mounts/backups/admin paths into the trusted state. Store recovery and
 joint rollback, live Selectel consistency/IAM, purge/restore fencing, stable subject
