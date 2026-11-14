@@ -1,0 +1,16 @@
+{
+  "format": "pult-erasure-custodian-host-v1",
+  "scope": "REPLACE_SCOPE",
+  "generation": "REPLACE_WITH_INDEPENDENTLY_TRUSTED_UUIDV4",
+  "custodian_uid": null,
+  "writer_uid": null,
+  "socket_gid": null,
+  "state_file": "/var/lib/pult-erasure-custodian/anchor.sqlite",
+  "socket_file": "/run/pult-erasure-custodian/custodian.sock",
+  "s3": {
+    "endpoint": "https://s3.ru-3.storage.selcloud.ru",
+    "region": "ru-3",
+    "bucket": "REPLACE_APPROVED_PRIVATE_BUCKET",
+    "key": "pult/erasure-test/REPLACE_SCOPE/journal.json"
+  }
+}

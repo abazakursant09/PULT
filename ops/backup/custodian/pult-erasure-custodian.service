@@ -1,0 +1,40 @@
+[Unit]
+Description=Pult erasure journal custodian (operator-provisioned, storage only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=pult-erasure-custodian
+Group=pult-erasure-writer
+SupplementaryGroups=
+WorkingDirectory=/opt/pult-erasure-custodian
+LoadCredential=journal-reader:/etc/pult-erasure-custodian/reader.json
+ExecStartPre=/opt/pult-erasure-custodian/venv/bin/python -I -S -B /opt/pult-erasure-custodian/ops/backup/erasure_custodian_host.py --config /etc/pult-erasure-custodian/host.json --reader-credential-file ${CREDENTIALS_DIRECTORY}/journal-reader --check
+ExecStart=/opt/pult-erasure-custodian/venv/bin/python -I -S -B /opt/pult-erasure-custodian/ops/backup/erasure_custodian_host.py --config /etc/pult-erasure-custodian/host.json --reader-credential-file ${CREDENTIALS_DIRECTORY}/journal-reader --serve
+Restart=no
+UMask=0077
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectProc=invisible
+RestrictNamespaces=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/pult-erasure-custodian /run/pult-erasure-custodian
+LimitCORE=0
+StandardInput=null
+StandardOutput=journal
+StandardError=journal
+
+# No Install target: do not enable/start until separate host/IAM approval.
+# No directory management, socket activation, stale-socket cleanup or auto restart.
