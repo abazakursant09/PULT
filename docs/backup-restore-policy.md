@@ -149,6 +149,11 @@ PITR admission. `ops/pitr/restore.sh` remains explicitly synthetic-only and is n
 an alternative production admission path. This change does not erase old backups,
 change retention periods, publish real checkpoints/IDs, or permit public launch.
 
+A dormant bounded journal storage slice is documented in
+[`erasure-journal-protocol.md`](erasure-journal-protocol.md). Its offline CAS/hash
+proof is not independent head custody or latest-head freshness. It is not wired
+to this runner, exports no empty checkpoint, and does not close the above gates.
+
 Restore fetches, checks remote size + ciphertext SHA-256 against the manifest, decrypts with the
 private identity, checks plaintext SHA-256, `pg_restore --list`, asserts the target is **empty**
 (never `--clean`), restores, then runs integrity checks (Alembic head `rob1a2b3c4d01`, full
