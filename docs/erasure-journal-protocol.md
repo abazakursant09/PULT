@@ -42,9 +42,11 @@ fail. A stale floor **cannot prove latest-head freshness**: an older valid histo
 at/above that floor could hide later erasures. Never bootstrap the floor from the
 restored DB, the backup, or a file transported beside the journal.
 
-An independent head custodian, its persistence/acknowledgement protocol, complete
-historical coverage, durable attempt receipts across crashes, and fencing of
-concurrent purges/restores remain unimplemented. No service/CLI/scheduler restarts
+The dormant [independent-custodian reference](erasure-anchor-protocol.md) adds
+local persistence/acknowledgement and crash-attempt receipts, with a genuine
+reader-only transport. Deployed independent head custody, complete historical
+coverage, authenticated service/session boundaries and fencing of concurrent
+purges/restores remain open. No service/CLI/scheduler restarts
 or retries this library. A caller must not treat a restart as permission to retry
 an unknown attempt. These are required before irreversible purge or admission;
 there is intentionally **no production integration** to bypass these gaps.

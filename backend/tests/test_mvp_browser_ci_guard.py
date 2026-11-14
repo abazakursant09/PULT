@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import os
 from pathlib import Path
 import re
 import shlex
+import shutil
+import subprocess
 from textwrap import dedent
 
 import pytest
@@ -22,20 +25,31 @@ MIRROR_STEP = "Use official Ubuntu package mirrors"
 MIRROR_COMMAND = dedent(r"""
     set -euo pipefail
     # runner-images uses one priority-tagged mirror list for all Ubuntu pockets.
-    # Use Kernel.org's Ubuntu archive when the ubuntu.com DNS zone is unavailable.
+    # Select a reachable complete HTTPS archive; a single mirror is not a gate dependency.
     # Ubuntu signing keys, suites, TLS verification and all tests stay unchanged.
     die() { printf '%s\n' "Ubuntu mirror preflight: $1" >&2; exit 1; }
-    getent ahosts mirrors.edge.kernel.org >/dev/null || die 'mirror DNS unavailable'
-    for suite in noble noble-security; do
-      curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
-        --connect-timeout 10 --max-time 30 --max-filesize 2097152 --output /dev/null \
-        "https://mirrors.edge.kernel.org/ubuntu/dists/$suite/InRelease" || die 'signed repository metadata unavailable'
-    done
     test -f /etc/apt/apt-mirrors.txt && test ! -L /etc/apt/apt-mirrors.txt && test -s /etc/apt/apt-mirrors.txt || die 'mirror list missing or unsafe'
     test -f /etc/apt/sources.list.d/ubuntu.sources && test ! -L /etc/apt/sources.list.d/ubuntu.sources || die 'unsupported sources layout'
     grep -Fq 'mirror+file:/etc/apt/apt-mirrors.txt' /etc/apt/sources.list.d/ubuntu.sources || die 'sources do not use the mirror list'
     grep -Eq '^https?://(azure\.archive|archive|security)\.ubuntu\.com/ubuntu/([[:space:]]+priority:[0-9]+)?[[:space:]]*$|^https://mirrors\.edge\.kernel\.org/ubuntu/[[:space:]]*$' /etc/apt/apt-mirrors.txt || die 'unrecognized mirror list'
-    printf '%s\n' 'https://mirrors.edge.kernel.org/ubuntu/' | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+    mirror_base=''
+    for mirror_candidate in https://archive.ubuntu.com/ubuntu/ https://mirrors.edge.kernel.org/ubuntu/; do
+      mirror_host="${mirror_candidate#https://}"
+      mirror_host="${mirror_host%%/*}"
+      if ! getent ahosts "$mirror_host" >/dev/null; then continue; fi
+      mirror_ready=1
+      for mirror_suite in noble noble-updates noble-backports noble-security; do
+        if ! curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+          --connect-timeout 10 --max-time 30 --max-filesize 2097152 --output /dev/null \
+          "${mirror_candidate}dists/$mirror_suite/InRelease"; then
+          mirror_ready=0
+          break
+        fi
+      done
+      if [ "$mirror_ready" = 1 ]; then mirror_base="$mirror_candidate"; break; fi
+    done
+    [ -n "$mirror_base" ] || die 'no trusted HTTPS mirror available'
+    printf '%s\n' "$mirror_base" | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
 """).lstrip("\n")
 
 
@@ -267,3 +281,149 @@ def test_browser_postgres_branch_keeps_failure_capture_and_owned_cluster_cleanup
     assert '"$PULT_E2E_PG_BIN/pg_ctl" -D "$PULT_E2E_PG_ROOT/data" -m fast -w stop' in branch
     assert branch.index('trap stop_pg EXIT\n') < branch.index(command.split(' --project=', 1)[0])
     assert branch.endswith('  stop_pg\n  trap - EXIT')
+
+
+def _run_mirror_preflight(tmp_path, scenario, *, unsafe=None):
+    """Execute the real shell block with DNS/curl/sudo stubbed; never touch /etc/network."""
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    mirrors, sources, trace = tmp_path / "mirrors", tmp_path / "sources", tmp_path / "trace"
+    mirrors.write_text("http://azure.archive.ubuntu.com/ubuntu/ priority:1\n", encoding="utf-8", newline="\n")
+    sources.write_text("Types: deb\nURIs: mirror+file:/etc/apt/apt-mirrors.txt\n"
+                       "Suites: noble noble-updates noble-backports noble-security\n"
+                       "Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\n", encoding="utf-8", newline="\n")
+    if unsafe == "empty":
+        mirrors.write_text("", encoding="utf-8", newline="\n")
+    elif unsafe == "unknown":
+        mirrors.write_text("https://unreviewed.invalid/ubuntu/\n", encoding="utf-8", newline="\n")
+    elif unsafe == "layout":
+        sources.write_text("URIs: https://unreviewed.invalid/\n", encoding="utf-8", newline="\n")
+    elif unsafe == "already_selected":
+        mirrors.write_text("https://archive.ubuntu.com/ubuntu/\n", encoding="utf-8", newline="\n")
+    before_mirror, before_source = mirrors.read_bytes(), sources.read_bytes()
+    scripts = {
+        "getent": r'''printf 'dns:%s\n' "$*" >> "$MIRROR_TRACE"
+[ "$#" = 2 ] && [ "$1" = ahosts ] || exit 91
+case "$2" in archive.ubuntu.com|mirrors.edge.kernel.org) ;; *) exit 91;; esac
+if [ "$MIRROR_SCENARIO" = all_dns_down ]; then exit 2; fi
+if [ "$MIRROR_SCENARIO" = primary_dns_down ] && [ "$2" = archive.ubuntu.com ]; then exit 2; fi
+exit 0''',
+        "curl": r'''printf 'curl:%s\n' "$*" >> "$MIRROR_TRACE"
+url="${!#}"
+expected=(--fail --silent --show-error --location --proto '=https' --proto-redir '=https'
+          --connect-timeout 10 --max-time 30 --max-filesize 2097152 --output /dev/null "$url")
+[ "$*" = "${expected[*]}" ] || exit 91
+case "$url" in
+  https://archive.ubuntu.com/ubuntu/dists/*/InRelease) mirror_role=primary;;
+  https://mirrors.edge.kernel.org/ubuntu/dists/*/InRelease) mirror_role=secondary;;
+  *) exit 91;;
+esac
+case "$MIRROR_SCENARIO:$mirror_role" in all_down:*|kernel_down:secondary|primary_down:primary) exit 28;; esac
+if [ "$MIRROR_SCENARIO" = primary_partial ] && [[ "$url" = *noble-security* ]] && [ "$mirror_role" = primary ]; then exit 22; fi
+exit 0''',
+        "grep": r'''args=("$@")
+last=$((${#args[@]}-1))
+case "${args[$last]}" in
+  /etc/apt/apt-mirrors.txt) args[$last]="$MIRROR_FILE";;
+  /etc/apt/sources.list.d/ubuntu.sources) args[$last]="$MIRROR_SOURCES";;
+  *) exit 91;;
+esac
+exec /usr/bin/grep "${args[@]}"''',
+        "sudo": r'''[ "$#" = 2 ] && [ "$1" = tee ] && [ "$2" = /etc/apt/apt-mirrors.txt ] || exit 91
+printf 'write\n' >> "$MIRROR_TRACE"
+[ "$MIRROR_SCENARIO" != write_failure ] || exit 1
+exec /usr/bin/tee "$MIRROR_FILE"''',
+    }
+    for name, script in scripts.items():
+        path = tools / name
+        path.write_bytes(("#!/bin/bash\nset -euo pipefail\n" + script + "\n").encode("utf-8"))
+        path.chmod(0o755)
+    env = {key: value for key, value in os.environ.items() if key in {"SystemRoot", "WINDIR", "TEMP", "TMP"}}
+    env.update(MIRROR_FIXTURE_BIN=tools.as_posix(), MIRROR_FILE=mirrors.as_posix(),
+               MIRROR_SOURCES=sources.as_posix(), MIRROR_TRACE=trace.as_posix(), MIRROR_SCENARIO=scenario,
+               MIRROR_UNSAFE=unsafe or "", PATH="/usr/bin:/bin")
+    convert = (r'''export MIRROR_FIXTURE_BIN="$(cygpath -u "$MIRROR_FIXTURE_BIN")"
+export MIRROR_FILE="$(cygpath -u "$MIRROR_FILE")"
+export MIRROR_SOURCES="$(cygpath -u "$MIRROR_SOURCES")"
+export MIRROR_TRACE="$(cygpath -u "$MIRROR_TRACE")"
+''' if os.name == "nt" else "")
+    prefix = r'''test() {
+  local args=("$@")
+  local last=$((${#args[@]}-1))
+  case "${args[$last]}" in
+    /etc/apt/apt-mirrors.txt) args[$last]="$MIRROR_FILE";;
+    /etc/apt/sources.list.d/ubuntu.sources) args[$last]="$MIRROR_SOURCES";;
+  esac
+  builtin test "${args[@]}"
+}
+export PATH="$MIRROR_FIXTURE_BIN"
+'''
+    if unsafe == "link":
+        prefix = prefix.replace('builtin test "${args[@]}"',
+                                'if [[ "$*" = "! -L /etc/apt/apt-mirrors.txt" ]]; then return 1; fi\n  builtin test "${args[@]}"')
+    shell = "C:/Program Files/Git/usr/bin/bash.exe" if os.name == "nt" else shutil.which("bash")
+    assert shell, "bash is required for this executable contract"
+    result = subprocess.run([shell, "-c", convert + prefix + _steps()[MIRROR_STEP]["run"]],
+                            env=env, capture_output=True, text=True, timeout=20)
+    assert sources.read_bytes() == before_source  # Suites/keyring/source trust config untouched.
+    return result, mirrors.read_bytes().decode("utf-8"), trace.read_text(encoding="utf-8") if trace.exists() else "", before_mirror.decode("utf-8")
+
+
+def test_mirror_preflight_works_when_old_single_mirror_times_out(tmp_path):
+    result, mirrors, trace, _ = _run_mirror_preflight(tmp_path, "kernel_down")
+    assert result.returncode == 0, result.stderr
+    assert mirrors == "https://archive.ubuntu.com/ubuntu/\n"
+    assert "https://mirrors.edge.kernel.org/ubuntu/" not in trace
+    for suite in ("noble", "noble-updates", "noble-backports", "noble-security"):
+        assert f"https://archive.ubuntu.com/ubuntu/dists/{suite}/InRelease" in trace
+
+
+@pytest.mark.parametrize("scenario", ["primary_down", "primary_dns_down", "primary_partial"])
+def test_mirror_preflight_uses_secondary_only_after_primary_failure(tmp_path, scenario):
+    result, mirrors, trace, _ = _run_mirror_preflight(tmp_path, scenario)
+    assert result.returncode == 0, result.stderr
+    assert mirrors == "https://mirrors.edge.kernel.org/ubuntu/\n"
+    assert trace.splitlines().count("write") == 1
+    for suite in ("noble", "noble-updates", "noble-backports", "noble-security"):
+        assert f"https://mirrors.edge.kernel.org/ubuntu/dists/{suite}/InRelease" in trace
+    if scenario == "primary_dns_down":
+        assert "https://archive.ubuntu.com/ubuntu/dists/" not in trace
+
+
+@pytest.mark.parametrize("scenario", ["all_down", "all_dns_down"])
+def test_mirror_preflight_fails_closed_without_any_complete_archive(tmp_path, scenario):
+    result, mirrors, trace, before = _run_mirror_preflight(tmp_path, scenario)
+    assert result.returncode != 0 and "no trusted HTTPS mirror available" in result.stderr
+    assert mirrors == before and "write" not in trace.splitlines()
+    if scenario == "all_dns_down":
+        assert "curl:" not in trace
+
+
+@pytest.mark.parametrize("unsafe", ["empty", "unknown", "layout", "link"])
+def test_mirror_preflight_rejects_unsafe_layout_before_network_or_write(tmp_path, unsafe):
+    result, mirrors, trace, before = _run_mirror_preflight(tmp_path, "healthy", unsafe=unsafe)
+    assert result.returncode != 0
+    assert mirrors == before and trace == ""
+
+
+def test_mirror_preflight_is_idempotent_and_does_not_hide_write_failure(tmp_path):
+    result, mirrors, trace, before = _run_mirror_preflight(tmp_path, "healthy", unsafe="already_selected")
+    assert result.returncode == 0 and mirrors == before
+    assert "mirrors.edge.kernel.org" not in trace
+
+
+def test_mirror_preflight_write_error_remains_a_failed_gate(tmp_path):
+    result, mirrors, trace, before = _run_mirror_preflight(tmp_path, "write_failure")
+    assert result.returncode != 0 and mirrors == before
+    assert trace.splitlines().count("write") == 1
+
+
+def test_mirror_selection_preserves_tls_bounds_and_apt_authentication():
+    script = _steps()[MIRROR_STEP]["run"]
+    assert "--proto '=https' --proto-redir '=https'" in script
+    assert "--connect-timeout 10 --max-time 30 --max-filesize 2097152" in script
+    for forbidden in ("--insecure", "--retry", "trusted=yes", "AllowInsecure", "AllowUnauthenticated",
+                      "allow-unauthenticated", "apt-key", "Signed-By:", "Check-Valid-Until=false"):
+        assert forbidden not in script
+    assert script.count("sudo tee") == 1
+    assert '"$mirror_base" | sudo tee /etc/apt/apt-mirrors.txt' in script

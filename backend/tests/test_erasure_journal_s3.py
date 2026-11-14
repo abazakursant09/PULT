@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from ops.backup.erasure_journal import (
     MAX_BYTES, Conflict, Event, Journal, JournalError, Missing, WriteUnknown, empty, genesis,
 )
-from ops.backup.erasure_journal_s3 import S3JournalStore
+from ops.backup.erasure_journal_s3 import S3JournalReader, S3JournalStore
 
 READER = {"access_key": "synthetic-reader", "secret_key": "synthetic-reader-secret"}
 WRITER = {"access_key": "synthetic-writer", "secret_key": "synthetic-writer-secret"}
@@ -294,3 +294,31 @@ def test_real_transport_explicitly_enforces_tls_no_env_and_zero_retry(monkeypatc
     with pytest.raises(JournalError):
         S3JournalStore(**CONFIG).read()
     assert settings == [{"verify": True, "trust_env": False, "retries": 0}]
+
+
+def test_reader_only_has_no_writer_credential_or_write_surface():
+    calls = []
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(200, content=BODY, headers={"etag": '"reader-only"'})
+    config = {key: value for key, value in CONFIG.items() if key != "writer"}
+    reader = S3JournalReader(**config, _test_transport=httpx.MockTransport(handler))
+    assert reader._writer is None and not hasattr(reader, "write")
+    assert reader.location == CONFIG["endpoint"] + "/" + CONFIG["bucket"] + "/" + CONFIG["key"]
+    assert reader.read().body == BODY
+    assert len(calls) == 1 and calls[0].method == "GET"
+    assert "Credential=synthetic-reader/" in calls[0].headers["authorization"]
+    with pytest.raises(JournalError):
+        reader._request("PUT", BODY, {"if-none-match": "*"})
+    assert len(calls) == 1
+    reader.close()
+
+
+def test_reader_rejects_writer_argument_and_arbitrary_client():
+    with pytest.raises(TypeError):
+        S3JournalReader(**CONFIG)
+    config = {key: value for key, value in CONFIG.items() if key != "writer"}
+    with pytest.raises(TypeError):
+        S3JournalReader(**config, http_client=object())
+    with pytest.raises(JournalError):
+        S3JournalReader(**config, _test_transport=object())
