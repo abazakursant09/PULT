@@ -3,3 +3,12 @@ backend/tests/characterization/**/snapshot.json text eol=lf
 # backend/tests/test_canary_tooling_guard.py). Pin its line endings to LF so the digest is identical on
 # every checkout (incl. Windows core.autocrlf=true), not platform-dependent. Content/blob is unchanged.
 ops/canary/canary.py text eol=lf
+# Schema2 cold intake compares exact reviewed bytes on every checkout.
+ops/backup/custodian_v2/** text eol=lf
+ops/backup/tests/custodian_v2/** text eol=lf
+ops/backup/erasure_anchor.py text eol=lf
+ops/backup/erasure_custodian.py text eol=lf
+ops/backup/erasure_custodian_host.py text eol=lf
+ops/backup/erasure_journal.py text eol=lf
+ops/backup/erasure_journal_s3.py text eol=lf
+ops/backup/custodian/requirements.lock text eol=lf

@@ -1,0 +1,32 @@
+{
+  "format":"pult-schema2-cold-source-profile-preparation-v1",
+  "status":"DRAFT_NOT_OPERATOR_APPROVED_OR_ACTIVATED",
+  "date_moscow":"2026-11-17",
+  "purpose":"exact source input for the next cold-host validation gate,not an executable deployment profile",
+  "admitted_operations":[],
+  "operator_approval":null,
+  "working_credentials_included":false,
+  "database_or_pending_included":false,
+  "installation_service_or_network_actions":false,
+  "runtime":{"implementation":"cpython","major_minor":[3,12],"platform":"linux","source_roots":"root-owned closed snapshot; actual deployment root and principal still require independent approval"},
+  "sources":{
+    "candidate/anchor_v2.py":"ce6bff676dd2d0eccc5857efe34316fdeb644fdb91df7fff20ef40f77dc17d73",
+    "candidate/protocol_v2.py":"5807a596d61ff894443b12b0d019bd3a35d04d7e1856c93f5fff06f17c2180c9",
+    "codec/event_codec.py":"c33ad596b91fe927df85fca61ae32d35bb1cf3a1d02da2b09dadb69fc361d04c",
+    "store/event_store.py":"d8fe11c109c7779522049428e3d95da40c026aea3bf8b42d1799a6f622e031c0",
+    "ownership/owned_host.py":"a9d71db50be14bd9d57c2535748907a26bc75eabfe3af9d8e203f77a6f434bc3",
+    "ownership/host_core.py":"da3754a860495a5c193daaf27cde3c04b95c55fc58d37dea60af37a58626e1e8",
+    "frozen/ops/backup/erasure_anchor.py":"b399803ac7a03aaa5a506cbb0036f98c153457769beabf46af44864b190861a8",
+    "frozen/ops/backup/erasure_journal.py":"94eeba19e645e25ec8286baebe4092a29c541c6f12858e1ff7b303f6a1a4fc98",
+    "frozen/ops/backup/erasure_journal_s3.py":"2886ec08fe17eb409d8d4a8c597015454c21f3ef703c674a7848f30b63bc544f",
+    "frozen/ops/canary/canary.py":"aa4b357acc6e908341c5523db8f93a32fdf3c0305a7ddc36c4c68842fbe3ee4f",
+    "frozen/ops/backup/erasure_custodian.py":"3eb793a1ef1002c6def97b52c579b2ff051e834b44b802a75aca09d640a691d3",
+    "frozen/ops/backup/erasure_custodian_host.py":"d7bdd8a858417ea20666bdb6fe5840ead124dec2a98d98ebb6e0d74eedfcdb24",
+    "frozen/ops/backup/custodian/requirements.lock":"cd1f0a681aae91a132427b88897782b0f2085c8a415cd39812f8e7a059361f08"
+  },
+  "dependency_archive_sha256":"3e8620ac77229e15442d09e1de39c2e9476cae2d916fe1361366d2bfac6b37de",
+  "proof":{"file":"RUN_1794867264911200650.json","sha256":"279af9f8121c81b73322986439969558478d5247d5cc77eff12c9da02a18bc56","scope":"local synthetic native durable protocol only,32tests"},
+  "next_required_proof":"checked descriptor bytes before import/exec,root-owned fixed profile approval,owner-before-firstSQLandcredential,exact binding,fail-closed cleanup,old profile refusing new sources",
+  "not_proven":"production host/RPC/installation/sourceCI/liveS3/IAM/independent placement/authenticatedfreshhead/restore/publiclaunch",
+  "new_paid_resources":0,"additional_spend_rub":0,"monthly_additional_planning_ceiling_rub":3500
+}

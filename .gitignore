@@ -95,3 +95,5 @@ standby.signal
 postgresql.auto.conf.pitr
 ops/pitr/secrets/
 *minio-ca*.key
+ops/backup/tests/custodian_v2/wheels/
+ops/backup/tests/custodian_v2/*/RUN_*.json
