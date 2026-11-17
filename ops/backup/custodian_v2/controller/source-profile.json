@@ -1,0 +1,18 @@
+{
+  "format": "pult-controller-source-preparation-v1",
+  "status": "DRAFT_NOT_OPERATOR_APPROVED_OR_ACTIVATED",
+  "operator_approval": null,
+  "admitted_operations": [],
+  "working_credentials_included": false,
+  "database_or_pending_included": false,
+  "installation_service_or_network_actions": false,
+  "lifecycle_limit": "ONE_LIVE_CONTROLLER_NO_RESTART_ADOPTION",
+  "max_calls": 64,
+  "runtime": {"implementation": "cpython", "major_minor": [3, 12], "platform": "linux"},
+  "sources": {
+    "observer_v2.py": "65462111526213daa1e62b3cbe81e146e8277f7eb5d521b70266f28046972739",
+    "supervisor_v2.py": "3d05d22163b11f815b29c222128c4e41987c9e4a83e7b4906cbe63a18941a37e",
+    "repeatable_observer.py": "de0c1caeaa00cabc2e4aa324e595bf6708668d719841f92bf85b3715be107aad",
+    "frozen/admission.py": "961cc3aef5dcfe9d6286b15a2d5c087a33dc1e5dafdc7d5a16f6eded961afea7"
+  }
+}
