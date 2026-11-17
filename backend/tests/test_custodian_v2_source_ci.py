@@ -96,7 +96,10 @@ def _assert_ci(workflow):
     assert len(names) == len(set(names))
     by_name = {step["name"]: step for step in steps}
     assert by_name["Set up Python"]["with"]["python-version"] == "3.13"
-    added = [GUARD_STEP, WHEEL_STEP, NATIVE_STEP, OPTIMIZED_STEP]
+    added = [GUARD_STEP, WHEEL_STEP, NATIVE_STEP, OPTIMIZED_STEP,
+             "Guard dormant controller source and CI contracts",
+             "Native systemd controller proof and independent receipt check",
+             "Reject optimized controller gate and verifier runtimes"]
     start = names.index(HOST_STEP) + 1
     assert names[start:start + len(added) + 1] == added + [BUILD_STEP]
     for name in added:

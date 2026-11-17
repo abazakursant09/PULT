@@ -17,6 +17,8 @@ on:
       - docs/erasure-anchor-protocol.md
       - docs/erasure-custodian-deployment.md
       - docs/erasure-custodian-v2-source-ci.md
+      - docs/erasure-custodian-controller-source-ci.md
+      - backend/tests/test_custodian_controller_source_ci.py
       - backend/tests/test_backup_restore_contract_guard.py
       - backend/tests/test_backup_verifier.py
       - backend/tests/test_restore_erasure_checkpoint.py
@@ -42,6 +44,8 @@ on:
       - docs/erasure-anchor-protocol.md
       - docs/erasure-custodian-deployment.md
       - docs/erasure-custodian-v2-source-ci.md
+      - docs/erasure-custodian-controller-source-ci.md
+      - backend/tests/test_custodian_controller_source_ci.py
       - backend/tests/test_backup_restore_contract_guard.py
       - backend/tests/test_backup_verifier.py
       - backend/tests/test_restore_erasure_checkpoint.py
@@ -142,6 +146,40 @@ jobs:
               if (result.returncode != 2 or result.stderr
                       or report != {"outcome": "NOT_RUN", "reason": "optimized_test_runtime_refused"}):
                   raise SystemExit("optimized gate did not return the exact refusal")
+          PY
+
+      - name: Guard dormant controller source and CI contracts
+        run: python -m pytest backend/tests/test_custodian_controller_source_ci.py -q
+
+      - name: Native systemd controller proof and independent receipt check
+        run: sudo -n -- unshare --net /usr/bin/python3.12 -I -S -B ops/backup/tests/custodian_v2/controller/ci_gate.py --reviewed-by-main
+
+      - name: Reject optimized controller gate and verifier runtimes
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import subprocess
+
+          root = "ops/backup/tests/custodian_v2/controller/"
+          cases = (
+              ("ci_gate.py", "optimized_ci_runtime_refused"),
+              ("run_gate.py", "optimized_test_runtime_refused"),
+              ("verify_receipt.py", "optimized_verifier_refused"),
+          )
+          for name, reason in cases:
+              result = subprocess.run(
+                  ["sudo", "-n", "--", "unshare", "--net", "/usr/bin/python3.12", "-I", "-S", "-B", "-O",
+                   root + name, "--reviewed-by-main"],
+                  capture_output=True, text=True, timeout=30, check=False,
+              )
+              try:
+                  report = json.loads(result.stdout)
+              except (ValueError, TypeError):
+                  raise SystemExit("optimized controller entry did not return refusal JSON") from None
+              if (result.returncode != 2 or result.stderr
+                      or report != {"outcome": "NOT_RUN", "reason": reason}):
+                  raise SystemExit("optimized controller entry did not return the exact refusal")
           PY
 
       - name: Build backup runner image (pinned base + pinned rclone/age, hash-verified)
