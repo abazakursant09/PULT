@@ -370,6 +370,29 @@ def writer_injection(staged, mode):
     return original
 
 
+def wrong_uid_probe(connection, config, staged):
+    # Public fixture metadata is sufficient to form a valid request. Do not
+    # grant this UID the writer's key merely to exercise channel authentication.
+    bind = dict(config['binding'])
+    bind['location'] = config['endpoint'] + '/' + config['bucket'] + '/pult/erasure-v2/' + bind['scope'] + '/' + bind['generation'] + '/events/'
+    request = dict(format=staged.FORMAT, op='prepare', binding=bind, attempt=config['attempt'],
+                   event=dict(config['event']), base=dict(config['expected_head']))
+    body = canonical(request)
+    staged.decode(body)
+    connection.settimeout(staged.SECONDS)
+    if connection.send(body) != len(body):
+        raise RuntimeError('WRONG_UID_PREPARE_SEND_UNCERTAIN')
+    # Stay alive while the custodian can receive the packet. A broken UID
+    # check would now reserve PREPARED and send an ACK, which must fail this
+    # probe; the root driver independently checks zero DB change / PUT / GET.
+    try:
+        reply = connection.recv(staged.MAX_FRAME + 1)
+    except (socket.timeout, ConnectionResetError):
+        reply = b''
+    if reply:
+        raise RuntimeError('WRONG_UID_RECEIVED_STAGE_ACK')
+
+
 def writer(config):
     import httpx
     import staged_ipc as staged
@@ -391,6 +414,7 @@ def writer(config):
         except PermissionError:
             if config['mode'] != 'wrong_uid' or os.getuid() != 48004:
                 raise
+            wrong_uid_probe(connection, config, staged)
             emit('WRITER_DONE', outcome=dict(status='UNKNOWN', head=None, purge_or_restore_admitted=False), reader_denied=reader_denied,
                  db_denied=db_denied, repeat_refused=False)
             return 0

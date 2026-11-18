@@ -303,3 +303,46 @@ def test_summary_field_closure(verifier, key):
 def test_draft_cannot_activate(key, value):
     body = deepcopy(json.loads((SOURCE / 'source-profile.json').read_bytes())); body[key] = value
     with pytest.raises(AssertionError): assert_draft(body)
+
+
+def assert_wrong_uid_probe(source):
+    tree = ast.parse(source)
+    probe = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'wrong_uid_probe')
+    require_statements(probe,
+        "bind = dict(config['binding'])",
+        "bind['location'] = config['endpoint'] + '/' + config['bucket'] + '/pult/erasure-v2/' + bind['scope'] + '/' + bind['generation'] + '/events/'",
+        "request = dict(format=staged.FORMAT, op='prepare', binding=bind, attempt=config['attempt'], event=dict(config['event']), base=dict(config['expected_head']))",
+        "body = canonical(request)",
+        "if connection.send(body) != len(body): raise RuntimeError('WRONG_UID_PREPARE_SEND_UNCERTAIN')",
+        "reply = connection.recv(staged.MAX_FRAME + 1)",
+        "if reply: raise RuntimeError('WRONG_UID_RECEIVED_STAGE_ACK')")
+    writer = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'writer')
+    handler = next(n for n in ast.walk(writer) if isinstance(n, ast.ExceptHandler)
+                   and isinstance(n.type, ast.Name) and n.type.id == 'PermissionError')
+    expected = ast.parse("""\
+if config['mode'] != 'wrong_uid' or os.getuid() != 48004:
+    raise
+wrong_uid_probe(connection, config, staged)
+emit('WRITER_DONE', outcome=dict(status='UNKNOWN', head=None, purge_or_restore_admitted=False), reader_denied=reader_denied,
+     db_denied=db_denied, repeat_refused=False)
+return 0
+""")
+    assert [ast.dump(n) for n in handler.body] == [ast.dump(n) for n in expected.body]
+
+
+def test_wrong_uid_sends_real_prepare_instead_of_fabricating_outcome():
+    assert_wrong_uid_probe((TESTS / 'worker.py').read_text(encoding='utf-8'))
+    assert literal(ast.parse((TESTS / 'run_gate.py').read_bytes()), 'CASES')['wrong_uid'] == (None, 0, 0, 0)
+
+
+@pytest.mark.parametrize('old,new', [
+    ('            wrong_uid_probe(connection, config, staged)', '            pass'),
+    ('if connection.send(body) != len(body):', 'if False:'),
+    ('reply = connection.recv(staged.MAX_FRAME + 1)', "reply = b''"),
+    ("if reply:", 'if False:'),
+])
+def test_wrong_uid_probe_cannot_skip_packet_or_accept_ack(old, new):
+    source = (TESTS / 'worker.py').read_text(encoding='utf-8')
+    assert_wrong_uid_probe(source); assert old in source
+    with pytest.raises((AssertionError, StopIteration)):
+        assert_wrong_uid_probe(source.replace(old, new))
