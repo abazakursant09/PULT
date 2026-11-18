@@ -1,0 +1,12 @@
+{
+  "format": "pult-staged-ipc-source-preparation-v1",
+  "status": "DRAFT_NOT_OPERATOR_APPROVED_OR_ACTIVATED",
+  "operator_approval": null,
+  "admitted_operations": [],
+  "working_credentials_included": false,
+  "database_or_pending_included": false,
+  "installation_service_or_network_actions": false,
+  "scope": "LOCAL_SYNTHETIC_AUTHENTICATED_IPC_NOT_TRUSTED_WRITABLE_HOST_OR_LIVE_S3",
+  "runtime": {"implementation": "cpython", "major_minor": [3, 12], "platform": "linux"},
+  "sources": {"staged_ipc.py": "f8010c39d6162dcac44b5e20cef1e79323c0e88a2e8a01eac34e8fe9163dbf02"}
+}
