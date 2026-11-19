@@ -21,7 +21,7 @@ RUN apk add --no-cache \
       meson=1.11.1-r0 \
       samurai=1.2-r8 \
       pkgconf=2.5.1-r0 \
-      openssl-dev=3.5.9-r0 \
+      openssl-dev=3.5.9-r1 \
       zlib-dev=1.4-r0 \
       zlib=1.4-r0 \
       xz-dev=5.8.4-r0 \
@@ -57,8 +57,8 @@ RUN set -eux; \
 FROM postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
 RUN apk add --no-cache \
       libbz2=1.0.8-r6 \
-      libssl3=3.5.9-r0 \
-      libcrypto3=3.5.9-r0 \
+      libssl3=3.5.9-r1 \
+      libcrypto3=3.5.9-r1 \
       lz4-libs=1.10.0-r1 \
       libxml2=2.13.9-r2 \
       zlib=1.4-r0 \

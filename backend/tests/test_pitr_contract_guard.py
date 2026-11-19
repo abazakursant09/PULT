@@ -76,6 +76,17 @@ def test_dockerfile_openssl_build_runtime_versions_match():
     assert len({found[0] for found in versions.values()}) == 1, versions
 
 
+def test_dockerfile_openssl_uses_reviewed_available_revision():
+    """19Nov2026: signed Alpine v3.24 replaced 3.5.9-r0 with 3.5.9-r1.
+
+    Matching three stale pins still passes the closure guard above, but cannot
+    build. Keep this independently reviewed revision exact; never auto-bump it.
+    """
+    df = _code(_r(DOCKERFILE))
+    for package in ("openssl-dev", "libssl3", "libcrypto3"):
+        assert re.findall(rf"\b{package}=([^\s\\]+)", df) == ["3.5.9-r1"], package
+
+
 def test_compression_build_runtime_versions_match():
     """Direct and libxml2-transitive compression libs stay aligned in both stages."""
     stages = _code(_r(DOCKERFILE)).split("FROM ")[1:]
