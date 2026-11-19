@@ -6,7 +6,7 @@
   "sources": {
     ".github/workflows/custodian_authenticated_action.yml": "70b859aa34f6e3dd5737c219aaa160197d0c8586ed294284412cc76589815272",
     "backend/tests/test_custodian_action_ci_guard.py": "fd086c43e988b170b52ceef0a84a97befc26316379495d6888df7b164d976028",
-    "backend/tests/test_custodian_action_protocol.py": "0de7bde7ff7ba7b3950631a8cac80c140c6eba461da454810a8aabc9c51959ab",
+    "backend/tests/test_custodian_action_protocol.py": "be2722d2f3dba159832910a043df3bb6420de4c73844b7219248a4dfad5df829",
     "ops/backup/custodian_v2/action/action_child.py": "f2d83b634a03c7c33696bf1f2ac95d0928a23f9422414d3c454bb9e3ff2dda9a",
     "ops/backup/custodian_v2/action/action_host.py": "eb90a46383b707762b91fb3f7f68a489e858d2602d11da7aaa215b5d43c11f11",
     "ops/backup/custodian_v2/action/action_profile.py": "5782ea5d74942d0bc3c0f766fa70ebd3133ec59faaca1a7307aeccb60061804e",

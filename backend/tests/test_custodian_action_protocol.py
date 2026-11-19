@@ -6,6 +6,7 @@ isolated module-registration context.  Exact capability types, Custodian,
 runtime admission and Channel are test doubles: no sockets, subprocesses,
 services, credentials, object storage or databases are opened.  In-memory
 phase/revision assertions are orchestration checks, never durable receipts.
+Loader regressions use disposable source files with bytecode explicitly enabled.
 """
 
 from collections import deque
@@ -14,8 +15,11 @@ from copy import deepcopy
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
+import py_compile
 import sys
+import tempfile
 from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -44,7 +48,10 @@ def load_registered(name, path):
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module  # Required by the REAL codec's dataclasses.
-    spec.loader.exec_module(module)
+    # Capture reviewed source directly: SourceFileLoader.exec_module may read
+    # stale .pyc or write __pycache__ into a frozen predecessor directory.
+    source = Path(path).read_bytes()
+    exec(compile(source, str(path), "exec", dont_inherit=True, optimize=0), module.__dict__)
     return module
 
 
@@ -977,6 +984,53 @@ class ClientMockedContractTests(ProtocolCase):
 
 
 class ModuleIsolationTests(unittest.TestCase):
+    def test_loader_does_not_write_bytecode_when_bytecode_enabled(self):
+        name = ACTION_NAME + "_no_bytecode"
+        saved = sys.modules.get(name, MISSING)
+        try:
+            with tempfile.TemporaryDirectory(prefix="pult-loader-no-pyc-") as folder:
+                directory = Path(folder)
+                source = directory / "fixture.py"
+                source.write_bytes(b"VALUE = 'source!'\n")
+                with patch.object(sys, "dont_write_bytecode", False), patch.object(sys, "pycache_prefix", None):
+                    loaded = load_registered(name, source)
+                self.assertEqual(loaded.VALUE, "source!")
+                self.assertIs(sys.modules[name], loaded)
+                self.assertEqual(loaded.__spec__.origin, str(source))
+                self.assertEqual({p.name for p in directory.iterdir()}, {"fixture.py"})
+        finally:
+            if saved is MISSING:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = saved
+
+    def test_loader_ignores_valid_stale_bytecode_and_preserves_cache(self):
+        name = ACTION_NAME + "_stale_bytecode"
+        saved = sys.modules.get(name, MISSING)
+        try:
+            with tempfile.TemporaryDirectory(prefix="pult-loader-stale-pyc-") as folder:
+                source = Path(folder) / "fixture.py"
+                cached = b"VALUE = 'cached!'\n"
+                reviewed = b"VALUE = 'source!'\n"
+                self.assertEqual(len(cached), len(reviewed))
+                source.write_bytes(cached)
+                original = source.stat()
+                with patch.object(sys, "dont_write_bytecode", False), patch.object(sys, "pycache_prefix", None):
+                    cache = Path(py_compile.compile(str(source), doraise=True,
+                        invalidation_mode=py_compile.PycInvalidationMode.TIMESTAMP))
+                    cache_bytes = cache.read_bytes()
+                    source.write_bytes(reviewed)
+                    os.utime(source, ns=(original.st_atime_ns, original.st_mtime_ns))
+                    loaded = load_registered(name, source)
+                self.assertEqual(loaded.VALUE, "source!")
+                self.assertEqual(cache.read_bytes(), cache_bytes)
+                self.assertEqual(source.read_bytes(), reviewed)
+        finally:
+            if saved is MISSING:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = saved
+
     def test_existing_module_objects_are_restored_by_identity(self):
         original = {name: sys.modules.get(name, MISSING) for name in MODULE_NAMES}
         sentinels = {name: ModuleType(name) for name in MODULE_NAMES}
