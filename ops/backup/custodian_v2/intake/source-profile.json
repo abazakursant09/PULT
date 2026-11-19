@@ -1,0 +1,12 @@
+{
+  "format": "pult-staged-source-intake-preparation-v1",
+  "status": "DRAFT_NOT_OPERATOR_APPROVED_OR_ACTIVATED",
+  "operator_approval": null,
+  "admitted_operations": [],
+  "working_credentials_included": false,
+  "database_or_pending_included": false,
+  "installation_service_or_network_actions": false,
+  "scope": "SOURCE_INTAKE_ONLY_NOT_HOST_WRITE_OUTER_STOP_OR_DEPLOYMENT",
+  "runtime": {"implementation": "cpython", "major_minor": [3, 12], "platform": "linux"},
+  "sources": {"staged_intake.py": "48c238948c9f2c94ed485093b0a583ebcaf7dca760612622e5a01eebd063617c"}
+}
