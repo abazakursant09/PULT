@@ -1,0 +1,13 @@
+{
+  "format": "pult-construction-stop-source-draft-v1",
+  "status": "DRAFT_NOT_OPERATOR_APPROVED_OR_ACTIVATED",
+  "operator_approval": null,
+  "scope": "STOP_BOUND_CONSTRUCTION_ONLY",
+  "admitted_operations": [],
+  "working_credentials_included": false,
+  "installation_service_or_network_actions": false,
+  "sources": {
+    "constructor_stop.py": "5406c5a81498013884ac46d0279219f299db40576357692604fb4f08c251ca8c",
+    "constructor_child.py": "5e54b650cfb44e4614eec0aafbcbc0c8faf7de985fd3344951b77c04c222322a"
+  }
+}
