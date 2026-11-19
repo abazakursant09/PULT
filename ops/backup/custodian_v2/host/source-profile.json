@@ -1,0 +1,21 @@
+{
+  "format": "pult-staged-host-construction-preparation-v1",
+  "status": "DRAFT_NOT_OPERATOR_APPROVED_OR_ACTIVATED",
+  "operator_approval": null,
+  "admitted_operations": [],
+  "working_credentials_included": false,
+  "state_bootstrap_or_reset": false,
+  "installation_service_or_network_actions": false,
+  "scope": "CONSTRUCTION_ONLY_NO_OUTER_WRITE_STOP_OR_DEPLOYMENT",
+  "runtime": {
+    "implementation": "cpython",
+    "major_minor": [
+      3,
+      12
+    ],
+    "platform": "linux"
+  },
+  "sources": {
+    "staged_host.py": "faf627fef860d560d01605e3717c9939fe81c2c4156b231b03e94c57320c2bae"
+  }
+}
