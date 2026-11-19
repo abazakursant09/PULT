@@ -1,0 +1,60 @@
+name: Custodian Host Construction
+
+# Synthetic owned host construction only; no listener, write admission or deployment.
+on:
+  pull_request:
+    paths:
+      - ops/backup/**
+      - ops/canary/canary.py
+      - backend/tests/test_custodian_host_construction_ci.py
+      - .github/workflows/custodian_host_construction.yml
+      - .gitattributes
+  push:
+    branches: [master]
+    paths:
+      - ops/backup/**
+      - ops/canary/canary.py
+      - backend/tests/test_custodian_host_construction_ci.py
+      - .github/workflows/custodian_host_construction.yml
+      - .gitattributes
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host-construction:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.13"
+      - name: Install locked CI dependencies
+        run: python -m pip install --require-hashes -r backend/requirements-ci.lock
+      - name: Guard dormant host construction and workflow
+        run: python -m pytest backend/tests/test_custodian_host_construction_ci.py -q
+      - name: Download seven hash-pinned synthetic wheels
+        run: |
+          set -euo pipefail
+          test -x /usr/bin/python3.12
+          python -m pip download --only-binary=:all: --no-deps --require-hashes -r ops/backup/custodian/requirements.lock -d ops/backup/tests/custodian_v2/wheels
+      - name: Native host construction and independent postcheck
+        run: sudo -n -- unshare --net /usr/bin/python3.12 -I -S -B ops/backup/tests/custodian_v2/host/ci_gate.py --reviewed-by-main
+      - name: Reject optimized intake runtimes
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import subprocess
+          root = "ops/backup/tests/custodian_v2/host/"
+          for file, reason in (("ci_gate.py", "optimized_host_construction_ci_refused"), ("run_gate.py", "optimized_host_construction_gate_refused"), ("verify_receipt.py", "optimized_host_construction_verifier_refused")):
+              result = subprocess.run(["sudo", "-n", "--", "unshare", "--net", "/usr/bin/python3.12", "-I", "-S", "-B", "-O", root + file, "--reviewed-by-main"], capture_output=True, text=True, timeout=30, check=False)
+              if result.returncode != 2 or result.stderr or json.loads(result.stdout) != {"outcome": "NOT_RUN", "reason": reason}:
+                  raise SystemExit("optimized host-construction runtime did not return exact refusal")
+          PY
