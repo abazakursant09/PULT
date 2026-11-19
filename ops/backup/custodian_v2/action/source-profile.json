@@ -1,0 +1,31 @@
+{
+  "format": "pult-synthetic-action-ci-catalogue-v3",
+  "status": "DRAFT_NOT_OPERATOR_APPROVED_OR_ACTIVATED",
+  "admitted_operations": [],
+  "working_credentials_included": false,
+  "sources": {
+    ".github/workflows/custodian_authenticated_action.yml": "70b859aa34f6e3dd5737c219aaa160197d0c8586ed294284412cc76589815272",
+    "backend/tests/test_custodian_action_ci_guard.py": "fd086c43e988b170b52ceef0a84a97befc26316379495d6888df7b164d976028",
+    "backend/tests/test_custodian_action_protocol.py": "0de7bde7ff7ba7b3950631a8cac80c140c6eba461da454810a8aabc9c51959ab",
+    "ops/backup/custodian_v2/action/action_child.py": "f2d83b634a03c7c33696bf1f2ac95d0928a23f9422414d3c454bb9e3ff2dda9a",
+    "ops/backup/custodian_v2/action/action_host.py": "eb90a46383b707762b91fb3f7f68a489e858d2602d11da7aaa215b5d43c11f11",
+    "ops/backup/custodian_v2/action/action_profile.py": "5782ea5d74942d0bc3c0f766fa70ebd3133ec59faaca1a7307aeccb60061804e",
+    "ops/backup/custodian_v2/action/action_protocol.py": "796fe52d76c910ac5c966d58095226efa725bfd24cc07a3ef9fecdf69685bc5f",
+    "ops/backup/custodian_v2/action/action_root.py": "120f94fd8a0fe2cc36a40def828cc722b4714ef411806c1c109ec945ed011d62",
+    "ops/backup/custodian_v2/cold/cold_host.py": "091133edcafb1110e13e6a79f51d336d9a152f2bf3f96d485b2c38d3899f438c",
+    "ops/backup/custodian_v2/controller/frozen/admission.py": "961cc3aef5dcfe9d6286b15a2d5c087a33dc1e5dafdc7d5a16f6eded961afea7",
+    "ops/backup/custodian_v2/controller/supervisor_v2.py": "3d05d22163b11f815b29c222128c4e41987c9e4a83e7b4906cbe63a18941a37e",
+    "ops/backup/custodian_v2/host/staged_host.py": "faf627fef860d560d01605e3717c9939fe81c2c4156b231b03e94c57320c2bae",
+    "ops/backup/custodian_v2/intake/staged_intake.py": "48c238948c9f2c94ed485093b0a583ebcaf7dca760612622e5a01eebd063617c",
+    "ops/backup/custodian_v2/staged/staged_ipc.py": "f8010c39d6162dcac44b5e20cef1e79323c0e88a2e8a01eac34e8fe9163dbf02",
+    "ops/backup/custodian_v2/stop/constructor_stop.py": "5406c5a81498013884ac46d0279219f299db40576357692604fb4f08c251ca8c",
+    "ops/backup/tests/custodian_v2/action/ci_gate.py": "af994df1bcf73400ea7948d6b9c7b59bb9c0c8d6005842304f77fd8f1345fe9b",
+    "ops/backup/tests/custodian_v2/action/native_chain.py": "c9b2ff592317790430dce76f2783a6fc3826b81e60a9b7a4587c3edd9595d9a1",
+    "ops/backup/tests/custodian_v2/action/proof_controller.py": "cb047a57eed27d4057bbe92f5d9a852822ef3e4925f4d5e05e849d7ef8eb01ca",
+    "ops/backup/tests/custodian_v2/action/test_atomic_attestation.py": "3ec4b05e88c7dcb358f0e5d072a29ebc361ebb7f8e5234c4fa5f8637d85d00ba",
+    "ops/backup/tests/custodian_v2/action/verify_receipt.py": "816b61d7a07c522ab5ad98d80a0b20039bbd5233870cffd869a38bdb9ab6c378",
+    "ops/backup/tests/custodian_v2/controller/ci_gate.py": "d30bb8ab0837bffccae10aeb2aa5e8bf891ad9b7923cdcbcd51afe15d865d61b",
+    "ops/backup/tests/custodian_v2/controller/scope_control.py": "d46ee7c30b01c124d88a60f5b846d3cabcaf6b043b5dc2568a26b32615186234",
+    "ops/backup/tests/custodian_v2/host/run_gate.py": "002078181e29af013e97b41b074f24167b36ca35c7da7df5e02787b4ccedf0ca"
+  }
+}
