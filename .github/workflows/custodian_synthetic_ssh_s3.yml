@@ -1,0 +1,81 @@
+name: Custodian Synthetic SSH and S3
+
+on:
+  pull_request:
+    paths:
+      - ops/backup/**
+      - backend/tests/test_custodian_ssh_s3_ci_guard.py
+      - docs/custodian-synthetic-ssh-s3.md
+      - .github/workflows/custodian_synthetic_ssh_s3.yml
+      - .gitattributes
+  push:
+    branches: [master]
+    paths:
+      - ops/backup/**
+      - backend/tests/test_custodian_ssh_s3_ci_guard.py
+      - docs/custodian-synthetic-ssh-s3.md
+      - .github/workflows/custodian_synthetic_ssh_s3.yml
+      - .gitattributes
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  component:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.13"
+      - name: Guard source catalogue and workflow
+        run: python -I -S -B backend/tests/test_custodian_ssh_s3_ci_guard.py
+      - name: Download seven hash-pinned synthetic wheels
+        run: python -m pip download --only-binary=:all: --no-deps --require-hashes -r ops/backup/custodian/requirements.lock -d ops/backup/tests/custodian_v2/wheels
+      - name: Portable components, no provider claim
+        run: python -I -S -B ops/backup/tests/custodian_v2/synthetic_ssh_s3/run_local_gate.py
+
+  native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.13"
+      - name: Download seven hash-pinned synthetic wheels
+        run: python -m pip download --only-binary=:all: --no-deps --require-hashes -r ops/backup/custodian/requirements.lock -d ops/backup/tests/custodian_v2/wheels
+      - name: Offline supply rejection tests
+        run: /usr/bin/python3.12 -I -S -B ops/backup/tests/custodian_v2/synthetic_ssh_s3/test_fetch_supply.py
+      - name: Fetch two exact verified OpenSSH artifacts without installation
+        run: python -I -S -B ops/backup/tests/custodian_v2/synthetic_ssh_s3/fetch_openssh_supply.py
+      - name: Real isolated OpenSSH admission and denial scenarios
+        run: sudo -n -- /usr/bin/python3.12 -I -S -B ops/backup/tests/custodian_v2/synthetic_ssh_s3/run_native_ssh_gate.py
+      - name: Real systemd SQLite and IPC with explicit mock S3
+        run: sudo -n -- unshare --net /usr/bin/python3.12 -I -S -B ops/backup/tests/custodian_v2/synthetic_ssh_s3/native_storage_gate.py --reviewed-by-main
+      - name: Reject optimized proof entry points
+        run: |
+          python - <<'PY'
+          import subprocess
+          from pathlib import Path
+          root = Path("ops/backup/tests/custodian_v2/synthetic_ssh_s3")
+          reasons = {"run_local_gate.py": b"SYNTHETIC_COMPONENT_GATE_REFUSED", "run_native_ssh_gate.py": b"NATIVE_SSH_COMPONENT_GATE_REFUSED", "native_storage_gate.py": b"NATIVE_STORAGE_GATE_REFUSED"}
+          for name, reason in reasons.items():
+              result = subprocess.run(["sudo", "-n", "--", "/usr/bin/python3.12", "-I", "-S", "-B", "-O", str(root/name)], capture_output=True, timeout=20)
+              if result.returncode != 1 or result.stdout or reason not in result.stderr:
+                  raise SystemExit("optimized proof was not refused")
+          PY

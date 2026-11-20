@@ -16,3 +16,6 @@ ops/backup/custodian/requirements.lock text eol=lf
 .github/workflows/custodian_authenticated_action.yml text eol=lf
 backend/tests/test_custodian_action_ci_guard.py text eol=lf
 backend/tests/test_custodian_action_protocol.py text eol=lf
+.github/workflows/custodian_synthetic_ssh_s3.yml text eol=lf
+backend/tests/test_custodian_ssh_s3_ci_guard.py text eol=lf
+docs/custodian-synthetic-ssh-s3.md text eol=lf

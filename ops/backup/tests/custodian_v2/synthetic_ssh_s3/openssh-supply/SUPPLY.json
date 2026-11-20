@@ -1,0 +1,19 @@
+{
+  "format": "pult-openssh-component-supply-v1",
+  "component_only": true,
+  "install_allowed": false,
+  "maintainer_scripts_allowed": false,
+  "unpack_only": true,
+  "packages": [
+    {
+      "file": "openssh-server_1%3a9.6p1-3ubuntu13.20_amd64.deb",
+      "bytes": 511546,
+      "sha256": "5d0d5eb672ddc27601e2da4e8465c5736dc73375a21bc1cd1834fcb08fb155bf"
+    },
+    {
+      "file": "libwrap0_7.6.q-33_amd64.deb",
+      "bytes": 47874,
+      "sha256": "36118b862539868408ee056411d6e470068d14c46e5296b29bfb744770f5d2ce"
+    }
+  ]
+}
