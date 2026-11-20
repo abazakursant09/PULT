@@ -12,3 +12,7 @@ ops/backup/erasure_custodian_host.py text eol=lf
 ops/backup/erasure_journal.py text eol=lf
 ops/backup/erasure_journal_s3.py text eol=lf
 ops/backup/custodian/requirements.lock text eol=lf
+# New CI catalogue also pins these non-runtime text inputs byte-for-byte.
+.github/workflows/custodian_authenticated_action.yml text eol=lf
+backend/tests/test_custodian_action_ci_guard.py text eol=lf
+backend/tests/test_custodian_action_protocol.py text eol=lf
