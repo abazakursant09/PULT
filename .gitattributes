@@ -1,3 +1,4 @@
+.gitattributes text eol=lf
 backend/tests/characterization/**/snapshot.json text eol=lf
 # SECURITY-2D-3E1B-3C2A: the canary runtime is frozen by a raw-byte SHA-256 (see
 # backend/tests/test_canary_tooling_guard.py). Pin its line endings to LF so the digest is identical on
@@ -16,3 +17,6 @@ ops/backup/custodian/requirements.lock text eol=lf
 .github/workflows/custodian_authenticated_action.yml text eol=lf
 backend/tests/test_custodian_action_ci_guard.py text eol=lf
 backend/tests/test_custodian_action_protocol.py text eol=lf
+.github/workflows/custodian_synthetic_ssh_s3.yml text eol=lf
+backend/tests/test_custodian_ssh_s3_ci_guard.py text eol=lf
+docs/custodian-synthetic-ssh-s3.md text eol=lf
