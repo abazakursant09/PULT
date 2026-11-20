@@ -4,9 +4,9 @@
   "admitted_operations": [],
   "working_credentials_included": false,
   "sources": {
-    ".gitattributes": "6cfafa45dac452537fc0681f290ca819070cc40ac2403c48d941b997bf4fbf27",
+    ".gitattributes": "d8e7c02e359d7166b2846337616608bd1bf7e45d5540df004efe5d060fea2cec",
     ".github/workflows/custodian_synthetic_ssh_s3.yml": "6c388b554aca05c156f0d738efae8fa9d78cfdb387de745fc7e56dec414b3aaa",
-    "backend/tests/test_custodian_ssh_s3_ci_guard.py": "37262508e39a705d0b8a7118c08ef7d26f6288bce7a705dccc0a2fa73ac2ca59",
+    "backend/tests/test_custodian_ssh_s3_ci_guard.py": "b538b19048c275f828622a89a636373859358f86e958bcd41f856e7597525ecd",
     "docs/custodian-synthetic-ssh-s3.md": "f5ca7b5bfa18d395f9bc93758255585a14c953ca2e97415e101cc79cd49b2280",
     "ops/backup/custodian_v2/candidate/anchor_v2.py": "ce6bff676dd2d0eccc5857efe34316fdeb644fdb91df7fff20ef40f77dc17d73",
     "ops/backup/custodian_v2/candidate/protocol_v2.py": "5807a596d61ff894443b12b0d019bd3a35d04d7e1856c93f5fff06f17c2180c9",

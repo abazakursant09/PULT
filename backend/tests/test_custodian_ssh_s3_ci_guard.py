@@ -106,7 +106,7 @@ class SyntheticSshS3Guard(unittest.TestCase):
 
     def test_hashed_external_text_is_lf_on_windows_too(self):
         source = (REPO/'.gitattributes').read_text()
-        for relative in ('.github/workflows/custodian_synthetic_ssh_s3.yml',
+        for relative in ('.gitattributes', '.github/workflows/custodian_synthetic_ssh_s3.yml',
             'backend/tests/test_custodian_ssh_s3_ci_guard.py', 'docs/custodian-synthetic-ssh-s3.md'):
             self.assertIn(relative+' text eol=lf', source)
 
