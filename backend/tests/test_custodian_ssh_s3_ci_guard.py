@@ -116,5 +116,11 @@ class SyntheticSshS3Guard(unittest.TestCase):
                 command = row.lstrip().removeprefix('run: ')
                 self.assertNotIn(': ', command, 'colon command requires a YAML block scalar')
 
+    def test_linux_component_uses_pinned_native_python312(self):
+        source = WORKFLOW.read_text()
+        self.assertIn('os: ubuntu-24.04\n            proof_python: /usr/bin/python3.12', source)
+        self.assertIn('os: windows-2022\n            proof_python: python', source)
+        self.assertIn('run: ${{ matrix.proof_python }} -I -S -B ops/backup/tests/custodian_v2/synthetic_ssh_s3/run_local_gate.py', source)
+
 if __name__ == '__main__':
     unittest.main()

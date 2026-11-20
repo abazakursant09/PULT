@@ -27,6 +27,11 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, windows-2022]
+        include:
+          - os: ubuntu-24.04
+            proof_python: /usr/bin/python3.12
+          - os: windows-2022
+            proof_python: python
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     steps:
@@ -44,7 +49,7 @@ jobs:
         run: >-
           python -m pip download --only-binary=:all: --no-deps --require-hashes -r ops/backup/custodian/requirements.lock -d ops/backup/tests/custodian_v2/wheels
       - name: Portable components, no provider claim
-        run: python -I -S -B ops/backup/tests/custodian_v2/synthetic_ssh_s3/run_local_gate.py
+        run: ${{ matrix.proof_python }} -I -S -B ops/backup/tests/custodian_v2/synthetic_ssh_s3/run_local_gate.py
 
   native:
     runs-on: ubuntu-24.04
