@@ -110,5 +110,11 @@ class SyntheticSshS3Guard(unittest.TestCase):
             'backend/tests/test_custodian_ssh_s3_ci_guard.py', 'docs/custodian-synthetic-ssh-s3.md'):
             self.assertIn(relative+' text eol=lf', source)
 
+    def test_ci_colon_commands_are_not_ambiguous_plain_scalars(self):
+        for row in WORKFLOW.read_text().splitlines():
+            if row.lstrip().startswith('run: '):
+                command = row.lstrip().removeprefix('run: ')
+                self.assertNotIn(': ', command, 'colon command requires a YAML block scalar')
+
 if __name__ == '__main__':
     unittest.main()

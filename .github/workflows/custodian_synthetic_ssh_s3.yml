@@ -41,7 +41,8 @@ jobs:
       - name: Guard source catalogue and workflow
         run: python -I -S -B backend/tests/test_custodian_ssh_s3_ci_guard.py
       - name: Download seven hash-pinned synthetic wheels
-        run: python -m pip download --only-binary=:all: --no-deps --require-hashes -r ops/backup/custodian/requirements.lock -d ops/backup/tests/custodian_v2/wheels
+        run: >-
+          python -m pip download --only-binary=:all: --no-deps --require-hashes -r ops/backup/custodian/requirements.lock -d ops/backup/tests/custodian_v2/wheels
       - name: Portable components, no provider claim
         run: python -I -S -B ops/backup/tests/custodian_v2/synthetic_ssh_s3/run_local_gate.py
 
@@ -58,7 +59,8 @@ jobs:
         with:
           python-version: "3.13"
       - name: Download seven hash-pinned synthetic wheels
-        run: python -m pip download --only-binary=:all: --no-deps --require-hashes -r ops/backup/custodian/requirements.lock -d ops/backup/tests/custodian_v2/wheels
+        run: >-
+          python -m pip download --only-binary=:all: --no-deps --require-hashes -r ops/backup/custodian/requirements.lock -d ops/backup/tests/custodian_v2/wheels
       - name: Offline supply rejection tests
         run: /usr/bin/python3.12 -I -S -B ops/backup/tests/custodian_v2/synthetic_ssh_s3/test_fetch_supply.py
       - name: Fetch two exact verified OpenSSH artifacts without installation
