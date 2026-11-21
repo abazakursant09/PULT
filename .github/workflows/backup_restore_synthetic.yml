@@ -33,6 +33,8 @@ on:
       - backend/tests/test_erasure_operator.py
       - backend/tests/test_erasure_operator_review_pg.py
       - backend/tests/test_erasure_operator_ci.py
+      - backend/tests/test_operator_offline_host.py
+      - docs/operator-offline-host.md
       - docs/erasure-operator-review.md
       - backend/tests/test_erasure_custodian.py
       - backend/tests/test_erasure_custodian_host.py
@@ -68,6 +70,8 @@ on:
       - backend/tests/test_erasure_operator.py
       - backend/tests/test_erasure_operator_review_pg.py
       - backend/tests/test_erasure_operator_ci.py
+      - backend/tests/test_operator_offline_host.py
+      - docs/operator-offline-host.md
       - docs/erasure-operator-review.md
       - backend/tests/test_erasure_custodian.py
       - backend/tests/test_erasure_custodian_host.py
@@ -119,6 +123,12 @@ jobs:
 
       - name: Synthetic Linux operator review (real kernel peer UIDs)
         run: sudo -n -- "$(command -v python)" -I -B ops/backup/tests/erasure_operator_isolation_proof.py
+
+      - name: Offline operator host profile contracts
+        run: python -B -m pytest backend/tests/test_operator_offline_host.py -q
+
+      - name: Native offline operator forced-stop proof
+        run: sudo -n -- unshare --net /usr/bin/python3.12 -I -S -B ops/backup/tests/operator_offline_host_proof.py
 
       - name: Synthetic Linux custodian isolation (real distinct unprivileged UIDs)
         run: sudo -n -- "$(command -v python)" -I -B ops/backup/tests/custodian_isolation_proof.py
