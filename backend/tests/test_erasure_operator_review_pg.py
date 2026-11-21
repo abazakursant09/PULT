@@ -441,7 +441,7 @@ def test_pg_operator_validates_arguments_and_engine_before_connect(pg):
     pg.run(scenario())
 
 
-def test_pg_operator_sanitizes_storage_and_cleanup_failures(pg, monkeypatch):
+def test_pg_operator_sanitizes_storage_and_cleanup_failures(pg, monkeypatch, caplog):
     async def scenario():
         row = await _seed(pg)
         before = await _snapshot(pg, row)
@@ -477,4 +477,62 @@ def test_pg_operator_sanitizes_storage_and_cleanup_failures(pg, monkeypatch):
             assert 4.5 <= elapsed < 7
         assert await _snapshot(pg, row) == before
         await _observe(pg, row)
+        # Real native-close failures, below AsyncConnection.__aexit__. NullPool
+        # can swallow them even though that public wrapper exits successfully.
+        import asyncpg
+        import logging
+        original_native_close = asyncpg.Connection.close
+        original_native_terminate = asyncpg.Connection.terminate
+        for mode in ('before_close', 'after_close', 'terminate_failure', 'disabled_logging', 'cancelled_close'):
+            fault_engine = create_async_engine(pg.url.set(username=_READER),
+                poolclass=NullPool, echo=False, hide_parameters=True)
+            review = CommittedDraftReviewer(fault_engine, database_name=pg.url.database,
+                                           database_oid=pg.oid, reader_role=_READER)
+            handles, closes, terminations = [], [], []
+            def connected(dbapi, _record):
+                handles.append(dbapi.driver_connection)
+            event.listen(fault_engine.sync_engine, 'connect', connected)
+            async def broken_close(self, *args, **kwargs):
+                if self not in handles:
+                    return await original_native_close(self, *args, **kwargs)
+                closes.append(True)
+                if mode == 'after_close':
+                    await original_native_close(self, *args, **kwargs)
+                if mode == 'cancelled_close':
+                    raise asyncio.CancelledError()
+                raise RuntimeError(_SECRET)
+            def broken_terminate(self):
+                original_native_terminate(self)
+                if self in handles:
+                    terminations.append(True)
+                    if mode == 'terminate_failure':
+                        raise RuntimeError(_SECRET)
+            try:
+                if mode == 'disabled_logging':
+                    # Only this facade's sink is disabled; global loggers stay intact.
+                    review._cleanup.logger = logging.Logger('synthetic-disabled-pool', logging.CRITICAL + 1)
+                with monkeypatch.context() as patch:
+                    caplog.clear()
+                    patch.setattr(asyncpg.Connection, 'close', broken_close)
+                    patch.setattr(asyncpg.Connection, 'terminate', broken_terminate)
+                    error_type = asyncio.CancelledError if mode == 'cancelled_close' else ReviewError
+                    with pytest.raises(error_type):
+                        await review(row.account, row.draft, nonce=str(uuid4()))
+                    assert _SECRET not in caplog.text
+                    assert review._cleanup.failed is True
+                    assert len(handles) == len(closes) == 1
+                    assert handles[0].is_closed() is True
+                    assert terminations == ([] if mode == 'after_close' else [True])
+                    # No closed-state check, retry or new caller may clear the latch.
+                    with pytest.raises(ReviewError, match='^review_storage_failed$'):
+                        await review(row.account, row.draft, nonce=str(uuid4()))
+                    assert len(handles) == 1
+            finally:
+                for handle in handles:
+                    if not handle.is_closed():
+                        original_native_terminate(handle)  # Owned artificial fixture only.
+                event.remove(fault_engine.sync_engine, 'connect', connected)
+                await fault_engine.dispose()
+        assert await _snapshot(pg, row) == before
+        await _observe(pg, row)  # A different, healthy dedicated pool is unaffected.
     pg.run(scenario())

@@ -8,9 +8,11 @@ A fresh observation is neither a mutation permit nor a live recovery/purge fence
 No lifecycle, enrollment, journal, restore or purge operation is reachable here.
 """
 import asyncio
+import logging
 import re
 from datetime import datetime, timezone
 
+import asyncpg
 from sqlalchemy import text
 from sqlalchemy.dialects.postgresql.asyncpg import PGDialect_asyncpg
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -18,6 +20,25 @@ from sqlalchemy.pool import NullPool
 
 from ops.backup.erasure_operator import DraftObservation, ReviewError, _epoch, _uuid
 from services.account_closure_policy import evaluate_closure
+
+
+class _PoolCleanupAudit(logging.LoggerAdapter):
+    """Dedicated-pool lifetime latch, not a global logging filter or retry.
+
+    The pinned NullPool reports swallowed close/reset errors through error().
+    Native closed-state verification alone misses close-then-raise. Latch before
+    forwarding even when logging is disabled, never copy exception text/kwargs.
+    Keep this facade installed while shielded cleanup may still be running.
+    """
+    def __init__(self, logger):
+        super().__init__(logger, {})
+        self.failed = False
+
+    def log(self, level, _message, *args, **kwargs):
+        if level >= logging.ERROR:
+            self.failed = True
+        self.logger.log(level, 'review_pool_cleanup_failed' if level >= logging.ERROR
+                        else 'review_pool_diagnostic')
 
 
 # All identifiers and settings are static. Catalog lookups are parameterized;
@@ -92,6 +113,10 @@ class CommittedDraftReviewer:
         self._database_oid = database_oid
         self._reader_role = reader_role
         self._validate_engine()
+        self._pool = engine.pool
+        existing = self._pool.logger
+        self._cleanup = existing if type(existing) is _PoolCleanupAudit else _PoolCleanupAudit(existing)
+        self._pool.logger = self._cleanup
 
     def __repr__(self):
         return '<CommittedDraftReviewer private read-only binding>'
@@ -107,6 +132,9 @@ class CommittedDraftReviewer:
                 or engine.echo not in (None, False) or engine.pool.echo not in (None, False)
                 or engine.sync_engine.hide_parameters is not True):
             raise ReviewError('trusted_review_engine_required')
+        if hasattr(self, '_pool') and (
+                engine.pool is not self._pool or self._pool.logger is not self._cleanup):
+            raise ReviewError('trusted_review_engine_required')
 
     async def __call__(self, account_id, draft_id, *, nonce):
         # Validate before checkout (including aliases rejected by the wire type).
@@ -115,10 +143,17 @@ class CommittedDraftReviewer:
         if len({account_id, draft_id, nonce}) != 3:
             raise ReviewError('review_identity_alias_refused')
         self._validate_engine()
+        if self._cleanup.failed:
+            raise ReviewError('review_storage_failed')
+        native, native_closed = None, False
         try:
             # The outer deadline also bounds physical checkout/connect and close,
             # not only SQL execution. Timeout/cancellation never emits an observation.
             async with asyncio.timeout(5), self._engine.connect() as connection:
+                raw = await connection.get_raw_connection()
+                if type(raw.driver_connection) is not asyncpg.Connection:
+                    raise ReviewError('review_storage_failed')
+                native = raw.driver_connection
                 async with connection.begin():
                     await connection.execute(text(
                         'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY'))
@@ -169,8 +204,6 @@ class CommittedDraftReviewer:
                     observation = DraftObservation(nonce=nonce, account_id=account_id,
                         draft_id=draft_id, closure_epoch=closure_epoch,
                         policy=row['user_policy'], reviewed_at=rendered_review)
-            # Never expose a success if commit, rollback or physical close failed.
-            return observation
         except ReviewError as error:
             # Only our own fixed refusal codes may cross the backend boundary;
             # a driver/cleanup hook raising this public exception is not trusted.
@@ -182,3 +215,23 @@ class CommittedDraftReviewer:
             raise ReviewError(reason) from None
         except Exception:
             raise ReviewError('review_storage_failed') from None
+        finally:
+            if native is not None:
+                try:
+                    native_closed = native.is_closed() is True
+                except Exception:
+                    native_closed = False
+                if not native_closed:
+                    # Latch BEFORE fallback; successful termination cannot turn
+                    # an uncertain physical close into an accepted observation.
+                    self._cleanup.failed = True
+                    try:
+                        native.terminate()
+                    except Exception:
+                        pass  # Fixed refusal below/on the original error path.
+        # No selected return may survive a failed finally/cleanup. A poisoned
+        # pool is never reset here; a new trusted engine needs separate creation.
+        self._validate_engine()
+        if not native_closed or self._cleanup.failed:
+            raise ReviewError('review_storage_failed')
+        return observation
