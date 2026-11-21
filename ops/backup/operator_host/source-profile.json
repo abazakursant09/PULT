@@ -1,0 +1,115 @@
+{
+  "format": "pult-offline-operator-source-draft-v1",
+  "status": "DRAFT_NOT_OPERATOR_APPROVED_OR_ACTIVATED",
+  "operator_approval": null,
+  "operational_manifest_included": false,
+  "scope": "SYNTHETIC_REVIEW_ENDPOINT_ONLY",
+  "synthetic_only": true,
+  "admitted_operations": [],
+  "working_credentials_included": false,
+  "database_or_pending_included": false,
+  "cloud_or_publication_authorized": false,
+  "deployment_performed": false,
+  "runtime": {
+    "implementation": "cpython",
+    "major_minor": [3, 12],
+    "platform": "linux",
+    "executable": "/usr/bin/python3.12",
+    "required_flags": ["-I", "-S", "-B"],
+    "optimization": 0,
+    "original_main_thread_only": true,
+    "single_thread_only": true,
+    "process_manager": "PID1 systemd with cgroup v2"
+  },
+  "trust_roots": [
+    "trusted root controller",
+    "Linux kernel",
+    "PID1 systemd and cgroup v2",
+    "fixed trusted OS tools including setpriv",
+    "fixed bootstrap and system CPython 3.12",
+    "independently supplied operational manifest SHA-256"
+  ],
+  "hash_policy": {
+    "algorithm": "sha256",
+    "candidate_sources": "UTF-8 bytes with CRLF converted to LF; no other changes",
+    "immutable_dependencies": "Exact profile.PINS values; not newly approved or repinned",
+    "runtime_manifest": "Exact installed bytes; bootstrap performs no newline normalization",
+    "refresh_required_after_source_changes": true
+  },
+  "candidate_source_roles": ["profile", "host", "bootstrap", "worker"],
+  "immutable_source_roles": ["journal", "anchor", "ipc", "operator", "stop", "supervisor", "core"],
+  "lifecycle": {
+    "scope": "ONE_ORIGINAL_LIVE_ROOT_CONTROLLER_ONE_WORKER_ONE_SYNTHETIC_REVIEW",
+    "new_control_and_ipc_domain_required": true,
+    "permanent_fence": "constructor-stop.claim",
+    "controller_start_condition": "NEGATIVE_PERMANENT_FENCE",
+    "privilege_drop": "FIXED_OS_SETPRIV_BEFORE_PYTHON_ALL_FIVE_CAPABILITY_SETS_ZERO",
+    "runtime_max_seconds": 15,
+    "timeout_stop_seconds": 2,
+    "kill_mode": "control-group",
+    "restart": "no",
+    "unknown_policy": "REVIEW_REQUIRED_NO_RETRY_NO_ADOPTION_NO_REARM",
+    "early_core_observation_is_parent_receipt": false,
+    "live_authority": false
+  },
+  "flags": {
+    "identity_enrollment_admitted": false,
+    "journal_dispatch_admitted": false,
+    "purge_or_restore_admitted": false
+  },
+  "native_proof": {
+    "status": "REQUIRED_OFFLINE_GATE_NOT_DEPLOYMENT_APPROVAL",
+    "harness_status": "SOURCE_PREPARED",
+    "harness": "ops/backup/tests/operator_offline_host_proof.py",
+    "planned_command": "sudo -n -- unshare --net /usr/bin/python3.12 -I -S -B ops/backup/tests/operator_offline_host_proof.py",
+    "command_interface_finalized": true,
+    "required_cases": 11,
+    "permitted_skips": 0
+  },
+  "sources": {
+    "journal": {
+      "path": "ops/backup/erasure_journal.py",
+      "sha256": "94eeba19e645e25ec8286baebe4092a29c541c6f12858e1ff7b303f6a1a4fc98"
+    },
+    "anchor": {
+      "path": "ops/backup/erasure_anchor.py",
+      "sha256": "b399803ac7a03aaa5a506cbb0036f98c153457769beabf46af44864b190861a8"
+    },
+    "ipc": {
+      "path": "ops/backup/erasure_custodian.py",
+      "sha256": "3eb793a1ef1002c6def97b52c579b2ff051e834b44b802a75aca09d640a691d3"
+    },
+    "operator": {
+      "path": "ops/backup/erasure_operator.py",
+      "sha256": "c4be8ed53a803afe37cf6c72ac9fa462167ace9401575ee1f85faa2774a1365f"
+    },
+    "stop": {
+      "path": "ops/backup/custodian_v2/stop/constructor_stop.py",
+      "sha256": "5406c5a81498013884ac46d0279219f299db40576357692604fb4f08c251ca8c"
+    },
+    "supervisor": {
+      "path": "ops/backup/custodian_v2/controller/supervisor_v2.py",
+      "sha256": "3d05d22163b11f815b29c222128c4e41987c9e4a83e7b4906cbe63a18941a37e"
+    },
+    "core": {
+      "path": "ops/backup/custodian_v2/controller/frozen/admission.py",
+      "sha256": "961cc3aef5dcfe9d6286b15a2d5c087a33dc1e5dafdc7d5a16f6eded961afea7"
+    },
+    "profile": {
+      "path": "ops/backup/operator_host/profile.py",
+      "sha256": "0998c8922c470406d2789727b749ed9365f36f2fa3ee70eea7448d3693e31edf"
+    },
+    "host": {
+      "path": "ops/backup/operator_host/host.py",
+      "sha256": "5a47b32282fa4c6533ea0c4ed2602523dc2054cb8e567da571de3962b877e356"
+    },
+    "bootstrap": {
+      "path": "ops/backup/operator_host/bootstrap.py",
+      "sha256": "96141d0e26cfc718e9cb762f689d20cad90f22c815dadec587fcac8c7580d3fa"
+    },
+    "worker": {
+      "path": "ops/backup/operator_host/worker.py",
+      "sha256": "5e7993f35e9d50019af79ecb2335cb2fe5111f38f06c83f70fc01304d425a06c"
+    }
+  }
+}
