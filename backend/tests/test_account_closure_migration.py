@@ -52,7 +52,8 @@ def migrated(prior, tmp_path, monkeypatch):
 
 def test_single_pinned_head():
     script=ScriptDirectory.from_config(config())
-    assert script.get_heads()==[REV]
+    assert script.get_heads()==['ejp1a2b3c4d01']
+    assert script.get_revision('ejp1a2b3c4d01').down_revision==REV
     assert script.get_revision(REV).down_revision==PARENT
 
 

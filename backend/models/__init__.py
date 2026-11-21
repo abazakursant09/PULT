@@ -1,4 +1,6 @@
 from .user import User
+# Dormant erasure DRAFT foundation; no router/task/dispatcher or external writer.
+from .erasure_preparation import ErasurePreparation
 # Ownership boundary (F1.0) — workspace owns marketplace accounts and, later, evidence
 from .workspace import Workspace
 # LEGAL-PRELAUNCH-F2 (blocker #6) — append-only server-side registration/recovery consent evidence
