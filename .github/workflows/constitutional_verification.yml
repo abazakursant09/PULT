@@ -97,6 +97,46 @@ jobs:
           python -c "import os; assert os.environ.get('PULT_TEST_PG_URL'), 'PULT_TEST_PG_URL required'"
           pytest -p no:cacheprovider -q -rA tests/test_startup_migration_pg.py
 
+      - name: Real PG16 erasure DRAFT concurrency (owned isolated database, no skips)
+        env:
+          APP_ENV: test
+        run: |
+          python - <<'PY'
+          import asyncio, os, pathlib, subprocess, sys, uuid
+          from xml.etree import ElementTree
+          import asyncpg
+
+          async def provision():
+              # This is the existing pinned CI service, never an app URL fallback.
+              admin = await asyncpg.connect(host='127.0.0.1', port=5432, user='postgres',
+                  password='postgres', database='pult_explain', timeout=5)
+              try:
+                  assert 160000 <= int(await admin.fetchval('SHOW server_version_num')) < 170000
+                  data = await admin.fetchval('SHOW data_directory')
+                  assert data == '/var/lib/postgresql/data'
+                  assert not await admin.fetchval("SELECT 1 FROM pg_roles WHERE rolname='erasure_prep_owner'")
+                  name = 'erasure_prep_test_' + uuid.uuid4().hex
+                  await admin.execute("CREATE ROLE erasure_prep_owner LOGIN PASSWORD 'erasure-prep-fixture-only'")
+                  await admin.execute('CREATE DATABASE ' + name + ' OWNER erasure_prep_owner')
+                  oid = await admin.fetchval('SELECT oid FROM pg_database WHERE datname=$1', name)
+                  return name, data, oid
+              finally:
+                  await admin.close()
+
+          database, data, oid = asyncio.run(provision())
+          env = dict(os.environ, PULT_ERASURE_PREP_TEST_URL=
+              'postgresql+asyncpg://erasure_prep_owner:erasure-prep-fixture-only@127.0.0.1:5432/' + database,
+              PULT_ERASURE_PREP_TEST_DATA=data, PULT_ERASURE_PREP_TEST_DATABASE_OID=str(oid))
+          report = pathlib.Path('erasure-preparation-pg.xml')
+          result = subprocess.run([sys.executable, '-B', '-m', 'pytest', '-p', 'no:cacheprovider', '-q',
+              'tests/test_erasure_preparation_pg.py', '--junitxml=' + str(report)], env=env, timeout=90)
+          assert result.returncode == 0
+          xml = ElementTree.parse(report).getroot()
+          suites = [xml] if xml.tag == 'testsuite' else list(xml.findall('testsuite'))
+          assert sum(int(s.get('tests', '0')) for s in suites) == 3
+          assert all(int(s.get(k, '0')) == 0 for s in suites for k in ('errors', 'failures', 'skipped'))
+          PY
+
       - name: Real PG16 import conflict resolution (isolated databases)
         env:
           PULT_TEST_PG_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/pult_explain

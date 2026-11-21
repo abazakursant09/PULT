@@ -87,6 +87,24 @@ def test_dockerfile_openssl_uses_reviewed_available_revision():
         assert re.findall(rf"\b{package}=([^\s\\]+)", df) == ["3.5.9-r1"], package
 
 
+def test_dockerfile_libxml2_build_runtime_versions_match():
+    """The libxml2 headers and runtime library must use the same exact revision."""
+    df = _code(_r(DOCKERFILE))
+    versions = {
+        package: re.findall(rf"(?<![\w-]){package}=([^\s\\]+)", df)
+        for package in ("libxml2-dev", "libxml2")
+    }
+    assert all(len(found) == 1 for found in versions.values()), versions
+    assert len({found[0] for found in versions.values()}) == 1, versions
+
+
+def test_dockerfile_libxml2_uses_reviewed_available_revision():
+    """21Nov2026: fail-closed CI found the signed Alpine dev revision is now r3."""
+    df = _code(_r(DOCKERFILE))
+    for package in ("libxml2-dev", "libxml2"):
+        assert re.findall(rf"(?<![\w-]){package}=([^\s\\]+)", df) == ["2.13.9-r3"], package
+
+
 def test_compression_build_runtime_versions_match():
     """Direct and libxml2-transitive compression libs stay aligned in both stages."""
     stages = _code(_r(DOCKERFILE)).split("FROM ")[1:]

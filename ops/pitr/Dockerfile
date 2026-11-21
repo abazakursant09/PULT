@@ -27,7 +27,7 @@ RUN apk add --no-cache \
       xz-dev=5.8.4-r0 \
       xz-libs=5.8.4-r0 \
       lz4-dev=1.10.0-r1 \
-      libxml2-dev=2.13.9-r2 \
+      libxml2-dev=2.13.9-r3 \
       bzip2-dev=1.0.8-r6 \
       zstd-dev=1.5.7-r2 \
       yaml-dev=0.2.5-r2
@@ -60,7 +60,7 @@ RUN apk add --no-cache \
       libssl3=3.5.9-r1 \
       libcrypto3=3.5.9-r1 \
       lz4-libs=1.10.0-r1 \
-      libxml2=2.13.9-r2 \
+      libxml2=2.13.9-r3 \
       zlib=1.4-r0 \
       xz-libs=5.8.4-r0 \
       zstd-libs=1.5.7-r2
