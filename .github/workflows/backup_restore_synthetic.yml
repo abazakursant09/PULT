@@ -29,6 +29,11 @@ on:
       - backend/tests/test_erasure_identity.py
       - backend/tests/test_erasure_identity_process.py
       - backend/tests/test_erasure_identity_ci.py
+      - backend/services/erasure_operator_review.py
+      - backend/tests/test_erasure_operator.py
+      - backend/tests/test_erasure_operator_review_pg.py
+      - backend/tests/test_erasure_operator_ci.py
+      - docs/erasure-operator-review.md
       - backend/tests/test_erasure_custodian.py
       - backend/tests/test_erasure_custodian_host.py
       - backend/tests/test_custodian_v2_source_ci.py
@@ -59,6 +64,11 @@ on:
       - backend/tests/test_erasure_identity.py
       - backend/tests/test_erasure_identity_process.py
       - backend/tests/test_erasure_identity_ci.py
+      - backend/services/erasure_operator_review.py
+      - backend/tests/test_erasure_operator.py
+      - backend/tests/test_erasure_operator_review_pg.py
+      - backend/tests/test_erasure_operator_ci.py
+      - docs/erasure-operator-review.md
       - backend/tests/test_erasure_custodian.py
       - backend/tests/test_erasure_custodian_host.py
       - backend/tests/test_custodian_v2_source_ci.py
@@ -102,6 +112,13 @@ jobs:
       - name: Synthetic independent identity registry (no dispatch)
         working-directory: backend
         run: python -B -m pytest tests/test_erasure_identity.py tests/test_erasure_identity_process.py tests/test_erasure_identity_ci.py -q
+
+      - name: Operator review protocol and mandatory proof contracts (no admission)
+        working-directory: backend
+        run: python -B -m pytest tests/test_erasure_operator.py tests/test_erasure_operator_ci.py -q
+
+      - name: Synthetic Linux operator review (real kernel peer UIDs)
+        run: sudo -n -- "$(command -v python)" -I -B ops/backup/tests/erasure_operator_isolation_proof.py
 
       - name: Synthetic Linux custodian isolation (real distinct unprivileged UIDs)
         run: sudo -n -- "$(command -v python)" -I -B ops/backup/tests/custodian_isolation_proof.py
