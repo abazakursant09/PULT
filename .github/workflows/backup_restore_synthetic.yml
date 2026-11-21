@@ -35,6 +35,8 @@ on:
       - backend/tests/test_erasure_operator_ci.py
       - backend/tests/test_operator_offline_host.py
       - docs/operator-offline-host.md
+      - backend/tests/test_operator_pg_lifetime_ci.py
+      - docs/operator-pg-lifetime-proof.md
       - docs/erasure-operator-review.md
       - backend/tests/test_erasure_custodian.py
       - backend/tests/test_erasure_custodian_host.py
@@ -72,6 +74,8 @@ on:
       - backend/tests/test_erasure_operator_ci.py
       - backend/tests/test_operator_offline_host.py
       - docs/operator-offline-host.md
+      - backend/tests/test_operator_pg_lifetime_ci.py
+      - docs/operator-pg-lifetime-proof.md
       - docs/erasure-operator-review.md
       - backend/tests/test_erasure_custodian.py
       - backend/tests/test_erasure_custodian_host.py
@@ -418,3 +422,18 @@ jobs:
           docker rm -f minio pgsource pgtarget 2>/dev/null || true
           docker network rm pultbk 2>/dev/null || true
           rm -f "$RUNNER_TEMP/age.key" || true
+
+      - name: Guard joint synthetic PG operator lifetime contracts
+        run: python -B -m pytest backend/tests/test_operator_pg_lifetime_ci.py -q
+
+      - name: Download exact joint PG proof wheels
+        run: |
+          set -euo pipefail
+          python -m pip download --require-hashes --only-binary=:all: --no-deps \
+            --python-version 3.12 --implementation cp --abi cp312 \
+            --platform manylinux_2_28_x86_64 --platform manylinux_2_24_x86_64 --platform manylinux_2_17_x86_64 \
+            -r ops/backup/tests/operator_pg_lifetime/requirements.lock \
+            -d "$RUNNER_TEMP/operator-pg-wheels"
+
+      - name: Joint synthetic PG operator lifetime no runtime admission
+        run: sudo -n -- unshare --net /usr/bin/python3.12 -I -S -B ops/backup/tests/operator_pg_lifetime/gate.py --wheels-dir "$RUNNER_TEMP/operator-pg-wheels"

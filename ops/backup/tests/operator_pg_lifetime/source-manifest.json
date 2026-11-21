@@ -1,0 +1,98 @@
+{
+  "admitted_operations": [],
+  "cases": [
+    "authorized",
+    "close_then_raise",
+    "blocked_close_hang",
+    "controller_death",
+    "wrong_peer",
+    "restored"
+  ],
+  "flags": {
+    "identity_enrollment_admitted": false,
+    "journal_dispatch_admitted": false,
+    "purge_or_restore_admitted": false
+  },
+  "format": "pult-operator-pg-joint-test-sources-v1",
+  "postgres_image": "postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777",
+  "runtime": {
+    "executable": "/usr/bin/python3.12",
+    "flags": [
+      "-I",
+      "-S",
+      "-B"
+    ],
+    "optimization": 0
+  },
+  "sources": {
+    "anchor": {
+      "path": "ops/backup/erasure_anchor.py",
+      "sha256": "b399803ac7a03aaa5a506cbb0036f98c153457769beabf46af44864b190861a8"
+    },
+    "baseline_helper": {
+      "path": "ops/backup/tests/operator_offline_host_proof.py",
+      "sha256": "c51993af7ed4fc52dac8391a2a7139152c39fc469e412bc936cc71fc0e1fd0bb"
+    },
+    "bootstrap": {
+      "path": "ops/backup/operator_host/bootstrap.py",
+      "sha256": "96141d0e26cfc718e9cb762f689d20cad90f22c815dadec587fcac8c7580d3fa"
+    },
+    "core": {
+      "path": "ops/backup/custodian_v2/controller/frozen/admission.py",
+      "sha256": "961cc3aef5dcfe9d6286b15a2d5c087a33dc1e5dafdc7d5a16f6eded961afea7"
+    },
+    "host": {
+      "path": "ops/backup/operator_host/host.py",
+      "sha256": "5a47b32282fa4c6533ea0c4ed2602523dc2054cb8e567da571de3962b877e356"
+    },
+    "ipc": {
+      "path": "ops/backup/erasure_custodian.py",
+      "sha256": "3eb793a1ef1002c6def97b52c579b2ff051e834b44b802a75aca09d640a691d3"
+    },
+    "journal": {
+      "path": "ops/backup/erasure_journal.py",
+      "sha256": "94eeba19e645e25ec8286baebe4092a29c541c6f12858e1ff7b303f6a1a4fc98"
+    },
+    "operator": {
+      "path": "ops/backup/erasure_operator.py",
+      "sha256": "c4be8ed53a803afe37cf6c72ac9fa462167ace9401575ee1f85faa2774a1365f"
+    },
+    "policy": {
+      "path": "backend/services/account_closure_policy.py",
+      "sha256": "e606c8b81793a54caa94b1bf9d3c88a21dc7df0f211d60cca6b8a483d8e750cf"
+    },
+    "profile": {
+      "path": "ops/backup/operator_host/profile.py",
+      "sha256": "0998c8922c470406d2789727b749ed9365f36f2fa3ee70eea7448d3693e31edf"
+    },
+    "reviewer": {
+      "path": "backend/services/erasure_operator_review.py",
+      "sha256": "efaa87935a5e6df3fdb8077cabba1b41f0cbb725d11430e896c454483ccc2606"
+    },
+    "stop": {
+      "path": "ops/backup/custodian_v2/stop/constructor_stop.py",
+      "sha256": "5406c5a81498013884ac46d0279219f299db40576357692604fb4f08c251ca8c"
+    },
+    "supervisor": {
+      "path": "ops/backup/custodian_v2/controller/supervisor_v2.py",
+      "sha256": "3d05d22163b11f815b29c222128c4e41987c9e4a83e7b4906cbe63a18941a37e"
+    },
+    "worker": {
+      "path": "ops/backup/operator_host/worker.py",
+      "sha256": "5e7993f35e9d50019af79ecb2335cb2fe5111f38f06c83f70fc01304d425a06c"
+    }
+  },
+  "status": "TEST_COMPOSITION_ONLY_NO_PG_RUNTIME_ADMISSION",
+  "versions": {
+    "asyncpg": "0.31.0",
+    "greenlet": "3.5.5",
+    "sqlalchemy": "2.0.51",
+    "typing-extensions": "4.16.0"
+  },
+  "wheels": {
+    "asyncpg-0.31.0-cp312-cp312-manylinux_2_28_x86_64.whl": "aad7a33913fb8bcb5454313377cc330fbb19a0cd5faa7272407d8a0c4257b671",
+    "greenlet-3.5.5-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl": "147b25a42e5ca5be3d42356e8f608b37af715a1c196e9bf9d1627f3341adfe1d",
+    "sqlalchemy-2.0.51-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl": "1d21ce524ab86c23046e992a5b81cb54c21079c6df6e78b8fc77d77cac70a6b9",
+    "typing_extensions-4.16.0-py3-none-any.whl": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8"
+  }
+}
