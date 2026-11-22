@@ -24,6 +24,9 @@ on:
       - backend/tests/test_restore_erasure_checkpoint.py
       - backend/tests/test_erasure_journal.py
       - backend/tests/test_erasure_journal_s3.py
+      - backend/tests/test_working_journal_v2.py
+      - backend/tests/test_working_journal_v2_ci.py
+      - docs/working-journal-v2-namespace.md
       - backend/tests/test_erasure_anchor.py
       - backend/tests/test_erasure_anchor_process.py
       - backend/tests/test_erasure_identity.py
@@ -66,6 +69,9 @@ on:
       - backend/tests/test_restore_erasure_checkpoint.py
       - backend/tests/test_erasure_journal.py
       - backend/tests/test_erasure_journal_s3.py
+      - backend/tests/test_working_journal_v2.py
+      - backend/tests/test_working_journal_v2_ci.py
+      - docs/working-journal-v2-namespace.md
       - backend/tests/test_erasure_anchor.py
       - backend/tests/test_erasure_anchor_process.py
       - backend/tests/test_erasure_identity.py
@@ -122,6 +128,9 @@ jobs:
         run: |
           pip install --require-hashes -r requirements-ci.lock
           python -m pytest tests/test_backup_restore_contract_guard.py tests/test_backup_verifier.py tests/test_restore_erasure_checkpoint.py tests/test_erasure_journal.py tests/test_erasure_journal_s3.py tests/test_erasure_anchor.py tests/test_erasure_anchor_process.py tests/test_erasure_custodian.py tests/test_erasure_custodian_host.py -q
+
+      - name: Working v2 namespace contract (socket-free, no admission)
+        run: python -B -m pytest backend/tests/test_working_journal_v2.py backend/tests/test_working_journal_v2_ci.py -q
 
       - name: Synthetic independent identity registry (no dispatch)
         working-directory: backend
