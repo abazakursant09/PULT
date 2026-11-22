@@ -24,6 +24,9 @@ ACCOUNT = "c7461350-9188-4bf1-bc6c-c4a5b9455bec"
 DRAFT = "ff636b10-6ccb-4b1b-9394-df59af74b793"
 ENV = {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"}
 DOCKER = ("/usr/bin/docker", "--host=unix:///var/run/docker.sock")
+# Bounded initdb/readiness preparation only; no worker is admitted yet. The
+# independent operator's 15-second runtime and 2-second stop limits are unchanged.
+STARTUP_TIMEOUT = 60
 
 
 class Refused(RuntimeError):
@@ -258,7 +261,7 @@ class PGFixture:
         self.record = self._record(self.cid, {(DATA, True), (SOCKET, True)})
         self._write(self.root/"pg-container.json", _canonical(self.record))
         self._docker(["start", self.cid])
-        until = time.monotonic()+20
+        until = time.monotonic()+STARTUP_TIMEOUT
         while True:
             self._verify(self.cid, self.record)
             ready = self._docker(["exec", "--user=postgres", self.cid, "pg_isready", "-q",
