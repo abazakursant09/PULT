@@ -1,0 +1,22 @@
+{
+  "format": "pult-working-launch-profile-check-v1",
+  "release": {
+    "root": "/opt/REPLACE_WITH_REVIEWED_WORKING_BUNDLE",
+    "identity": {
+      "device": null,
+      "inode": null
+    }
+  },
+  "entry_sha256": null,
+  "actor": {
+    "uid": null,
+    "gid": null
+  },
+  "namespace": {
+    "endpoint": "https://s3.ru-3.storage.selcloud.ru",
+    "region": "ru-3",
+    "bucket": "REPLACE_WITH_APPROVED_PRIVATE_WORKING_BUCKET",
+    "scope": "REPLACE_WITH_INDEPENDENT_WORKING_SCOPE",
+    "generation": "REPLACE_WITH_INDEPENDENT_CANONICAL_UUID4"
+  }
+}
