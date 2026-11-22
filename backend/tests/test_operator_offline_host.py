@@ -560,13 +560,367 @@ class Contracts(unittest.TestCase):
             file = REPO/".github/workflows/backup_restore_synthetic.yaml"
         text = file.read_text()
         for name, entry in (("Offline operator host profile contracts", "python -B -m pytest backend/tests/test_operator_offline_host.py -q"),
-            ("Native offline operator forced-stop proof", "sudo -n -- unshare --net /usr/bin/python3.12 -I -S -B ops/backup/tests/operator_offline_host_proof.py")):
+            ("Native offline operator forced-stop proof", "sudo -n -- unshare --net /usr/bin/python3.12 -I -S -B ops/backup/tests/operator_offline_startup_gate.py")):
             start = text.index("- name: "+name)
             tail = text[start+1:]
             end = tail.find("\n      - name:")
             block = text[start:] if end < 0 else text[start:start+1+end]
             self.assertIn(entry, block)
             self.assertNotRegex(block, r"(?m)^\s*(if|continue-on-error):")
+
+
+def startup_gate():
+    file = REPO / "ops/backup/tests/operator_offline_startup_gate.py"
+    module = ModuleType("portable_operator_startup_gate")
+    module.__file__ = str(file)
+    exec(compile(file.read_bytes(), str(file), "exec", dont_inherit=True, optimize=0), module.__dict__)
+    return module
+
+
+class StartupGateContracts(unittest.TestCase):
+    """Portable publication/FD models only; never native/root/controller execution."""
+
+    def setUp(self):
+        import json
+        self.json, self.g = json, startup_gate()
+
+    def legacy(self):
+        raw = (REPO / "ops/backup/tests/operator_offline_host_proof.py").read_bytes().replace(b"\r\n", b"\n")
+        with mock.patch.object(self.g, "_read_file", return_value=raw):
+            module, source, child = self.g._load_legacy()
+        self.assertFalse(child)
+        self.assertEqual(source, raw)
+        return module
+
+    def publication(self):
+        """Fake POSIX metadata/FDs explicitly, including on Windows; no skips."""
+        m = SimpleNamespace(files={}, modes={}, events=[], closes=[], fault=None, bad=None,
+                            opens=[], syncs=[], original_reads=[], moved=False)
+        testcase = self
+        class Item(PurePosixPath):
+            def is_symlink(self): return False
+            def read_bytes(self): return m.files[str(self)]
+            def read_text(self):
+                testcase.assertTrue(str(self).startswith("/proc/"))
+                return "0::/system.slice/" + UNIT + "\n"
+            def write_text(self, value):
+                testcase.assertEqual(str(self), "/sys/fs/cgroup/system.slice/" + UNIT + "/cgroup.procs")
+                testcase.assertEqual(value, "777")
+                m.moved = True
+            def lstat(self):
+                if self == m.root:
+                    return meta(True)
+                testcase.assertIn(str(self), m.files)
+                return meta(False, str(self))
+        def meta(directory, key=None):
+            mode = stat.S_IFDIR | 0o755 if directory else stat.S_IFREG | m.modes[key]
+            return SimpleNamespace(st_dev=7, st_ino=10 if directory else 11,
+                st_uid=1 if m.bad == "owner" and not directory else 0, st_gid=0,
+                st_mode=stat.S_IFIFO | 0o600 if m.bad == "type" and not directory else mode,
+                st_nlink=2 if m.bad == "links" and not directory else 1,
+                st_size=0 if directory else len(m.files[key]), st_mtime_ns=1, st_ctime_ns=2)
+        m.root = Item("/tmp/pult-offline-portable")
+        def put(file, raw, mode=0o444):
+            m.events.append(("put-begin", file.name))
+            testcase.assertNotIn(str(file), m.files)
+            if m.fault == "descendant-put" and file.name == "descendant.json":
+                raise OSError("ARTIFICIAL_PRIVATE_PUT")
+            m.files[str(file)], m.modes[str(file)] = raw, mode
+            m.events.append(("put-done", file.name))
+        def root_json(file):
+            m.original_reads.append(file)
+            return self.json.loads(m.files[str(file)])
+        def canonical(value):
+            return (self.json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n").encode("ascii")
+        m.legacy = SimpleNamespace(put=put, root_json=root_json, canonical=canonical)
+        def open_file(file, flags, mode=None):
+            m.opens.append((str(file), flags, mode))
+            if file == m.root:
+                testcase.assertIsNone(mode)
+                return 102
+            testcase.assertEqual(file, m.root / ".operator-startup-ready.pending")
+            testcase.assertEqual(flags, 1 | 2 | 4 | 8 | 16)
+            testcase.assertEqual(mode, 0o600)
+            if str(file) in m.files: raise FileExistsError("MODEL_EXCLUSIVE")
+            m.files[str(file)], m.modes[str(file)] = b"", mode
+            m.events.append(("stage-open", file.name))
+            return 101
+        def fstat(fd):
+            testcase.assertIn(fd, (101, 102))
+            return meta(fd == 102, str(m.root / ".operator-startup-ready.pending") if fd == 101 else None)
+        def write(fd, raw):
+            testcase.assertEqual(fd, 101)
+            testcase.assertNotIn(str(m.root / "ready.json"), m.files)
+            if m.fault == "write-zero": return 0
+            # Partial writes are real write-all model coverage, not a fake receipt.
+            count = min(7, len(raw))
+            key = str(m.root / ".operator-startup-ready.pending")
+            m.files[key] += raw[:count]
+            m.events.append(("stage-write", count))
+            return count
+        def fchmod(fd, mode):
+            testcase.assertEqual((fd, mode), (101, 0o600))
+            m.modes[str(m.root / ".operator-startup-ready.pending")] = 0o644 if m.bad == "mode" else mode
+        def fsync(fd):
+            m.syncs.append(fd)
+            if m.fault == ("file-fsync" if fd == 101 else "directory-fsync"):
+                raise OSError("ARTIFICIAL_PRIVATE_SYNC")
+        def close(fd):
+            m.closes.append(fd)
+            if m.fault == ("file-close" if fd == 101 else "directory-close"):
+                raise OSError("ARTIFICIAL_PRIVATE_CLOSE")
+        def replace(source, target):
+            testcase.assertIn(("put-done", "descendant.json"), m.events)
+            testcase.assertIn(101, m.syncs)
+            testcase.assertEqual(m.closes, [101])
+            testcase.assertNotIn(str(target), m.files)
+            if m.fault == "replace": raise OSError("ARTIFICIAL_PRIVATE_RENAME")
+            m.files[str(target)] = m.files.pop(str(source))
+            m.modes[str(target)] = m.modes.pop(str(source))
+            m.events.append(("replace", target.name))
+        self.g.Path = Item
+        self.g.os = SimpleNamespace(open=open_file, fstat=fstat, write=write, fchmod=fchmod, fsync=fsync,
+            close=close, replace=replace, path=SimpleNamespace(lexists=lambda p: str(p) in m.files),
+            O_RDONLY=0, O_WRONLY=1, O_CREAT=2, O_EXCL=4, O_NOFOLLOW=8, O_CLOEXEC=16, O_DIRECTORY=32)
+        m.barrier = self.g._StartupBarrier(m.legacy, m.root)
+        m.raw = canonical(dict(unit=UNIT, pid=123, start_ticks=456, invocation="e" * 32))
+        return m
+
+    def test_atomic_ready_is_invisible_until_completed_descendant_and_full_stage(self):
+        m = self.publication()
+        b = m.barrier
+        b.put(b.ready, m.raw, 0o600)
+        self.assertNotIn(str(b.ready), m.files)
+        first = b.root_json(b.ready)
+        self.assertEqual(first["invocation"], "e" * 32)
+        first["invocation"] = "mutated portable observation"
+        self.assertEqual(b.root_json(b.ready)["invocation"], "e" * 32)
+        self.assertEqual(m.original_reads, [])
+        b.put(b.descendant, b'{"pid":777}\n', 0o600)
+        b.finish()
+        self.assertEqual(m.files[str(b.ready)], m.raw)
+        self.assertEqual(m.modes[str(b.ready)], 0o600)
+        self.assertNotIn(str(b.temporary), m.files)
+        self.assertEqual(m.closes, [101, 102])
+        self.assertEqual(m.syncs, [101, 102])
+        self.assertEqual(m.events[-1], ("replace", "ready.json"))
+        self.assertEqual(b.root_json(b.ready)["pid"], 123)
+        self.assertEqual(m.original_reads, [b.ready])
+
+    def test_other_paths_keep_original_write_and_read_behavior(self):
+        m = self.publication()
+        other = m.root / "other.json"
+        m.barrier.put(other, b'{"normal":true}\n', 0o444)
+        self.assertEqual(m.barrier.root_json(other), {"normal": True})
+        self.assertEqual(m.opens, [])
+
+    def test_missing_duplicate_and_unreleased_barriers_refuse(self):
+        m = self.publication(); b = m.barrier
+        for call in (b.finish, lambda: b.root_json(b.ready), lambda: b.put(b.descendant, b"x", 0o600)):
+            with self.assertRaises(self.g.StartupGateRefused): call()
+        b.put(b.ready, m.raw, 0o600)
+        for call in (b.finish, lambda: b.put(b.ready, m.raw, 0o600)):
+            with self.assertRaises(self.g.StartupGateRefused): call()
+        b.put(b.descendant, b"x", 0o600)
+        before = list(m.events)
+        for file in (b.ready, b.descendant):
+            with self.assertRaises(self.g.StartupGateRefused): b.put(file, m.raw, 0o600)
+        self.assertEqual(m.events, before)
+
+    def test_all_publication_faults_fail_without_close_retry(self):
+        for fault in ("descendant-put", "write-zero", "file-fsync", "file-close", "replace", "directory-fsync", "directory-close"):
+            with self.subTest(fault=fault):
+                m = self.publication(); m.fault = fault; b = m.barrier
+                b.put(b.ready, m.raw, 0o600)
+                with self.assertRaises((self.g.StartupGateRefused, OSError)):
+                    b.put(b.descendant, b"x", 0o600)
+                with self.assertRaises(self.g.StartupGateRefused): b.finish()
+                self.assertLessEqual(m.closes.count(101), 1)
+                self.assertLessEqual(m.closes.count(102), 1)
+                if str(b.ready) in m.files:
+                    self.assertEqual(m.files[str(b.ready)], m.raw)
+                else:
+                    self.assertFalse(b.released)
+
+    def test_wrong_temporary_type_owner_mode_or_links_never_publishes_ready(self):
+        for bad in ("type", "owner", "mode", "links"):
+            with self.subTest(bad=bad):
+                m = self.publication(); m.bad = bad; b = m.barrier
+                b.put(b.ready, m.raw, 0o600)
+                with self.assertRaises(self.g.StartupGateRefused): b.put(b.descendant, b"x", 0o600)
+                self.assertNotIn(str(b.ready), m.files)
+                self.assertEqual(m.closes, [101])
+
+    def test_controller_helpers_restore_after_success_failure_and_pending_return(self):
+        for outcome in ("success", "failure", "pending"):
+            with self.subTest(outcome=outcome):
+                m = self.publication(); legacy = m.legacy
+                put, root_json = legacy.put, legacy.root_json
+                original_error = ValueError("ARTIFICIAL_PRIVATE")
+                def original(root, mode, sha):
+                    legacy.put(root / "ready.json", m.raw, 0o600)
+                    self.assertEqual(legacy.root_json(root / "ready.json")["pid"], 123)
+                    if outcome == "failure": raise original_error
+                    if outcome == "success": legacy.put(root / "descendant.json", b"x", 0o600)
+                    return "UNCHANGED_RETURN"
+                wrapped = self.g._controller(legacy, original)
+                if outcome == "success": self.assertEqual(wrapped(m.root, "term_descendant", SHA), "UNCHANGED_RETURN")
+                elif outcome == "failure":
+                    with self.assertRaises(ValueError) as caught: wrapped(m.root, "term_descendant", SHA)
+                    self.assertIs(caught.exception, original_error)
+                else:
+                    with self.assertRaises(self.g.StartupGateRefused): wrapped(m.root, "term_descendant", SHA)
+                self.assertIs(legacy.put, put)
+                self.assertIs(legacy.root_json, root_json)
+
+    def test_nonterm_modes_are_delegated_without_any_helper_replacement(self):
+        m = self.publication(); put, read = m.legacy.put, m.legacy.root_json
+        def original(root, mode, sha):
+            self.assertIs(m.legacy.put, put); self.assertIs(m.legacy.root_json, read)
+            return mode
+        wrapped = self.g._controller(m.legacy, original)
+        for mode in ("authorized", "freeze", "queued_late", "controller_death"):
+            self.assertEqual(wrapped(m.root, mode, SHA), mode)
+        self.assertEqual(m.events, [])
+
+    def test_fixed_fixture_copy_stages_library_before_wrapper_and_refuses_duplicates(self):
+        m = self.publication()
+        put = self.g._fixture_put(m.legacy.put, b"WRAPPER", b"ACCEPTED_LEGACY")
+        file = m.root / "fixture.py"
+        put(file, b"WRAPPER")
+        self.assertEqual(m.events, [("put-begin", self.g.CHILD_LEGACY), ("put-done", self.g.CHILD_LEGACY),
+                                    ("put-begin", "fixture.py"), ("put-done", "fixture.py")])
+        self.assertEqual(m.modes[str(file.with_name(self.g.CHILD_LEGACY))], 0o444)
+        with self.assertRaises(self.g.StartupGateRefused): put(file, b"WRAPPER")
+
+    def test_wrong_fixture_copy_cannot_write_legacy_or_wrapper(self):
+        for wrong in ("body", "mode", "root"):
+            with self.subTest(wrong=wrong):
+                m = self.publication(); put = self.g._fixture_put(m.legacy.put, b"WRAPPER", b"LEGACY")
+                file = m.root / "fixture.py" if wrong != "root" else self.g.Path("/tmp/foreign/fixture.py")
+                with self.assertRaises(self.g.StartupGateRefused):
+                    put(file, b"WRONG" if wrong == "body" else b"WRAPPER", 0o600 if wrong == "mode" else 0o444)
+                self.assertEqual(m.events, [])
+
+    def test_frozen_hash_and_private_capture_preserve_parent_and_child_path_modes(self):
+        import hashlib
+        raw = (REPO / "ops/backup/tests/operator_offline_host_proof.py").read_bytes().replace(b"\r\n", b"\n")
+        self.assertEqual(hashlib.sha256(raw).hexdigest(), self.g.LEGACY_SHA)
+        self.assertEqual(self.g.LEGACY_SHA, "70ed55b2fc5ee22aa0f90391a99f817728079b77726b793e8212fa18da312568")
+        for child in (False, True):
+            with self.subTest(child=child):
+                self.g = startup_gate()
+                if child:
+                    self.g.Path = PurePosixPath
+                    self.g.__file__ = "/tmp/pult-offline-model/fixture.py"
+                data = raw if child else raw.replace(b"\n", b"\r\n")
+                with mock.patch.object(self.g, "_read_file", return_value=data) as read:
+                    legacy, accepted, actual_child = self.g._load_legacy()
+                self.assertEqual(accepted, raw)
+                self.assertIs(actual_child, child)
+                self.assertEqual(legacy.__file__, self.g.__file__)
+                self.assertEqual(read.call_args.args[0].name, self.g.CHILD_LEGACY if child else self.g.LEGACY)
+                self.assertEqual(len(legacy.CASES), 11)
+                self.assertNotIn(legacy.__name__, sys.modules)
+                self.assertEqual(legacy.REPO is None, child)
+
+    def test_modified_library_and_non_lf_child_refuse_before_module_creation(self):
+        raw = (REPO / "ops/backup/tests/operator_offline_host_proof.py").read_bytes().replace(b"\r\n", b"\n")
+        for child, bad in ((False, raw + b"# modified"), (True, raw + b"# modified"), (True, raw.replace(b"\n", b"\r\n"))):
+            with self.subTest(child=child, crlf=b"\r\n" in bad):
+                gate = startup_gate()
+                if child: gate.__file__ = str(Path(gate.__file__).with_name("fixture.py"))
+                with mock.patch.object(gate, "_read_file", return_value=bad), mock.patch.object(gate, "ModuleType") as construct:
+                    with self.assertRaises(gate.StartupGateRefused): gate._load_legacy()
+                construct.assert_not_called()
+
+    def test_main_delegates_frozen_inventory_and_restores_helpers(self):
+        legacy = self.legacy(); put, controller = legacy.put, legacy.controller
+        cases, pins = legacy.CASES, dict(legacy.PINS)
+        legacy.main = mock.Mock(return_value=7)
+        with mock.patch.object(self.g, "_load_legacy", return_value=(legacy, b"LEGACY", False)), \
+             mock.patch.object(self.g, "_read_file", return_value=b"WRAPPER"):
+            self.assertEqual(self.g.main(), 7)
+        legacy.main.assert_called_once_with()
+        self.assertIs(legacy.put, put); self.assertIs(legacy.controller, controller)
+        self.assertEqual((legacy.CASES, legacy.PINS), (cases, pins))
+
+    def test_actual_frozen_ready_method_runs_against_only_fake_process_and_proc(self):
+        legacy = self.legacy(); m = self.publication()
+        profile = SimpleNamespace(spec={"sources": {}}, root_guard=lambda: None,
+            kernel_actor=lambda pid: 456)
+        class ReadyCompleted(Exception): pass
+        class FakeBound:
+            def __init__(self, value): pass
+            def run(self):
+                self.ready(UNIT, 123)
+                raise ReadyCompleted()
+        host = SimpleNamespace(Bound=FakeBound)
+        profile.capture = lambda name: host
+        bootstrap = m.root / "release" / legacy.PATHS["bootstrap"]
+        m.files[str(bootstrap)] = b"ARTIFICIAL_BOOTSTRAP"
+        profile_loader = SimpleNamespace(load_profile=lambda *args: profile)
+        child = SimpleNamespace(pid=777, stdout=SimpleNamespace(close=mock.Mock()))
+        legacy.Path = self.g.Path
+        legacy.put, legacy.root_json = m.legacy.put, m.legacy.root_json
+        legacy.load = lambda *args: profile_loader
+        legacy.line = lambda *args: "TERM_IGNORED"
+        legacy.process_identity = lambda pid: dict(pid=pid, start_ticks=999)
+        legacy.state = lambda unit: dict(InvocationID="e" * 32)
+        legacy.subprocess = SimpleNamespace(Popen=mock.Mock(return_value=child), DEVNULL=-1, PIPE=-2)
+        legacy.sys = SimpleNamespace(stdin=SimpleNamespace(buffer=SimpleNamespace(readline=lambda n: b"approval\n")))
+        put, read = legacy.put, legacy.root_json
+        wrapped = self.g._controller(legacy, legacy.controller)
+        with self.assertRaises(ReadyCompleted): wrapped(m.root, "term_descendant", legacy.sha(b"ARTIFICIAL_BOOTSTRAP"))
+        self.assertTrue(m.moved)
+        self.assertEqual(m.events[-1], ("replace", "ready.json"))
+        self.assertEqual(self.json.loads(m.files[str(m.root / "ready.json")])["invocation"], "e" * 32)
+        self.assertEqual(m.original_reads, [])
+        legacy.subprocess.Popen.assert_called_once()
+        child.stdout.close.assert_called_once()
+        self.assertIs(legacy.put, put); self.assertIs(legacy.root_json, read)
+
+    def test_wrapper_entrypoint_diagnostic_has_only_fixed_reason(self):
+        source = (REPO / "ops/backup/tests/operator_offline_startup_gate.py").read_text()
+        self.assertIn('reason="operator_startup_gate_refused"', source)
+        self.assertNotIn("str(error)", source)
+
+    def test_bounded_source_reader_rejects_unsafe_input_before_pread_and_closes_once(self):
+        for fault in (None, "fifo", "symlink", "oversize", "empty", "hardlink", "path-race", "close"):
+            with self.subTest(fault=fault):
+                gate = startup_gate()
+                counts = {"read": 0, "close": 0}
+                info = SimpleNamespace(st_dev=7, st_ino=8, st_uid=0, st_gid=0,
+                    st_mode=stat.S_IFREG | 0o444, st_nlink=1, st_size=4,
+                    st_mtime_ns=1, st_ctime_ns=2)
+                if fault == "fifo": info.st_mode = stat.S_IFIFO | 0o444
+                elif fault == "symlink": info.st_mode = stat.S_IFLNK | 0o777
+                elif fault == "oversize": info.st_size = gate.MAX_SOURCE + 1
+                elif fault == "empty": info.st_size = 0
+                elif fault == "hardlink": info.st_nlink = 2
+                linked = SimpleNamespace(**vars(info))
+                if fault == "path-race": linked.st_ino += 1
+                file = SimpleNamespace(lstat=lambda: linked)
+                def opened(target, flags):
+                    self.assertIs(target, file)
+                    self.assertEqual(flags, 1 | 2 | 4 | 8)
+                    return 99
+                def read(fd, maximum, offset):
+                    self.assertEqual((fd, maximum, offset), (99, gate.MAX_SOURCE + 1, 0))
+                    counts["read"] += 1
+                    return b"FILE"
+                def close(fd):
+                    self.assertEqual(fd, 99)
+                    counts["close"] += 1
+                    if fault == "close": raise OSError("ARTIFICIAL_PRIVATE_CLOSE")
+                gate.os = SimpleNamespace(open=opened, fstat=lambda fd: info, pread=read, close=close,
+                    O_RDONLY=1, O_NOFOLLOW=2, O_NONBLOCK=4, O_CLOEXEC=8)
+                if fault is None:
+                    self.assertEqual(gate._read_file(file), b"FILE")
+                else:
+                    with self.assertRaises(gate.StartupGateRefused): gate._read_file(file)
+                self.assertEqual(counts["close"], 1)
+                self.assertEqual(counts["read"], int(fault in (None, "path-race", "close")))
 
 
 if __name__ == "__main__":
