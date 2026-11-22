@@ -109,6 +109,15 @@ frozen tail, adding mandatory contracts/native steps and narrow path filters.
 No tests are suppressed. The new privileged proof is not run against the user's
 existing WSL/application host or the working cloud server.
 
+The predecessor eleven-case offline-operator proof runs through a fixed CI-only
+startup adapter. Its accepted original source and the three older PG proof pins
+remain unchanged. The adapter copies that verified library into each owned test
+fixture before startup and delays the existing READY observation until descendant
+metadata has been written. This prevents a client starting protected intake while
+the harness itself still changes an owned ancestor directory. All original cases,
+production source guards, stop oracles and refusal behavior remain mandatory;
+there is no retry or relaxed metadata check.
+
 Rollback is to leave the additive adapter unused. There is no schema conversion,
 old-fence deletion or destructive contraction. No persistent service, account,
 timer, live key, S3/IAM/cloud/DNS setting, enrollment, dispatch, purge/restore,

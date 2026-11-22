@@ -169,7 +169,7 @@ jobs:
         run: python -B -m pytest backend/tests/test_operator_offline_host.py -q
 
       - name: Native offline operator forced-stop proof
-        run: sudo -n -- unshare --net /usr/bin/python3.12 -I -S -B ops/backup/tests/operator_offline_host_proof.py
+        run: sudo -n -- unshare --net /usr/bin/python3.12 -I -S -B ops/backup/tests/operator_offline_startup_gate.py
 
       - name: Synthetic Linux custodian isolation (real distinct unprivileged UIDs)
         run: sudo -n -- "$(command -v python)" -I -B ops/backup/tests/custodian_isolation_proof.py
