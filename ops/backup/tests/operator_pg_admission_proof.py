@@ -35,7 +35,7 @@ HELPERS = {
     "baseline": ("ops/backup/tests/operator_offline_host_proof.py",
                  "c51993af7ed4fc52dac8391a2a7139152c39fc469e412bc936cc71fc0e1fd0bb"),
     "pg": ("ops/backup/tests/operator_pg_lifetime/pg_fixture.py",
-           "a4432e770e7ea7442a3075617f22c6390814a3b73fb673f45d1c6574b0b69897"),
+           "957714ddb27b24ba237992b339b9e119f25b5e844e2771fa6729ca5f7192e310"),
 }
 OLD = ("journal", "anchor", "ipc", "operator", "stop", "supervisor", "core",
        "profile", "host", "bootstrap", "worker")
@@ -302,6 +302,43 @@ def pg_evidence(case, started, verified):
                 application_rows_unchanged=True if expected else None)
 
 
+def column_scope_proof(pg, pg_module):
+    """Owner audit and two rolled-back grants in this fresh fake DB only."""
+    need(type(pg) is pg_module.PGFixture and pg.pg is not None
+         and re.fullmatch(r"op_reader_[0-9a-f]{32}", pg.reader), "owned_column_scope_fixture_required")
+    expected = dict(required_columns_readable=True, all_table_select=False,
+                    sensitive_columns_readable=False, table_or_column_write=False)
+    need(pg._assert_reader_scope() == expected, "initial_column_scope_unverified")
+    columns = ",".join(pg_module.READ_COLUMNS["users"])
+    trials = (
+        ("sensitive_column_grant_refused", "GRANT SELECT(email) ON public.users TO "+pg.reader+";",
+         "REVOKE SELECT(email) ON public.users FROM "+pg.reader+";"),
+        ("broad_table_grant_refused", "GRANT SELECT ON public.users TO "+pg.reader+";",
+         "REVOKE SELECT ON public.users FROM "+pg.reader+";\n"
+         "GRANT SELECT("+columns+") ON public.users TO "+pg.reader+";"),
+    )
+    result = dict(required_columns=12, sensitive_columns_denied=6)
+    for label, grant, rollback in trials:
+        pg._psql(grant)
+        refused = False
+        try:
+            try:
+                pg._assert_reader_scope()
+            except pg_module.Refused as error:
+                need(type(error) is pg_module.Refused
+                     and error.args == ("minimal_reader_scope_refused",), "unexpected_column_scope_failure")
+                refused = True
+        finally:
+            # Revoke only this trial's grant on the newly owned artificial role;
+            # explicitly re-establish the original six-column grant after table
+            # revocation. No existing application/role/database is addressed.
+            pg._psql(rollback)
+        need(refused and pg._assert_reader_scope() == expected, "overbroad_or_unrestored_column_scope")
+        result[label] = True
+    result["original_scope_restored"] = True
+    return result
+
+
 def safe_child_locations(raw):
     """Only fixture-owned structural diagnostics, never exception values."""
     records = []
@@ -349,7 +386,7 @@ def run_case(case, gate, baseline, pg_module, manifest, source_rows, bodies, whe
     unit = "pult-call-gate-"+uuid4().hex+".service"
     description = "PULT PG admission proof "+uuid4().hex
     producer = peer = None
-    profile = legacy_sha = envelope_sha = evidence = None
+    profile = legacy_sha = envelope_sha = evidence = column_scope = None
     passed = pg_ready = False
     began = time.monotonic()
     try:
@@ -374,6 +411,7 @@ def run_case(case, gate, baseline, pg_module, manifest, source_rows, bodies, whe
         if case == "authorized":
             pg_config = pg.start("authorized")
             pg_ready = True
+            column_scope = column_scope_proof(pg, pg_module)
         else:
             # These cases must stop before runtime.run(), imports or SQL. The
             # fixture object only generates fake names; never starts Docker/PG.
@@ -516,6 +554,7 @@ def run_case(case, gate, baseline, pg_module, manifest, source_rows, bodies, whe
                  and {p.name for p in (root/"control").iterdir()} == {"operator-host.lock"}
                  and not list((root/"ipc").iterdir()), "negative_admission_created_actor_or_socket")
         evidence = dict(case=case, outcome="PASS", outer_receipt=result if case == "authorized" else None,
+            minimal_column_scope=column_scope,
             rejected_before_run=case not in ("authorized", "shared_tmp_churn"),
             capture_only=case == "shared_tmp_churn", approval=envelope_sha, legacy_approval=legacy_sha,
             production_pg_source_admission_proved=False, **FLAGS)
@@ -661,6 +700,16 @@ def main():
          and all(sha(capture(Path(p))) == wanted for p, wanted in snapshots.items())
          and len(results) == len(CASES) == 18 and [r["case"] for r in results] == list(CASES)
          and all(r["outcome"] == "PASS" and r["owned_resources_cleanup_confirmed"] is True
+                 and (r["minimal_column_scope"] is None if r["case"] != "authorized" else
+                      type(r["minimal_column_scope"]) is dict
+                      and set(r["minimal_column_scope"]) == {"required_columns", "sensitive_columns_denied",
+                          "sensitive_column_grant_refused", "broad_table_grant_refused", "original_scope_restored"}
+                      and type(r["minimal_column_scope"]["required_columns"]) is int
+                      and r["minimal_column_scope"]["required_columns"] == 12
+                      and type(r["minimal_column_scope"]["sensitive_columns_denied"]) is int
+                      and r["minimal_column_scope"]["sensitive_columns_denied"] == 6
+                      and all(r["minimal_column_scope"][key] is True for key in (
+                          "sensitive_column_grant_refused", "broad_table_grant_refused", "original_scope_restored")))
                  and all(r[key] is value for key, value in
                          pg_evidence(r["case"], r["pg_fixture_started"],
                                      r["reader_backends_absent_before_pg_teardown"] is True).items())

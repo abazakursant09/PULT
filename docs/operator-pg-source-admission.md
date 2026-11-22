@@ -107,6 +107,23 @@ from 20 to 60 seconds after repeated preparation-only timeouts. It verifies the
 same pinned image, mounts, role and seed before admitting any worker; no retry or
 partial setup is accepted. The operator's 15-second runtime and 2-second stop
 deadline remain unchanged. This is a test-fixture change, not a new DB authority.
+
+The newly owned synthetic reader receives column-level SELECT only: six closure
+fields from `users` and six DRAFT fields from `erasure_preparations`, exactly the
+accepted reviewer's fixed query. It cannot read the six dummy sensitive columns,
+hold table-level SELECT grants, or write either target. An owner-only catalog audit is required
+before any worker launch. The direct positive proof additionally grants one
+sensitive column and then broad table SELECT, requires each widening to be
+refused by the scope audit, and revokes only these artificial grants before the
+actual review. The owner-issued GRANT itself succeeds; audit refusal is not a
+claim that PostgreSQL prevents its trusted owner from changing permissions.
+All twelve required grants are verified again; the observation must still pass.
+The preparation table currently has six columns, all required; column grants can
+therefore permit `SELECT *` there. No statement-wide or row-level isolation is
+claimed from the absence of a table-level SELECT grant.
+This is synthetic least-privilege evidence only. Other cluster/database/PUBLIC
+grants, memberships, functions and working deployment require a separate audit;
+these fixture checks do not assert complete access isolation on a live cluster.
 Churn is an intake-only
 case, not a second PG review or a mutation permit. Diagnostics may identify owned
 temporary scopes and technical unit IDs. Runtime failures expose only fixed
