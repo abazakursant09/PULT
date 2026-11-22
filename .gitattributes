@@ -20,8 +20,3 @@ backend/tests/test_custodian_action_protocol.py text eol=lf
 .github/workflows/custodian_synthetic_ssh_s3.yml text eol=lf
 backend/tests/test_custodian_ssh_s3_ci_guard.py text eol=lf
 docs/custodian-synthetic-ssh-s3.md text eol=lf
-# Working profile checks exact captured Git bytes, including the reused helper.
-ops/backup/operator_pg/bootstrap.py text eol=lf
-ops/backup/working_journal_v2.py text eol=lf
-ops/backup/working_launch_profile.py text eol=lf
-ops/backup/tests/working_launch_profile_proof.py text eol=lf

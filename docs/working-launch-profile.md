@@ -52,8 +52,11 @@ seven exact reviewed wheels and their exact extracted dependency tree. The
 parent inputs are the accepted working module, v2 codec, S3 credential validator,
 journal types, canary signer, requirements lock, PG descriptor helper and cold
 captured-import helper. All eight byte pins are compiled into the new entry.
-No dependencies or versions were added. EOL attributes preserve the exact LF
-bytes on Windows checkouts; the checker never normalizes captured bytes.
+No dependencies or versions were added. Release assembly must supply exact LF
+Git source bytes; an ordinary Windows checkout is not an approved Linux release.
+The global EOL attributes are themselves frozen by a predecessor catalogue and
+remain unchanged. Only synthetic fixture assembly may normalize checkout line
+endings; the actual checker never normalizes captured bytes.
 
 1. Require isolated CPython3.12 at `/usr/bin/python3.12`, `-I -S -B`, no
    optimization, one main thread, all real/effective/saved/fs IDs consistent,

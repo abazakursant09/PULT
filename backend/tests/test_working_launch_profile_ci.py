@@ -77,11 +77,11 @@ def test_parent_pins_are_unchanged_exact_LF_git_bytes():
         assert hashlib.sha256((ROOT/name).read_bytes()).hexdigest() == wanted
 
 
-def test_exact_byte_inputs_have_explicit_LF_attributes():
-    lines = (ROOT/".gitattributes").read_text().splitlines()
-    for name in (entry.CAPTURE, "ops/backup/working_journal_v2.py", entry.ENTRY,
-                 "ops/backup/tests/working_launch_profile_proof.py"):
-        assert name + " text eol=lf" in lines
+def test_frozen_global_attributes_are_not_changed_for_the_new_release():
+    # This metadata is itself captured by the accepted SSH/S3 source catalogue.
+    # Release assembly, not a global attributes mutation, supplies exact LF bytes.
+    assert hashlib.sha256((ROOT/".gitattributes").read_bytes()).hexdigest() == (
+        "d8e7c02e359d7166b2846337616608bd1bf7e45d5540df004efe5d060fea2cec")
 
 
 def test_example_is_not_an_approved_or_runnable_profile():
