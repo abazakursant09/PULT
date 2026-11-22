@@ -105,7 +105,7 @@
     },
     "bootstrap": {
       "path": "ops/backup/operator_host/bootstrap.py",
-      "sha256": "96141d0e26cfc718e9cb762f689d20cad90f22c815dadec587fcac8c7580d3fa"
+      "sha256": "fbe97312685869a147f60f8acbf173692ca4047380c2db5b659ce7479f749519"
     },
     "worker": {
       "path": "ops/backup/operator_host/worker.py",

@@ -84,6 +84,16 @@ def _stamp(info):
         'st_mtime_ns', 'st_ctime_ns'))
 
 
+def _capture_stamp(info):
+    # Shared root-owned sticky ancestors (e.g. /tmp) permit unrelated sibling
+    # churn. Retain identity/protection, ACL and descriptor-relative child checks;
+    # keep the full stamp for every owned nonsticky directory and regular file.
+    if stat.S_ISDIR(info.st_mode) and info.st_uid == 0 and info.st_mode & stat.S_ISVTX:
+        return tuple(getattr(info, key) for key in (
+            'st_dev', 'st_ino', 'st_mode', 'st_uid', 'st_gid'))
+    return _stamp(info)
+
+
 def _no_acl(fd):
     if any(name.startswith('system.posix_acl_') for name in os.listxattr(fd)):
         raise Refused('bootstrap_refused')
@@ -152,7 +162,8 @@ class _Capture:
         for fd, parent, name, before in self.entries:
             _no_acl(fd)
             linked = os.stat(name, dir_fd=parent, follow_symlinks=False)
-            if _stamp(os.fstat(fd)) != _stamp(before) or _stamp(linked) != _stamp(before):
+            if (_capture_stamp(os.fstat(fd)) != _capture_stamp(before)
+                    or _capture_stamp(linked) != _capture_stamp(before)):
                 raise Refused('bootstrap_refused')
 
 

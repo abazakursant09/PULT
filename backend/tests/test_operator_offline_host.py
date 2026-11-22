@@ -75,6 +75,84 @@ class Contracts(unittest.TestCase):
         self.assertEqual(self.p.FORMAT, "pult-offline-operator-host-v1")
         self.assertEqual(self.p.MODE, "SYNTHETIC_REVIEW_ENDPOINT_ONLY")
 
+    @staticmethod
+    def _capture_info(**changes):
+        values = dict(st_dev=1, st_ino=2, st_mode=stat.S_IFDIR | 0o1777,
+                      st_uid=0, st_gid=0, st_nlink=3, st_size=4096,
+                      st_mtime_ns=10, st_ctime_ns=20)
+        values.update(changes)
+        return SimpleNamespace(**values)
+
+    def _capture_check(self, before, after, acl=()):
+        captured = self.b._Capture()
+        captured.entries = [(99, 98, "synthetic", before)]
+        fake_os = SimpleNamespace(fstat=mock.Mock(return_value=after),
+                                  stat=mock.Mock(return_value=after),
+                                  listxattr=mock.Mock(return_value=acl))
+        with mock.patch.object(self.b, "os", fake_os):
+            captured.check()
+
+    def test_shared_sticky_ancestor_sibling_content_churn_is_not_source_change(self):
+        before = self._capture_info()
+        self._capture_check(before, self._capture_info(
+            st_nlink=4, st_size=8192, st_mtime_ns=11, st_ctime_ns=21))
+
+    def test_shared_sticky_ancestor_identity_and_protection_changes_remain_refused(self):
+        for field, value in (("st_dev", 8), ("st_ino", 9), ("st_mode", stat.S_IFDIR | 0o0777),
+                             ("st_uid", 42), ("st_gid", 42)):
+            with self.subTest(field=field), self.assertRaises(self.b.Refused):
+                self._capture_check(self._capture_info(), self._capture_info(**{field: value}))
+
+    def test_nonsticky_or_nonroot_directory_content_churn_remains_refused(self):
+        for shape in (dict(st_mode=stat.S_IFDIR | 0o755), dict(st_uid=42)):
+            with self.subTest(shape=shape), self.assertRaises(self.b.Refused):
+                self._capture_check(self._capture_info(**shape),
+                                    self._capture_info(**dict(shape, st_mtime_ns=11)))
+
+    def test_file_content_metadata_and_hardlink_changes_remain_refused(self):
+        for field in ("st_size", "st_mtime_ns", "st_ctime_ns", "st_nlink"):
+            before = self._capture_info(st_mode=stat.S_IFREG | 0o444, st_nlink=1)
+            changed = dict(vars(before), **{field: getattr(before, field) + 1})
+            with self.subTest(field=field), self.assertRaises(self.b.Refused):
+                self._capture_check(before, SimpleNamespace(**changed))
+
+    def test_shared_sticky_ancestor_acl_change_remains_refused(self):
+        with self.assertRaises(self.b.Refused):
+            self._capture_check(self._capture_info(), self._capture_info(),
+                                ("system.posix_acl_access",))
+
+    def _native_module(self):
+        file = REPO / 'ops/backup/tests/operator_offline_host_proof.py'
+        module = ModuleType('portable_native_diagnostic_only')
+        module.__file__ = str(file)
+        exec(compile(file.read_bytes(), str(file), 'exec', dont_inherit=True), module.__dict__)
+        return module
+
+    def test_client_failure_preserves_fixed_reason_and_exit_status_not_raw_text(self):
+        import json
+        native = self._native_module()
+        raw = b'{"outcome":"FAIL","error_type":"Refused","reason":"offline_operator_bootstrap_refused"}'
+        detail = json.loads(native.client_failure('authorized', 1, raw, b'').split(':', 1)[1])
+        self.assertEqual(detail['reason'], 'offline_operator_bootstrap_refused')
+        self.assertEqual(detail['case'], 'authorized')
+        self.assertEqual(detail['returncode'], 1)
+        self.assertEqual(detail['stdout_bytes'], len(raw))
+        self.assertEqual(detail['stderr_bytes'], 0)
+        self.assertEqual(detail['stdout_sha256'], native.sha(raw))
+
+    def test_client_failure_redacts_unknown_text_paths_and_unstructured_bytes(self):
+        import json
+        native = self._native_module()
+        secret = b'NOT_FOR_PUBLIC_LOG'
+        for output in (secret, b'\xff', b'[]', b'null', b'{}',
+                       json.dumps(dict(outcome='FAIL', error_type='Refused',
+                                       reason='/private/NOT_FOR_PUBLIC_LOG')).encode()):
+            with self.subTest(output=output):
+                result = native.client_failure('authorized', -9, output, secret)
+                self.assertNotIn(secret.decode(), result)
+                self.assertNotIn('/private', result)
+                self.assertEqual(json.loads(result.split(':', 1)[1])['returncode'], -9)
+
     def test_all_seven_accepted_lf_source_pins(self):
         import hashlib
         for name, wanted in self.p.PINS.items():

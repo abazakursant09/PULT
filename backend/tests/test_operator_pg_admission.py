@@ -30,7 +30,7 @@ ACCEPTED = {
     "core": ("ops/backup/custodian_v2/controller/frozen/admission.py", "961cc3aef5dcfe9d6286b15a2d5c087a33dc1e5dafdc7d5a16f6eded961afea7"),
     "profile": ("ops/backup/operator_host/profile.py", "0998c8922c470406d2789727b749ed9365f36f2fa3ee70eea7448d3693e31edf"),
     "host": ("ops/backup/operator_host/host.py", "5a47b32282fa4c6533ea0c4ed2602523dc2054cb8e567da571de3962b877e356"),
-    "bootstrap": ("ops/backup/operator_host/bootstrap.py", "96141d0e26cfc718e9cb762f689d20cad90f22c815dadec587fcac8c7580d3fa"),
+    "bootstrap": ("ops/backup/operator_host/bootstrap.py", "fbe97312685869a147f60f8acbf173692ca4047380c2db5b659ce7479f749519"),
     "worker": ("ops/backup/operator_host/worker.py", "5e7993f35e9d50019af79ecb2335cb2fe5111f38f06c83f70fc01304d425a06c"),
     "policy": ("backend/services/account_closure_policy.py", "e606c8b81793a54caa94b1bf9d3c88a21dc7df0f211d60cca6b8a483d8e750cf"),
     "reviewer": ("backend/services/erasure_operator_review.py", "efaa87935a5e6df3fdb8077cabba1b41f0cbb725d11430e896c454483ccc2606"),
