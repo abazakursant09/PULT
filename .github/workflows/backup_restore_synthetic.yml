@@ -37,6 +37,9 @@ on:
       - docs/operator-offline-host.md
       - backend/tests/test_operator_pg_lifetime_ci.py
       - docs/operator-pg-lifetime-proof.md
+      - backend/tests/test_operator_pg_admission.py
+      - backend/tests/test_operator_pg_admission_ci.py
+      - docs/operator-pg-source-admission.md
       - docs/erasure-operator-review.md
       - backend/tests/test_erasure_custodian.py
       - backend/tests/test_erasure_custodian_host.py
@@ -76,6 +79,9 @@ on:
       - docs/operator-offline-host.md
       - backend/tests/test_operator_pg_lifetime_ci.py
       - docs/operator-pg-lifetime-proof.md
+      - backend/tests/test_operator_pg_admission.py
+      - backend/tests/test_operator_pg_admission_ci.py
+      - docs/operator-pg-source-admission.md
       - docs/erasure-operator-review.md
       - backend/tests/test_erasure_custodian.py
       - backend/tests/test_erasure_custodian_host.py
@@ -437,3 +443,9 @@ jobs:
 
       - name: Joint synthetic PG operator lifetime no runtime admission
         run: sudo -n -- unshare --net /usr/bin/python3.12 -I -S -B ops/backup/tests/operator_pg_lifetime/gate.py --wheels-dir "$RUNNER_TEMP/operator-pg-wheels"
+
+      - name: Guard dormant synthetic PG source-envelope contracts
+        run: python -B -m pytest backend/tests/test_operator_pg_admission.py backend/tests/test_operator_pg_admission_ci.py -q
+
+      - name: Native synthetic PG source-envelope admission only
+        run: sudo -n -- unshare --net /usr/bin/python3.12 -I -S -B ops/backup/tests/operator_pg_admission_proof.py --wheels-dir "$RUNNER_TEMP/operator-pg-wheels"
