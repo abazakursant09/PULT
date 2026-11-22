@@ -3,6 +3,7 @@ import ast
 import hashlib
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 from types import ModuleType
@@ -151,6 +152,105 @@ class AdmissionCIContracts(unittest.TestCase):
         self.assertEqual(len(budgets), 1)
         self.assertEqual(ast.dump(budgets[0]), ast.dump(ast.parse(
             "time.monotonic() + STARTUP_TIMEOUT", mode="eval").body))
+
+    @staticmethod
+    def _column_pairs(columns, default_table=None):
+        # Compare exact SQL meaning, without prescribing grouped-vs-pair storage.
+        rows = ([(table, column) for table, names in columns.items() for column in names]
+                if type(columns) is dict else list(columns))
+        return [(tuple(row.split(".")) if "." in row else (default_table, row))
+                if type(row) is str else tuple(row) for row in rows]
+
+    @staticmethod
+    def _reader_scope_view():
+        return dict(required_columns_readable=True, all_table_select=False,
+                    sensitive_columns_readable=False, table_or_column_write=False)
+
+    def test_reader_columns_are_exact_twelve_accepted_draft_fields(self):
+        helper = captured("ops/backup/tests/operator_pg_lifetime/pg_fixture.py")
+        self.assertIs(type(helper.READ_COLUMNS), dict)
+        self.assertEqual(set(helper.READ_COLUMNS), {"users", "erasure_preparations"})
+        self.assertTrue(all(type(columns) is tuple for columns in helper.READ_COLUMNS.values()))
+        expected = {
+            ("users", "id"), ("users", "deleted_at"),
+            ("users", "closure_policy_version"), ("users", "closure_started_at"),
+            ("users", "closure_restore_requested_at"), ("users", "closure_purge_started_at"),
+            ("erasure_preparations", "id"), ("erasure_preparations", "user_id"),
+            ("erasure_preparations", "closure_policy_version"),
+            ("erasure_preparations", "closure_started_at"),
+            ("erasure_preparations", "prepared_at"), ("erasure_preparations", "state"),
+        }
+        columns = self._column_pairs(helper.READ_COLUMNS)
+        self.assertEqual(len(columns), 12)
+        self.assertCountEqual(columns, expected)
+        # Read the accepted SQL literal only; do not import SQLAlchemy/asyncpg.
+        tree = ast.parse((REPO/"backend/services/erasure_operator_review.py").read_bytes())
+        assignment = next(node for node in tree.body if isinstance(node, ast.Assign)
+                          and any(isinstance(target, ast.Name) and target.id == "_DRAFT"
+                                  for target in node.targets))
+        query = ast.literal_eval(assignment.value.args[0])
+        aliases = {"u": "users", "p": "erasure_preparations"}
+        referenced = {(aliases[alias], column)
+                      for alias, column in re.findall(r"\b([up])\.([a-z_]+)\b", query)}
+        self.assertEqual(referenced, expected)
+
+    def test_sensitive_columns_are_exact_six_private_user_fields(self):
+        helper = captured("ops/backup/tests/operator_pg_lifetime/pg_fixture.py")
+        self.assertIs(type(helper.SENSITIVE_COLUMNS), tuple)
+        expected = {("users", name) for name in (
+            "email", "name", "hashed_password", "verification_token", "reset_token", "registered_ip")}
+        columns = self._column_pairs(helper.SENSITIVE_COLUMNS, default_table="users")
+        self.assertEqual(len(columns), 6)
+        self.assertCountEqual(columns, expected)
+        self.assertTrue(expected.isdisjoint(self._column_pairs(helper.READ_COLUMNS)))
+
+    def test_reader_scope_valid_accepts_only_exact_required_boolean_view(self):
+        helper = captured("ops/backup/tests/operator_pg_lifetime/pg_fixture.py")
+        view = self._reader_scope_view()
+        self.assertIs(helper._reader_scope_valid(view), True)
+        self.assertEqual(view, self._reader_scope_view())
+
+    def test_reader_scope_valid_refuses_missing_or_extra_fields(self):
+        helper = captured("ops/backup/tests/operator_pg_lifetime/pg_fixture.py")
+        for field in self._reader_scope_view():
+            view = self._reader_scope_view()
+            del view[field]
+            with self.subTest(missing=field):
+                self.assertIs(helper._reader_scope_valid(view), False)
+        view = self._reader_scope_view()
+        view["approved"] = True
+        self.assertIs(helper._reader_scope_valid(view), False)
+
+    def test_reader_scope_valid_refuses_non_dict_and_dict_subclasses(self):
+        helper = captured("ops/backup/tests/operator_pg_lifetime/pg_fixture.py")
+        class AliasDict(dict):
+            pass
+        for view in (None, True, 0, "view", [], tuple(self._reader_scope_view().items()),
+                     AliasDict(self._reader_scope_view())):
+            with self.subTest(kind=type(view).__name__):
+                self.assertIs(helper._reader_scope_valid(view), False)
+
+    def test_reader_scope_valid_refuses_boolean_mutations_and_numeric_aliases(self):
+        helper = captured("ops/backup/tests/operator_pg_lifetime/pg_fixture.py")
+        for field, required in self._reader_scope_view().items():
+            for bad in (not required, 0, 1, None, "true", "false"):
+                view = self._reader_scope_view()
+                view[field] = bad
+                with self.subTest(field=field, kind=type(bad).__name__, value=bad):
+                    self.assertIs(helper._reader_scope_valid(view), False)
+
+    def test_reader_scope_helper_top_level_imports_are_stdlib_only(self):
+        file = REPO/"ops/backup/tests/operator_pg_lifetime/pg_fixture.py"
+        tree = ast.parse(file.read_bytes())
+        roots = set()
+        for node in tree.body:
+            if isinstance(node, ast.Import):
+                roots.update(alias.name.split(".")[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                self.assertEqual(node.level, 0)
+                roots.add(node.module.split(".")[0])
+        self.assertTrue(roots <= sys.stdlib_module_names | {"__future__"},
+                        "helper must be captured without application/native dependencies")
 
 
 if __name__ == "__main__":

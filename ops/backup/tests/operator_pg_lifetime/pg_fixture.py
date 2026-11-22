@@ -27,6 +27,14 @@ DOCKER = ("/usr/bin/docker", "--host=unix:///var/run/docker.sock")
 # Bounded initdb/readiness preparation only; no worker is admitted yet. The
 # independent operator's 15-second runtime and 2-second stop limits are unchanged.
 STARTUP_TIMEOUT = 60
+READ_COLUMNS = {
+    "users": ("id", "deleted_at", "closure_policy_version", "closure_started_at",
+              "closure_restore_requested_at", "closure_purge_started_at"),
+    "erasure_preparations": ("id", "user_id", "closure_policy_version",
+                             "closure_started_at", "prepared_at", "state"),
+}
+SENSITIVE_COLUMNS = ("email", "name", "hashed_password", "verification_token",
+                     "reset_token", "registered_ip")
 
 
 class Refused(RuntimeError):
@@ -40,6 +48,16 @@ def _need(value, reason):
 
 def _canonical(value):
     return (json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)+"\n").encode("ascii")
+
+
+def _reader_scope_valid(view):
+    return (type(view) is dict and set(view) == {
+        "required_columns_readable", "all_table_select", "sensitive_columns_readable",
+        "table_or_column_write"}
+        and view["required_columns_readable"] is True
+        and view["all_table_select"] is False
+        and view["sensitive_columns_readable"] is False
+        and view["table_or_column_write"] is False)
 
 
 def _identity(path):
@@ -284,6 +302,7 @@ class PGFixture:
             "REVOKE ALL ON DATABASE "+self.database+" FROM PUBLIC;\n"
             "GRANT CONNECT ON DATABASE "+self.database+" TO "+self.reader+";", database="postgres")
         self._seed()
+        self._assert_reader_scope()
         oid = self._psql("SELECT oid FROM pg_database WHERE datname='"+self.database+"';").decode("ascii")
         _need(re.fullmatch("[0-9]{1,10}", oid) and 16384 <= int(oid) < 2**32, "database_oid_refused")
         self.pg = dict(socket=str(self.socket), database=self.database, database_oid=int(oid),
@@ -320,11 +339,46 @@ SELECT 'DRAFT_ID', id, closure_policy_version, closure_started_at,
 """.replace("ACCOUNT", ACCOUNT).replace("DRAFT_ID", DRAFT)
         if self.case == "restored":
             sql += "UPDATE public.users SET closure_restore_requested_at=transaction_timestamp();\n"
+        grants = "".join("GRANT SELECT ("+", ".join(columns)+") ON public."+table+
+                        " TO "+self.reader+";\n" for table, columns in READ_COLUMNS.items())
         sql += ("REVOKE ALL ON SCHEMA public FROM PUBLIC;\n"
-            "GRANT USAGE ON SCHEMA public TO "+self.reader+";\n"
-            "GRANT SELECT ON public.users, public.erasure_preparations TO "+self.reader+";\n"
+            "GRANT USAGE ON SCHEMA public TO "+self.reader+";\n"+grants+
             "ALTER ROLE "+self.reader+" SET default_transaction_read_only=on;\nCOMMIT;")
         self._psql(sql)
+
+    def _assert_reader_scope(self):
+        _need(os.getuid() == os.geteuid() == 0, "owner_reader_scope_required")
+        role = "'"+_ident(self.reader)+"'"
+        required = ",".join("('"+table+"','"+column+"')"
+                            for table, columns in READ_COLUMNS.items() for column in columns)
+        sensitive = ",".join("('users','"+column+"')" for column in SENSITIVE_COLUMNS)
+        sql = f"""
+WITH required_columns(table_name,column_name) AS (VALUES {required}),
+ sensitive_columns(table_name,column_name) AS (VALUES {sensitive}),
+ targets(table_oid) AS (
+  VALUES ('public.users'::regclass), ('public.erasure_preparations'::regclass))
+SELECT pg_catalog.json_build_object(
+ 'required_columns_readable',
+  (SELECT bool_and(pg_catalog.has_column_privilege(
+    {role}, 'public.' || table_name, column_name, 'SELECT')) FROM required_columns),
+ 'all_table_select',
+  (SELECT bool_or(pg_catalog.has_table_privilege({role}, table_oid, 'SELECT')) FROM targets),
+ 'sensitive_columns_readable',
+  (SELECT bool_or(pg_catalog.has_column_privilege(
+    {role}, 'public.' || table_name, column_name, 'SELECT')) FROM sensitive_columns),
+ 'table_or_column_write',
+  (SELECT bool_or(pg_catalog.has_table_privilege(
+    {role}, table_oid, 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+    OR pg_catalog.has_any_column_privilege(
+    {role}, table_oid, 'INSERT,UPDATE,REFERENCES')) FROM targets));
+"""
+        raw = self._psql(sql)
+        try:
+            view = json.loads(raw)
+        except (ValueError, TypeError):
+            raise Refused("minimal_reader_scope_refused") from None
+        _need(_reader_scope_valid(view), "minimal_reader_scope_refused")
+        return view
 
     def _observe(self):
         _need(self.pg is not None and not self.closed, "live_owned_pg_required")
