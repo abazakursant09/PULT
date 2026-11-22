@@ -29,6 +29,10 @@ on:
       - backend/tests/test_working_launch_profile.py
       - backend/tests/test_working_launch_profile_ci.py
       - docs/working-launch-profile.md
+      - backend/tests/test_working_runtime_admission.py
+      - backend/tests/test_working_runtime_resources.py
+      - backend/tests/test_working_runtime_admission_ci.py
+      - docs/working-runtime-admission.md
       - docs/working-journal-v2-namespace.md
       - backend/tests/test_erasure_anchor.py
       - backend/tests/test_erasure_anchor_process.py
@@ -77,6 +81,10 @@ on:
       - backend/tests/test_working_launch_profile.py
       - backend/tests/test_working_launch_profile_ci.py
       - docs/working-launch-profile.md
+      - backend/tests/test_working_runtime_admission.py
+      - backend/tests/test_working_runtime_resources.py
+      - backend/tests/test_working_runtime_admission_ci.py
+      - docs/working-runtime-admission.md
       - docs/working-journal-v2-namespace.md
       - backend/tests/test_erasure_anchor.py
       - backend/tests/test_erasure_anchor_process.py
@@ -461,6 +469,12 @@ jobs:
 
       - name: Guard dormant synthetic PG source-envelope contracts
         run: python -B -m pytest backend/tests/test_operator_pg_admission.py backend/tests/test_operator_pg_admission_ci.py -q
+
+      - name: Working local runtime admission contracts
+        run: python -B -m pytest backend/tests/test_working_runtime_admission.py backend/tests/test_working_runtime_resources.py backend/tests/test_working_runtime_admission_ci.py -q
+
+      - name: Native working local runtime ownership without dispatch
+        run: sudo -n -- unshare --net /usr/bin/env -i PATH=/usr/bin:/bin LANG=C.UTF-8 /usr/bin/python3.12 -I -S -B ops/backup/tests/working_runtime_admission_proof.py
 
       - name: Native synthetic PG source-envelope admission only
         run: sudo -n -- unshare --net /usr/bin/python3.12 -I -S -B ops/backup/tests/operator_pg_admission_proof.py --wheels-dir "$RUNNER_TEMP/operator-pg-wheels"
