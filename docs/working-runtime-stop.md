@@ -118,6 +118,14 @@ the harness itself still changes an owned ancestor directory. All original cases
 production source guards, stop oracles and refusal behavior remain mandatory;
 there is no retry or relaxed metadata check.
 
+The working-stop fixture encodes control identities as exact `device`/`inode`
+objects, not the legacy helper's tuple shape. A portable regression passes its
+actual generated identity through the actual runtime validator. Native failures
+export only a closed stage/case vocabulary and completed-case count; unknown
+cleanup stays false. The outer supervisor may forward only a canonical, bounded,
+nonzero-child FAIL diagnostic. These diagnostics never satisfy the PASS receipt
+or turn an incomplete matrix into an accepted run.
+
 Rollback is to leave the additive adapter unused. There is no schema conversion,
 old-fence deletion or destructive contraction. No persistent service, account,
 timer, live key, S3/IAM/cloud/DNS setting, enrollment, dispatch, purge/restore,

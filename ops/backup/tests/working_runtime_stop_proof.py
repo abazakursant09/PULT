@@ -69,6 +69,10 @@ WHEEL_PINS = {
 FLAGS = ("operation_admitted", "launch_admitted", "identity_enrollment_admitted",
          "journal_dispatch_admitted", "purge_or_restore_admitted", "remote_io_admitted")
 RESULTS = []
+STAGES = {"runtime_preflight", "arguments", "source_inputs", "source_api", "wheel_inputs", "scope_setup",
+          "supervision", "scope_cleanup", "child_receipt", "case_setup", "case_start", "controller_ready",
+          "controller_profile", "case_result", "case_cleanup", "case_postcheck", "input_postcheck", "receipt"}
+PROGRESS = {"stage": "runtime_preflight", "case": None}
 
 
 class ProofError(Exception):
@@ -91,6 +95,49 @@ def digest(raw):
 def canonical(value):
     return (json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
                        allow_nan=False) + "\n").encode("ascii")
+
+
+def at(stage, case=None):
+    need(type(stage) is str and stage in STAGES and (case is None or type(case) is str and case in CASES))
+    PROGRESS.update(stage=stage, case=case)
+
+
+def valid_failure(value):
+    """Closed diagnostic vocabulary only; no exception text or OS identities."""
+    need(type(value) is dict and set(value) == {"format", "status", "tests", "skips", "cleanup_confirmed", "stage", "case"}
+         and value["format"] == FORMAT and value["status"] == "FAIL"
+         and type(value["tests"]) is int and 0 <= value["tests"] <= len(CASES)
+         and type(value["skips"]) is int and value["skips"] == 0 and value["cleanup_confirmed"] is False
+         and type(value["stage"]) is str and value["stage"] in STAGES
+         and (value["case"] is None or type(value["case"]) is str and value["case"] in CASES))
+    return True
+
+
+def failure(tests=0):
+    value = dict(format=FORMAT, status="FAIL", tests=tests, skips=0, cleanup_confirmed=False, **PROGRESS)
+    valid_failure(value)
+    return value
+
+
+def child_failure(result):
+    """A nonzero child may supply diagnostics, never cleanup/admission success."""
+    try:
+        if (result is None or type(result.returncode) is not int or result.returncode == 0
+                or type(result.stdout) is not str or type(result.stderr) is not str or result.stderr):
+            return None
+        raw = result.stdout.encode("ascii")
+        need(0 < len(raw) <= 4096)
+        value = json.loads(raw)
+        valid_failure(value)
+        need(canonical(value) == raw)
+        return value
+    except Exception:
+        return None
+
+
+def wheel_directory(repo, args):
+    need(not args or len(args) == 2 and args[0] == "--wheels-dir")
+    return Path(args[1]) if args else repo / "ops/backup/tests/custodian_v2/wheels"
 
 
 def initial_read(file, maximum=600000):
@@ -755,8 +802,8 @@ def profile_value(prepared, controller, helper):
     return dict(format="pult-working-runtime-stop-v1", mode="LOCAL_ROLE_CONSTRUCTION_ONLY",
         sources={k: dict(path=str(v), sha256=digest(helper.bounded_file(v, 600000))) for k, v in paths.items()},
         runtime_profile=dict(path=str(prepared["runtime_file"]), sha256=prepared["runtime_sha"]), controller=controller,
-        control=dict(root=str(prepared["control"]), identity=helper.identity(prepared["control"]),
-                     lock_identity=helper.identity(prepared["control"] / "working-runtime-stop.lock")),
+        control=dict(root=str(prepared["control"]), identity=dict(zip(("device", "inode"), helper.identity(prepared["control"]))),
+                     lock_identity=dict(zip(("device", "inode"), helper.identity(prepared["control"] / "working-runtime-stop.lock")))),
         role=prepared["runtime_spec"]["role"], actor=prepared["runtime_spec"]["actors"][prepared["runtime_spec"]["role"]])
 
 
@@ -817,6 +864,7 @@ def run_case(prepared, case, modules, helper, scope):
     try:
         telemetry = Telemetry(ipc_file, telemetry_file, actor, helper)
         launcher = Launcher(helper, command)
+        at("controller_ready", case)
         pid = launcher.ready()
         actual = unit_state(unit)
         need(actual.get("MainPID") == str(pid) and actual.get("ActiveState") == "active")
@@ -835,6 +883,9 @@ def run_case(prepared, case, modules, helper, scope):
         approval = "0" * 64 if case == "wrong_sha" else digest(profile_raw)
         need(os.write(launcher.owned.process.stdin.fileno(), (approval + "\n").encode("ascii")) == 65)
         answer = launcher.finish(context, root_pidfd)
+        at("case_result", case)
+        if answer is not None and answer["outcome"] == "REFUSED" and case not in EARLY:
+            at("controller_profile", case)
         if fence.exists():
             raw_fence = helper.bounded_file(fence, 4096)
         if case in NO_CONTROLLER_RECEIPT:
@@ -890,6 +941,8 @@ def run_case(prepared, case, modules, helper, scope):
             need(evidence["descendant_sigkill_confirmed"] is True)
     finally:
         # Stop the only producer before inspecting the durable ledger, even after SIGKILL.
+        prior_progress = dict(PROGRESS)
+        at("case_cleanup", case)
         errors = []
         quiesced = False
         try:
@@ -921,6 +974,8 @@ def run_case(prepared, case, modules, helper, scope):
             try: telemetry.close()
             except BaseException: errors.append(True)
         need(not errors)
+        PROGRESS.update(prior_progress)
+    at("case_postcheck", case)
     need(telemetry is not None)
     records = telemetry.records
     held = [v for v in records if v["phase"] == "HELD"]
@@ -951,12 +1006,15 @@ def run_case(prepared, case, modules, helper, scope):
 
 
 def native_matrix():
+    at("source_inputs")
     repo = Path(__file__).resolve().parents[3]
     modules, blobs, helper, raw, sources = inputs(repo)
     control = modules["scope"]
+    at("scope_setup")
     scope = control.read_scope()
     launch = read_json(Path(os.environ[control.ENV]).parent / "working-stop-launch.json")
     wheels_dir = Path(launch["wheels_dir"])
+    at("wheel_inputs")
     wheels = {n: helper.bounded_file(wheels_dir / n, 2 * 1024 * 1024) for n in helper.WHEELS}
     wheels_before = {n: digest(v) for n, v in wheels.items()}
     need(wheels_before == WHEEL_PINS)
@@ -969,9 +1027,12 @@ def native_matrix():
     base.chmod(0o755)
     rows = RESULTS
     for case in CASES:
+        at("case_setup", case)
         prepared = prepare_case(base, case, modules, blobs, helper, raw, sources, wheels, dependencies, directories)
+        at("case_start", case)
         rows.append(run_case(prepared, case, modules, helper, scope))
         need(helper.descriptors() == baseline and helper.fixture_cleanup_allowed())
+    at("input_postcheck")
     after_raw = {n: helper.bounded_file(repo / n, 600000) for n in raw}
     wheels_after = wheel_hashes(wheels_dir, helper)
     result = dict(format=FORMAT, status="PASS", scope="ARTIFICIAL_LOCAL_CONSTRUCTION_AND_STOP_ONLY",
@@ -982,6 +1043,7 @@ def native_matrix():
         wheel_hashes_before=wheels_before, wheel_hashes_after=wheels_after,
         **dict.fromkeys(FLAGS, False))
     validate_input_evidence(result, raw, after_raw, wheels_before, wheels_after)
+    at("receipt")
     sys.stdout.buffer.write(canonical(result))
     return 0
 
@@ -1012,30 +1074,43 @@ def main():
                                                   reason="independent_stop_review_pending")))
             return 2
         except BaseException:
-            sys.stdout.buffer.write(canonical(dict(format=FORMAT, status="FAIL", tests=len(RESULTS), skips=0,
-                                                  cleanup_confirmed=False)))
+            sys.stdout.buffer.write(canonical(failure(len(RESULTS))))
             return 1
     try:
         repo = Path(__file__).resolve().parents[3]
         args = sys.argv[1:]
-        need(not args or len(args) == 2 and args[0] == "--wheels-dir")
+        at("arguments")
+        wheels_dir = wheel_directory(repo, args)
+        at("source_inputs")
         modules, _, helper, raw, _ = inputs(repo)
+        at("source_api")
         stop = load_local(repo / STOP, "_source_api_preflight")
         need(stop.PINS["worker"] == digest(raw[WORKER].replace(b"\r\n", b"\n")))
-        wheels_dir = Path(args[1]) if args else repo / "ops/backup/tests/custodian_v2/wheels"
+        at("wheel_inputs")
         wheels_before = wheel_hashes(wheels_dir, helper)
         ci, control = modules["ci"], modules["scope"]
+        at("scope_setup")
         with ci.create_scope(control) as scope:
             target = Path(os.environ[control.ENV]).parent / "working-stop-launch.json"
             helper.write(target, canonical(dict(wheels_dir=str(wheels_dir))), 0o600)
+            at("supervision")
             result, clean, reason = ci.supervised_run(scope, control, Path(__file__), timeout=850)
+            at("scope_cleanup")
+        at("child_receipt")
+        diagnostic = child_failure(result)
+        if diagnostic is not None:
+            # Even when cleanup is unproven, this remains explicitly FAIL/false.
+            sys.stdout.buffer.write(canonical(diagnostic))
+            return 1
         need(clean and not reason and result is not None and result.returncode == 0 and not result.stderr
              and len(result.stdout.encode("ascii")) <= 131072)
         value = json.loads(result.stdout)
+        at("input_postcheck")
         after_raw = {n: helper.bounded_file(repo / n, 600000) for n in raw}
         wheels_after = wheel_hashes(wheels_dir, helper)
         validate_input_evidence(value, raw, after_raw, wheels_before, wheels_after)
         need(not Path(scope["work"]).exists() and not Path(scope["active"]).parent.exists())
+        at("receipt")
         sys.stdout.buffer.write(canonical(value))
         return 0
     except ApprovalPending:
@@ -1043,8 +1118,7 @@ def main():
                                               reason="independent_stop_review_pending")))
         return 2
     except BaseException:
-        sys.stdout.buffer.write(canonical(dict(format=FORMAT, status="FAIL", tests=0, skips=0,
-                                              cleanup_confirmed=False)))
+        sys.stdout.buffer.write(canonical(failure()))
         return 1
 
 
