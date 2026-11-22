@@ -14,7 +14,7 @@
     },
     "bootstrap": {
       "path": "ops/backup/operator_host/bootstrap.py",
-      "sha256": "96141d0e26cfc718e9cb762f689d20cad90f22c815dadec587fcac8c7580d3fa"
+      "sha256": "fbe97312685869a147f60f8acbf173692ca4047380c2db5b659ce7479f749519"
     },
     "core": {
       "path": "ops/backup/custodian_v2/controller/frozen/admission.py",
@@ -38,7 +38,7 @@
     },
     "pg_bootstrap": {
       "path": "ops/backup/operator_pg/bootstrap.py",
-      "sha256": "5ae78f74479afb3d42815c9695732c6f8643f8f1b5b8750fb280e1b5b6fc6212"
+      "sha256": "419fd3b888e1824a916ca1072836d23722edc60ea27027bf17bafe0de64689c4"
     },
     "pg_runtime": {
       "path": "ops/backup/operator_pg/runtime.py",

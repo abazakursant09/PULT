@@ -33,7 +33,7 @@ HELPERS = {
     "gate": ("ops/backup/tests/operator_pg_lifetime/gate.py",
              "ee69907ff414ae1efd387778754a75d73185795b7f2cb6607e5e09e73eafb7b3"),
     "baseline": ("ops/backup/tests/operator_offline_host_proof.py",
-                 "c51993af7ed4fc52dac8391a2a7139152c39fc469e412bc936cc71fc0e1fd0bb"),
+                 "70ed55b2fc5ee22aa0f90391a99f817728079b77726b793e8212fa18da312568"),
     "pg": ("ops/backup/tests/operator_pg_lifetime/pg_fixture.py",
            "957714ddb27b24ba237992b339b9e119f25b5e844e2771fa6729ca5f7192e310"),
 }
@@ -41,7 +41,7 @@ OLD = ("journal", "anchor", "ipc", "operator", "stop", "supervisor", "core",
        "profile", "host", "bootstrap", "worker")
 NEW = {"pg_bootstrap": "ops/backup/operator_pg/bootstrap.py",
        "pg_runtime": "ops/backup/operator_pg/runtime.py"}
-LEGACY_BOOTSTRAP = "96141d0e26cfc718e9cb762f689d20cad90f22c815dadec587fcac8c7580d3fa"
+LEGACY_BOOTSTRAP = "fbe97312685869a147f60f8acbf173692ca4047380c2db5b659ce7479f749519"
 FLAGS = dict(identity_enrollment_admitted=False, journal_dispatch_admitted=False,
              purge_or_restore_admitted=False)
 ENV = {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"}

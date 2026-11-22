@@ -130,6 +130,47 @@ def refused_peer(output, code):
             'failure_misreported_as_early_observation')
 
 
+def client_failure(mode, code, output, error):
+    # Synthetic harness only. Never echo raw subprocess text or exception paths.
+    detail = dict(case=mode, returncode=code, stdout_bytes=len(output),
+                  stderr_bytes=len(error), stdout_sha256=sha(output),
+                  reason='unstructured_client_failure')
+    try:
+        value = json.loads(output)
+    except (ValueError, UnicodeError):
+        value = None
+    if (type(value) is dict and set(value) == {'outcome', 'error_type', 'reason'}
+            and value['outcome'] == 'FAIL'):
+        known = {'offline_operator_bootstrap_refused', 'bootstrap_refused',
+                 'trusted_bootstrap_changed', 'early_observation_admitted'}
+        if type(value['reason']) is str and value['reason'] in known:
+            detail['reason'] = value['reason']
+        else:
+            detail['reason'] = 'redacted_client_exception'
+    return 'authorized_client_failed:'+json.dumps(detail, sort_keys=True)
+
+
+def shared_tmp_capture(root, bootstrap_sha):
+    """Actual descriptor check under /tmp sibling churn, before any worker."""
+    bootstrap = root/'release'/PATHS['bootstrap']
+    require(sha(bootstrap.read_bytes()) == bootstrap_sha, 'trusted_bootstrap_changed')
+    module = load(bootstrap, 'trusted_shared_tmp_capture')
+    fixed = root/'fixture.py'
+    with module._Capture() as captured:
+        body = captured.take(str(fixed), 100000)
+        captured.check()
+        with tempfile.TemporaryDirectory(prefix='pult-offline-sibling-', dir='/tmp') as sibling:
+            shared = [before for _, _, leaf, before in captured.entries
+                      if stat.S_ISDIR(before.st_mode) and before.st_uid == 0
+                      and before.st_mode & stat.S_ISVTX and leaf == 'tmp']
+            require(len(shared) == 1 and Path(sibling).is_dir()
+                    and Path(sibling).parent == root.parent and Path(sibling) != root,
+                    'shared_tmp_sibling_churn_not_observed')
+            captured.check()
+            require(fixed.read_bytes() == body, 'shared_tmp_source_changed')
+    return True
+
+
 def controller(root, mode, bootstrap_sha):
     print("CONTROLLER_READY "+str(os.getpid()), flush=True)
     approval = sys.stdin.buffer.readline(66).decode("ascii").strip()
@@ -326,6 +367,7 @@ def native_case(mode):
         script = root/"fixture.py"
         put(script, Path(__file__).read_bytes().replace(b"\r\n", b"\n"))
         bootstrap_sha = sources["bootstrap"]["sha256"]
+        shared_tmp_churn = shared_tmp_capture(root, bootstrap_sha) if mode == 'authorized' else None
         props = dict(Type="exec", ExitType="main", RemainAfterExit="no", User="0", Group="0",
             KillMode="control-group", KillSignal="SIGTERM", SendSIGKILL="yes", FinalKillSignal="SIGKILL",
             TimeoutStopSec="2", Restart="no", RuntimeMaxSec="45", PrivateNetwork="yes",
@@ -418,7 +460,8 @@ def native_case(mode):
             operation=spec["operation"], controller=spec["controller"], unit=ready["unit"])
             and stat.S_IMODE((control/"constructor-stop.claim").stat().st_mode) == 0o444, "retained_claim_changed")
         if mode in ("authorized", 'term_descendant', 'cleanup_unknown'):
-            require(peer.returncode == 0 and not peer_error, "authorized_client_failed:"+peer_error.decode("utf8", "replace")[:1000])
+            require(peer.returncode == 0 and not peer_error,
+                    client_failure(mode, peer.returncode, observation, peer_error))
             early = json.loads(observation)
             require(early["kind"] == "EARLY_NONADMITTING_OBSERVATION_NOT_PARENT_RECEIPT", "early_receipt_conflated")
             require((ipc/"synthetic.reviewed").read_bytes() == b"OFFLINE_SYNTHETIC_REVIEW\n", "callback_marker_missing")
@@ -452,7 +495,8 @@ def native_case(mode):
                 and not (ipc/'synthetic.reviewed').exists() and terminal['Result'] == 'exit-code',
                 'wrong_UID_peer_not_refused_before_callback')
         return dict(case=mode, outcome="PASS", seconds=round(elapsed, 3), parent_receipt=receipt,
-            precleanup=terminal, actual_actor=ready, descendant_sigkill_confirmed=answer['descendant_killed'])
+            precleanup=terminal, actual_actor=ready, descendant_sigkill_confirmed=answer['descendant_killed'],
+            shared_tmp_sibling_churn_proved=shared_tmp_churn)
     finally:
         # Stop the only producer before reading its exact durable child ledger.
         try:
