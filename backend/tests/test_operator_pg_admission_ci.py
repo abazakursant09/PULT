@@ -1,4 +1,5 @@
 """Mandatory source-envelope CI contract; portable checks are not native proof."""
+import ast
 import hashlib
 import json
 from pathlib import Path
@@ -134,6 +135,22 @@ class AdmissionCIContracts(unittest.TestCase):
                 for started, verified in ((True, False), (False, True), (True, True)):
                     with self.subTest(started=started, verified=verified), self.assertRaises(proof.Refused):
                         proof.pg_evidence(case, started, verified)
+
+    def test_fixture_readiness_budget_is_fixed_bounded_and_separate_from_worker(self):
+        relative = "ops/backup/tests/operator_pg_lifetime/pg_fixture.py"
+        helper = captured(relative)
+        self.assertEqual(helper.STARTUP_TIMEOUT, 60)
+        tree = ast.parse((REPO/relative).read_bytes())
+        fixture = next(node for node in tree.body if isinstance(node, ast.ClassDef)
+                       and node.name == "PGFixture")
+        start = next(node for node in fixture.body if isinstance(node, ast.FunctionDef)
+                     and node.name == "_start")
+        budgets = [node.value for node in ast.walk(start) if isinstance(node, ast.Assign)
+                   and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
+                   and node.targets[0].id == "until"]
+        self.assertEqual(len(budgets), 1)
+        self.assertEqual(ast.dump(budgets[0]), ast.dump(ast.parse(
+            "time.monotonic() + STARTUP_TIMEOUT", mode="eval").body))
 
 
 if __name__ == "__main__":

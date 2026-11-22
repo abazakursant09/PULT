@@ -35,7 +35,7 @@ HELPERS = {
     "baseline": ("ops/backup/tests/operator_offline_host_proof.py",
                  "c51993af7ed4fc52dac8391a2a7139152c39fc469e412bc936cc71fc0e1fd0bb"),
     "pg": ("ops/backup/tests/operator_pg_lifetime/pg_fixture.py",
-           "95f06b5a1b8b5fe6892ea192c7d2ac6959467b84aecc40f32aeed90b29c403ad"),
+           "a4432e770e7ea7442a3075617f22c6390814a3b73fb673f45d1c6574b0b69897"),
 }
 OLD = ("journal", "anchor", "ipc", "operator", "stop", "supervisor", "core",
        "profile", "host", "bootstrap", "worker")

@@ -3,8 +3,8 @@
 This additive package approves no working database, credentials, deployment,
 enrollment, journal append, purge, restore or public launch. It prepares a fixed
 source envelope for the accepted read-only reviewer and process-stop mechanism.
-The old eleven-source SYNTHETIC profile, backend adapter and all prior gates stay
-unchanged. Rollback means leaving this new package unused, not resetting claims.
+The old eleven-source SYNTHETIC profile and backend adapter stay unchanged; all
+prior gates remain mandatory. Rollback leaves this package unused, not claims reset.
 
 The DRAFT source catalogue has a different format from an operational envelope.
 Its hashes are not independent approval. Catalogue hashes normalize checkout CRLF
@@ -100,8 +100,13 @@ no readers and unchanged rows before teardown. The seventeen intake-only cases
 must not start a DB or call runtime.run(); their database observation fields are
 null, not manufactured PASS. A fake binding there is input-shape evidence only.
 Both kinds retain exact owned-unit/source-descriptor cleanup requirements. This
-avoids seventeen unnecessary initdb cycles without changing any PG/helper,
-worker-runtime or stop deadline, and does not substitute for the real PG case.
+avoids seventeen unnecessary initdb cycles without changing worker-runtime or
+stop policy, and does not substitute for the real PG case.
+The shared test fixture's bounded initdb/readiness budget is separately extended
+from 20 to 60 seconds after repeated preparation-only timeouts. It verifies the
+same pinned image, mounts, role and seed before admitting any worker; no retry or
+partial setup is accepted. The operator's 15-second runtime and 2-second stop
+deadline remain unchanged. This is a test-fixture change, not a new DB authority.
 Churn is an intake-only
 case, not a second PG review or a mutation permit. Diagnostics may identify owned
 temporary scopes and technical unit IDs. Runtime failures expose only fixed
